@@ -1,0 +1,36 @@
+Installed: 2026-08-16T05:08:40+05:30
+
+[Session Entry]
+[Desktop Entry]
+Name=Adaptive Desktop
+Comment=Reversible custom desktop experience
+Exec=/usr/local/bin/adaptive-desktop-session
+TryExec=/usr/local/bin/adaptive-desktop-session
+Type=Application
+DesktopNames=ubuntu:GNOME
+X-GDM-SessionRegisters=true
+X-Ubuntu-Gettext-Domain=gnome-session-42
+
+[dconf Profile]
+user-db:adaptive
+
+[Wrapper]
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+#
+# Adaptive Desktop
+#
+# IMPORTANT:
+# Ubuntu's normal session does NOT execute this wrapper.
+# Therefore DCONF_PROFILE=adaptive is local to this login session.
+#
+
+export DCONF_PROFILE=adaptive
+
+exec /usr/bin/gnome-session --session=ubuntu
+
+[Checksums]
+075d05a03b539abdd2eed2dba7733497e8cba047387611f66adc9f1b55ab86ca  /usr/share/xsessions/adaptive-desktop.desktop
+bb8f059015843875d40c3b3b3821d9e431bc31567f0803e77fee11f40f17a447  /etc/dconf/profile/adaptive
+1c3c20643931d768dbc990064c5103e18c7f7b229a0ea1501ae0bddd165be96f  /usr/local/bin/adaptive-desktop-session
