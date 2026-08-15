@@ -1,0 +1,70 @@
+=== DATE ===
+Sun Aug 16 04:51:02 AM IST 2026
+
+=== OS ===
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=jammy
+
+=== KERNEL ===
+Linux nova-matrix 6.8.0-136-generic #136~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul  3 16:29:11 UTC  x86_64 x86_64 x86_64 GNU/Linux
+
+=== DESKTOP ===
+XDG_CURRENT_DESKTOP=ubuntu:GNOME
+XDG_SESSION_DESKTOP=ubuntu
+XDG_SESSION_TYPE=x11
+
+=== DISPLAY MANAGER ===
+/usr/sbin/gdm3
+
+=== CPU ===
+CPU(s):                                  16
+On-line CPU(s) list:                     0-15
+Model name:                              13th Gen Intel(R) Core(TM) i7-1360P
+Thread(s) per core:                      2
+Core(s) per socket:                      12
+NUMA node0 CPU(s):                       0-15
+
+=== MEMORY ===
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       5.9Gi       1.2Gi       1.1Gi       8.2Gi       7.8Gi
+Swap:           15Gi       545Mi        14Gi
+
+=== GPU ===
+00:02.0 VGA compatible controller: Intel Corporation Device a7a0 (rev 04)
+	Subsystem: Lenovo Device 3cdc
+	Kernel driver in use: i915
+	Kernel modules: i915, xe
+
+=== NVIDIA ===
+NVIDIA driver not active / not NVIDIA
+
+=== MONITORS ===
+XWAYLAND0 connected primary 1920x1200+0+0 (normal left inverted right x axis y axis) 300mm x 190mm
+
+=== INSTALLED DESKTOP PACKAGES ===
+ii  chrome-gnome-shell                                          10.1-5                                                           all          GNOME Shell extensions integration for web browsers
+ii  gnome-shell                                                 42.9-0ubuntu2.3                                                  amd64        graphical shell for the GNOME desktop
+ii  gnome-shell-common                                          42.9-0ubuntu2.3                                                  all          common files for the GNOME graphical shell
+ii  gnome-shell-extension-appindicator                          42-2~fakesync1                                                   all          AppIndicator, KStatusNotifierItem and tray support for GNOME Shell
+ii  gnome-shell-extension-desktop-icons-ng                      43-2ubuntu1                                                      all          desktop icon support for GNOME Shell
+ii  gnome-shell-extension-manager                               0.3.0-0ubuntu2.1                                                 amd64        Utility for managing GNOME Shell Extensions
+ii  gnome-shell-extension-prefs                                 42.9-0ubuntu2.3                                                  amd64        tool to enable / disable GNOME Shell extensions
+ii  gnome-shell-extension-ubuntu-dock                           72~ubuntu5.22.04.3                                               all          Ubuntu Dock for GNOME Shell
+ii  gnome-shell-extensions                                      42.1-0ubuntu1                                                    all          Extensions to extend functionality of GNOME Shell
+ii  ubuntu-desktop                                              1.481.5                                                          amd64        The Ubuntu desktop system
+ii  ubuntu-desktop-minimal                                      1.481.5                                                          amd64        The Ubuntu desktop minimal system
+ii  yaru-theme-gnome-shell                                      22.04.5                                                          all          Yaru GNOME Shell desktop theme from the Ubuntu Community
+
+=== DISK ===
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p6  336G  305G   13G  96% /
