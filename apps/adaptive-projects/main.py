@@ -337,6 +337,44 @@ class Projects(Gtk.ApplicationWindow):
         for _, author, _ in commits:
             authors[author] = authors.get(author, 0) + 1
 
+        # Top-level structure: where the code actually lives.
+        dirs = {}
+        for f in files:
+            head = f.split("/", 1)[0] if "/" in f else "(root)"
+            dirs[head] = dirs.get(head, 0) + 1
+
+        # When the work happens: weekday x hour.
+        punch = {}
+        for stamp, _, _ in commits:
+            local = time.localtime(stamp)
+            punch[(local.tm_wday, local.tm_hour)] = punch.get(
+                (local.tm_wday, local.tm_hour), 0) + 1
+
+        # Streaks, measured in days that carry at least one commit.
+        day_set = {int(s // 86400) for s, _, _ in commits}
+        best = run = 0
+        if day_set:
+            for day in range(min(day_set), max(day_set) + 1):
+                run = run + 1 if day in day_set else 0
+                best = max(best, run)
+
+        ahead = behind = 0
+        counts = git(path, "rev-list", "--left-right", "--count",
+                     "HEAD...@{u}").strip()
+        if counts and "\t" in counts:
+            try:
+                ahead, behind = (int(x) for x in counts.split("\t")[:2])
+            except ValueError:
+                pass
+
+        size = ""
+        try:
+            out = subprocess.run(["du", "-sh", str(path)], capture_output=True,
+                                 text=True, timeout=10).stdout
+            size = out.split("\t")[0].strip()
+        except Exception:
+            pass
+
         return {
             "commits": commits,
             "files": files,
@@ -344,6 +382,13 @@ class Projects(Gtk.ApplicationWindow):
             "status": status,
             "exts": sorted(exts.items(), key=lambda kv: -kv[1]),
             "authors": sorted(authors.items(), key=lambda kv: -kv[1]),
+            "dirs": sorted(dirs.items(), key=lambda kv: -kv[1]),
+            "punch": punch,
+            "streak": best,
+            "active_days": len(day_set),
+            "ahead": ahead,
+            "behind": behind,
+            "size": size,
         }
 
     def _show_detail(self, project):
@@ -404,6 +449,10 @@ class Projects(Gtk.ApplicationWindow):
             (str(len(data["branches"])), "BRANCHES", "accent"),
             (str(len(data["status"])), "UNCOMMITTED", "warning"),
             (age, "AGE", "cyan"),
+            (str(data["active_days"]), "ACTIVE DAYS", "violet"),
+            (f'{data["streak"]}d', "LONGEST STREAK", "accent"),
+            (data["size"] or "-", "ON DISK", "cyan"),
+            (f'+{data["ahead"]}/-{data["behind"]}', "VS ORIGIN", "warning"),
         ):
             stats.append(self._stat(value, label, accent))
 
@@ -420,8 +469,14 @@ class Projects(Gtk.ApplicationWindow):
 
         body.append(self._panel("COMMIT ACTIVITY  ·  LAST 26 WEEKS",
                                 self._heatmap(data["commits"])))
+        body.append(self._panel("COMMITS PER WEEK  ·  LAST 26 WEEKS",
+                                self._trend(data["commits"])))
+        body.append(self._panel("WHEN THE WORK HAPPENS",
+                                self._punchcard(data["punch"])))
         body.append(self._panel("WHAT IT IS MADE OF",
                                 self._languages(data["exts"], len(data["files"]))))
+        body.append(self._panel("WHERE THE CODE LIVES",
+                                self._treemap(data["dirs"], len(data["files"]))))
         body.append(self._panel("WHO WORKS ON IT",
                                 self._authors(data["authors"])))
         body.append(self._panel("RECENT HISTORY",
@@ -479,6 +534,147 @@ class Projects(Gtk.ApplicationWindow):
 
         area.set_draw_func(draw)
         return area
+
+    def _trend(self, commits):
+        """Commits per week. The shape says whether a project is accelerating,
+        steady, or was finished months ago."""
+        weeks = 26
+        now = time.time()
+        buckets = [0] * weeks
+
+        for stamp, _, _ in commits:
+            index = int((now - stamp) // (7 * 86400))
+            if 0 <= index < weeks:
+                buckets[weeks - 1 - index] += 1
+
+        peak = max(buckets) or 1
+
+        area = Gtk.DrawingArea()
+        area.set_content_height(90)
+
+        def draw(_a, cr, width, height, *_):
+            step = width / max(weeks - 1, 1)
+            pad = 10
+
+            cr.set_line_width(1)
+            for i in range(1, 4):
+                y = pad + (height - 2 * pad) * i / 4
+                cr.set_source_rgba(1, 1, 1, 0.05)
+                cr.move_to(0, y)
+                cr.line_to(width, y)
+                cr.stroke()
+
+            def point(i):
+                y = pad + (height - 2 * pad) * (1 - buckets[i] / peak)
+                return i * step, y
+
+            cr.move_to(0, height)
+            for i in range(weeks):
+                cr.line_to(*point(i))
+            cr.line_to(width, height)
+            cr.close_path()
+            cr.set_source_rgba(0.47, 0.66, 1.0, 0.16)
+            cr.fill()
+
+            cr.set_line_width(2)
+            cr.set_source_rgb(0.47, 0.66, 1.0)
+            cr.move_to(*point(0))
+            for i in range(1, weeks):
+                cr.line_to(*point(i))
+            cr.stroke()
+
+            x, y = point(weeks - 1)
+            cr.set_source_rgb(0.40, 0.88, 1.0)
+            cr.arc(x, y, 3.5, 0, 2 * 3.14159)
+            cr.fill()
+
+        area.set_draw_func(draw)
+        return area
+
+    def _punchcard(self, punch):
+        """Weekday against hour. Shows the rhythm a project is worked to -
+        weeknights, weekends, or office hours."""
+        peak = max(punch.values(), default=1)
+
+        area = Gtk.DrawingArea()
+        area.set_content_height(132)
+
+        def draw(_a, cr, width, height, *_):
+            left, top = 34, 8
+            cell_w = (width - left - 8) / 24
+            cell_h = (height - top - 16) / 7
+
+            cr.select_font_face("Ubuntu")
+            cr.set_font_size(8)
+
+            for day in range(7):
+                cr.set_source_rgba(1, 1, 1, 0.42)
+                cr.move_to(2, top + day * cell_h + cell_h / 2 + 3)
+                cr.show_text(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day])
+
+                for hour in range(24):
+                    count = punch.get((day, hour), 0)
+                    if not count:
+                        continue
+
+                    share = count / peak
+                    radius = max(1.5, (min(cell_w, cell_h) / 2 - 1) * (0.35 + 0.65 * share))
+                    cx = left + hour * cell_w + cell_w / 2
+                    cy = top + day * cell_h + cell_h / 2
+
+                    cr.set_source_rgba(0.40, 0.88, 1.0, 0.35 + 0.65 * share)
+                    cr.arc(cx, cy, radius, 0, 2 * 3.14159)
+                    cr.fill()
+
+            cr.set_source_rgba(1, 1, 1, 0.34)
+            for hour in (0, 6, 12, 18, 23):
+                cr.move_to(left + hour * cell_w, height - 4)
+                cr.show_text(f"{hour:02d}")
+
+        area.set_draw_func(draw)
+        return area
+
+    def _treemap(self, dirs, total):
+        """Top-level directories by tracked file count, biggest first."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        if not total or not dirs:
+            return box
+
+        top = dirs[:8]
+        peak = top[0][1]
+
+        for name, count in top:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+            label = Gtk.Label(label=name, xalign=0)
+            label.add_css_class("author")
+            label.set_size_request(160, -1)
+            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            row.append(label)
+
+            meter = Gtk.DrawingArea()
+            meter.set_content_height(12)
+            meter.set_hexpand(True)
+
+            def draw(_a, cr, width, height, share=count / peak):
+                cr.set_source_rgba(1, 1, 1, 0.06)
+                cr.rectangle(0, 0, width, height)
+                cr.fill()
+                cr.set_source_rgba(0.60, 0.55, 1.0, 0.85)
+                cr.rectangle(0, 0, width * share, height)
+                cr.fill()
+
+            meter.set_draw_func(draw)
+            row.append(meter)
+
+            value = Gtk.Label(label=f"{count}  ·  {100 * count / total:.0f}%")
+            value.add_css_class("author-count")
+            row.append(value)
+
+            box.append(row)
+
+        return box
 
     def _languages(self, exts, total):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
