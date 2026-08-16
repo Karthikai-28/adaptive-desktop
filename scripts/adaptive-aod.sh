@@ -47,6 +47,9 @@ status() {
     echo "sleep-inactive-ac-type:   $(gsettings get $POWER sleep-inactive-ac-type)"
     echo "sleep-inactive-batt-type: $(gsettings get $POWER sleep-inactive-battery-type)"
     echo "idle-dim:                 $(gsettings get $POWER idle-dim)"
+    if command -v xset >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
+        echo "X DPMS:                   $(xset q | grep -c 'DPMS is Enabled') (1 = still enabled)"
+    fi
     echo "lock-enabled:             $(gsettings get org.gnome.desktop.screensaver lock-enabled)"
 
     if [[ -f "$STATE_FILE" ]]; then
@@ -79,6 +82,16 @@ on)
     gsettings set $POWER sleep-inactive-ac-type nothing
     gsettings set $POWER sleep-inactive-battery-type nothing
 
+    # X keeps its own screen-saver and DPMS timers, independent of GNOME's
+    # settings. They are usually zero here, but DPMS still reports itself as
+    # enabled, and anything that pokes those timers later would blank a panel
+    # that is supposed to stay lit. Turn them off outright.
+    if command -v xset >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
+        xset s off
+        xset s noblank
+        xset -dpms
+    fi
+
     echo "Always-on display enabled."
     echo "The session no longer auto-locks on idle - use Super+L."
     echo "Display stays lit on battery too; closing the lid still suspends."
@@ -94,6 +107,11 @@ off)
         gsettings set $POWER sleep-inactive-ac-type "$AC_TYPE"
         gsettings set $POWER sleep-inactive-battery-type "$BATT_TYPE"
         gsettings set $POWER sleep-inactive-battery-timeout "${BATT_TIMEOUT##* }"
+        if command -v xset >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
+            xset +dpms
+            xset s on
+        fi
+
         rm -f "$STATE_FILE"
         echo "Always-on display disabled; previous settings restored."
     else

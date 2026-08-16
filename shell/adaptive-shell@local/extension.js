@@ -72,6 +72,7 @@ class AdaptiveShellV16 {
         this._aodBox = null;
         this._aodTime = null;
         this._aodDate = null;
+        this._lockBackgroundGroup = null;
 
         this._commandLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -228,7 +229,12 @@ class AdaptiveShellV16 {
     }
 
     _lockHideDesktopChrome(hidden) {
-        for (const actor of [this._rail, this._dockChrome]) {
+        for (const actor of [
+            this._rail,
+            this._dockChrome,
+            this._brandButton,
+            this._projectButton ? this._projectButton.container : null,
+        ]) {
             if (!actor)
                 continue;
 
@@ -240,6 +246,12 @@ class AdaptiveShellV16 {
 
         if (hidden)
             this._hideTooltip();
+
+        // Ask the dock to re-evaluate, so it hides through its own path too.
+        try {
+            this._dock26Layout();
+        } catch (e) {
+        }
     }
 
     _lockScreenStart() {
@@ -308,6 +320,19 @@ class AdaptiveShellV16 {
         if (clock._adaptiveLock)
             return true;
 
+        // GNOME 40+ paints the desktop wallpaper, blurred, behind the lock
+        // screen - which is why org.gnome.desktop.screensaver's picture-uri
+        // had no effect on it; that key is legacy. Hiding the background group
+        // leaves the shield's own black showing, which is what the OLED
+        // treatment needs. Restored when the session unlocks.
+        try {
+            if (dialog._backgroundGroup) {
+                dialog._backgroundGroup.hide();
+                this._lockBackgroundGroup = dialog._backgroundGroup;
+            }
+        } catch (e) {
+        }
+
         clock._adaptiveLock = true;
 
         // GNOME leaves the prompt column at its natural alignment, which puts
@@ -323,6 +348,7 @@ class AdaptiveShellV16 {
             x_align: Clutter.ActorAlign.CENTER,
         });
         activity.clutter_text.line_wrap = true;
+        activity.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         activity.visible = false;
 
         try {
@@ -456,6 +482,7 @@ class AdaptiveShellV16 {
             style_class: 'adaptive-aod-date',
             x_align: Clutter.ActorAlign.CENTER,
         });
+        this._aodDate.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
 
         box.add_child(this._aodTime);
         box.add_child(this._aodDate);
@@ -516,10 +543,18 @@ class AdaptiveShellV16 {
         const show = idle >= AOD_IDLE_MS;
         const dialog = Main.screenShield ? Main.screenShield._dialog : null;
 
+        // Hide what the dialog *shows*, not the dialog itself. The dialog is
+        // the opaque cover over the session: hiding it outright let the
+        // desktop - dock and panel included - show through underneath.
         if (dialog) {
-            try {
-                dialog.visible = !show;
-            } catch (e) {
+            for (const part of [dialog._clock, dialog._notifications]) {
+                if (!part)
+                    continue;
+
+                try {
+                    part.visible = !show;
+                } catch (e) {
+                }
             }
         }
 
@@ -533,6 +568,9 @@ class AdaptiveShellV16 {
     }
 
     _aodRemove() {
+        this._lockRestoreDialogParts();
+        this._lockRestoreBackground();
+
         try {
             const dialog = Main.screenShield ? Main.screenShield._dialog : null;
             if (dialog)
@@ -607,7 +645,37 @@ class AdaptiveShellV16 {
         }
     }
 
+    _lockRestoreDialogParts() {
+        const dialog = Main.screenShield ? Main.screenShield._dialog : null;
+        if (!dialog)
+            return;
+
+        for (const part of [dialog._clock, dialog._notifications]) {
+            if (!part)
+                continue;
+
+            try {
+                part.visible = true;
+            } catch (e) {
+            }
+        }
+    }
+
+    _lockRestoreBackground() {
+        if (!this._lockBackgroundGroup)
+            return;
+
+        try {
+            this._lockBackgroundGroup.show();
+        } catch (e) {
+        }
+
+        this._lockBackgroundGroup = null;
+    }
+
     _lockDetachDialog() {
+        this._lockRestoreBackground();
+
         if (this._lockClock && this._lockClock._adaptiveUpdateClock) {
             try {
                 this._lockClock._updateClock =
@@ -2116,6 +2184,13 @@ class AdaptiveShellV16 {
     }
 
     _dock26MonitorNeedsHide(index) {
+        // Setting visible=false from outside does not survive: the dock's own
+        // layout pass runs afterwards and shows it again. Locked has to be one
+        // of the dock's own reasons to stay down.
+        if (Main.sessionMode.isLocked ||
+            Main.sessionMode.currentMode === 'unlock-dialog')
+            return true;
+
         return (
             this._dock26MonitorInFullscreen(index) ||
             this._dock26MonitorHasFocusedMaximized(index)
