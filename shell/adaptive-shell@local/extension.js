@@ -1,4 +1,4 @@
-const { St, Gio, GLib, Clutter } = imports.gi;
+const { St, Gio, GLib, Clutter, Shell } = imports.gi;
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
@@ -18,9 +18,14 @@ class AdaptiveShellV16 {
         this._projectButton = null;
         this._systemCenterButton = null;
         this._workspacesButton = null;
+        this._windowList = null;
         this._projectLabel = null;
         this._activeProjectId = null;
         this._monitorChangedId = 0;
+        this._windowCreatedId = 0;
+        this._focusWindowId = 0;
+        this._windowRefreshId = 0;
+        this._windowSignalIds = [];
         this._hiddenActors = [];
         this._clockActor = null;
         this._clockDisplay = null;
@@ -60,9 +65,18 @@ class AdaptiveShellV16 {
             'monitors-changed',
             () => this._layoutRail()
         );
+        this._windowCreatedId = global.display.connect(
+            'window-created',
+            () => this._queueWindowListRefresh()
+        );
+        this._focusWindowId = global.display.connect(
+            'notify::focus-window',
+            () => this._queueWindowListRefresh()
+        );
 
         this._layoutRail();
         this._connectToProjectContext();
+        this._queueWindowListRefresh();
 
         log('[Adaptive Shell v1.6] functional rail installed');
         log('[Adaptive Shell v1.6] GNOME dateMenu restored');
@@ -131,6 +145,23 @@ class AdaptiveShellV16 {
             this._monitorChangedId = 0;
         }
 
+        if (this._windowCreatedId) {
+            global.display.disconnect(this._windowCreatedId);
+            this._windowCreatedId = 0;
+        }
+
+        if (this._focusWindowId) {
+            global.display.disconnect(this._focusWindowId);
+            this._focusWindowId = 0;
+        }
+
+        if (this._windowRefreshId) {
+            GLib.Source.remove(this._windowRefreshId);
+            this._windowRefreshId = 0;
+        }
+
+        this._disconnectWindowSignals();
+
         if (this._rail) {
             Main.layoutManager.removeChrome(this._rail);
             this._rail.destroy();
@@ -158,6 +189,8 @@ class AdaptiveShellV16 {
             this._workspacesButton.destroy();
             this._workspacesButton = null;
         }
+
+        this._windowList = null;
 
         if (this._projectProxy) {
             this._projectProxy = null;
@@ -315,7 +348,7 @@ class AdaptiveShellV16 {
         this._brandButton.set_child(brand);
         this._brandButton.connect(
             'clicked',
-            () => this._showOverview()
+            () => this._toggleOverview()
         );
 
         this._projectButton = new PanelMenu.Button(0.0, 'ProjectMenu', false);
@@ -412,8 +445,8 @@ class AdaptiveShellV16 {
         top.add_child(
             this._dockButton(
                 'overview.svg',
-                'Overview',
-                () => this._showOverview()
+                'Home',
+                () => this._toggleOverview()
             )
         );
 
@@ -435,15 +468,7 @@ class AdaptiveShellV16 {
 
         this._workspacesButton = new PanelMenu.Button(0.0, 'WorkspacesMenu', false);
         this._workspacesButton.add_style_class_name('adaptive-dock-button');
-        
-        const wsIconPath = GLib.build_filenamev([
-            Me.path, 'assets', 'dock', 'workspaces.svg'
-        ]);
-        const wsIcon = new St.Icon({
-            gicon: Gio.FileIcon.new(Gio.File.new_for_path(wsIconPath)),
-            style_class: 'adaptive-dock-icon',
-        });
-        this._workspacesButton.add_child(wsIcon);
+        this._workspacesButton.add_child(this._dockContent('workspaces.svg', 'Workspaces'));
         
         this._workspacesButton.menu.connect('open-state-changed', (menu, open) => {
             if (open) {
@@ -463,6 +488,27 @@ class AdaptiveShellV16 {
 
         this._rail.add_child(top);
 
+        const openGroup = new St.BoxLayout({
+            vertical: true,
+            style_class: 'adaptive-rail-group adaptive-window-group',
+        });
+
+        openGroup.add_child(
+            new St.Label({
+                text: 'OPEN',
+                style_class: 'adaptive-rail-section-label',
+                x_align: Clutter.ActorAlign.START,
+            })
+        );
+
+        this._windowList = new St.BoxLayout({
+            vertical: true,
+            style_class: 'adaptive-window-list',
+        });
+
+        openGroup.add_child(this._windowList);
+        this._rail.add_child(openGroup);
+
         this._rail.add_child(
             new St.Widget({
                 y_expand: true,
@@ -477,15 +523,7 @@ class AdaptiveShellV16 {
 
         this._systemCenterButton = new PanelMenu.Button(0.0, 'SystemCenterMenu', false);
         this._systemCenterButton.add_style_class_name('adaptive-dock-button');
-        
-        const iconPath = GLib.build_filenamev([
-            Me.path, 'assets', 'dock', 'settings.svg'
-        ]);
-        const icon = new St.Icon({
-            gicon: Gio.FileIcon.new(Gio.File.new_for_path(iconPath)),
-            style_class: 'adaptive-dock-icon',
-        });
-        this._systemCenterButton.add_child(icon);
+        this._systemCenterButton.add_child(this._dockContent('settings.svg', 'System'));
         
         let actions = SystemActions.getDefault();
 
@@ -820,7 +858,7 @@ class AdaptiveShellV16 {
         return clean.charAt(0).toUpperCase() + clean.slice(1);
     }
 
-    _dockButton(iconFile, name, callback) {
+    _dockContent(iconFile, labelText) {
         const iconPath = GLib.build_filenamev([
             Me.path,
             'assets',
@@ -828,13 +866,179 @@ class AdaptiveShellV16 {
             iconFile,
         ]);
 
-        const icon = new St.Icon({
-            gicon: Gio.FileIcon.new(
-                Gio.File.new_for_path(iconPath)
-            ),
-            style_class: 'adaptive-dock-icon',
+        const box = new St.BoxLayout({
+            vertical: false,
+            style_class: 'adaptive-dock-content',
+            x_expand: true,
         });
 
+        box.add_child(
+            new St.Icon({
+                gicon: Gio.FileIcon.new(
+                    Gio.File.new_for_path(iconPath)
+                ),
+                style_class: 'adaptive-dock-icon',
+            })
+        );
+
+        box.add_child(
+            new St.Label({
+                text: labelText,
+                y_align: Clutter.ActorAlign.CENTER,
+                style_class: 'adaptive-dock-label',
+            })
+        );
+
+        return box;
+    }
+
+    _queueWindowListRefresh() {
+        if (this._windowRefreshId)
+            return;
+
+        this._windowRefreshId = GLib.idle_add(
+            GLib.PRIORITY_DEFAULT_IDLE,
+            () => {
+                this._windowRefreshId = 0;
+                this._refreshWindowList();
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+    }
+
+    _disconnectWindowSignals() {
+        for (const item of this._windowSignalIds) {
+            try {
+                item.window.disconnect(item.id);
+            } catch (e) {
+                logError(e, '[Adaptive Shell v1.6] disconnect window signal');
+            }
+        }
+
+        this._windowSignalIds = [];
+    }
+
+    _refreshWindowList() {
+        if (!this._windowList)
+            return;
+
+        this._disconnectWindowSignals();
+        this._windowList.destroy_all_children();
+
+        const windows = global.get_window_actors()
+            .map(actor => actor.meta_window)
+            .filter(window => this._isDockWindow(window))
+            .sort((a, b) => this._windowSortKey(a).localeCompare(this._windowSortKey(b)));
+
+        if (!windows.length) {
+            this._windowList.add_child(
+                new St.Label({
+                    text: 'No open windows',
+                    style_class: 'adaptive-window-empty',
+                    x_align: Clutter.ActorAlign.START,
+                })
+            );
+            return;
+        }
+
+        for (const window of windows) {
+            this._windowList.add_child(this._windowButton(window));
+
+            try {
+                this._windowSignalIds.push({
+                    window,
+                    id: window.connect('unmanaged', () => this._queueWindowListRefresh()),
+                });
+                this._windowSignalIds.push({
+                    window,
+                    id: window.connect('notify::title', () => this._queueWindowListRefresh()),
+                });
+            } catch (e) {
+                logError(e, '[Adaptive Shell v1.6] connect window signal');
+            }
+        }
+    }
+
+    _isDockWindow(window) {
+        if (!window)
+            return false;
+
+        try {
+            if (window.skip_taskbar)
+                return false;
+
+            if (window.is_override_redirect && window.is_override_redirect())
+                return false;
+
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _windowSortKey(window) {
+        try {
+            const app = Shell.WindowTracker.get_default().get_window_app(window);
+            const appName = app ? app.get_name() : '';
+            return `${appName} ${window.get_title() || ''}`;
+        } catch (e) {
+            return window.get_title() || '';
+        }
+    }
+
+    _windowButton(window) {
+        const app = Shell.WindowTracker.get_default().get_window_app(window);
+        const appName = app ? app.get_name() : 'Window';
+        const title = window.get_title() || appName;
+        const isActive = global.display.focus_window === window;
+
+        const button = new St.Button({
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            style_class: isActive ? 'adaptive-window-button active' : 'adaptive-window-button',
+            accessible_name: `Switch to ${title}`,
+        });
+
+        const row = new St.BoxLayout({
+            vertical: false,
+            style_class: 'adaptive-window-content',
+            x_expand: true,
+        });
+
+        let icon;
+        if (app)
+            icon = app.create_icon_texture(18);
+        else
+            icon = new St.Icon({
+                icon_name: 'application-x-executable-symbolic',
+                style_class: 'adaptive-window-icon',
+            });
+
+        icon.add_style_class_name('adaptive-window-icon');
+        row.add_child(icon);
+
+        row.add_child(
+            new St.Label({
+                text: title,
+                y_align: Clutter.ActorAlign.CENTER,
+                style_class: 'adaptive-window-label',
+            })
+        );
+
+        button.set_child(row);
+        button.connect('clicked', () => {
+            try {
+                Main.activateWindow(window);
+            } catch (e) {
+                logError(e, '[Adaptive Shell v1.6] activate window');
+            }
+        });
+
+        return button;
+    }
+
+    _dockButton(iconFile, name, callback) {
         const button = new St.Button({
             reactive: true,
             can_focus: true,
@@ -843,7 +1047,7 @@ class AdaptiveShellV16 {
             accessible_name: name,
         });
 
-        button.set_child(icon);
+        button.set_child(this._dockContent(iconFile, name));
 
         button.connect(
             'clicked',
@@ -886,7 +1090,7 @@ class AdaptiveShellV16 {
             24
         );
 
-        const width = 58;
+        const width = 172;
         const height = Math.max(
             1,
             monitor.height - panelHeight
@@ -905,6 +1109,13 @@ class AdaptiveShellV16 {
 
     _showOverview() {
         Main.overview.show();
+    }
+
+    _toggleOverview() {
+        if (Main.overview.visible)
+            Main.overview.hide();
+        else
+            Main.overview.show();
     }
 
     _showApplications() {
