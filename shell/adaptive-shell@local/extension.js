@@ -2183,6 +2183,18 @@ class AdaptiveShellV16 {
         return false;
     }
 
+    _dock26RaiseAboveWindows() {
+        if (!this._rail)
+            return;
+
+        try {
+            const parent = this._rail.get_parent();
+            if (parent)
+                parent.set_child_above_sibling(this._rail, null);
+        } catch (e) {
+        }
+    }
+
     _dock26Locked() {
         return (
             Main.sessionMode.isLocked ||
@@ -2296,7 +2308,7 @@ class AdaptiveShellV16 {
 
         this._dock26TargetMonitor = index;
 
-        if (!this._dock26MonitorNeedsHide(index)) {
+        if (!this._dock26Locked()) {
             this._dock26EdgeRevealed = true;
             this._dock26Layout();
             return;
@@ -2320,9 +2332,9 @@ class AdaptiveShellV16 {
 
                     this._dock26TargetMonitor = index;
 
-                    // Never let the edge raise the dock over a locked screen.
-                    this._dock26EdgeRevealed =
-                        !this._dock26MonitorNeedsHide(index);
+                    // Never over a locked screen; everywhere else the edge
+                    // reveal is honoured, fullscreen included.
+                    this._dock26EdgeRevealed = !this._dock26Locked();
 
                     this._dock26Layout();
 
@@ -2535,20 +2547,17 @@ class AdaptiveShellV16 {
         );
 
         if (hidden && this._dock26Locked()) {
-            // Locked is absolute: no hot edge, no reveal, nothing of the
-            // desktop on top of the lock screen.
+            // Locked is the only absolute: nothing of the desktop goes on top
+            // of the lock screen, hot edge included.
             this._dock26EdgeRevealed = false;
             this._dock26HideDock(true);
         } else if (hidden) {
-            // A fullscreen window is stacked above shell chrome, so a dock
-            // revealed here is painted under it: it looks present but every
-            // click lands on the window behind. Nothing to reveal, then -
-            // the hot edge is ignored until fullscreen ends.
-            if (this._dock26MonitorInFullscreen(index)) {
-                this._dock26EdgeRevealed = false;
-                this._dock26HideDock(true);
-            } else if (this._dock26EdgeRevealed) {
+            // Fullscreen suppresses the dock appearing *by itself*, which was
+            // the original complaint, but reaching for the bottom edge is a
+            // deliberate request and still works.
+            if (this._dock26EdgeRevealed) {
                 this._dock26ShowDock(true);
+                this._dock26RaiseAboveWindows();
             } else {
                 this._dock26HideDock(true);
             }
