@@ -24,10 +24,10 @@ Status:
 
 ### Remaining
 
-- ⬜ Add dedicated recovery runbook.
-- ⬜ Add environment verification script.
-- ⬜ Add stable Git checkpoint tags.
-- ⬜ Test recovery from TTY.
+- ✅ Add dedicated recovery runbook.
+- ✅ Add environment verification script.
+- 🔬 Add stable Git checkpoint tags.
+- 🔬 Test recovery from TTY.
 
 ## Milestone 1 — Separate Adaptive session
 
@@ -42,9 +42,9 @@ Status:
 
 ### Remaining
 
-- 🔬 Verify normal Ubuntu never inherits Adaptive settings.
-- ⬜ Add automatic session validation script.
-- ⬜ Add uninstall/recovery documentation.
+- ✅ Verify normal Ubuntu never inherits Adaptive settings.
+- ✅ Add automatic session validation script.
+- ✅ Add uninstall/recovery documentation.
 
 ## Milestone 2 — Shell
 
