@@ -1,3 +1,14 @@
 logs/*
 *.log
 .DS_Store
+
+# Local recovery snapshots
+backups/
+
+# Runtime logs
+logs/
+
+# Machine-specific audit output
+session-audit.txt
+system-baseline.txt
+disk-audit.txt
