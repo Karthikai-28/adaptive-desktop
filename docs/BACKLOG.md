@@ -67,7 +67,7 @@ Status:
 ### In progress
 
 - ✅ Convert rail from floating palette into a true docked shell rail.
-- 🔬 Reserve application area to the right of the rail.
+- ✅ Reserve application area to the right of the rail.
 - ✅ Add icon+text dock labels and live open-window switching.
 - ✅ Improve icon consistency and active states.
 - ✅ Keep stock top-right controls until System Center is functional.
