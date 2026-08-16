@@ -408,6 +408,10 @@ class PreviewController:
     def __init__(self, window):
         self._window = window
         self.panel = None
+        # One reusable location strip per window; see get_widget().
+        self.location_strip = None
+        self.location_path = None
+        self.location_inspector = None
         self.stack = None
 
         self.preview_body = None
@@ -2869,57 +2873,27 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
             controller.ensure_attached()
             GLib.idle_add(controller.ensure_attached)
 
-            strip = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL,
-                spacing=5,
-            )
-            _css(strip, "adaptive-location-strip")
+            # Nautilus calls this on every location and view change. It does
+            # not drop the widget handed over last time, so building a fresh
+            # strip per call stacked duplicate "ADAPTIVE FILES" bars on top of
+            # the file view. One strip per window is built once and reused.
+            strip = getattr(controller, "location_strip", None)
 
-            brand = Gtk.Label(label="ADAPTIVE FILES")
-            brand.set_margin_start(3)
-            brand.set_margin_end(5)
-            _css(brand, "adaptive-location-brand")
-            strip.pack_start(brand, False, False, 0)
+            if strip is None:
+                strip = self._build_location_strip(controller)
+                controller.location_strip = strip
 
-            inspector = Gtk.ToggleButton(label="Inspector")
-            inspector.set_active(controller.panel_visible)
-            _css(inspector, "adaptive-location-button")
+            parent = strip.get_parent()
+            if parent is not None:
+                parent.remove(strip)
 
-            def toggle(button):
-                controller.set_panel_visible(button.get_active())
-
-            inspector.connect("toggled", toggle)
-            strip.pack_start(inspector, False, False, 0)
-
-            storage = Gtk.Button(label="Storage")
-            _css(storage, "adaptive-location-button")
-            storage.connect(
-                "clicked",
-                lambda *_: controller.show_tab("storage"),
-            )
-            strip.pack_start(storage, False, False, 0)
-
-            network = Gtk.Button(label="Network")
-            _css(network, "adaptive-location-button")
-            network.connect(
-                "clicked",
-                lambda *_: controller.show_tab("network"),
-            )
-            strip.pack_start(network, False, False, 0)
-
-            project = Gtk.Button(label="Project")
-            _css(project, "adaptive-location-button")
-            project.connect(
-                "clicked",
-                lambda *_: controller.show_tab("project"),
-            )
-            strip.pack_start(project, False, False, 0)
-
-            path = Gtk.Label(label=uri or "", xalign=1)
-            path.set_hexpand(True)
-            path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-            _css(path, "adaptive-muted")
-            strip.pack_end(path, True, True, 6)
+            try:
+                controller.location_path.set_text(uri or "")
+                controller.location_inspector.set_active(
+                    controller.panel_visible
+                )
+            except Exception:
+                pass
 
             strip.show_all()
 
@@ -2933,6 +2907,51 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
         except Exception:
             _log_exception("get_widget failed")
             return None
+
+    def _build_location_strip(self, controller):
+        strip = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=5,
+        )
+        _css(strip, "adaptive-location-strip")
+
+        brand = Gtk.Label(label="ADAPTIVE FILES")
+        brand.set_margin_start(3)
+        brand.set_margin_end(5)
+        _css(brand, "adaptive-location-brand")
+        strip.pack_start(brand, False, False, 0)
+
+        inspector = Gtk.ToggleButton(label="Inspector")
+        inspector.set_active(controller.panel_visible)
+        _css(inspector, "adaptive-location-button")
+        inspector.connect(
+            "toggled",
+            lambda button: controller.set_panel_visible(button.get_active()),
+        )
+        strip.pack_start(inspector, False, False, 0)
+        controller.location_inspector = inspector
+
+        for label, tab in (
+            ("Storage", "storage"),
+            ("Network", "network"),
+            ("Project", "project"),
+        ):
+            button = Gtk.Button(label=label)
+            _css(button, "adaptive-location-button")
+            button.connect(
+                "clicked",
+                lambda _b, t=tab: controller.show_tab(t),
+            )
+            strip.pack_start(button, False, False, 0)
+
+        path = Gtk.Label(label="", xalign=1)
+        path.set_hexpand(True)
+        path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        _css(path, "adaptive-muted")
+        strip.pack_end(path, True, True, 6)
+        controller.location_path = path
+
+        return strip
 
     def get_file_items(self, *args):
         try:
