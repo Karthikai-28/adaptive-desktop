@@ -76,6 +76,25 @@ has_source() {
   fi
 
   echo
+  echo "== Adaptive visual system =="
+  test -f "${HOME}/.local/share/themes/Adaptive/gtk-3.0/gtk.css" \
+    || fail "Adaptive GTK theme is not installed"
+  rg -q 'Yaru-dark/gtk-3.0/gtk.css' "${HOME}/.local/share/themes/Adaptive/gtk-3.0/gtk.css" \
+    || fail "Adaptive theme does not build on Yaru; unstyled widgets would fall back to raw Adwaita"
+  rg -q 'Inherits=Yaru' "${REPO}/icons/AdaptiveFilesIcons/index.theme" \
+    || fail "AdaptiveFilesIcons does not inherit Yaru"
+  pass "Adaptive GTK theme and icon inheritance are installed"
+
+  if [[ "${DCONF_PROFILE:-}" == "adaptive" ]]; then
+    theme="$(gsettings get org.gnome.desktop.interface gtk-theme)"
+    [[ "$theme" == "'Adaptive'" ]] \
+      || verify "Adaptive session gtk-theme is ${theme}; run scripts/install-adaptive-theme.sh"
+    pass "Adaptive session appearance is applied"
+  else
+    verify "Run scripts/install-adaptive-theme.sh from inside Adaptive Desktop"
+  fi
+
+  echo
   echo "== Project context =="
   "${REPO}/scripts/verify-project-context-service.sh"
   test -f "${HOME}/.config/autostart/adaptive-project-context.desktop" \
