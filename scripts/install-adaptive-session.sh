@@ -131,10 +131,25 @@ set -Eeuo pipefail
 #
 # IMPORTANT:
 # Ubuntu's normal session does NOT execute this wrapper.
-# Therefore DCONF_PROFILE=adaptive is local to this login session.
+# Therefore everything exported here is local to this login session.
 #
 
 export DCONF_PROFILE=adaptive
+export GNOME_SHELL_SESSION_MODE=ubuntu
+export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+
+#
+# Put the Adaptive Nautilus prefix ahead of the system one so this session
+# resolves the file manager's desktop entry, mime defaults, icons, themes and
+# search provider to our build. D-Bus activation is handled separately by
+# scripts/install-files-session-integration.sh, because the session bus fixes
+# its service directories before this wrapper ever runs.
+#
+ADAPTIVE_FILES_SHARE="$HOME/adaptive-desktop/.local/adaptive-nautilus/share"
+
+if [ -d "$ADAPTIVE_FILES_SHARE" ]; then
+    export XDG_DATA_DIRS="${ADAPTIVE_FILES_SHARE}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+fi
 
 exec /usr/bin/gnome-session --session=ubuntu
 WRAPPER

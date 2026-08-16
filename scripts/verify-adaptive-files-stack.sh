@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+#
+# Checks that the Adaptive session's file manager is wired up.
+#
+# Replaces the old adaptive-files-launch-v1.6.sh self-test. There is no
+# launcher any more: the forked Nautilus is activated the same way Ubuntu
+# activates its own, so what needs verifying is the fork itself plus the
+# activation files that point at it.
+#
+
+REPO="${HOME}/adaptive-desktop"
+PREFIX="${REPO}/.local/adaptive-nautilus"
+BIN="${PREFIX}/bin/nautilus"
+DISPATCH="${REPO}/scripts/adaptive-files-dispatch.sh"
+SERVICE_DIR="${HOME}/.local/share/dbus-1/services"
+
+pass() {
+  printf 'PASS: %s\n' "$*"
+}
+
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+echo "===== ADAPTIVE FILES STACK ====="
+
+test -x "$BIN" || fail "forked Nautilus binary missing: $BIN"
+pass "forked Nautilus binary"
+
+test -f "${PREFIX}/share/applications/org.gnome.Nautilus.desktop" \
+  || fail "fork desktop entry missing"
+pass "fork desktop entry"
+
+test -f "${PREFIX}/share/themes/AdaptiveFiles/gtk-3.0/gtk.css" \
+  || fail "AdaptiveFiles GTK theme missing"
+pass "AdaptiveFiles GTK theme"
+
+test -f "${PREFIX}/share/icons/AdaptiveFilesIcons/index.theme" \
+  || fail "AdaptiveFilesIcons missing"
+pass "AdaptiveFilesIcons"
+
+test -f "${PREFIX}/share/nautilus-python/extensions/adaptive_preview.py" \
+  || fail "preview extension missing"
+pass "preview extension"
+
+test -x "$DISPATCH" || fail "session dispatcher missing: $DISPATCH"
+bash -n "$DISPATCH"
+pass "session dispatcher"
+
+for name in org.gnome.Nautilus org.freedesktop.FileManager1; do
+  service="${SERVICE_DIR}/${name}.service"
+  test -f "$service" || fail "activation file missing: $service"
+  grep -q "Exec=${DISPATCH}" "$service" \
+    || fail "$service does not point at the dispatcher"
+  pass "activation: $name"
+done
+
+# The fork must own the app id it is activated under, otherwise stock Nautilus
+# and this build fight over the same bus name.
+grep -q '#define APPLICATION_ID "org.gnome.Nautilus"' \
+  "${REPO}/build/adaptive-nautilus/config.h" \
+  || fail "fork was built with a different APPLICATION_ID"
+pass "fork owns org.gnome.Nautilus"
+
+echo
+echo "inode/directory default:"
+xdg-mime query default inode/directory || true
+
+echo
+echo "Adaptive Files stack verified."

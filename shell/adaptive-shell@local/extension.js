@@ -52,18 +52,6 @@ class AdaptiveShellV16 {
             }
         });
 
-        this._filesLauncher = GLib.build_filenamev([
-            GLib.get_home_dir(),
-            'adaptive-desktop',
-            'scripts',
-            'adaptive-files-launch-v1.6.sh',
-        ]);
-        this._settingsLauncher = GLib.build_filenamev([
-            GLib.get_home_dir(),
-            'adaptive-desktop',
-            'scripts',
-            'adaptive-settings-launch.sh',
-        ]);
         this._commandLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
             'adaptive-desktop',
@@ -1624,32 +1612,27 @@ class AdaptiveShellV16 {
         );
     }
 
-    _openFiles() {
-        if (!GLib.file_test(
-            this._filesLauncher,
-            GLib.FileTest.IS_EXECUTABLE
-        )) {
-            throw new Error(
-                `Missing ${this._filesLauncher}`
-            );
-        }
+    // Activating the app rather than spawning a binary is what gives the
+    // Ubuntu dock behaviour: an already-open window is focused instead of a
+    // second one being created.
+    _activateApp(desktopId, fallbackArgv) {
+        const app = Shell.AppSystem.get_default().lookup_app(desktopId);
 
-        this._spawn([
-            this._filesLauncher,
-        ]);
-    }
-
-    _openSettings() {
-        if (GLib.file_test(this._settingsLauncher, GLib.FileTest.IS_EXECUTABLE)) {
-            this._spawn([
-                this._settingsLauncher,
-            ]);
+        if (app) {
+            app.activate();
             return;
         }
 
-        this._spawn([
-            'gnome-control-center',
-        ]);
+        if (fallbackArgv)
+            this._spawn(fallbackArgv);
+    }
+
+    _openFiles() {
+        this._activateApp('org.gnome.Nautilus.desktop', ['nautilus']);
+    }
+
+    _openSettings() {
+        this._activateApp('gnome-control-center.desktop', ['gnome-control-center']);
     }
 
     _runFocus(mode) {
