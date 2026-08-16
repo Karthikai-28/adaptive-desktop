@@ -18,6 +18,7 @@ class AdaptiveShellV16 {
         this._projectButton = null;
         this._systemCenterButton = null;
         this._workspacesButton = null;
+        this._commandButton = null;
         this._windowList = null;
         this._projectLabel = null;
         this._activeProjectId = null;
@@ -220,6 +221,11 @@ class AdaptiveShellV16 {
         if (this._workspacesButton) {
             this._workspacesButton.destroy();
             this._workspacesButton = null;
+        }
+
+        if (this._commandButton) {
+            this._commandButton.destroy();
+            this._commandButton = null;
         }
 
         this._windowList = null;
@@ -510,13 +516,14 @@ class AdaptiveShellV16 {
         
         top.add_child(this._workspacesButton);
 
-        top.add_child(
-            this._dockButton(
-                'search.svg',
-                'Search',
-                () => this._showSearch()
-            )
-        );
+        this._commandButton = new PanelMenu.Button(0.0, 'CommandMenu', false);
+        this._commandButton.add_style_class_name('adaptive-dock-button');
+        this._commandButton.add_child(this._dockContent('search.svg', 'Command'));
+        this._commandButton.menu.connect('open-state-changed', (menu, open) => {
+            if (open)
+                this._populateCommandMenu();
+        });
+        top.add_child(this._commandButton);
 
         this._rail.add_child(top);
 
@@ -1223,6 +1230,106 @@ class AdaptiveShellV16 {
             
             this._workspacesButton.menu.addMenuItem(item);
         }
+    }
+
+    _populateCommandMenu() {
+        this._commandButton.menu.removeAll();
+
+        this._addCommandHeader('COMMANDS');
+
+        this._addCommandItem('Search apps and files...', () => this._showSearch());
+        this._addCommandItem('Open Adaptive Files', () => this._openFiles());
+        this._addCommandItem('Open System Settings', () => this._openSettings());
+
+        this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._addCommandHeader('APPLICATIONS');
+
+        try {
+            const apps = Shell.AppSystem.get_default()
+                .get_installed()
+                .filter(app => app.should_show())
+                .sort((a, b) => a.get_name().localeCompare(b.get_name()))
+                .slice(0, 10);
+
+            for (const app of apps)
+                this._addCommandItem(app.get_name(), () => app.activate());
+        } catch (e) {
+            const item = new PopupMenu.PopupMenuItem('Applications unavailable');
+            item.setSensitive(false);
+            this._commandButton.menu.addMenuItem(item);
+        }
+
+        this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._addCommandHeader('PROJECTS');
+
+        if (!this._projectProxy) {
+            const item = new PopupMenu.PopupMenuItem('Project service offline');
+            item.setSensitive(false);
+            this._commandButton.menu.addMenuItem(item);
+            return;
+        }
+
+        const loading = new PopupMenu.PopupMenuItem('Loading projects...');
+        loading.setSensitive(false);
+        this._commandButton.menu.addMenuItem(loading);
+
+        this._projectProxy.call(
+            'ListProjects',
+            null,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            (proxy, res) => {
+                try {
+                    loading.destroy();
+                    const variant = proxy.call_finish(res);
+                    const projects = JSON.parse(variant.deep_unpack()[0]);
+                    let count = 0;
+
+                    for (const pid in projects) {
+                        count++;
+                        const project = projects[pid];
+                        this._addCommandItem(project.name, () => {
+                            this._projectProxy.call(
+                                'SetActiveProject',
+                                GLib.Variant.new('(s)', [pid]),
+                                Gio.DBusCallFlags.NONE,
+                                -1,
+                                null,
+                                null
+                            );
+                        });
+                    }
+
+                    if (!count) {
+                        const empty = new PopupMenu.PopupMenuItem('No projects registered');
+                        empty.setSensitive(false);
+                        this._commandButton.menu.addMenuItem(empty);
+                    }
+                } catch (e) {
+                    logError(e, '[Adaptive Shell v1.6] command projects');
+                }
+            }
+        );
+    }
+
+    _addCommandHeader(label) {
+        const item = new PopupMenu.PopupMenuItem(label);
+        item.setSensitive(false);
+        this._commandButton.menu.addMenuItem(item);
+    }
+
+    _addCommandItem(label, callback) {
+        const item = new PopupMenu.PopupMenuItem(label);
+        item.connect('activate', () => {
+            try {
+                callback();
+            } catch (e) {
+                logError(e, `[Adaptive Shell v1.6] command ${label}`);
+                Main.notifyError('Adaptive Desktop', `${label} could not run.`);
+            }
+        });
+        this._commandButton.menu.addMenuItem(item);
     }
 
     _showSearch() {
