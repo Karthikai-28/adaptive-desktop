@@ -220,14 +220,14 @@ Status:
 ## Milestone 10 — Window management
 
 - ⬜ Smart tiling.
-- ⬜ Split presets.
-- ⬜ Snapping.
+- ✅ Split presets.
+- 🟡 Snapping.
 - ⬜ Project-aware placement.
 - 🟡 Visible open-window switching from the dock.
 - ⬜ Restore.
-- ⬜ Fullscreen behavior.
+- 🟡 Fullscreen behavior.
 - ⬜ Multi-monitor behavior.
-- ⬜ Overview integration.
+- 🟡 Overview integration.
 
 ## Milestone 11 — Lock/Login/Session
 

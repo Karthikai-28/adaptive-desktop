@@ -64,6 +64,12 @@ class AdaptiveShellV16 {
             'scripts',
             'focus-cli.py',
         ]);
+        this._windowCli = GLib.build_filenamev([
+            GLib.get_home_dir(),
+            'adaptive-desktop',
+            'scripts',
+            'window-cli.py',
+        ]);
     }
 
     enable() {
@@ -1262,6 +1268,15 @@ class AdaptiveShellV16 {
         this._addCommandItem('Search apps and files...', () => this._showSearch());
         this._addCommandItem('Open Adaptive Files', () => this._openFiles());
         this._addCommandItem('Open System Settings', () => this._openSettings());
+
+        if (GLib.file_test(this._windowCli, GLib.FileTest.IS_EXECUTABLE)) {
+            this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this._addCommandHeader('WINDOW');
+            this._addCommandItem('Tile Active Window Left', () => this._spawn([this._windowCli, 'tile', 'left']));
+            this._addCommandItem('Tile Active Window Right', () => this._spawn([this._windowCli, 'tile', 'right']));
+            this._addCommandItem('Center Active Window', () => this._spawn([this._windowCli, 'tile', 'center']));
+            this._addCommandItem('Maximize Active Window Around Dock', () => this._spawn([this._windowCli, 'tile', 'maximize']));
+        }
 
         this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._addCommandHeader('APPLICATIONS');
