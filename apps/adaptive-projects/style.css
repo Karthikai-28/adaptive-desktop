@@ -1,0 +1,159 @@
+/* Project mode - same tokens as the shell and the palette. */
+
+@define-color ad_bg        #08111B;
+@define-color ad_bg_deep   #07101A;
+@define-color ad_surface   #111A28;
+@define-color ad_surface_2 #162233;
+@define-color ad_divider   #30425C;
+@define-color ad_text      #F2F6EF;
+@define-color ad_muted     #96A4B8;
+@define-color ad_accent    #78A9FF;
+@define-color ad_cyan      #66E0FF;
+@define-color ad_violet    #9A8BFF;
+@define-color ad_warning   #F3C96B;
+
+window.adaptive-projects { background-color: @ad_bg; }
+
+.root { background-color: @ad_bg; }
+
+.header {
+    padding: 26px 28px 14px 28px;
+    border-bottom: 1px solid alpha(@ad_divider, 0.35);
+    background-color: @ad_bg_deep;
+}
+
+.greeting {
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 26px;
+    font-weight: 600;
+}
+
+.greeting-sub {
+    color: @ad_muted;
+    font-size: 13px;
+}
+
+/* Numbers first: how much there is, how much is live, how much is dirty. */
+.stats { margin: 16px 0 14px 0; }
+
+.stat {
+    min-width: 150px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid alpha(@ad_divider, 0.42);
+    background-color: @ad_surface;
+}
+
+.stat-value {
+    color: @ad_text;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.stat-label {
+    color: @ad_muted;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+}
+
+.stat-accent  { border-left: 3px solid @ad_accent; }
+.stat-cyan    { border-left: 3px solid @ad_cyan; }
+.stat-violet  { border-left: 3px solid @ad_violet; }
+.stat-warning { border-left: 3px solid @ad_warning; }
+
+.filter {
+    min-height: 34px;
+    border-radius: 11px;
+    border: 1px solid alpha(@ad_divider, 0.5);
+    background-color: @ad_bg;
+    color: @ad_text;
+}
+
+.grid { padding: 16px 28px 20px 28px; }
+
+/* One card per repository. The left edge encodes recency, so a glance across
+   the grid shows where the work actually is. */
+.card {
+    min-width: 330px;
+    padding: 13px 15px;
+    border-radius: 14px;
+    border: 1px solid alpha(@ad_divider, 0.42);
+    border-left: 3px solid alpha(@ad_muted, 0.5);
+    background-color: @ad_surface;
+    background-image: none;
+    box-shadow: none;
+}
+
+.card:hover {
+    border-color: alpha(@ad_accent, 0.42);
+    background-color: @ad_surface_2;
+}
+
+.card.band-fresh { border-left-color: @ad_cyan; }
+.card.band-warm  { border-left-color: @ad_accent; }
+.card.band-cool  { border-left-color: @ad_violet; }
+.card.band-idle  { border-left-color: alpha(@ad_muted, 0.42); }
+
+.card.active {
+    border-color: alpha(@ad_cyan, 0.55);
+    background-color: alpha(@ad_accent, 0.13);
+}
+
+.card-name {
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.card-path {
+    color: @ad_muted;
+    font-size: 11px;
+}
+
+.card-subject {
+    margin-top: 3px;
+    color: alpha(@ad_text, 0.78);
+    font-size: 11px;
+}
+
+.card-when {
+    color: @ad_muted;
+    font-size: 10px;
+}
+
+.chip, .chip-dirty, .chip-active {
+    padding: 1px 8px;
+    border-radius: 7px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.chip {
+    border: 1px solid alpha(@ad_divider, 0.55);
+    background-color: @ad_bg_deep;
+    color: @ad_muted;
+}
+
+.chip-dirty {
+    border: 1px solid alpha(@ad_warning, 0.42);
+    background-color: alpha(@ad_warning, 0.14);
+    color: @ad_warning;
+}
+
+.chip-active {
+    border: 1px solid alpha(@ad_cyan, 0.5);
+    background-color: alpha(@ad_cyan, 0.16);
+    color: @ad_cyan;
+    font-weight: 700;
+}
+
+.footer {
+    padding: 8px 28px;
+    border-top: 1px solid alpha(@ad_divider, 0.35);
+    background-color: @ad_bg_deep;
+    color: @ad_muted;
+    font-size: 10px;
+}

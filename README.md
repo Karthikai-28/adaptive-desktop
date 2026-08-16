@@ -45,9 +45,9 @@ files fork     .local/adaptive-nautilus/bin/nautilus
 files routing  scripts/adaptive-files-dispatch.sh
 ```
 
-`adaptive-shell-v16@local` is a **retired duplicate kept for rollback**. Only
-one Adaptive rail extension may be enabled at a time — with both enabled the
-rails stack and the dock labels render with their first glyph covered.
+Only one Adaptive shell extension exists. The retired `adaptive-shell-v16@local`
+duplicate and the v1.x/v2.x one-off scripts were deleted; git history holds them
+if a rollback is ever needed.
 
 ## Development workflow
 
