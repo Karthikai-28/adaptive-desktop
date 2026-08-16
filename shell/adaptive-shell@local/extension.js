@@ -13,6 +13,13 @@ const Gvc = imports.gi.Gvc;
 
 const Me = ExtensionUtils.getCurrentExtension();
 
+// Always-on-display tuning. The drift keeps a static clock from ghosting an
+// OLED; the ambient level is what it settles to once nobody is looking.
+const LOCK_AMBIENT_AFTER_S = 12;
+const LOCK_AMBIENT_OPACITY = 145;
+const LOCK_DRIFT_INTERVAL_S = 90;
+const LOCK_DRIFT_RADIUS_PX = 14;
+
 let _shell = null;
 
 class AdaptiveShellV16 {
@@ -299,6 +306,47 @@ class AdaptiveShellV16 {
 
         if (this._lockActivity)
             this._lockActivity.visible = !!this._lockActivity.text;
+
+        this._lockTicks = (this._lockTicks || 0) + 1;
+        this._lockAmbientStep();
+    }
+
+    // Always-on behaviour, borrowed from how phones do it.
+    //
+    // A static bright clock left on an OLED for hours is exactly how panels
+    // acquire ghosting, so the clock drifts slowly around a small orbit and
+    // settles to a dimmer level once nobody is interacting. Both are cheap:
+    // one translation and one opacity, on the tick that already runs.
+    _lockAmbientStep() {
+        if (!this._lockClock)
+            return;
+
+        const ticks = this._lockTicks;
+
+        // Fade to the ambient level a few seconds in, so the clock is bright
+        // at the moment of locking and quiet afterwards.
+        if (ticks === LOCK_AMBIENT_AFTER_S) {
+            this._lockClock.ease({
+                opacity: LOCK_AMBIENT_OPACITY,
+                duration: 1200,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        }
+
+        if (ticks % LOCK_DRIFT_INTERVAL_S !== 0)
+            return;
+
+        // Eight positions around a small circle: one full lap per
+        // 8 * LOCK_DRIFT_INTERVAL_S, far slower than the eye tracks.
+        const stop = (ticks / LOCK_DRIFT_INTERVAL_S) % 8;
+        const angle = (stop / 8) * 2 * Math.PI;
+
+        this._lockClock.ease({
+            translation_x: Math.round(Math.cos(angle) * LOCK_DRIFT_RADIUS_PX),
+            translation_y: Math.round(Math.sin(angle) * LOCK_DRIFT_RADIUS_PX),
+            duration: 2500,
+            mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+        });
     }
 
     _lockActivitySummary() {
@@ -348,9 +396,19 @@ class AdaptiveShellV16 {
         }
 
         if (this._lockClock) {
+            try {
+                this._lockClock.remove_all_transitions();
+                this._lockClock.opacity = 255;
+                this._lockClock.translation_x = 0;
+                this._lockClock.translation_y = 0;
+            } catch (e) {
+            }
+
             this._lockClock._adaptiveLock = false;
             this._lockClock = null;
         }
+
+        this._lockTicks = 0;
     }
 
     _connectToProjectContext() {
