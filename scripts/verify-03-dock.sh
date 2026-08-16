@@ -13,10 +13,7 @@ echo "PASS: live Adaptive Shell extension.js"
 test -f "${LIVE}/assets/dock/files.svg"
 echo "PASS: custom Files dock SVG"
 
-test -x "${REPO}/scripts/adaptive-files-launch.sh"
-echo "PASS: Adaptive Files launcher"
-
-"${REPO}/scripts/adaptive-files-launch.sh" --self-test
+"${REPO}/scripts/verify-adaptive-files-stack.sh"
 
 command -v gnome-control-center >/dev/null
 echo "PASS: Settings launcher target exists"

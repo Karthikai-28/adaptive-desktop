@@ -30,8 +30,6 @@ gnome-shell --version
 python3 - <<'PY'
 from pathlib import Path
 for path in [
-    "apps/adaptive-files/main.py",
-    "apps/adaptive-settings/main.py",
     "services/project-context/main.py",
     "scripts/project-cli.py",
     "scripts/focus-cli.py",

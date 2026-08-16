@@ -76,8 +76,8 @@ class CommandWindow(Gtk.ApplicationWindow):
 
     def _actions(self, query):
         actions = [
-            Result("Open Adaptive Files", "Desktop action", lambda: self._spawn(["./scripts/adaptive-files-launch-v1.6.sh"])),
-            Result("Open Adaptive Settings", "Desktop action", lambda: self._spawn(["./scripts/adaptive-settings-launch.sh"])),
+            Result("Open Adaptive Files", "Desktop action", lambda: self._spawn(["gio", "open", str(Path.home())])),
+            Result("Open Adaptive Settings", "Desktop action", lambda: self._spawn(["gnome-control-center"])),
             Result("Focus On", "Hide notification banners", lambda: self._spawn(["./scripts/focus-cli.py", "on"])),
             Result("Focus Off", "Show notification banners", lambda: self._spawn(["./scripts/focus-cli.py", "off"])),
             Result("Smart Tile Window", "Window action", lambda: self._spawn(["./scripts/window-cli.py", "tile", "smart"])),
