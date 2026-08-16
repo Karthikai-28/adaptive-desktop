@@ -157,3 +157,52 @@ window.adaptive-projects { background-color: @ad_bg; }
     color: @ad_muted;
     font-size: 10px;
 }
+
+/* ---------- project detail ---------- */
+
+.back, .action {
+    padding: 4px 12px;
+    border-radius: 9px;
+    border: 1px solid alpha(@ad_divider, 0.5);
+    background-color: @ad_surface;
+    background-image: none;
+    color: @ad_text;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.back:hover, .action:hover {
+    border-color: alpha(@ad_accent, 0.45);
+    background-color: @ad_surface_2;
+}
+
+.detail-body { padding: 16px 28px 24px 28px; }
+
+.panel {
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid alpha(@ad_divider, 0.4);
+    background-color: @ad_surface;
+}
+
+.panel-title {
+    color: @ad_muted;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+.legend { color: @ad_muted; font-size: 10px; font-weight: 600; }
+.legend-0 { color: #78A9FF; }
+.legend-1 { color: #66E0FF; }
+.legend-2 { color: #9A8BFF; }
+.legend-3 { color: #F3C96B; }
+.legend-4 { color: #65D9B5; }
+.legend-5 { color: #FF7A90; }
+
+.author { color: @ad_text; font-size: 11px; font-weight: 600; }
+.author-count { color: @ad_muted; font-size: 10px; }
+
+.commit-when { color: @ad_muted; font-size: 10px; }
+.commit-subject { color: alpha(@ad_text, 0.86); font-size: 11px; }
+.commit-author { color: @ad_muted; font-size: 10px; }
