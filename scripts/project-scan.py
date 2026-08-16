@@ -23,6 +23,13 @@ from pathlib import Path
 
 REGISTRY = Path.home() / ".config/adaptive-desktop/projects.json"
 
+# The Project Context service keeps the registry in memory and rewrites the
+# whole file whenever anything changes, so writing the file directly is lost
+# the moment the next switch happens. Registration goes through its D-Bus API
+# when it is running, and falls back to the file only when it is not.
+BUS_NAME = "org.adaptive.ProjectContext"
+BUS_PATH = "/org/adaptive/ProjectContext"
+
 # Directories that never contain a repository worth listing, or that hold
 # thousands of vendored ones.
 SKIP = {
@@ -109,6 +116,69 @@ def describe(repo):
     }
 
 
+def service():
+    """The running service, or None to fall back to writing the file."""
+    try:
+        import gi
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio
+
+        proxy = Gio.DBusProxy.new_for_bus_sync(
+            Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
+            BUS_NAME, BUS_PATH, BUS_NAME, None,
+        )
+
+        if proxy.get_name_owner() is None:
+            return None
+
+        return proxy
+    except Exception:
+        return None
+
+
+def register_via_service(proxy, repos):
+    """Add and describe each repository through the owning service."""
+    import json as _json
+    from gi.repository import GLib
+
+    existing = {}
+    try:
+        raw = proxy.call_sync("ListProjects", None,
+                              0, -1, None).unpack()[0]
+        for pid, entry in _json.loads(raw).get("projects", {}).items():
+            existing[entry.get("path")] = entry.get("id", pid)
+    except Exception:
+        pass
+
+    added = updated = 0
+
+    for repo in repos:
+        path = str(repo)
+        pid = existing.get(path)
+
+        if pid is None:
+            name = repo.name.replace("-", " ").replace("_", " ").title()
+            try:
+                pid = proxy.call_sync(
+                    "AddProject", GLib.Variant("(ss)", (path, name)),
+                    0, -1, None).unpack()[0]
+                added += 1
+            except Exception:
+                continue
+        else:
+            updated += 1
+
+        patch = _json.dumps({"metadata": {"git": describe(repo)}})
+
+        try:
+            proxy.call_sync("UpdateProject", GLib.Variant("(ss)", (pid, patch)),
+                            0, -1, None)
+        except Exception:
+            pass
+
+    return added, updated
+
+
 def load():
     if REGISTRY.exists():
         try:
@@ -132,6 +202,16 @@ def main():
     args = ap.parse_args()
 
     repos = find_repos(Path(args.root))
+
+    proxy = service()
+    if proxy is not None and not args.dry_run:
+        added, updated = register_via_service(proxy, repos)
+        print(f"repositories found: {len(repos)}")
+        print(f"  added   {added}")
+        print(f"  updated {updated}")
+        print("registered through the Project Context service")
+        return
+
     data = load()
     projects = data.setdefault("projects", {})
     by_path = {p.get("path"): pid for pid, p in projects.items()}
