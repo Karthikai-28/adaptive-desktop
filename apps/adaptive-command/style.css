@@ -1,43 +1,195 @@
-window {
-    background: #08111B;
-    color: #F2F6EF;
+/*
+ * Adaptive Command - search palette
+ *
+ * The Command screen from the design system: an obsidian panel floating over
+ * the desktop, one oversized field, sectioned results, thin structural lines
+ * and an 8px rhythm. Colours mirror tokens/adaptive.tokens.json.
+ *
+ * Space Grotesk is the design typeface. It is not installed by default, so the
+ * stack falls through to Ubuntu, which shares its geometric build.
+ */
+
+@define-color ad_bg          #08111B;
+@define-color ad_bg_deep     #07101A;
+@define-color ad_surface     #111A28;
+@define-color ad_surface_2   #162233;
+@define-color ad_divider     #30425C;
+@define-color ad_text        #F2F6EF;
+@define-color ad_muted       #96A4B8;
+@define-color ad_accent      #78A9FF;
+@define-color ad_cyan        #66E0FF;
+@define-color ad_violet      #9A8BFF;
+
+window.adaptive-command {
+    background-color: transparent;
 }
 
-.root {
-    background: #08111B;
+.palette {
+    background-color: @ad_bg;
+    border: 1px solid alpha(@ad_divider, 0.55);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px alpha(black, 0.55);
 }
 
-searchentry {
-    min-height: 42px;
-    font-size: 15px;
+/* ---------------------------------------------------------------- query */
+
+.query-row {
+    padding: 18px 20px;
 }
 
-.result {
-    min-height: 52px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    background: #111A28;
+.query-icon {
+    color: @ad_muted;
+    -gtk-icon-size: 20px;
 }
 
-.result:hover,
-.result:focus {
-    border-color: rgba(120, 169, 255, 0.24);
-    background: #162233;
+entry.query {
+    background: none;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    caret-color: @ad_accent;
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 24px;
+    font-weight: 500;
 }
 
-.result-title {
-    color: #F2F6EF;
-    font-size: 13px;
-    font-weight: 750;
+/* The session theme draws a focus ring on every focusable widget. In a palette
+   whose entire surface is one field, that ring reads as a stray box, so it is
+   cancelled here - the caret already shows where focus is. */
+entry.query,
+entry.query:focus,
+entry.query:focus-visible,
+entry.query > text,
+entry.query > text:focus {
+    outline: none;
+    border: none;
+    box-shadow: none;
+    background: none;
+    background-color: transparent;
 }
 
-.result-subtitle {
-    color: #96A4B8;
+entry.query placeholder,
+entry.query text placeholder {
+    color: alpha(@ad_muted, 0.62);
+}
+
+.rule {
+    background-color: alpha(@ad_divider, 0.42);
+    min-height: 1px;
+}
+
+/* -------------------------------------------------------------- sections */
+
+.section {
+    padding: 14px 20px 6px 20px;
+    color: alpha(@ad_muted, 0.85);
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
     font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+.results {
+    padding-bottom: 8px;
+}
+
+.results-scroll {
+    background-color: transparent;
+}
+
+/* ------------------------------------------------------------------ rows */
+
+button.row {
+    margin: 1px 10px;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: none;
+    background-color: transparent;
+    box-shadow: none;
+    color: @ad_text;
+}
+
+button.row:hover {
+    background-color: alpha(@ad_surface_2, 0.85);
+}
+
+/* The left edge carries the category accent, echoing the project cards. */
+button.row.selected {
+    background-color: alpha(@ad_accent, 0.14);
+    border-color: alpha(@ad_accent, 0.34);
+}
+
+button.row.accent-accent.selected { border-left: 3px solid @ad_accent; }
+button.row.accent-cyan.selected   { border-left: 3px solid @ad_cyan; }
+button.row.accent-violet.selected { border-left: 3px solid @ad_violet; }
+button.row.accent-muted.selected  { border-left: 3px solid @ad_muted; }
+
+.row-icon {
+    color: @ad_text;
+}
+
+.row-title {
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.row-subtitle {
+    color: @ad_muted;
+    font-size: 11px;
+}
+
+.badge {
+    padding: 2px 8px;
+    border: 1px solid alpha(@ad_divider, 0.55);
+    border-radius: 7px;
+    background-color: alpha(@ad_surface, 0.9);
+    color: @ad_muted;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.chip {
+    min-width: 18px;
+    padding: 2px 7px;
+    border: 1px solid alpha(@ad_divider, 0.6);
+    border-radius: 7px;
+    background-color: alpha(@ad_surface_2, 0.92);
+    color: @ad_muted;
+    font-size: 10px;
+    font-weight: 700;
 }
 
 .empty {
-    color: #96A4B8;
-    padding: 30px;
+    padding: 34px 20px;
+    color: alpha(@ad_muted, 0.75);
+    font-size: 13px;
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.footer {
+    padding: 9px 20px;
+    border-top: 1px solid alpha(@ad_divider, 0.35);
+    background-color: alpha(@ad_bg_deep, 0.75);
+}
+
+.hint {
+    color: alpha(@ad_muted, 0.8);
+    font-size: 10px;
+    letter-spacing: 0.3px;
+}
+
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    min-width: 6px;
+    border-radius: 6px;
+    background-color: alpha(@ad_muted, 0.35);
 }

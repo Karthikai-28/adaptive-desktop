@@ -76,12 +76,6 @@ class AdaptiveShellV16 {
             'scripts',
             'appearance-cli.py',
         ]);
-        this._commandHistoryFile = GLib.build_filenamev([
-            GLib.get_home_dir(),
-            '.config',
-            'adaptive-desktop',
-            'command-history.json',
-        ]);
     }
 
     enable() {
@@ -569,12 +563,14 @@ class AdaptiveShellV16 {
         
         top.add_child(this._workspacesButton);
 
-        this._commandButton = this._railMenuButton('search.svg', 'Command');
-        this._commandButton.menu.connect('open-state-changed', (menu, open) => {
-            this._setActorActive(this._commandButton, open);
-            if (open)
-                this._populateCommandMenu();
-        });
+        // The rail button and Alt+Space open the same palette. Two command
+        // surfaces that answer the same question would only drift apart, and
+        // the search itself belongs in the app process, not in the shell.
+        this._commandButton = this._dockButton(
+            'search.svg',
+            'Command',
+            () => this._openCommand()
+        );
         top.add_child(this._commandButton);
 
         this._rail.add_child(top);
@@ -1347,150 +1343,6 @@ class AdaptiveShellV16 {
         }
     }
 
-    _populateCommandMenu() {
-        this._commandButton.menu.removeAll();
-
-        this._addCommandHeader('COMMANDS');
-
-        if (GLib.file_test(this._commandLauncher, GLib.FileTest.IS_EXECUTABLE))
-            this._addCommandItem('Open Command Palette', () => this._spawn([this._commandLauncher]));
-        this._addCommandItem('Search apps and files...', () => this._showSearch());
-        this._addCommandItem('Open Adaptive Files', () => this._openFiles());
-        this._addCommandItem('Open System Settings', () => this._openSettings());
-        if (GLib.file_test(this._focusCli, GLib.FileTest.IS_EXECUTABLE))
-            this._addCommandItem('Apply Project Focus', () => this._spawn([this._focusCli, 'apply-project']));
-
-        if (GLib.file_test(this._windowCli, GLib.FileTest.IS_EXECUTABLE)) {
-            this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            this._addCommandHeader('WINDOW');
-            this._addCommandItem('Smart Tile Active Window', () => this._spawn([this._windowCli, 'tile', 'smart']));
-            this._addCommandItem('Tile Active Window Left', () => this._spawn([this._windowCli, 'tile', 'left']));
-            this._addCommandItem('Tile Active Window Right', () => this._spawn([this._windowCli, 'tile', 'right']));
-            this._addCommandItem('Center Active Window', () => this._spawn([this._windowCli, 'tile', 'center']));
-            this._addCommandItem('Maximize Active Window Around Dock', () => this._spawn([this._windowCli, 'tile', 'maximize']));
-            this._addCommandItem('Toggle Active Window Fullscreen', () => this._spawn([this._windowCli, 'fullscreen']));
-            this._addCommandItem('Save Active Window Placement', () => this._spawn([this._windowCli, 'save']));
-            this._addCommandItem('Restore Active Window Placement', () => this._spawn([this._windowCli, 'restore']));
-            this._addCommandItem('Save Project Window Placement', () => this._spawn([this._windowCli, 'save-project']));
-            this._addCommandItem('Restore Project Window Placement', () => this._spawn([this._windowCli, 'restore-project']));
-        }
-
-        if (GLib.file_test(this._appearanceCli, GLib.FileTest.IS_EXECUTABLE)) {
-            this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            this._addCommandHeader('APPEARANCE');
-            this._addCommandItem('Reduced Motion On', () => this._spawn([this._appearanceCli, 'reduced-motion', 'on']));
-            this._addCommandItem('Reduced Motion Off', () => this._spawn([this._appearanceCli, 'reduced-motion', 'off']));
-            this._addCommandItem('High Contrast On', () => this._spawn([this._appearanceCli, 'high-contrast', 'on']));
-            this._addCommandItem('Dark Theme', () => this._spawn([this._appearanceCli, 'scheme', 'dark']));
-            this._addCommandItem('Light Theme', () => this._spawn([this._appearanceCli, 'scheme', 'light']));
-        }
-
-        const recentActions = this._loadCommandHistory();
-        if (recentActions.length) {
-            this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            this._addCommandHeader('RECENT');
-            for (const action of recentActions.slice(0, 5))
-                this._addCommandItem(action.label, () => this._runRememberedCommand(action.label), false);
-        }
-
-        this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._addCommandHeader('SETTINGS');
-        for (const section of this._settingsSections())
-            this._addCommandItem(section.label, () => this._runSettingsSection(section));
-
-        this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._addCommandHeader('APPLICATIONS');
-
-        try {
-            const apps = Shell.AppSystem.get_default()
-                .get_installed()
-                .filter(app => app.should_show())
-                .sort((a, b) => a.get_name().localeCompare(b.get_name()))
-                .slice(0, 10);
-
-            for (const app of apps)
-                this._addCommandItem(app.get_name(), () => app.activate());
-        } catch (e) {
-            const item = new PopupMenu.PopupMenuItem('Applications unavailable');
-            item.setSensitive(false);
-            this._commandButton.menu.addMenuItem(item);
-        }
-
-        this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._addCommandHeader('PROJECTS');
-
-        if (!this._projectProxy) {
-            const item = new PopupMenu.PopupMenuItem('Project service offline');
-            item.setSensitive(false);
-            this._commandButton.menu.addMenuItem(item);
-            return;
-        }
-
-        const loading = new PopupMenu.PopupMenuItem('Loading projects...');
-        loading.setSensitive(false);
-        this._commandButton.menu.addMenuItem(loading);
-
-        this._projectProxy.call(
-            'ListProjects',
-            null,
-            Gio.DBusCallFlags.NONE,
-            -1,
-            null,
-            (proxy, res) => {
-                try {
-                    loading.destroy();
-                    const variant = proxy.call_finish(res);
-                    const projects = JSON.parse(variant.deep_unpack()[0]);
-                    let count = 0;
-
-                    for (const pid in projects) {
-                        count++;
-                        const project = projects[pid];
-                        this._addCommandItem(project.name, () => {
-                            this._projectProxy.call(
-                                'SetActiveProject',
-                                GLib.Variant.new('(s)', [pid]),
-                                Gio.DBusCallFlags.NONE,
-                                -1,
-                                null,
-                                null
-                            );
-                        });
-                    }
-
-                    if (!count) {
-                        const empty = new PopupMenu.PopupMenuItem('No projects registered');
-                        empty.setSensitive(false);
-                        this._commandButton.menu.addMenuItem(empty);
-                    }
-                } catch (e) {
-                    logError(e, '[Adaptive Shell v1.6] command projects');
-                }
-            }
-        );
-    }
-
-    _addCommandHeader(label) {
-        const item = new PopupMenu.PopupMenuItem(label);
-        item.setSensitive(false);
-        this._commandButton.menu.addMenuItem(item);
-    }
-
-    _addCommandItem(label, callback, remember = true) {
-        const item = new PopupMenu.PopupMenuItem(label);
-        item.connect('activate', () => {
-            try {
-                if (remember)
-                    this._rememberCommand(label);
-                callback();
-            } catch (e) {
-                logError(e, `[Adaptive Shell v1.6] command ${label}`);
-                Main.notifyError('Adaptive Desktop', `${label} could not run.`);
-            }
-        });
-        this._commandButton.menu.addMenuItem(item);
-    }
-
     _settingsSections() {
         return [
             { label: 'Appearance Settings', argv: ['gnome-control-center', 'appearance'] },
@@ -1506,77 +1358,6 @@ class AdaptiveShellV16 {
 
     _runSettingsSection(section) {
         this._spawn(section.argv);
-    }
-
-    _runRememberedCommand(label) {
-        const setting = this._settingsSections().find(section => section.label === label);
-        if (setting) {
-            this._runSettingsSection(setting);
-            return;
-        }
-
-        if (label === 'Search apps and files...') {
-            this._showSearch();
-            return;
-        }
-
-        if (label === 'Open Adaptive Files') {
-            this._openFiles();
-            return;
-        }
-
-        if (label === 'Open System Settings') {
-            this._openSettings();
-            return;
-        }
-
-        if (GLib.file_test(this._windowCli, GLib.FileTest.IS_EXECUTABLE)) {
-            const windowCommands = {
-                'Smart Tile Active Window': ['tile', 'smart'],
-                'Tile Active Window Left': ['tile', 'left'],
-                'Tile Active Window Right': ['tile', 'right'],
-                'Center Active Window': ['tile', 'center'],
-                'Maximize Active Window Around Dock': ['tile', 'maximize'],
-                'Toggle Active Window Fullscreen': ['fullscreen'],
-                'Save Active Window Placement': ['save'],
-                'Restore Active Window Placement': ['restore'],
-                'Save Project Window Placement': ['save-project'],
-                'Restore Project Window Placement': ['restore-project'],
-            };
-
-            if (windowCommands[label]) {
-                this._spawn([this._windowCli, ...windowCommands[label]]);
-                return;
-            }
-        }
-
-        this._showSearch();
-    }
-
-    _loadCommandHistory() {
-        try {
-            const file = Gio.File.new_for_path(this._commandHistoryFile);
-            const [, contents] = file.load_contents(null);
-            return JSON.parse(imports.byteArray.toString(contents));
-        } catch (e) {
-            return [];
-        }
-    }
-
-    _rememberCommand(label) {
-        const history = this._loadCommandHistory().filter(item => item.label !== label);
-        history.unshift({ label });
-
-        try {
-            const dir = GLib.path_get_dirname(this._commandHistoryFile);
-            GLib.mkdir_with_parents(dir, 0o755);
-            GLib.file_set_contents(
-                this._commandHistoryFile,
-                JSON.stringify(history.slice(0, 12))
-            );
-        } catch (e) {
-            logError(e, '[Adaptive Shell v1.6] remember command');
-        }
     }
 
     _showSearch() {
@@ -1629,6 +1410,15 @@ class AdaptiveShellV16 {
 
     _openFiles() {
         this._activateApp('org.gnome.Nautilus.desktop', ['nautilus']);
+    }
+
+    _openCommand() {
+        if (!GLib.file_test(this._commandLauncher, GLib.FileTest.IS_EXECUTABLE)) {
+            Main.notifyError('Adaptive Desktop', 'Command palette is not installed.');
+            return;
+        }
+
+        this._spawn([this._commandLauncher]);
     }
 
     _openSettings() {

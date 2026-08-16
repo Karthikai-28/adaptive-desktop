@@ -52,7 +52,7 @@ set_binding() {
     gsettings set "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${key}" binding "${binding}"
 }
 
-set_binding "adaptive-command" "Adaptive Command" "${REPO}/scripts/adaptive-command-launch.sh" "<Super>space"
+set_binding "adaptive-command" "Adaptive Command" "${REPO}/scripts/adaptive-command-launch.sh" "<Alt>space"
 set_binding "adaptive-window-smart" "Adaptive Smart Tile" "${REPO}/scripts/window-cli.py tile smart" "<Super><Alt>space"
 set_binding "adaptive-window-left" "Adaptive Tile Left" "${REPO}/scripts/window-cli.py tile left" "<Super><Alt>Left"
 set_binding "adaptive-window-right" "Adaptive Tile Right" "${REPO}/scripts/window-cli.py tile right" "<Super><Alt>Right"
@@ -109,11 +109,22 @@ PY
 echo "Resolving accelerator conflicts:"
 release_wm_accelerator switch-to-workspace-left '<Super><Alt>Left'
 release_wm_accelerator switch-to-workspace-right '<Super><Alt>Right'
+
+#
+# Alt+Space opens the Command palette. GNOME's activate-window-menu holds it by
+# default and has no second binding, so it is moved rather than released -
+# dropping it outright would leave the window menu unreachable from the
+# keyboard, which is an accessibility regression.
+#
+if [ "$(gsettings get org.gnome.desktop.wm.keybindings activate-window-menu)" = "['<Alt>space']" ]; then
+    gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "['<Alt>F3']"
+    echo "  moved activate-window-menu from <Alt>space to <Alt>F3"
+fi
 echo
 
 cat <<'EOF'
 Installed Adaptive Desktop shortcuts:
-  Super+Space        Command palette
+  Alt+Space          Command palette
   Super+Alt+Space    Smart tile active window
   Super+Alt+Left     Tile active window left
   Super+Alt+Right    Tile active window right
