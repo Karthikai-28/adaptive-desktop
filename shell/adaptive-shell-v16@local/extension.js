@@ -1274,10 +1274,13 @@ class AdaptiveShellV16 {
         if (GLib.file_test(this._windowCli, GLib.FileTest.IS_EXECUTABLE)) {
             this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             this._addCommandHeader('WINDOW');
+            this._addCommandItem('Smart Tile Active Window', () => this._spawn([this._windowCli, 'tile', 'smart']));
             this._addCommandItem('Tile Active Window Left', () => this._spawn([this._windowCli, 'tile', 'left']));
             this._addCommandItem('Tile Active Window Right', () => this._spawn([this._windowCli, 'tile', 'right']));
             this._addCommandItem('Center Active Window', () => this._spawn([this._windowCli, 'tile', 'center']));
             this._addCommandItem('Maximize Active Window Around Dock', () => this._spawn([this._windowCli, 'tile', 'maximize']));
+            this._addCommandItem('Save Active Window Placement', () => this._spawn([this._windowCli, 'save']));
+            this._addCommandItem('Restore Active Window Placement', () => this._spawn([this._windowCli, 'restore']));
         }
 
         this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
