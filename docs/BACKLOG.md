@@ -26,7 +26,7 @@ Status:
 
 - ✅ Add dedicated recovery runbook.
 - ✅ Add environment verification script.
-- 🔬 Add stable Git checkpoint tags.
+- ✅ Add stable Git checkpoint tags.
 - 🔬 Test recovery from TTY.
 
 ## Milestone 1 — Separate Adaptive session
