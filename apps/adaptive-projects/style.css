@@ -221,3 +221,38 @@ window.adaptive-projects { background-color: @ad_bg; }
 .detail-body { padding: 18px 28px 28px 28px; }
 
 .panel { padding: 16px 18px 18px 18px; }
+
+/* ---------- learn: the repository's own documentation ---------- */
+
+.doc-index {
+    border-right: 1px solid alpha(@ad_divider, 0.4);
+    background-color: @ad_bg_deep;
+}
+
+.doc-index-list { padding: 12px 10px; }
+
+.doc-entry {
+    padding: 7px 10px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+.doc-entry:hover { background-color: @ad_surface; }
+
+.doc-entry.selected {
+    border-color: alpha(@ad_cyan, 0.4);
+    background-color: alpha(@ad_accent, 0.14);
+}
+
+.doc-name { color: @ad_text; font-size: 12px; font-weight: 600; }
+.doc-path { color: @ad_muted; font-size: 9px; }
+
+/* Reading measure: long lines are the enemy of documentation. */
+.doc-body {
+    padding: 26px 34px 40px 34px;
+    color: alpha(@ad_text, 0.9);
+    font-size: 13px;
+}

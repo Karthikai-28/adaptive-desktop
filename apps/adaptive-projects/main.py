@@ -10,6 +10,7 @@ Ordering is by last commit, most recent first, which is the order that answers
 """
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -579,6 +580,243 @@ class Projects(Gtk.ApplicationWindow):
 
         return self._file_list(rows)
 
+    # ------------------------------------------------------------------ learn
+
+    def _markdown(self, text):
+        """Markdown to Pango markup.
+
+        Enough of the language to read documentation comfortably - headings,
+        emphasis, code, lists, quotes and rules. Pango is not HTML, so this
+        renders structure rather than trying to be a browser.
+        """
+        def esc(value):
+            return (value.replace("&", "&amp;")
+                         .replace("<", "&lt;")
+                         .replace(">", "&gt;"))
+
+        sizes = {1: "xx-large", 2: "x-large", 3: "large",
+                 4: "medium", 5: "medium", 6: "small"}
+
+        out, in_code = [], False
+        table = []
+
+        def flush_table():
+            """Render collected pipe-table rows as an aligned monospace block."""
+            if not table:
+                return
+
+            rows = []
+            for row in table:
+                # The whole row is monospace already, so inline-code ticks
+                # would only be noise.
+                cells = [c.strip().replace("`", "")
+                         for c in row.strip().strip("|").split("|")]
+                if all(re.fullmatch(r":?-{2,}:?", c or "-") for c in cells):
+                    continue  # the |---|---| separator
+                rows.append(cells)
+
+            table.clear()
+
+            if not rows:
+                return
+
+            width = max(len(r) for r in rows)
+            rows = [r + [""] * (width - len(r)) for r in rows]
+            sizes = [max(len(r[i]) for r in rows) for i in range(width)]
+
+            for index, row in enumerate(rows):
+                cells = "  ".join(
+                    cell.ljust(sizes[i]) for i, cell in enumerate(row))
+                if index == 0:
+                    out.append(f'<tt><b>{cells}</b></tt>')
+                    out.append('<tt><span foreground="#30425C">'
+                               + "\u2500" * min(len(cells), 78) + "</span></tt>")
+                else:
+                    out.append(f"<tt>{cells}</tt>")
+
+        for line in text.splitlines():
+            if line.lstrip().startswith("```"):
+                flush_table()
+                in_code = not in_code
+                continue
+
+            if not in_code and line.lstrip().startswith("|"):
+                table.append(esc(line))
+                continue
+
+            flush_table()
+
+            if in_code:
+                out.append(f'<tt><span foreground="#96A4B8">{esc(line)}</span></tt>')
+                continue
+
+            if re.match(r"^\s*([-*_])\1{2,}\s*$", line):
+                out.append('<span foreground="#30425C">'
+                           + "\u2500" * 48 + "</span>")
+                continue
+
+            heading = re.match(r"^(#{1,6})\s+(.*)$", line)
+            if heading:
+                level = len(heading.group(1))
+                out.append("")
+                out.append(f'<span size="{sizes[level]}" weight="bold">'
+                           f"{esc(heading.group(2))}</span>")
+                continue
+
+            body = esc(line)
+
+            quote = re.match(r"^\s*&gt;\s?(.*)$", body)
+            if quote:
+                body = ('<span foreground="#66E0FF">\u2503</span>  '
+                        f'<i>{quote.group(1)}</i>')
+            else:
+                bullet = re.match(r"^(\s*)[-*+]\s+(.*)$", body)
+                if bullet:
+                    body = f"{bullet.group(1)}   \u2022  {bullet.group(2)}"
+                else:
+                    number = re.match(r"^(\s*)(\d+)\.\s+(.*)$", body)
+                    if number:
+                        body = (f"{number.group(1)}   {number.group(2)}."
+                                f"  {number.group(3)}")
+
+            body = re.sub(r"`([^`]+)`",
+                          r'<tt><span foreground="#66E0FF">\1</span></tt>', body)
+            body = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", body)
+            body = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?![*\w])", r"<i>\1</i>", body)
+            body = re.sub(r"\[([^\]]+)\]\([^)]*\)",
+                          r'<span foreground="#78A9FF" underline="single">\1</span>',
+                          body)
+
+            out.append(body)
+
+        flush_table()
+        return "\n".join(out)
+
+    def _show_learn(self, project):
+        child = self.detail_holder.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self.detail_holder.remove(child)
+            child = nxt
+
+        root = Path(project["path"])
+        docs = [d for d in git(root, "ls-files", "*.md", "*.markdown",
+                               "*.MD").splitlines() if d]
+
+        # README first, then docs/, then the rest - reading order, not
+        # alphabetical order.
+        def rank(name):
+            lower = name.lower()
+            if lower.startswith("readme"):
+                return (0, name)
+            if "/" not in name:
+                return (1, name)
+            if lower.startswith("doc"):
+                return (2, name)
+            return (3, name)
+
+        docs.sort(key=rank)
+
+        head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        head.add_css_class("header")
+
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        back = Gtk.Button(label="\u2190  Project")
+        back.add_css_class("back")
+        back.connect("clicked", lambda *_: self._show_detail(project))
+        bar.append(back)
+        head.append(bar)
+
+        title = Gtk.Label(label=f"Learn {project['name']}", xalign=0)
+        title.add_css_class("greeting")
+        head.append(title)
+
+        count = Gtk.Label(
+            label=(f"{len(docs)} documents in this repository"
+                   if docs else "no markdown in this repository"),
+            xalign=0)
+        count.add_css_class("greeting-sub")
+        head.append(count)
+
+        self.detail_holder.append(head)
+
+        split = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        split.set_vexpand(True)
+
+        # --- index -------------------------------------------------------
+        index_scroll = Gtk.ScrolledWindow()
+        index_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        index_scroll.set_size_request(300, -1)
+        index_scroll.add_css_class("doc-index")
+
+        index = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        index.add_css_class("doc-index-list")
+        index_scroll.set_child(index)
+        split.append(index_scroll)
+
+        # --- reader ------------------------------------------------------
+        reader_scroll = Gtk.ScrolledWindow()
+        reader_scroll.set_policy(Gtk.PolicyType.AUTOMATIC,
+                                 Gtk.PolicyType.AUTOMATIC)
+        reader_scroll.set_hexpand(True)
+
+        reader = Gtk.Label(xalign=0, yalign=0)
+        reader.add_css_class("doc-body")
+        reader.set_wrap(True)
+        reader.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        reader.set_selectable(True)
+        reader_scroll.set_child(reader)
+        split.append(reader_scroll)
+
+        self.detail_holder.append(split)
+
+        self._doc_buttons = []
+
+        def show(name):
+            try:
+                text = (root / name).read_text(encoding="utf-8",
+                                               errors="replace")
+            except Exception as error:
+                text = f"Could not read {name}: {error}"
+
+            reader.set_markup(self._markdown(text))
+            reader_scroll.get_vadjustment().set_value(0)
+
+            for button, doc in self._doc_buttons:
+                if doc == name:
+                    button.add_css_class("selected")
+                else:
+                    button.remove_css_class("selected")
+
+        for name in docs:
+            button = Gtk.Button()
+            button.add_css_class("doc-entry")
+            button.connect("clicked", lambda _b, n=name: show(n))
+
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+            leaf = Gtk.Label(label=name.rsplit("/", 1)[-1], xalign=0)
+            leaf.add_css_class("doc-name")
+            leaf.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            row.append(leaf)
+
+            if "/" in name:
+                where = Gtk.Label(label=name.rsplit("/", 1)[0], xalign=0)
+                where.add_css_class("doc-path")
+                where.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                row.append(where)
+
+            button.set_child(row)
+            index.append(button)
+            self._doc_buttons.append((button, name))
+
+        if docs:
+            show(docs[0])
+        else:
+            reader.set_markup("<i>Nothing to read here yet.</i>")
+
+        self.stack.set_visible_child_name("detail")
+
     # --------------------------------------------------------------- actions
 
     def _on_filter(self, entry):
@@ -699,6 +937,7 @@ class Projects(Gtk.ApplicationWindow):
 
         for label, handler in (
             ("Analyze", lambda *_: self._show_analysis(project)),
+            ("Learn", lambda *_: self._show_learn(project)),
             ("Set active", lambda *_: self._set_active(project)),
             ("Open in Files", lambda *_: self._open_files(project)),
             ("Terminal here", lambda *_: self._open_terminal(project)),
