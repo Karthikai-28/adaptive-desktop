@@ -132,6 +132,8 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.visible_items = []
         self.selected = None
         self.selected_button = None
+        self.selected_items = {}
+        self.selected_buttons = {}
 
         self.show_hidden = False
         self.query = ""
@@ -741,6 +743,8 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.current = target
         self.selected = None
         self.selected_button = None
+        self.selected_items = {}
+        self.selected_buttons = {}
         self.populate()
 
     def go_back(self, *_):
@@ -751,6 +755,8 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.current = self.back_stack.pop()
         self.selected = None
         self.selected_button = None
+        self.selected_items = {}
+        self.selected_buttons = {}
         self.populate()
 
     def go_forward(self, *_):
@@ -761,6 +767,8 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.current = self.forward_stack.pop()
         self.selected = None
         self.selected_button = None
+        self.selected_items = {}
+        self.selected_buttons = {}
         self.populate()
 
     def go_up(self, *_):
@@ -904,7 +912,10 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
 
         self.folder_summary.set_text(f"{folders} folders · {files} files")
         self.status_label.set_text(f"{len(self.visible_items)} items")
-        self.selection_label.set_text(self.selected.name if self.selected else "")
+        if len(self.selected_items) > 1:
+            self.selection_label.set_text(f"{len(self.selected_items)} selected")
+        else:
+            self.selection_label.set_text(self.selected.name if self.selected else "")
 
     def _item_widget(self, item):
         button = Gtk.Button()
@@ -917,12 +928,11 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             button.set_size_request(104, 88)
 
         if (
-            self.selected is not None
-            and self.selected.file is not None
-            and self.selected.file.equal(item.file)
+            item.file is not None
+            and item.file.get_uri() in self.selected_items
         ):
             button.add_css_class("selected")
-            self.selected_button = button
+            self.selected_buttons[item.file.get_uri()] = button
 
         horizontal = self.view_mode == "list"
 
@@ -966,9 +976,14 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
 
         return button
 
-    def _item_pressed(self, _gesture, n_press, _x, _y, item, button):
+    def _item_pressed(self, gesture, n_press, _x, _y, item, button):
+        state = gesture.get_current_event_state()
+        if isinstance(state, tuple):
+            state = state[-1]
+        additive = bool(state & Gdk.ModifierType.CONTROL_MASK)
+
         if n_press == 1:
-            self._select_item(item, button)
+            self._select_item(item, button, additive=additive)
             return
 
         if n_press == 2:
@@ -977,16 +992,60 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             else:
                 self._open_file(item)
 
-    def _select_item(self, item, button):
-        if self.selected_button:
-            self.selected_button.remove_css_class("selected")
+    def _select_item(self, item, button, additive=False):
+        uri = item.file.get_uri()
 
-        self.selected = item
-        self.selected_button = button
-        button.add_css_class("selected")
+        if additive:
+            if uri in self.selected_items:
+                button.remove_css_class("selected")
+                self.selected_items.pop(uri, None)
+                self.selected_buttons.pop(uri, None)
+            else:
+                self.selected_items[uri] = item
+                self.selected_buttons[uri] = button
+                button.add_css_class("selected")
+        else:
+            for selected_button in self.selected_buttons.values():
+                selected_button.remove_css_class("selected")
+            self.selected_items = {uri: item}
+            self.selected_buttons = {uri: button}
+            button.add_css_class("selected")
 
-        self.selection_label.set_text(item.name)
-        self._show_item_preview(item)
+        if self.selected_items:
+            self.selected = list(self.selected_items.values())[-1]
+            self.selected_button = self.selected_buttons.get(self.selected.file.get_uri())
+        else:
+            self.selected = None
+            self.selected_button = None
+
+        if len(self.selected_items) > 1:
+            self.selection_label.set_text(f"{len(self.selected_items)} selected")
+            self._show_multi_preview()
+        elif self.selected:
+            self.selection_label.set_text(self.selected.name)
+            self._show_item_preview(self.selected)
+        else:
+            self.selection_label.set_text("")
+            self._show_location_preview()
+
+    def _show_multi_preview(self):
+        self._clear_box(self.preview_content)
+        self._clear_box(self.preview_actions)
+
+        count = len(self.selected_items)
+        self._replace_header_icon("folder-generic.svg")
+        self.preview_title.set_text(f"{count} selected")
+        self.preview_subtitle.set_text("Multiple selection")
+
+        self.preview_content.append(self._section_label("SELECTION"))
+        self.preview_content.append(self._metadata_row("Items", str(count)))
+
+        self.preview_actions.append(
+            self._action_button("copy.svg", "Copy Paths", self._action_copy_paths)
+        )
+        self.preview_actions.append(
+            self._action_button("delete.svg", "Move Selection to Trash", self._action_trash_selection)
+        )
 
     def _open_file(self, item):
         try:
@@ -1227,6 +1286,8 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
 
     def _show_storage_preview(self):
         self.selected = None
+        self.selected_items = {}
+        self.selected_buttons = {}
 
         if self.selected_button:
             self.selected_button.remove_css_class("selected")
@@ -1826,6 +1887,17 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.get_display().get_clipboard().set(file_display(self.selected.file))
         self._message("Copied", "Path copied to clipboard.")
 
+    def _action_copy_paths(self, *_):
+        if not self.selected_items:
+            return
+
+        paths = [
+            file_display(item.file)
+            for item in self.selected_items.values()
+        ]
+        self.get_display().get_clipboard().set("\n".join(paths))
+        self._message("Copied", f"{len(paths)} paths copied to clipboard.")
+
     def _action_trash(self, *_):
         if not self.selected:
             return
@@ -1836,11 +1908,38 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             self.selected.file.trash(None)
             self.selected = None
             self.selected_button = None
+            self.selected_items = {}
+            self.selected_buttons = {}
             self.populate()
             self._message("Moved to Trash", name)
 
         except GLib.Error as error:
             self._message("Trash failed", error.message)
+
+    def _action_trash_selection(self, *_):
+        if not self.selected_items:
+            return
+
+        count = 0
+        failures = []
+
+        for item in list(self.selected_items.values()):
+            try:
+                item.file.trash(None)
+                count += 1
+            except GLib.Error as error:
+                failures.append(f"{item.name}: {error.message}")
+
+        self.selected = None
+        self.selected_button = None
+        self.selected_items = {}
+        self.selected_buttons = {}
+        self.populate()
+
+        if failures:
+            self._message("Some items were not moved", "\n".join(failures[:4]))
+        else:
+            self._message("Moved to Trash", f"{count} items")
 
     def _action_rename(self, *_):
         if not self.selected:
@@ -1870,6 +1969,8 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
                         self.selected.file.set_display_name(new_name, None)
                         self.selected = None
                         self.selected_button = None
+                        self.selected_items = {}
+                        self.selected_buttons = {}
                         self.populate()
 
                     except GLib.Error as error:

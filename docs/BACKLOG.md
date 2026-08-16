@@ -169,7 +169,7 @@ Status:
 - ✅ Search/filters.
 - ✅ Preview/Inspector.
 - ⬜ Split view.
-- ⬜ Multi-select.
+- ✅ Multi-select.
 - ⬜ Transfers.
 - ⬜ Conflict resolution.
 - 🟡 Trash/recovery.
