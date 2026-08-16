@@ -112,6 +112,17 @@ Status:
 
 ## Milestone 5 — Universal Command
 
+One surface: the palette app. Alt+Space and the rail's Command button open the
+same window, and the in-shell command menu has been removed. Search lives in
+the app process, never in the shell.
+
+- ✅ Palette redesigned to the Command screen in the design system.
+- ✅ Searches apps, files, folders, projects, settings and desktop actions.
+- ⬜ Space Grotesk is not installed on this machine, so the palette falls back
+  to Ubuntu. `sudo apt install fonts-space-grotesk` if it should match the
+  design typeface exactly.
+- 🔬 plocate's index is rebuilt daily and was two days stale when tested. A
+  live home walk covers recent files; `sudo updatedb` refreshes the rest.
 - ✅ Global shortcut.
 - ✅ Application search.
 - ✅ File/folder search.
