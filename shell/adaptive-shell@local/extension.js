@@ -70,6 +70,12 @@ class AdaptiveShellV16 {
             'scripts',
             'window-cli.py',
         ]);
+        this._appearanceCli = GLib.build_filenamev([
+            GLib.get_home_dir(),
+            'adaptive-desktop',
+            'scripts',
+            'appearance-cli.py',
+        ]);
         this._commandHistoryFile = GLib.build_filenamev([
             GLib.get_home_dir(),
             '.config',
@@ -1287,6 +1293,16 @@ class AdaptiveShellV16 {
             this._addCommandItem('Maximize Active Window Around Dock', () => this._spawn([this._windowCli, 'tile', 'maximize']));
             this._addCommandItem('Save Active Window Placement', () => this._spawn([this._windowCli, 'save']));
             this._addCommandItem('Restore Active Window Placement', () => this._spawn([this._windowCli, 'restore']));
+        }
+
+        if (GLib.file_test(this._appearanceCli, GLib.FileTest.IS_EXECUTABLE)) {
+            this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this._addCommandHeader('APPEARANCE');
+            this._addCommandItem('Reduced Motion On', () => this._spawn([this._appearanceCli, 'reduced-motion', 'on']));
+            this._addCommandItem('Reduced Motion Off', () => this._spawn([this._appearanceCli, 'reduced-motion', 'off']));
+            this._addCommandItem('High Contrast On', () => this._spawn([this._appearanceCli, 'high-contrast', 'on']));
+            this._addCommandItem('Dark Theme', () => this._spawn([this._appearanceCli, 'scheme', 'dark']));
+            this._addCommandItem('Light Theme', () => this._spawn([this._appearanceCli, 'scheme', 'light']));
         }
 
         const recentActions = this._loadCommandHistory();

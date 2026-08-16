@@ -246,9 +246,9 @@ Status:
 - ⬜ Final icon family.
 - ✅ Typography scale.
 - ✅ Motion tokens.
-- ⬜ Reduced-motion mode.
-- ⬜ High-contrast mode.
-- ⬜ Light-theme decision.
+- ✅ Reduced-motion mode.
+- ✅ High-contrast mode.
+- ✅ Light-theme decision.
 - ✅ Component/state inventory.
 
 ## Milestone 13 — Stability
