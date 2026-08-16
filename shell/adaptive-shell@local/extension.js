@@ -2183,12 +2183,18 @@ class AdaptiveShellV16 {
         return false;
     }
 
+    _dock26Locked() {
+        return (
+            Main.sessionMode.isLocked ||
+            Main.sessionMode.currentMode === 'unlock-dialog'
+        );
+    }
+
     _dock26MonitorNeedsHide(index) {
         // Setting visible=false from outside does not survive: the dock's own
         // layout pass runs afterwards and shows it again. Locked has to be one
         // of the dock's own reasons to stay down.
-        if (Main.sessionMode.isLocked ||
-            Main.sessionMode.currentMode === 'unlock-dialog')
+        if (this._dock26Locked())
             return true;
 
         return (
@@ -2313,7 +2319,11 @@ class AdaptiveShellV16 {
                         return GLib.SOURCE_REMOVE;
 
                     this._dock26TargetMonitor = index;
-                    this._dock26EdgeRevealed = true;
+
+                    // Never let the edge raise the dock over a locked screen.
+                    this._dock26EdgeRevealed =
+                        !this._dock26MonitorNeedsHide(index);
+
                     this._dock26Layout();
 
                     return GLib.SOURCE_REMOVE;
@@ -2524,7 +2534,12 @@ class AdaptiveShellV16 {
             1
         );
 
-        if (hidden) {
+        if (hidden && this._dock26Locked()) {
+            // Locked is absolute: no hot edge, no reveal, nothing of the
+            // desktop on top of the lock screen.
+            this._dock26EdgeRevealed = false;
+            this._dock26HideDock(true);
+        } else if (hidden) {
             // A fullscreen window is stacked above shell chrome, so a dock
             // revealed here is painted under it: it looks present but every
             // click lands on the window behind. Nothing to reveal, then -

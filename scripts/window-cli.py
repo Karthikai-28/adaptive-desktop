@@ -10,7 +10,7 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".config" / "adaptive-desktop"
 STATE_FILE = CONFIG_DIR / "window-placements.json"
 PROJECTS_FILE = CONFIG_DIR / "projects.json"
-DOCK_WIDTH = 172
+DOCK_RESERVED_HEIGHT = 80
 TOP_BAR_HEIGHT = 28
 
 
@@ -99,14 +99,16 @@ def active_monitor(window):
 
 
 def usable_area(monitor):
-    dock = DOCK_WIDTH if monitor.get("primary") else 0
+    # The Adaptive dock is now centered on the bottom edge. Keep custom tiling
+    # above it on the primary display instead of reserving space on the left.
+    bottom = DOCK_RESERVED_HEIGHT if monitor.get("primary") else 0
     top = TOP_BAR_HEIGHT
 
     return {
-        "x": monitor["x"] + dock,
+        "x": monitor["x"],
         "y": monitor["y"] + top,
-        "width": max(320, monitor["width"] - dock),
-        "height": max(240, monitor["height"] - top),
+        "width": max(320, monitor["width"]),
+        "height": max(240, monitor["height"] - top - bottom),
     }
 
 

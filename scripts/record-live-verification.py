@@ -17,8 +17,8 @@ CHECKS = [
     },
     {
         "id": "rail_strut",
-        "backlog": "Reserve application area to the right of the rail.",
-        "prompt": "After reloading Adaptive Shell, do maximized windows avoid the left rail?",
+        "backlog": "Reserve application area above the bottom dock.",
+        "prompt": "After reloading Adaptive Shell, do maximized/tiled windows avoid the bottom dock?",
     },
     {
         "id": "project_autostart",
@@ -33,7 +33,7 @@ CHECKS = [
     {
         "id": "multi_monitor",
         "backlog": "Multi-monitor behavior.",
-        "prompt": "With an external monitor attached, do rail placement and window presets behave correctly?",
+        "prompt": "With an external monitor attached, do bottom-dock placement and window presets behave correctly?",
     },
     {
         "id": "audio_output",

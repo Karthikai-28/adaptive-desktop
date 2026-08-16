@@ -66,19 +66,24 @@ Status:
 
 ### In progress
 
-- ✅ Convert rail from floating palette into a true docked shell rail.
-- ✅ Reserve application area to the right of the rail.
-- ✅ Add icon+text dock labels and live open-window switching.
-- ✅ Improve icon consistency and active states.
+- ✅ Replace the left rail with a centered bottom application dock.
+- ✅ Dock shows GNOME favorites plus running non-favorite applications.
+- ✅ One icon per application; running-window count is shown with dots.
+- ✅ Right-click supports Keep in Dock / Remove from Dock and window actions.
+- ✅ Hover magnification animates the active icon and its nearest neighbors.
+- ✅ Home, Workspaces, Command and System controls are not permanent dock items.
+- ✅ Command remains available from the global keyboard shortcut.
 - ✅ Keep stock top-right controls until System Center is functional.
 
 ### Acceptance criteria
 
-- rail flush to left edge;
-- rail occupies shell height below top bar;
-- maximized windows do not overlap the rail;
-- System Center control anchored near bottom;
-- no rounded floating outer card look.
+- dock centered on the bottom edge;
+- favorites persist through the normal GNOME favorites backend;
+- running apps appear once even with multiple windows;
+- Files uses one dock icon with per-window indicators;
+- maximized/tiled windows do not overlap the dock;
+- hover magnification is smooth and restrained;
+- Applications button opens the full app grid.
 
 ## Milestone 3 — Project Context Service
 
@@ -112,9 +117,8 @@ Status:
 
 ## Milestone 5 — Universal Command
 
-One surface: the palette app. Alt+Space and the rail's Command button open the
-same window, and the in-shell command menu has been removed. Search lives in
-the app process, never in the shell.
+One surface: the palette app. Alt+Space opens it; the permanent dock no longer
+contains a Command icon. Search lives in the app process, never in the shell.
 
 - ✅ Palette redesigned to the Command screen in the design system.
 - ✅ Searches apps, files, folders, projects, settings and desktop actions.

@@ -117,5 +117,4 @@ Full procedures: `docs/RECOVERY_RUNBOOK.md`, `docs/UNINSTALL_AND_RECOVERY.md`.
 | `docs/UBUNTU_FILES_PARITY.md` | File manager architecture rule |
 | `docs/COMMAND_PERMISSION_MODEL.md` | Command surface safety model |
 | `docs/RECOVERY_RUNBOOK.md` | Getting back to a working desktop |
-| `docs/LEGACY_PHASES.md` | Which historical scripts are safe to ignore |
 | `docs/REPO_DOCUMENTATION_MAP.md` | Everything else |
