@@ -23,6 +23,7 @@ class AdaptiveShellV16 {
         this._filesButton = null;
         this._appsButton = null;
         this._windowList = null;
+        this._menuManager = null;
         this._projectLabel = null;
         this._activeProjectId = null;
         this._monitorChangedId = 0;
@@ -288,6 +289,7 @@ class AdaptiveShellV16 {
             this._commandButton = null;
         }
 
+        this._menuManager = null;
         this._windowList = null;
 
         if (this._projectProxy) {
@@ -470,9 +472,13 @@ class AdaptiveShellV16 {
             0
         );
 
-        Main.panel._leftBox.insert_child_at_index(
+        // A PanelMenu.Button already lives inside its own container, so it has
+        // to go through addToStatusArea instead of being reparented directly.
+        Main.panel.addToStatusArea(
+            'adaptive-project',
             this._projectButton,
-            1
+            1,
+            'left'
         );
     }
 
@@ -561,10 +567,11 @@ class AdaptiveShellV16 {
         );
         top.add_child(this._appsButton);
 
-        this._workspacesButton = new PanelMenu.Button(0.0, 'WorkspacesMenu', false);
-        this._workspacesButton.add_style_class_name('adaptive-dock-button');
-        this._workspacesButton.add_child(this._dockContent('workspaces.svg', 'Workspaces'));
-        
+        this._workspacesButton = this._railMenuButton(
+            'workspaces.svg',
+            'Workspaces'
+        );
+
         this._workspacesButton.menu.connect('open-state-changed', (menu, open) => {
             this._setActorActive(this._workspacesButton, open);
             if (open) {
@@ -574,9 +581,7 @@ class AdaptiveShellV16 {
         
         top.add_child(this._workspacesButton);
 
-        this._commandButton = new PanelMenu.Button(0.0, 'CommandMenu', false);
-        this._commandButton.add_style_class_name('adaptive-dock-button');
-        this._commandButton.add_child(this._dockContent('search.svg', 'Command'));
+        this._commandButton = this._railMenuButton('search.svg', 'Command');
         this._commandButton.menu.connect('open-state-changed', (menu, open) => {
             this._setActorActive(this._commandButton, open);
             if (open)
@@ -619,9 +624,7 @@ class AdaptiveShellV16 {
                 'adaptive-rail-group adaptive-rail-bottom',
         });
 
-        this._systemCenterButton = new PanelMenu.Button(0.0, 'SystemCenterMenu', false);
-        this._systemCenterButton.add_style_class_name('adaptive-dock-button');
-        this._systemCenterButton.add_child(this._dockContent('settings.svg', 'System'));
+        this._systemCenterButton = this._railMenuButton('settings.svg', 'System');
         this._systemCenterButton.menu.connect('open-state-changed', (_menu, open) => {
             this._setActorActive(this._systemCenterButton, open);
         });
@@ -967,6 +970,36 @@ class AdaptiveShellV16 {
             return 'Unavailable';
 
         return clean.charAt(0).toUpperCase() + clean.slice(1);
+    }
+
+    _railMenuButton(iconFile, labelText) {
+        const button = new St.Button({
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            style_class: 'adaptive-dock-button',
+            accessible_name: labelText,
+        });
+
+        button.set_child(this._dockContent(iconFile, labelText));
+
+        // Rail menus open to the right of the rail, not below the button,
+        // so they never cover the rest of the rail.
+        const menu = new PopupMenu.PopupMenu(button, 0.0, St.Side.LEFT);
+        menu.actor.add_style_class_name('panel-menu');
+        menu.actor.hide();
+        Main.uiGroup.add_actor(menu.actor);
+
+        if (!this._menuManager)
+            this._menuManager = new PopupMenu.PopupMenuManager(this._rail);
+
+        this._menuManager.addMenu(menu);
+
+        button.menu = menu;
+        button.connect('clicked', () => menu.toggle());
+        button.connect('destroy', () => menu.destroy());
+
+        return button;
     }
 
     _dockContent(iconFile, labelText) {
