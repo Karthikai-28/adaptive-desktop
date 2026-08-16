@@ -96,7 +96,7 @@ Status:
 - ✅ Make Projects overlay data-driven.
 - ✅ No-project state.
 - 🔬 Verify service autostart inside Adaptive Desktop.
-- 🔬 Verify shell DBus updates after extension reload.
+- ✅ Verify shell DBus updates after extension reload.
 
 ## Milestone 4 — Workspaces
 
