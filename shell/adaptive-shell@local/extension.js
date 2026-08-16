@@ -1800,6 +1800,53 @@ class AdaptiveShellV16 {
         });
     }
 
+    // The dock should be exactly as wide as what it shows.
+    _dock26ContentWidth() {
+        if (!this._rail)
+            return 0;
+
+        const children = this._rail
+            .get_children()
+            .filter(child => child.visible);
+
+        let content = 0;
+
+        for (const child of children) {
+            const [, natural] = child.get_preferred_width(
+                this._dock26SurfaceHeight
+            );
+            content += Math.ceil(natural);
+
+            // Margins sit outside the preferred width, so leaving them out
+            // makes the dock narrower than its own contents.
+            try {
+                const childNode = child.get_theme_node();
+                content +=
+                    childNode.get_margin(St.Side.LEFT) +
+                    childNode.get_margin(St.Side.RIGHT);
+            } catch (e) {
+            }
+        }
+
+        let spacing = 0;
+        let padding = 0;
+
+        try {
+            const node = this._rail.get_theme_node();
+            spacing = node.get_length('spacing');
+            padding =
+                node.get_horizontal_padding() +
+                node.get_border_width(St.Side.LEFT) +
+                node.get_border_width(St.Side.RIGHT);
+        } catch (e) {
+        }
+
+        if (children.length > 1)
+            content += spacing * (children.length - 1);
+
+        return Math.ceil(content + padding);
+    }
+
     _dock26Layout() {
         if (!this._rail || !this._dockChrome)
             return;
@@ -1811,12 +1858,12 @@ class AdaptiveShellV16 {
         if (!monitor)
             return;
 
-        // Measured against the dock's real height. Asking with -1 returns the
-        // width for an unconstrained height, which came back short while the
-        // app icons were still being allocated - the box was then centred at
-        // its wrong width and the icons overflowed to the right of centre.
-        const [, naturalWidth] =
-            this._rail.get_preferred_width(this._dock26SurfaceHeight);
+        // Width is summed from the children rather than taken from
+        // get_preferred_width(). Some child over-claimed, so the rail was
+        // allocated ~540px wider than its icons; the box was centred correctly
+        // but the icons packed against its right edge, which reads as a dock
+        // sitting well right of centre.
+        const naturalWidth = this._dock26ContentWidth();
 
         const width = Math.max(
             100,
