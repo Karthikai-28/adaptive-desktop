@@ -58,6 +58,12 @@ class AdaptiveShellV16 {
             'scripts',
             'adaptive-settings-launch.sh',
         ]);
+        this._focusCli = GLib.build_filenamev([
+            GLib.get_home_dir(),
+            'adaptive-desktop',
+            'scripts',
+            'focus-cli.py',
+        ]);
     }
 
     enable() {
@@ -617,6 +623,16 @@ class AdaptiveShellV16 {
         settingsItem.connect('activate', () => this._openSettings());
         this._systemCenterButton.menu.addMenuItem(settingsItem);
         
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        let focusOnItem = new PopupMenu.PopupMenuItem('Focus On');
+        focusOnItem.connect('activate', () => this._runFocus('on'));
+        this._systemCenterButton.menu.addMenuItem(focusOnItem);
+
+        let focusOffItem = new PopupMenu.PopupMenuItem('Focus Off');
+        focusOffItem.connect('activate', () => this._runFocus('off'));
+        this._systemCenterButton.menu.addMenuItem(focusOffItem);
+
         this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
         let lockItem = new PopupMenu.PopupMenuItem('Lock Screen');
@@ -1396,6 +1412,18 @@ class AdaptiveShellV16 {
 
         this._spawn([
             'gnome-control-center',
+        ]);
+    }
+
+    _runFocus(mode) {
+        if (!GLib.file_test(this._focusCli, GLib.FileTest.IS_EXECUTABLE)) {
+            Main.notifyError('Adaptive Desktop', 'Focus controls are not installed.');
+            return;
+        }
+
+        this._spawn([
+            this._focusCli,
+            mode,
         ]);
     }
 

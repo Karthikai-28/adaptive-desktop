@@ -210,12 +210,12 @@ Status:
 
 ## Milestone 9 — Notifications and Focus
 
-- ⬜ Notification center.
-- ⬜ Critical/normal policy.
-- ⬜ Focus profiles.
+- 🟡 Notification center.
+- 🟡 Critical/normal policy.
+- 🟡 Focus profiles.
 - ⬜ Project focus profile.
-- ⬜ Focus timer.
-- ⬜ Quiet/fullscreen behavior.
+- ✅ Focus timer.
+- 🟡 Quiet/fullscreen behavior.
 
 ## Milestone 10 — Window management
 
