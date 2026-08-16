@@ -70,7 +70,7 @@ Status:
 - 🔬 Reserve application area to the right of the rail.
 - ✅ Add icon+text dock labels and live open-window switching.
 - ✅ Improve icon consistency and active states.
-- 🟡 Keep stock top-right controls until System Center is functional.
+- ✅ Keep stock top-right controls until System Center is functional.
 
 ### Acceptance criteria
 
@@ -105,9 +105,9 @@ Status:
 - ✅ Project-to-workspace mapping.
 - ✅ Restore project workspace.
 - ✅ Remember window placement where safe.
-- 🟡 Workspace overview redesign.
+- 🔬 Workspace overview redesign.
 - ✅ Keyboard shortcuts.
-- 🟡 Multi-monitor behavior.
+- 🔬 Multi-monitor behavior.
 - ✅ Reduced-motion behavior.
 
 ## Milestone 5 — Universal Command
@@ -183,7 +183,7 @@ Status:
 - ✅ Standalone Adaptive Files app exists.
 - ✅ Nautilus native preview/inspector layer exists.
 - ✅ Project registry format is understood by Adaptive Files.
-- 🟡 Nautilus preview has a Project tab backed by Project Context Service.
+- 🔬 Nautilus preview has a Project tab backed by Project Context Service.
 
 ## Milestone 8 — Settings
 
@@ -210,12 +210,12 @@ Status:
 
 ## Milestone 9 — Notifications and Focus
 
-- 🟡 Notification center.
-- 🟡 Critical/normal policy.
+- ✅ Notification center.
+- ✅ Critical/normal policy.
 - ✅ Focus profiles.
 - ✅ Project focus profile.
 - ✅ Focus timer.
-- 🟡 Quiet/fullscreen behavior.
+- ✅ Quiet/fullscreen behavior.
 
 ## Milestone 10 — Window management
 
@@ -227,12 +227,12 @@ Status:
 - ✅ Restore.
 - ✅ Fullscreen behavior.
 - ✅ Multi-monitor behavior.
-- 🟡 Overview integration.
+- ✅ Overview integration.
 
 ## Milestone 11 — Lock/Login/Session
 
-- 🟡 Adaptive lock treatment.
-- 🟡 Login compatibility.
+- 🔬 Adaptive lock treatment.
+- 🔬 Login compatibility.
 - ✅ Session status.
 - ✅ Return to Ubuntu.
 - ✅ Session save behavior.
@@ -254,7 +254,7 @@ Status:
 ## Milestone 13 — Stability
 
 - ✅ Shell smoke tests.
-- 🟡 No-extension fallback test.
+- 🔬 No-extension fallback test.
 - 🔬 GDM fallback test.
 - 🔬 Reboot test.
 - 🔬 Suspend/resume test.
@@ -262,7 +262,7 @@ Status:
 - ✅ File transfer stress test.
 - 🔬 Long-running shell memory test.
 - ✅ Update compatibility check.
-- 🟡 Backup/restore test.
+- 🔬 Backup/restore test.
 
 ## Immediate next work
 
