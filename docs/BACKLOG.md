@@ -242,14 +242,14 @@ Status:
 
 - 🟡 Core palette defined.
 - 🟡 Initial shell CSS implemented.
-- ⬜ Tokenize colors/spacing.
+- ✅ Tokenize colors/spacing.
 - ⬜ Final icon family.
-- ⬜ Typography scale.
-- ⬜ Motion tokens.
+- ✅ Typography scale.
+- ✅ Motion tokens.
 - ⬜ Reduced-motion mode.
 - ⬜ High-contrast mode.
 - ⬜ Light-theme decision.
-- ⬜ Component/state inventory.
+- ✅ Component/state inventory.
 
 ## Milestone 13 — Stability
 

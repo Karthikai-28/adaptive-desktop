@@ -127,9 +127,10 @@ Use an 8 px rhythm where practical:
 
 Shell targets:
 
-- rail width: ~72 px;
+- compact rail width: ~72 px;
+- labeled rail width: 172 px;
 - rail icon: 18–22 px;
-- rail item: 44–48 px;
+- rail item: 34–44 px;
 - overlay offset from rail: 16–24 px.
 
 ## Typography
