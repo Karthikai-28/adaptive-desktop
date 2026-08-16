@@ -13,8 +13,12 @@ set -Eeuo pipefail
 #   * the panel stays lit, which costs power. True black helps a lot on OLED
 #     because unlit pixels draw nothing, but it is not free.
 #
-# On battery the machine is still allowed to suspend, so an unattended laptop
-# does not run itself flat holding a clock on screen.
+# Battery matters here: this is a laptop, and leaving the battery rules alone
+# meant the machine suspended after 20 minutes and the display went black with
+# no clock on it - which is the thing an always-on display is supposed to
+# prevent. So battery inactivity is neutralised too. Closing the lid still
+# suspends, which is the safety net that keeps an unattended laptop from
+# running itself flat.
 #
 # Previous values are saved so `off` restores exactly what was there before.
 #
@@ -63,6 +67,8 @@ on)
         {
             echo "IDLE_DELAY=$(gsettings get $SESSION idle-delay)"
             echo "AC_TYPE=$(gsettings get $POWER sleep-inactive-ac-type)"
+            echo "BATT_TYPE=$(gsettings get $POWER sleep-inactive-battery-type)"
+            echo "BATT_TIMEOUT=$(gsettings get $POWER sleep-inactive-battery-timeout)"
             echo "IDLE_DIM=$(gsettings get $POWER idle-dim)"
         } > "$STATE_FILE"
     fi
@@ -71,10 +77,11 @@ on)
     gsettings set $SESSION idle-delay 0
     gsettings set $POWER idle-dim false
     gsettings set $POWER sleep-inactive-ac-type nothing
-    # Battery deliberately left alone: an unattended laptop should still sleep.
+    gsettings set $POWER sleep-inactive-battery-type nothing
 
     echo "Always-on display enabled."
     echo "The session no longer auto-locks on idle - use Super+L."
+    echo "Display stays lit on battery too; closing the lid still suspends."
     ;;
 off)
     require_adaptive
@@ -85,12 +92,16 @@ off)
         gsettings set $SESSION idle-delay "${IDLE_DELAY##* }"
         gsettings set $POWER idle-dim "$IDLE_DIM"
         gsettings set $POWER sleep-inactive-ac-type "$AC_TYPE"
+        gsettings set $POWER sleep-inactive-battery-type "$BATT_TYPE"
+        gsettings set $POWER sleep-inactive-battery-timeout "${BATT_TIMEOUT##* }"
         rm -f "$STATE_FILE"
         echo "Always-on display disabled; previous settings restored."
     else
         gsettings reset $SESSION idle-delay
         gsettings reset $POWER idle-dim
         gsettings reset $POWER sleep-inactive-ac-type
+        gsettings reset $POWER sleep-inactive-battery-type
+        gsettings reset $POWER sleep-inactive-battery-timeout
         echo "No saved state; reset to GNOME defaults."
     fi
     ;;

@@ -254,6 +254,24 @@ class AdaptiveShellV16 {
         this._lockClock = clock;
         this._lockActivity = activity;
 
+        // GNOME's own _updateClock() writes the wall clock's HH:MM into the
+        // same label once a minute, which wiped the seconds every time the
+        // minute rolled over. Wrapping it - rather than racing it from a
+        // timer - means the date still updates GNOME's way and the seconds
+        // are re-applied in the same frame, so the format never flickers.
+        if (!clock._adaptiveUpdateClock) {
+            clock._adaptiveUpdateClock = clock._updateClock.bind(clock);
+
+            clock._updateClock = () => {
+                clock._adaptiveUpdateClock();
+
+                try {
+                    this._lockApplyTime();
+                } catch (e) {
+                }
+            };
+        }
+
         this._lockTick();
 
         // One second, because the clock now shows seconds.
@@ -283,29 +301,12 @@ class AdaptiveShellV16 {
         if (!this._lockClock || !this._lockClock._time)
             return;
 
-        const now = GLib.DateTime.new_now_local();
+        this._lockApplyTime();
 
-        // GNOME's WallClock only ticks per minute, so the seconds are
-        // formatted here, honouring the session's 12/24-hour preference.
-        let format = '%H:%M:%S';
-
-        try {
-            const iface = new Gio.Settings({
-                schema_id: 'org.gnome.desktop.interface',
-            });
-
-            if (iface.get_string('clock-format') === '12h')
-                format = '%l:%M:%S %p';
-        } catch (e) {
-        }
-
-        this._lockClock._time.text = now.format(format).trim();
-
-        if (this._lockActivity)
+        if (this._lockActivity) {
             this._lockActivity.text = this._lockActivitySummary();
-
-        if (this._lockActivity)
             this._lockActivity.visible = !!this._lockActivity.text;
+        }
 
         this._lockTicks = (this._lockTicks || 0) + 1;
         this._lockAmbientStep();
@@ -347,6 +348,30 @@ class AdaptiveShellV16 {
             duration: 2500,
             mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
         });
+    }
+
+    _lockApplyTime() {
+        if (!this._lockClock || !this._lockClock._time)
+            return;
+
+        // The 12/24-hour preference is read once and cached: this runs every
+        // second, and building a Gio.Settings each time would be wasteful.
+        if (this._lockTimeFormat === undefined) {
+            this._lockTimeFormat = '%H:%M:%S';
+
+            try {
+                const iface = new Gio.Settings({
+                    schema_id: 'org.gnome.desktop.interface',
+                });
+
+                if (iface.get_string('clock-format') === '12h')
+                    this._lockTimeFormat = '%l:%M:%S %p';
+            } catch (e) {
+            }
+        }
+
+        const now = GLib.DateTime.new_now_local();
+        this._lockClock._time.text = now.format(this._lockTimeFormat).trim();
     }
 
     _lockActivitySummary() {
@@ -404,11 +429,18 @@ class AdaptiveShellV16 {
             } catch (e) {
             }
 
+            if (this._lockClock._adaptiveUpdateClock) {
+                this._lockClock._updateClock =
+                    this._lockClock._adaptiveUpdateClock;
+                this._lockClock._adaptiveUpdateClock = null;
+            }
+
             this._lockClock._adaptiveLock = false;
             this._lockClock = null;
         }
 
         this._lockTicks = 0;
+        this._lockTimeFormat = undefined;
     }
 
     _connectToProjectContext() {
