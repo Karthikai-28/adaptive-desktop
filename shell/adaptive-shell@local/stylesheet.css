@@ -1,0 +1,160 @@
+
+/* =========================================================
+   GNOME PANEL TAKEOVER
+   ========================================================= */
+
+.adaptive-main-panel {
+    background-color: rgba(8, 17, 27, 0.97);
+    border-bottom: 1px solid rgba(48, 66, 92, 0.65);
+    box-shadow: 0 5px 22px rgba(0, 0, 0, 0.32);
+}
+
+.adaptive-top-indicator {
+    spacing: 18px;
+}
+
+.adaptive-brand {
+    color: #78a9ff;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 2px;
+}
+
+.adaptive-project-state {
+    color: #96a4b8;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+
+/* =========================================================
+   LEFT RAIL
+   ========================================================= */
+
+.adaptive-rail {
+    width: 64px;
+    padding: 10px 8px;
+    spacing: 10px;
+
+    background-color: rgba(8, 17, 27, 0.96);
+    border: 1px solid rgba(48, 66, 92, 0.78);
+    border-radius: 20px;
+
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+}
+
+.adaptive-rail-button {
+    width: 46px;
+    height: 46px;
+
+    border-radius: 14px;
+
+    background-color: rgba(17, 26, 40, 0.96);
+    border: 1px solid rgba(48, 66, 92, 0.75);
+
+    color: #96a4b8;
+}
+
+.adaptive-rail-button:hover {
+    background-color: rgba(120, 169, 255, 0.14);
+    border-color: rgba(120, 169, 255, 0.62);
+    color: #f2f6ef;
+}
+
+.adaptive-rail-button:active {
+    background-color: rgba(120, 169, 255, 0.24);
+}
+
+.adaptive-rail-icon {
+    icon-size: 18px;
+    color: #9fb4d6;
+}
+
+.adaptive-rail-button:hover .adaptive-rail-icon {
+    color: #f2f6ef;
+}
+
+
+/* =========================================================
+   OVERLAY
+   ========================================================= */
+
+.adaptive-overlay {
+    width: 440px;
+    padding: 20px;
+    spacing: 12px;
+
+    background-color: rgba(8, 17, 27, 0.98);
+    border: 1px solid rgba(120, 169, 255, 0.28);
+    border-radius: 22px;
+
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.50);
+}
+
+.adaptive-overlay-header {
+    spacing: 18px;
+}
+
+.adaptive-overlay-title {
+    color: #f2f6ef;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.adaptive-overlay-subtitle {
+    color: #96a4b8;
+    font-size: 11px;
+    padding-top: 4px;
+}
+
+.adaptive-close-button {
+    width: 34px;
+    height: 34px;
+
+    border-radius: 10px;
+
+    background-color: rgba(17, 26, 40, 0.95);
+    border: 1px solid rgba(48, 66, 92, 0.8);
+
+    color: #96a4b8;
+    font-size: 19px;
+}
+
+.adaptive-close-button:hover {
+    color: #f2f6ef;
+    border-color: rgba(120, 169, 255, 0.7);
+}
+
+.adaptive-separator {
+    height: 1px;
+    background-color: rgba(48, 66, 92, 0.65);
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+.adaptive-card {
+    padding: 14px 15px;
+    border-radius: 13px;
+
+    background-color: rgba(17, 26, 40, 0.92);
+    border: 1px solid rgba(48, 66, 92, 0.60);
+
+    text-align: left;
+}
+
+.adaptive-card:hover {
+    background-color: rgba(120, 169, 255, 0.11);
+    border-color: rgba(120, 169, 255, 0.52);
+}
+
+.adaptive-card-title {
+    color: #f2f6ef;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.adaptive-card-subtitle {
+    color: #96a4b8;
+    font-size: 10px;
+    padding-top: 4px;
+}
