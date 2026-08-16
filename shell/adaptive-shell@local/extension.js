@@ -86,6 +86,7 @@ class AdaptiveShellV16 {
         this._dock26WindowEnteredMonitorId = 0;
         this._dock26RevealTimerId = 0;
         this._dock26HideTimerId = 0;
+        this._dock26RelayoutId = 0;
         this._dock26EdgeRevealed = false;
         this._dock26HideOnMaximized = true;
         this._dock26ReservedHeight = 70;
@@ -289,6 +290,11 @@ class AdaptiveShellV16 {
         if (this._tooltipTimeoutId) {
             GLib.Source.remove(this._tooltipTimeoutId);
             this._tooltipTimeoutId = 0;
+        }
+
+        if (this._dock26RelayoutId) {
+            GLib.Source.remove(this._dock26RelayoutId);
+            this._dock26RelayoutId = 0;
         }
 
         if (this._dockDemagnifyId) {
@@ -1805,8 +1811,12 @@ class AdaptiveShellV16 {
         if (!monitor)
             return;
 
+        // Measured against the dock's real height. Asking with -1 returns the
+        // width for an unconstrained height, which came back short while the
+        // app icons were still being allocated - the box was then centred at
+        // its wrong width and the icons overflowed to the right of centre.
         const [, naturalWidth] =
-            this._rail.get_preferred_width(-1);
+            this._rail.get_preferred_width(this._dock26SurfaceHeight);
 
         const width = Math.max(
             100,
@@ -1816,9 +1826,19 @@ class AdaptiveShellV16 {
             )
         );
 
-        const x =
+        // Centre on this monitor, then clamp inside it. With an external
+        // display attached the X screen is the union of both monitors, so a
+        // stale or screen-sized geometry here pushed the dock off-centre
+        // towards the second monitor instead of sitting in the middle of the
+        // one it belongs to.
+        const centred =
             monitor.x +
             Math.round((monitor.width - width) / 2);
+
+        const x = Math.max(
+            monitor.x,
+            Math.min(centred, monitor.x + monitor.width - width)
+        );
 
         const y =
             monitor.y +
@@ -1853,13 +1873,44 @@ class AdaptiveShellV16 {
         );
 
         if (hidden) {
-            if (this._dock26EdgeRevealed)
-                this._dock26ShowDock(true);
-            else
+            // A fullscreen window is stacked above shell chrome, so a dock
+            // revealed here is painted under it: it looks present but every
+            // click lands on the window behind. Nothing to reveal, then -
+            // the hot edge is ignored until fullscreen ends.
+            if (this._dock26MonitorInFullscreen(index)) {
+                this._dock26EdgeRevealed = false;
                 this._dock26HideDock(true);
+            } else if (this._dock26EdgeRevealed) {
+                this._dock26ShowDock(true);
+            } else {
+                this._dock26HideDock(true);
+            }
         } else {
             this._dock26EdgeRevealed = false;
             this._dock26ShowDock(false);
+        }
+
+        // Icons can finish allocating after this ran, leaving the dock centred
+        // on a stale width. Re-check once on idle and correct if it moved.
+        if (!this._dock26RelayoutId) {
+            this._dock26RelayoutId = GLib.idle_add(
+                GLib.PRIORITY_DEFAULT_IDLE,
+                () => {
+                    this._dock26RelayoutId = 0;
+
+                    if (!this._rail)
+                        return GLib.SOURCE_REMOVE;
+
+                    const [, settled] = this._rail.get_preferred_width(
+                        this._dock26SurfaceHeight
+                    );
+
+                    if (Math.abs(Math.ceil(settled) - this._rail.width) > 1)
+                        this._dock26Layout();
+
+                    return GLib.SOURCE_REMOVE;
+                }
+            );
         }
 
         try {
