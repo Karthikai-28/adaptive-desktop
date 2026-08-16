@@ -1,0 +1,448 @@
+* {
+    font-family: "Inter", "Noto Sans", sans-serif;
+}
+
+window {
+    background: #09111d;
+    color: #edf3fb;
+}
+
+.root {
+    background: rgba(8, 15, 25, 0.97);
+}
+
+/* Chrome */
+
+.titlebar {
+    min-height: 34px;
+    padding: 0 6px 0 10px;
+    background: rgba(9, 17, 29, 0.98);
+    border-bottom: 1px solid rgba(125, 151, 188, 0.11);
+}
+
+.title {
+    color: #edf3fb;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.window-button {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+}
+
+.window-button:hover {
+    background: rgba(132, 159, 198, 0.10);
+}
+
+/* Toolbar */
+
+.toolbar {
+    min-height: 38px;
+    padding: 4px 7px;
+    background: rgba(10, 19, 32, 0.97);
+    border-bottom: 1px solid rgba(125, 151, 188, 0.10);
+}
+
+.tool-button {
+    min-width: 29px;
+    min-height: 29px;
+    padding: 0;
+    border-radius: 7px;
+    border: 1px solid transparent;
+    background: transparent;
+}
+
+.tool-button:hover {
+    background: rgba(132, 159, 198, 0.08);
+    border-color: rgba(132, 159, 198, 0.11);
+}
+
+.tool-button:checked {
+    background: rgba(86, 135, 205, 0.17);
+    border-color: rgba(104, 167, 255, 0.24);
+}
+
+.path-box,
+.search-box {
+    min-height: 28px;
+    padding: 0 7px;
+    border-radius: 7px;
+    border: 1px solid rgba(125, 151, 188, 0.11);
+    background: rgba(19, 29, 44, 0.88);
+}
+
+.path-entry,
+.search-entry {
+    min-height: 22px;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    color: #dbe5f1;
+    font-size: 10.5px;
+}
+
+/* Sidebar */
+
+.body {
+    background: #08101b;
+}
+
+.sidebar {
+    background: rgba(10, 18, 30, 0.98);
+    border-right: 1px solid rgba(125, 151, 188, 0.10);
+}
+
+.side-heading {
+    padding: 0 6px;
+    color: #8ea1ba;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+}
+
+.side-item {
+    min-height: 32px;
+    padding: 0 7px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+}
+
+.side-item:hover {
+    background: rgba(126, 154, 192, 0.07);
+}
+
+.side-label {
+    color: #d0dae7;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.side-empty {
+    color: #667a95;
+    font-size: 9px;
+}
+
+.storage-button {
+    padding: 8px;
+    border: 0;
+    border-radius: 9px;
+    background: rgba(17, 28, 43, 0.70);
+}
+
+.storage-button:hover {
+    background: rgba(33, 50, 73, 0.82);
+}
+
+.storage-primary {
+    color: #dce5f1;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.storage-secondary {
+    color: #8193ad;
+    font-size: 9.5px;
+}
+
+.storage-mini trough,
+.storage-capacity-bar trough {
+    min-height: 4px;
+    border-radius: 999px;
+    background: rgba(59, 77, 103, 0.62);
+}
+
+.storage-mini progress,
+.storage-capacity-bar progress {
+    min-height: 4px;
+    border-radius: 999px;
+    background: #68a7ff;
+}
+
+/* Browser */
+
+.content-paned > separator {
+    min-width: 1px;
+    background: rgba(125, 151, 188, 0.10);
+}
+
+.browser {
+    background:
+        radial-gradient(
+            circle at 90% 0%,
+            rgba(64, 102, 158, 0.05),
+            transparent 32%
+        ),
+        #08101b;
+}
+
+.browser-header {
+    min-height: 32px;
+    padding: 0 11px;
+    border-bottom: 1px solid rgba(125, 151, 188, 0.07);
+}
+
+.folder-title {
+    color: #e7eef8;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.folder-summary {
+    color: #71849e;
+    font-size: 9px;
+}
+
+.item {
+    padding: 5px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+}
+
+.item:hover {
+    background: rgba(126, 154, 192, 0.055);
+}
+
+.item.selected {
+    background: rgba(82, 130, 198, 0.14);
+    border-color: rgba(104, 167, 255, 0.22);
+}
+
+.item-name {
+    color: #e4ebf5;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.item-secondary {
+    color: #7488a4;
+    font-size: 8.5px;
+}
+
+.item-list {
+    margin: 0 2px;
+    padding: 3px 8px;
+    border-radius: 6px;
+}
+
+/* Preview header + hierarchy */
+
+.preview-panel {
+    background: rgba(10, 18, 30, 0.985);
+}
+
+.preview-header {
+    min-height: 46px;
+    padding: 5px 10px;
+    border-bottom: 1px solid rgba(125, 151, 188, 0.08);
+}
+
+.preview-header-icon {
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 8px;
+    background: rgba(25, 39, 58, 0.72);
+    padding: 4px;
+}
+
+.preview-title {
+    color: #edf3fa;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.preview-subtitle {
+    color: #7488a4;
+    font-size: 8.5px;
+}
+
+.preview-hero {
+    padding: 10px;
+    border-radius: 11px;
+    background: rgba(16, 27, 43, 0.68);
+}
+
+.preview-large-caption {
+    color: #9fb1c8;
+    font-size: 10px;
+}
+
+.preview-section-label {
+    margin-top: 5px;
+    color: #91a4bd;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+}
+
+.preview-meta-key {
+    color: #7c90aa;
+    font-size: 9.5px;
+}
+
+.preview-meta-value {
+    color: #d4deea;
+    font-size: 9.5px;
+    font-weight: 600;
+}
+
+.folder-preview-list,
+.storage-detail-card,
+.storage-capacity-card {
+    padding: 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(125, 151, 188, 0.07);
+    background: rgba(14, 25, 40, 0.72);
+}
+
+.folder-preview-row {
+    min-height: 27px;
+    padding: 0 4px;
+}
+
+.folder-preview-name {
+    color: #dce5ef;
+    font-size: 9.5px;
+}
+
+.folder-preview-size {
+    color: #7387a1;
+    font-size: 8.5px;
+}
+
+.actual-preview {
+    border-radius: 9px;
+    background: rgba(15, 27, 43, 0.70);
+}
+
+.text-preview {
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(14, 25, 40, 0.78);
+    color: #d7e0eb;
+    font-size: 9.5px;
+}
+
+.preview-actions {
+    border-top: 1px solid rgba(125, 151, 188, 0.08);
+}
+
+.preview-action {
+    min-height: 29px;
+    padding: 0 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(125, 151, 188, 0.09);
+    background: rgba(18, 29, 44, 0.74);
+    color: #dce5f1;
+    font-size: 10px;
+}
+
+.preview-action:hover {
+    background: rgba(35, 52, 76, 0.82);
+    border-color: rgba(104, 167, 255, 0.17);
+}
+
+/* Storage redesign */
+
+.storage-overview-card {
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(104, 167, 255, 0.12);
+    background:
+        linear-gradient(
+            135deg,
+            rgba(27, 46, 72, 0.78),
+            rgba(13, 24, 39, 0.82)
+        );
+}
+
+.storage-percent {
+    color: #edf4ff;
+    font-size: 21px;
+    font-weight: 800;
+}
+
+.storage-percent-label {
+    color: #8093ad;
+    font-size: 8px;
+}
+
+.storage-feature-value {
+    color: #edf3fa;
+    font-size: 17px;
+    font-weight: 780;
+}
+
+.storage-feature-value-small {
+    color: #d9e3ef;
+    font-size: 12px;
+    font-weight: 700;
+    margin-top: 6px;
+}
+
+.storage-feature-label {
+    color: #8193ad;
+    font-size: 8.5px;
+}
+
+.storage-capacity-label {
+    color: #8296b0;
+    font-size: 8.5px;
+}
+
+/* Network */
+
+.remote-connect-card {
+    min-height: 130px;
+    padding: 14px;
+    border-radius: 11px;
+    background: rgba(15, 27, 43, 0.74);
+}
+
+.dialog-title {
+    color: #edf3fa;
+    font-size: 14px;
+    font-weight: 750;
+}
+
+.dialog-help {
+    color: #8296b0;
+    font-size: 10px;
+}
+
+/* Status */
+
+.statusbar {
+    min-height: 24px;
+    padding: 0 8px;
+    background: rgba(9, 17, 29, 0.98);
+    border-top: 1px solid rgba(125, 151, 188, 0.08);
+}
+
+.status-text {
+    color: #6b7f9b;
+    font-size: 8px;
+}
+
+.error-title {
+    color: #e8eef7;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.error-detail {
+    color: #7589a5;
+    font-size: 10px;
+}
+
+dialog {
+    background: #101a29;
+    color: #eaf0f9;
+}

@@ -1,0 +1,124 @@
+===== SOURCE =====
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6
+
+===== APPLICATION / DBUS IDENTIFIERS =====
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-search-engine-model.c:24:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-search-directory.c:36:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-application.c:63:#include "nautilus-shell-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-application.c:1289:    gtk_window_set_default_icon_name (APPLICATION_ID);
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-application.c:1618:                         "application-id", APPLICATION_ID,
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/unity-quicklist-handler.c:137:    unity_quicklist_handler_launcher_entry_add (self, "org.gnome.Nautilus.desktop");
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-search-engine-recent.c:23:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:21:      'nautilus-search-provider.h'
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:38:    interface_prefix: 'org.gnome.Nautilus',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:46:    interface_prefix: 'org.gnome.Nautilus',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:50:    'nautilus-shell-search-provider-generated',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:52:      meson.source_root(), 'data', 'shell-search-provider-dbus-interfaces.xml'
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:123:  'nautilus-shell-search-provider.c',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:224:  'nautilus-search-provider.c',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/meson.build:225:  'nautilus-search-provider.h',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-search-provider.c:20:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/.gitignore:12:/nautilus-shell-search-provider-generated.c
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/.gitignore:13:/nautilus-shell-search-provider-generated.h
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-main.c:69:    g_set_prgname (APPLICATION_ID);
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-preferences-window.c:381:    gtk_window_set_icon_name (GTK_WINDOW (preferences_window), APPLICATION_ID);
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-freedesktop-dbus.c:324:/* Tries to own the org.freedesktop.FileManager1 service name */
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-file-utilities.h:32:#define NAUTILUS_DESKTOP_ID APPLICATION_ID ".desktop"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-shell-search-provider.c:2: * nautilus-shell-search-provider.c - Implementation of a GNOME Shell
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-shell-search-provider.c:34:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-shell-search-provider.c:39:#include "nautilus-shell-search-provider-generated.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-shell-search-provider.c:40:#include "nautilus-shell-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-previewer.c:36:#define PREVIEWER_DBUS_NAME "org.gnome.NautilusPreviewer"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-previewer.c:37:#define PREVIEWER2_DBUS_IFACE "org.gnome.NautilusPreviewer2"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-search-engine-simple.c:27:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-search-engine.h:28:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-tracker-utilities.c:50:    const gchar *busname = APPLICATION_ID ".Tracker3.Miner.Files";
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-search-engine-tracker.c:27:#include "nautilus-search-provider.h"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-toolbar.c:891:    self->ulauncher = unity_launcher_entry_get_for_desktop_id ("org.gnome.Nautilus.desktop");
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-freedesktop-dbus.h:25:#define NAUTILUS_FDO_DBUS_IFACE "org.freedesktop.FileManager1"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-freedesktop-dbus.h:26:#define NAUTILUS_FDO_DBUS_NAME  "org.freedesktop.FileManager1"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-window.c:2849:                         "icon-name", APPLICATION_ID,
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-window.c:2896:                           "logo-icon-name", APPLICATION_ID,
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-mime-actions.c:1290:                                             APPLICATION_ID,
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/src/nautilus-shell-search-provider.h:2: * nautilus-shell-search-provider.h - Implementation of a GNOME Shell
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:12:tracker_domain_config.set('application_id', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:13:tracker_domain_config.set('domain_rule', get_option('prefix') / domain_ontologies_dir / application_id + '.domain.rule')
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:16:  input: 'org.gnome.Nautilus.domain.rule.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:17:  output: application_id + '.domain.rule',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:22:  input: 'org.gnome.Nautilus.Tracker3.Miner.Extract.service.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:23:  output: application_id + '.Tracker3.Miner.Extract.service',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:28:  input: 'org.gnome.Nautilus.Tracker3.Miner.Files.service.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/meson.build:29:  output: application_id + '.Tracker3.Miner.Files.service',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/org.gnome.Nautilus.domain.rule.in:18:Domain=@application_id@
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/org.gnome.Nautilus.Tracker3.Miner.Files.service.in:2:Name=@application_id@.Tracker3.Miner.Files
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/org.gnome.Nautilus.Tracker3.Miner.Extract.service.in:2:Name=@application_id@.Tracker3.Miner.Extract
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:3:  join_paths(icondir, 'org.gnome.Nautilus' + profile + '.svg'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:5:  rename: '@0@.svg'.format(application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:11:  join_paths(icondir, 'org.gnome.Nautilus-symbolic.svg'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:13:  rename: '@0@-symbolic.svg'.format(application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:20:desktop_conf.set('icon', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:24:    input: files('org.gnome.Nautilus.desktop.in.in'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:25:    output: 'org.gnome.Nautilus.desktop.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:28:  output: '@0@.desktop'.format(application_id),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:46:appdata_conf.set('appid', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:50:    input: files('org.gnome.Nautilus.appdata.xml.in.in'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:51:    output: 'org.gnome.Nautilus.appdata.xml.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:54:  output: '@0@.appdata.xml'.format(application_id),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:61:service_conf.set('appid', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:65:  input: 'org.gnome.Nautilus.service.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:66:  output: '@0@.service'.format(application_id),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:72:  input: 'org.freedesktop.FileManager1.service.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:73:  output: 'org.freedesktop.FileManager1.service',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:80:search_provider_conf.set('appid', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:85:  input: files('org.gnome.Nautilus.search-provider.ini.in'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:86:  install_dir: join_paths(datadir, 'gnome-shell', 'search-providers'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:87:  output: '@0@.search-provider.ini'.format(application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/.gitignore:2:/org.freedesktop.FileManager1.service
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/.gitignore:3:/org.gnome.Nautilus.appdata.xml
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/.gitignore:4:/org.gnome.Nautilus.desktop
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/.gitignore:5:/org.gnome.Nautilus.service
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/freedesktop-dbus-interfaces.xml:20:  <interface name='org.freedesktop.FileManager1'>
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/dbus-interfaces.xml:25:  <interface name='org.gnome.Nautilus.FileOperations'>
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/dbus-interfaces.xml:29:      org.gnome.Nautilus.FileOperations2 interace.
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.freedesktop.FileManager1.service.in:2:Name=org.freedesktop.FileManager1
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.gnome.Nautilus.Source.svg:21:   sodipodi:docname="org.gnome.Nautilus.svg"
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/dbus-interfaces2.xml:25:  org.gnome.Nautilus.FileOperations2:
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/dbus-interfaces2.xml:40:  <interface name='org.gnome.Nautilus.FileOperations2'>
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.gnome.Nautilus.desktop.in.in:11:DBusActivatable=true
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/meson.build:5:  #  * Update version in data/org.gnome.Nautilus.appdata.xml.in.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/meson.build:159:application_id = 'org.gnome.Nautilus' + profile
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/meson.build:169:conf.set_quoted('APPLICATION_ID', application_id)
+
+===== MESON ID DEFINITIONS =====
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/meson.build:5:  #  * Update version in data/org.gnome.Nautilus.appdata.xml.in.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/meson.build:159:application_id = 'org.gnome.Nautilus' + profile
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/meson.build:169:conf.set_quoted('APPLICATION_ID', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:3:  join_paths(icondir, 'org.gnome.Nautilus' + profile + '.svg'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:5:  rename: '@0@.svg'.format(application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:11:  join_paths(icondir, 'org.gnome.Nautilus-symbolic.svg'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:13:  rename: '@0@-symbolic.svg'.format(application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:20:desktop_conf.set('icon', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:24:    input: files('org.gnome.Nautilus.desktop.in.in'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:25:    output: 'org.gnome.Nautilus.desktop.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:28:  output: '@0@.desktop'.format(application_id),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:46:appdata_conf.set('appid', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:50:    input: files('org.gnome.Nautilus.appdata.xml.in.in'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:51:    output: 'org.gnome.Nautilus.appdata.xml.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:54:  output: '@0@.appdata.xml'.format(application_id),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:61:service_conf.set('appid', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:65:  input: 'org.gnome.Nautilus.service.in',
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:66:  output: '@0@.service'.format(application_id),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:80:search_provider_conf.set('appid', application_id)
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:85:  input: files('org.gnome.Nautilus.search-provider.ini.in'),
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/meson.build:87:  output: '@0@.search-provider.ini'.format(application_id)
+
+===== DESKTOP / SERVICE / SEARCH FILES =====
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/nautilus-autorun-software.desktop.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.freedesktop.FileManager1.service.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.gnome.Nautilus.desktop.in.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.gnome.nautilus.gschema.xml
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.gnome.Nautilus.search-provider.ini.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/org.gnome.Nautilus.service.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/shell-search-provider-dbus-interfaces.xml
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/org.gnome.Nautilus.Tracker3.Miner.Extract.service.in
+/home/karthi/adaptive-desktop/vendor/nautilus-ubuntu/nautilus-42.6/data/tracker/org.gnome.Nautilus.Tracker3.Miner.Files.service.in

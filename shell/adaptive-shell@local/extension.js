@@ -1,470 +1,412 @@
-const { St, Clutter } = imports.gi;
-
+const { St, Gio, GLib, Clutter } = imports.gi;
 const Main = imports.ui.main;
-const PanelMenu = imports.ui.panelMenu;
+const ExtensionUtils = imports.misc.extensionUtils;
 
-let topIndicator = null;
-let rail = null;
-let overlay = null;
-let monitorSignal = null;
+const Me = ExtensionUtils.getCurrentExtension();
 
-let stockLeftVisible = true;
-let stockDateVisible = true;
+let _shell = null;
 
-
-/* =========================================================
- * HELPERS
- * ========================================================= */
-
-function makeLabel(text, styleClass = null) {
-    const label = new St.Label({
-        text,
-        y_align: Clutter.ActorAlign.CENTER,
-    });
-
-    if (styleClass)
-        label.add_style_class_name(styleClass);
-
-    return label;
-}
-
-function makeRailButton(iconName, name, action) {
-    const button = new St.Button({
-        style_class: 'adaptive-rail-button',
-        reactive: true,
-        can_focus: true,
-        track_hover: true,
-        accessible_name: name,
-        x_align: Clutter.ActorAlign.CENTER,
-        y_align: Clutter.ActorAlign.CENTER,
-    });
-
-    const icon = new St.Icon({
-        icon_name: iconName,
-        style_class: 'adaptive-rail-icon',
-        icon_size: 18,
-        x_align: Clutter.ActorAlign.CENTER,
-        y_align: Clutter.ActorAlign.CENTER,
-    });
-
-    button.set_child(icon);
-    button.connect('clicked', action);
-
-    return button;
-}
-
-
-/* =========================================================
- * STOCK GNOME CHROME
- * ========================================================= */
-
-function hideStockChrome() {
-    if (Main.panel._leftBox) {
-        stockLeftVisible = Main.panel._leftBox.visible;
-        Main.panel._leftBox.hide();
+class AdaptiveShell {
+    constructor() {
+        this._rail = null;
+        this._brandButton = null;
+        this._projectLabel = null;
+        this._monitorChangedId = 0;
+        this._hiddenActors = [];
+        this._clockActor = null;
+        this._filesLauncher = GLib.build_filenamev([
+            GLib.get_home_dir(),
+            'adaptive-desktop',
+            'scripts',
+            'adaptive-files-launch.sh',
+        ]);
     }
 
-    const dateMenu = Main.panel.statusArea.dateMenu;
+    enable() {
+        log('[Adaptive Shell] enable v1.5');
 
-    if (dateMenu) {
-        stockDateVisible = dateMenu.visible;
-        dateMenu.hide();
+        this._hideStockLeftItems();
+        this._restoreAndStyleStockClock();
+        this._buildTopIdentity();
+        this._buildRail();
+
+        this._monitorChangedId = Main.layoutManager.connect(
+            'monitors-changed',
+            () => this._layoutRail()
+        );
+
+        this._layoutRail();
+
+        log('[Adaptive Shell] dock ready');
+        log('[Adaptive Shell] stock clock/calendar restored');
     }
 
-    Main.panel.add_style_class_name('adaptive-main-panel');
-}
+    disable() {
+        log('[Adaptive Shell] disable v1.5');
 
-function restoreStockChrome() {
-    if (Main.panel._leftBox && stockLeftVisible)
-        Main.panel._leftBox.show();
+        if (this._monitorChangedId) {
+            Main.layoutManager.disconnect(this._monitorChangedId);
+            this._monitorChangedId = 0;
+        }
 
-    const dateMenu = Main.panel.statusArea.dateMenu;
+        if (this._rail) {
+            Main.layoutManager.removeChrome(this._rail);
+            this._rail.destroy();
+            this._rail = null;
+        }
 
-    if (dateMenu && stockDateVisible)
-        dateMenu.show();
+        if (this._brandButton) {
+            this._brandButton.destroy();
+            this._brandButton = null;
+        }
 
-    Main.panel.remove_style_class_name('adaptive-main-panel');
-}
+        if (this._projectLabel) {
+            this._projectLabel.destroy();
+            this._projectLabel = null;
+        }
 
+        if (this._clockActor) {
+            this._clockActor.remove_style_class_name('adaptive-stock-clock');
+            this._clockActor = null;
+        }
 
-/* =========================================================
- * OVERLAY
- * ========================================================= */
+        for (const item of this._hiddenActors) {
+            try {
+                if (item.wasVisible)
+                    item.actor.show();
+                else
+                    item.actor.hide();
+            } catch (e) {
+                logError(e, '[Adaptive Shell] restoring stock panel actor');
+            }
+        }
+        this._hiddenActors = [];
+    }
 
-function closeOverlay() {
-    if (!overlay)
-        return;
+    _panelActor(item) {
+        if (!item)
+            return null;
 
-    overlay.destroy();
-    overlay = null;
-}
+        if (item.container)
+            return item.container;
 
-function showOverlay(title, subtitle, items = []) {
-    closeOverlay();
+        if (item.actor)
+            return item.actor;
 
-    overlay = new St.BoxLayout({
-        style_class: 'adaptive-overlay',
-        vertical: true,
-        reactive: true,
-    });
+        return item;
+    }
 
-    const header = new St.BoxLayout({
-        style_class: 'adaptive-overlay-header',
-        vertical: false,
-    });
+    _rememberAndHide(actor) {
+        if (!actor)
+            return;
 
-    const headingBox = new St.BoxLayout({
-        vertical: true,
-        x_expand: true,
-    });
+        try {
+            this._hiddenActors.push({
+                actor,
+                wasVisible: actor.visible,
+            });
+            actor.hide();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] hiding stock panel actor');
+        }
+    }
 
-    headingBox.add_child(
-        makeLabel(title, 'adaptive-overlay-title')
-    );
+    _hideStockLeftItems() {
+        // We keep the stock dateMenu and all top-right system indicators.
+        // Only the legacy Activities / current-app labels are hidden.
+        this._rememberAndHide(
+            this._panelActor(Main.panel.statusArea.activities)
+        );
 
-    headingBox.add_child(
-        makeLabel(subtitle, 'adaptive-overlay-subtitle')
-    );
+        this._rememberAndHide(
+            this._panelActor(Main.panel.statusArea.appMenu)
+        );
+    }
 
-    const closeButton = new St.Button({
-        style_class: 'adaptive-close-button',
-        label: '×',
-        reactive: true,
-    });
+    _restoreAndStyleStockClock() {
+        const dateMenu = Main.panel.statusArea.dateMenu;
+        const actor = this._panelActor(dateMenu);
 
-    closeButton.connect('clicked', closeOverlay);
+        if (!actor)
+            return;
 
-    header.add_child(headingBox);
-    header.add_child(closeButton);
+        // A previous Adaptive Shell build hid this. Force the GNOME clock
+        // actor back on-screen. Keeping the real dateMenu preserves the
+        // calendar, notifications, appointments and GNOME time formatting.
+        try {
+            actor.show();
+            actor.add_style_class_name('adaptive-stock-clock');
+            this._clockActor = actor;
+        } catch (e) {
+            logError(e, '[Adaptive Shell] restoring dateMenu');
+        }
+    }
 
-    overlay.add_child(header);
-
-    overlay.add_child(
-        new St.Widget({
-            style_class: 'adaptive-separator',
-        })
-    );
-
-    for (const item of items) {
-        const card = new St.Button({
-            style_class: 'adaptive-card',
+    _buildTopIdentity() {
+        this._brandButton = new St.Button({
+            style_class: 'adaptive-brand-button',
             reactive: true,
             can_focus: true,
+            track_hover: true,
+            accessible_name: 'Adaptive Desktop overview',
         });
 
-        const content = new St.BoxLayout({
-            vertical: true,
+        const brand = new St.Label({
+            text: 'ADAPTIVE',
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: 'adaptive-brand-label',
         });
 
-        content.add_child(
-            makeLabel(item.title, 'adaptive-card-title')
+        this._brandButton.set_child(brand);
+        this._brandButton.connect(
+            'clicked',
+            () => this._showOverview()
         );
 
-        content.add_child(
-            makeLabel(item.subtitle, 'adaptive-card-subtitle')
-        );
+        this._projectLabel = new St.Label({
+            text: 'PROJECT · NONE',
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: 'adaptive-project-label',
+        });
 
-        card.set_child(content);
-        overlay.add_child(card);
+        Main.panel._leftBox.insert_child_at_index(
+            this._brandButton,
+            0
+        );
+        Main.panel._leftBox.insert_child_at_index(
+            this._projectLabel,
+            1
+        );
     }
 
-    Main.layoutManager.addChrome(overlay, {
-        affectsStruts: false,
-        trackFullscreen: true,
-    });
+    _buildRail() {
+        this._rail = new St.BoxLayout({
+            vertical: true,
+            style_class: 'adaptive-rail',
+            reactive: true,
+        });
 
-    positionOverlay();
-}
+        const top = new St.BoxLayout({
+            vertical: true,
+            style_class: 'adaptive-rail-group',
+        });
 
+        top.add_child(
+            this._makeDockButton(
+                'overview.svg',
+                'Overview',
+                () => this._showOverview()
+            )
+        );
 
-/* =========================================================
- * POSITIONING
- * ========================================================= */
+        top.add_child(
+            this._makeDockButton(
+                'files.svg',
+                'Adaptive Files',
+                () => this._openFiles()
+            )
+        );
 
-function positionRail() {
-    if (!rail)
-        return;
+        top.add_child(
+            this._makeDockButton(
+                'apps.svg',
+                'Applications',
+                () => this._showApplications()
+            )
+        );
 
-    const monitor = Main.layoutManager.primaryMonitor;
+        top.add_child(
+            this._makeDockButton(
+                'workspaces.svg',
+                'Workspaces',
+                () => this._showWorkspaces()
+            )
+        );
 
-    if (!monitor)
-        return;
+        top.add_child(
+            this._makeDockButton(
+                'search.svg',
+                'Search',
+                () => this._showSearch()
+            )
+        );
 
-    const panelHeight = Main.panel.height;
-    const railWidth = 72;
+        this._rail.add_child(top);
 
-    rail.set_position(
-        monitor.x,
-        monitor.y + panelHeight
-    );
-
-    rail.set_size(
-        railWidth,
-        monitor.height - panelHeight
-    );
-}
-
-function positionOverlay() {
-    if (!overlay)
-        return;
-
-    const monitor = Main.layoutManager.primaryMonitor;
-
-    if (!monitor)
-        return;
-
-    overlay.set_position(
-        monitor.x + 92,
-        monitor.y + Main.panel.height + 20
-    );
-}
-
-function reposition() {
-    positionRail();
-    positionOverlay();
-}
-
-
-/* =========================================================
- * PANELS
- * ========================================================= */
-
-function showProjects() {
-    showOverlay(
-        'Projects',
-        'Switch or create a working context.',
-        [
-            {
-                title: 'No active project',
-                subtitle: 'Your registered projects will appear here.',
-            },
-            {
-                title: '+ Add project',
-                subtitle: 'Register an existing folder.',
-            },
-        ]
-    );
-}
-
-function showWorkspaces() {
-    showOverlay(
-        'Workspaces',
-        'Desktop spaces linked to your active context.',
-        [
-            {
-                title: 'Workspace 01',
-                subtitle: 'Current workspace',
-            },
-            {
-                title: '+ New workspace',
-                subtitle: 'Create another working space',
-            },
-        ]
-    );
-}
-
-function showCommand() {
-    showOverlay(
-        'Command',
-        'Search, open, switch or run.',
-        [
-            {
-                title: 'Applications',
-                subtitle: 'Launch installed applications',
-            },
-            {
-                title: 'Files',
-                subtitle: 'Find files and folders',
-            },
-            {
-                title: 'Projects',
-                subtitle: 'Switch active project',
-            },
-            {
-                title: 'Actions',
-                subtitle: 'Run desktop commands',
-            },
-        ]
-    );
-}
-
-function showSystem() {
-    showOverlay(
-        'System Center',
-        'Desktop and device controls.',
-        [
-            {
-                title: 'Network',
-                subtitle: 'Connectivity and VPN',
-            },
-            {
-                title: 'Performance',
-                subtitle: 'CPU, memory and activity',
-            },
-            {
-                title: 'Settings',
-                subtitle: 'Adaptive Desktop configuration',
-            },
-            {
-                title: 'Return to Ubuntu',
-                subtitle: 'Exit Adaptive Desktop safely',
-            },
-        ]
-    );
-}
-
-
-/* =========================================================
- * RAIL
- * ========================================================= */
-
-function createRail() {
-    rail = new St.BoxLayout({
-        style_class: 'adaptive-rail',
-        vertical: true,
-        reactive: true,
-    });
-
-    const topGroup = new St.BoxLayout({
-        style_class: 'adaptive-rail-top',
-        vertical: true,
-        x_align: Clutter.ActorAlign.CENTER,
-    });
-
-    topGroup.add_child(
-        makeRailButton(
-            'go-home-symbolic',
-            'Home',
-            closeOverlay
-        )
-    );
-
-    topGroup.add_child(
-        makeRailButton(
-            'folder-symbolic',
-            'Projects',
-            showProjects
-        )
-    );
-
-    topGroup.add_child(
-        makeRailButton(
-            'view-grid-symbolic',
-            'Workspaces',
-            showWorkspaces
-        )
-    );
-
-    topGroup.add_child(
-        makeRailButton(
-            'system-search-symbolic',
-            'Command',
-            showCommand
-        )
-    );
-
-    rail.add_child(topGroup);
-
-    rail.add_child(
-        new St.Widget({
+        const spacer = new St.Widget({
             y_expand: true,
-        })
-    );
+        });
+        this._rail.add_child(spacer);
 
-    const bottomGroup = new St.BoxLayout({
-        style_class: 'adaptive-rail-bottom',
-        vertical: true,
-        x_align: Clutter.ActorAlign.CENTER,
-    });
+        const bottom = new St.BoxLayout({
+            vertical: true,
+            style_class: 'adaptive-rail-group adaptive-rail-bottom',
+        });
 
-    bottomGroup.add_child(
-        makeRailButton(
-            'preferences-system-symbolic',
-            'System Center',
-            showSystem
-        )
-    );
+        bottom.add_child(
+            this._makeDockButton(
+                'settings.svg',
+                'Settings',
+                () => this._openSettings()
+            )
+        );
 
-    rail.add_child(bottomGroup);
+        this._rail.add_child(bottom);
 
-    Main.layoutManager.addChrome(rail, {
-        affectsStruts: true,
-        trackFullscreen: true,
-    });
+        Main.layoutManager.addChrome(
+            this._rail,
+            {
+                affectsStruts: true,
+                trackFullscreen: true,
+            }
+        );
+    }
 
-    positionRail();
+    _makeDockButton(iconFile, accessibleName, callback) {
+        const path = GLib.build_filenamev([
+            Me.path,
+            'assets',
+            'dock',
+            iconFile,
+        ]);
+
+        const gicon = Gio.FileIcon.new(
+            Gio.File.new_for_path(path)
+        );
+
+        const icon = new St.Icon({
+            gicon,
+            style_class: 'adaptive-dock-icon',
+        });
+
+        const button = new St.Button({
+            style_class: 'adaptive-dock-button',
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            accessible_name: accessibleName,
+        });
+
+        button.set_child(icon);
+
+        button.connect('clicked', () => {
+            try {
+                callback();
+            } catch (e) {
+                logError(
+                    e,
+                    `[Adaptive Shell] ${accessibleName} action`
+                );
+                Main.notifyError(
+                    'Adaptive Desktop',
+                    `${accessibleName} could not be opened.`
+                );
+            }
+        });
+
+        return button;
+    }
+
+    _layoutRail() {
+        if (!this._rail)
+            return;
+
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!monitor)
+            return;
+
+        const panelHeight = Math.max(
+            Main.panel.height || 0,
+            24
+        );
+
+        const railWidth = 58;
+        const railHeight = Math.max(
+            1,
+            monitor.height - panelHeight
+        );
+
+        this._rail.set_position(
+            monitor.x,
+            monitor.y + panelHeight
+        );
+
+        this._rail.set_size(
+            railWidth,
+            railHeight
+        );
+    }
+
+    _showOverview() {
+        Main.overview.show();
+    }
+
+    _showApplications() {
+        if (typeof Main.overview.showApps === 'function')
+            Main.overview.showApps();
+        else
+            Main.overview.show();
+    }
+
+    _showWorkspaces() {
+        Main.overview.show();
+    }
+
+    _showSearch() {
+        // GNOME Shell's overview is the system search surface. Once shown,
+        // typing immediately enters search without us depending on private
+        // search-controller APIs.
+        Main.overview.show();
+    }
+
+    _openFiles() {
+        if (GLib.file_test(
+            this._filesLauncher,
+            GLib.FileTest.IS_EXECUTABLE
+        )) {
+            this._spawn([this._filesLauncher]);
+            return;
+        }
+
+        // Fail-safe fallback: Files remains reachable even if the Adaptive
+        // launcher was accidentally removed.
+        this._spawn(['nautilus', '--new-window']);
+    }
+
+    _openSettings() {
+        this._spawn(['gnome-control-center']);
+    }
+
+    _spawn(argv) {
+        try {
+            Gio.Subprocess.new(
+                argv,
+                Gio.SubprocessFlags.NONE
+            );
+        } catch (e) {
+            logError(
+                e,
+                `[Adaptive Shell] spawn failed: ${argv.join(' ')}`
+            );
+            Main.notifyError(
+                'Adaptive Desktop',
+                `Could not start ${argv[0]}.`
+            );
+        }
+    }
 }
-
-
-/* =========================================================
- * TOP BAR
- * ========================================================= */
-
-function createTopIndicator() {
-    topIndicator = new PanelMenu.Button(
-        0.0,
-        'Adaptive Desktop',
-        false
-    );
-
-    const content = new St.BoxLayout({
-        style_class: 'adaptive-top-indicator',
-    });
-
-    content.add_child(
-        makeLabel('ADAPTIVE', 'adaptive-brand')
-    );
-
-    content.add_child(
-        makeLabel('PROJECT · NONE', 'adaptive-project-state')
-    );
-
-    topIndicator.add_child(content);
-
-    Main.panel.addToStatusArea(
-        'adaptive-shell',
-        topIndicator,
-        0,
-        'center'
-    );
-}
-
-
-/* =========================================================
- * EXTENSION LIFECYCLE
- * ========================================================= */
 
 function init() {
 }
 
 function enable() {
-    hideStockChrome();
-    createTopIndicator();
-    createRail();
-
-    monitorSignal = Main.layoutManager.connect(
-        'monitors-changed',
-        reposition
-    );
+    _shell = new AdaptiveShell();
+    _shell.enable();
 }
 
 function disable() {
-    closeOverlay();
-
-    if (monitorSignal) {
-        Main.layoutManager.disconnect(monitorSignal);
-        monitorSignal = null;
+    if (_shell) {
+        _shell.disable();
+        _shell = null;
     }
-
-    if (rail) {
-        rail.destroy();
-        rail = null;
-    }
-
-    if (topIndicator) {
-        topIndicator.destroy();
-        topIndicator = null;
-    }
-
-    restoreStockChrome();
 }

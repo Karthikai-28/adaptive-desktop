@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=X-GNOME-Metatheme
+Name=AdaptiveFiles
+Comment=Process-local Karthi OS visual layer for Adaptive Files
+
+[X-GNOME-Metatheme]
+GtkTheme=AdaptiveFiles
+MetacityTheme=AdaptiveFiles
+IconTheme=Adwaita
+CursorTheme=Adwaita
+ButtonLayout=menu:minimize,maximize,close

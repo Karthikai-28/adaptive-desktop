@@ -1,0 +1,450 @@
+/* Adaptive Files Phase 2.1 inspector */
+
+.adaptive-preview-panel {
+    background-color: rgba(9, 18, 30, 0.985);
+    color: #F2F6EF;
+    border-left: 1px solid rgba(48, 66, 92, 0.72);
+}
+
+.adaptive-preview-header {
+    min-height: 46px;
+}
+
+.adaptive-preview-glyph {
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 9px;
+    background-color: rgba(120, 169, 255, 0.12);
+    color: #66E0FF;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.adaptive-preview-title {
+    color: #F2F6EF;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.adaptive-preview-subtitle {
+    color: #96A4B8;
+    font-size: 10px;
+}
+
+.adaptive-inspector-switcher {
+    border-radius: 9px;
+    background-color: rgba(17, 26, 40, 0.78);
+}
+
+.adaptive-inspector-switcher button {
+    min-height: 29px;
+    padding: 2px 7px;
+    color: #96A4B8;
+    font-size: 10px;
+    border-radius: 7px;
+}
+
+.adaptive-inspector-switcher button:checked {
+    color: #F2F6EF;
+    background-color: rgba(120, 169, 255, 0.15);
+    border-color: rgba(120, 169, 255, 0.24);
+}
+
+.adaptive-card,
+.adaptive-preview-hero,
+.adaptive-contents-card,
+.adaptive-metadata-card,
+.adaptive-storage-overview {
+    padding: 10px;
+    border-radius: 11px;
+    border: 1px solid rgba(48, 66, 92, 0.34);
+    background-color: rgba(17, 26, 40, 0.72);
+}
+
+.adaptive-preview-hero {
+    background-color: rgba(15, 27, 43, 0.82);
+}
+
+.adaptive-section-label {
+    margin-top: 5px;
+    color: #91A4BD;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+}
+
+.adaptive-empty-glyph {
+    color: #78A9FF;
+    font-size: 35px;
+}
+
+.adaptive-empty-title {
+    color: #E8EEF8;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.adaptive-empty-copy,
+.adaptive-muted {
+    color: #96A4B8;
+    font-size: 10.5px;
+}
+
+.adaptive-selection-count {
+    color: #F2F6EF;
+    font-size: 28px;
+    font-weight: 800;
+}
+
+.adaptive-hero-name {
+    color: #EAF1FA;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.adaptive-content-row {
+    min-height: 29px;
+    padding: 2px 4px;
+    border-radius: 6px;
+    color: #D9E2EE;
+}
+
+.adaptive-content-row:hover {
+    background-color: rgba(120, 169, 255, 0.07);
+}
+
+.adaptive-content-row label {
+    font-size: 10px;
+}
+
+.adaptive-row-size {
+    color: #788BA5;
+    font-size: 9px;
+}
+
+.adaptive-media-preview {
+    border-radius: 9px;
+}
+
+.adaptive-text-frame {
+    border: 1px solid rgba(48, 66, 92, 0.34);
+    border-radius: 9px;
+    background-color: #0B1522;
+}
+
+.adaptive-text-preview {
+    padding: 9px;
+    background-color: #0B1522;
+    color: #DCE6F2;
+    font-family: monospace;
+    font-size: 10px;
+}
+
+.adaptive-meta-key {
+    color: #8194AE;
+    font-size: 10.5px;
+}
+
+.adaptive-meta-value {
+    color: #D8E2EE;
+    font-size: 10.5px;
+    font-weight: 600;
+}
+
+.adaptive-path-value {
+    color: #C9D5E4;
+    font-family: monospace;
+    font-size: 9.5px;
+}
+
+.adaptive-inspector-button {
+    min-height: 31px;
+    padding: 2px 9px;
+    border-radius: 8px;
+    border: 1px solid rgba(48, 66, 92, 0.34);
+    background-color: rgba(22, 34, 51, 0.76);
+    color: #DCE6F2;
+    font-size: 10.5px;
+}
+
+.adaptive-inspector-button:hover {
+    background-color: rgba(41, 61, 88, 0.86);
+    border-color: rgba(120, 169, 255, 0.22);
+    color: #F2F6EF;
+}
+
+/* Storage */
+
+.adaptive-storage-overview {
+    background-image:
+        linear-gradient(
+            135deg,
+            rgba(30, 48, 74, 0.88),
+            rgba(13, 24, 39, 0.90)
+        );
+    border-color: rgba(120, 169, 255, 0.16);
+}
+
+.adaptive-storage-percent {
+    color: #F2F6EF;
+    font-size: 24px;
+    font-weight: 800;
+}
+
+.adaptive-storage-used-caption {
+    color: #8497B0;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.adaptive-storage-free {
+    color: #F2F6EF;
+    font-size: 19px;
+    font-weight: 800;
+}
+
+.adaptive-storage-used-value {
+    color: #D7E2EF;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.adaptive-storage-label,
+.adaptive-capacity-label {
+    color: #8FA1B9;
+    font-size: 10px;
+}
+
+.adaptive-storage-bar trough {
+    min-height: 6px;
+    border-radius: 99px;
+    background-color: rgba(48, 66, 92, 0.58);
+}
+
+.adaptive-storage-bar progress {
+    min-height: 6px;
+    border-radius: 99px;
+    background-image: linear-gradient(to right, #78A9FF, #66E0FF);
+}
+
+/* Network */
+
+.adaptive-network-title {
+    color: #EDF3FA;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.adaptive-network-copy {
+    color: #91A3BA;
+    font-size: 10.5px;
+}
+
+.adaptive-network-entry {
+    min-height: 30px;
+    font-size: 10.5px;
+}
+
+
+/* v1.1 startup strip + translucent inspector */
+.adaptive-preview-panel {
+    background-image:
+        linear-gradient(
+            180deg,
+            rgba(10, 20, 33, 0.965),
+            rgba(7, 16, 26, 0.935)
+        );
+    border-left: 1px solid rgba(120, 169, 255, 0.16);
+}
+
+.adaptive-location-strip {
+    min-height: 34px;
+    padding: 3px 8px;
+    margin: 0;
+    border-top: 1px solid rgba(48, 66, 92, 0.22);
+    border-bottom: 1px solid rgba(48, 66, 92, 0.32);
+    background-image:
+        linear-gradient(
+            to right,
+            rgba(11, 23, 38, 0.92),
+            rgba(18, 31, 49, 0.78)
+        );
+}
+
+.adaptive-location-brand {
+    color: #9CB0C9;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.adaptive-location-button {
+    min-height: 26px;
+    padding: 1px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(48, 66, 92, 0.34);
+    background-color: rgba(22, 34, 51, 0.54);
+    color: #CAD7E7;
+    font-size: 10px;
+}
+
+.adaptive-location-button:hover {
+    border-color: rgba(120, 169, 255, 0.28);
+    background-color: rgba(39, 58, 84, 0.66);
+    color: #F2F6EF;
+}
+
+.adaptive-location-button:checked {
+    border-color: rgba(102, 224, 255, 0.30);
+    background-color: rgba(120, 169, 255, 0.16);
+    color: #EAF6FF;
+}
+
+.adaptive-card,
+.adaptive-preview-hero,
+.adaptive-contents-card,
+.adaptive-metadata-card {
+    background-color: rgba(17, 26, 40, 0.69);
+    border-color: rgba(120, 169, 255, 0.10);
+}
+
+.adaptive-storage-overview {
+    background-image:
+        linear-gradient(
+            135deg,
+            rgba(30, 48, 74, 0.78),
+            rgba(13, 24, 39, 0.76)
+        );
+}
+
+.adaptive-icon-tile {
+    min-width: 66px;
+    min-height: 66px;
+    padding: 9px;
+    border-radius: 16px;
+    background-image:
+        radial-gradient(
+            circle at 35% 25%,
+            rgba(102, 224, 255, 0.11),
+            rgba(120, 169, 255, 0.035)
+        );
+    border: 1px solid rgba(120, 169, 255, 0.12);
+}
+
+
+/* v1.2 — make inspector unmistakable once attached */
+.adaptive-preview-panel {
+    min-width: 300px;
+    box-shadow: -10px 0 28px rgba(0, 0, 0, 0.22);
+    background-image:
+        radial-gradient(
+            circle at 68% 0%,
+            rgba(102, 224, 255, 0.075),
+            transparent 34%
+        ),
+        linear-gradient(
+            180deg,
+            rgba(12, 24, 39, 0.975),
+            rgba(7, 16, 27, 0.955)
+        );
+}
+
+.adaptive-preview-header {
+    background-color: rgba(120, 169, 255, 0.035);
+    border-bottom: 1px solid rgba(120, 169, 255, 0.08);
+}
+
+.adaptive-inspector-switcher {
+    padding: 3px;
+    border: 1px solid rgba(120, 169, 255, 0.08);
+    background-color: rgba(18, 31, 49, 0.72);
+}
+
+.adaptive-location-strip {
+    background-image:
+        radial-gradient(
+            circle at 18% 0%,
+            rgba(102, 224, 255, 0.055),
+            transparent 36%
+        ),
+        linear-gradient(
+            to right,
+            rgba(9, 20, 34, 0.96),
+            rgba(18, 31, 49, 0.82)
+        );
+}
+
+.adaptive-location-button:checked {
+    box-shadow: inset 0 -2px rgba(102, 224, 255, 0.75);
+}
+
+
+/* v1.3 preview bugfix polish */
+.adaptive-contents-card {
+    min-height: 36px;
+}
+
+.adaptive-content-row image {
+    -gtk-icon-effect: none;
+    opacity: 1;
+}
+
+.adaptive-metadata-card {
+    padding: 10px 11px;
+}
+
+.adaptive-path-value {
+    color: #B9C9DB;
+}
+
+.adaptive-preview-hero image {
+    -gtk-icon-effect: none;
+    opacity: 1;
+}
+
+
+/* v1.4 — Ubuntu native preview + source identity */
+.adaptive-file-identity {
+    min-height: 34px;
+    padding: 6px 7px;
+    border-radius: 9px;
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(10, 22, 36, 0.62);
+}
+
+.adaptive-file-type-icon {
+    -gtk-icon-effect: none;
+    opacity: 1;
+}
+
+.adaptive-file-type-title {
+    color: #EDF4FC;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.adaptive-file-type-subtitle {
+    color: #7F93AD;
+    font-size: 8.8px;
+}
+
+.adaptive-native-preview-caption {
+    color: #6F849E;
+    font-size: 8.5px;
+}
+
+.adaptive-code-preview {
+    padding: 4px;
+    font-family: monospace;
+    font-size: 9.5px;
+}
+
+.adaptive-text-frame {
+    min-height: 244px;
+    border-color: rgba(120, 169, 255, 0.10);
+    background-color: rgba(5, 12, 20, 0.86);
+}
+
+.adaptive-code-preview text {
+    background-color: transparent;
+}

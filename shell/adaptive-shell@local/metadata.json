@@ -1,7 +1,9 @@
 {
   "uuid": "adaptive-shell@local",
   "name": "Adaptive Desktop Shell",
-  "description": "Adaptive productivity desktop experience",
-  "shell-version": ["42"],
-  "version": 1
+  "description": "Adaptive Desktop navigation rail, working app launchers, and restored GNOME clock/calendar.",
+  "shell-version": [
+    "42"
+  ],
+  "version": 15
 }

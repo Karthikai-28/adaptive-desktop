@@ -1,0 +1,9 @@
+{
+  "uuid": "adaptive-shell-v16@local",
+  "name": "Adaptive Desktop Shell v1.6",
+  "description": "Fresh Adaptive Desktop shell module with functional rail, redesigned overview, Adaptive Files routing, and restored GNOME clock/calendar.",
+  "shell-version": [
+    "42"
+  ],
+  "version": 16
+}

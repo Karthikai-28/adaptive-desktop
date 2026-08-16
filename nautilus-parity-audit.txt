@@ -1,0 +1,71 @@
+========== OS ==========
+Ubuntu 22.04.5 LTS
+
+========== NAUTILUS ==========
+GNOME nautilus 42.6
+Package: nautilus
+Version: 1:42.6-0ubuntu2
+Status: install ok installed
+
+========== GVFS ==========
+ii  gvfs:amd64                                                  1.48.2-0ubuntu1.1                                                amd64        userspace virtual filesystem - GIO module
+ii  gvfs-backends                                               1.48.2-0ubuntu1.1                                                amd64        userspace virtual filesystem - backends
+ii  gvfs-common                                                 1.48.2-0ubuntu1.1                                                all          userspace virtual filesystem - common data files
+ii  gvfs-daemons                                                1.48.2-0ubuntu1.1                                                amd64        userspace virtual filesystem - servers
+ii  gvfs-fuse                                                   1.48.2-0ubuntu1.1                                                amd64        userspace virtual filesystem - fuse server
+ii  gvfs-libs:amd64                                             1.48.2-0ubuntu1.1                                                amd64        userspace virtual filesystem - private libraries
+
+========== TRACKER ==========
+ii  tracker                                                     3.3.0-1                                                          amd64        metadata database, indexer and search tool
+ii  tracker-extract                                             3.3.3-0ubuntu0.20.04.4                                           amd64        metadata database, indexer and search tool - metadata extractors
+ii  tracker-miner-fs                                            3.3.3-0ubuntu0.20.04.4                                           amd64        metadata database, indexer and search tool - filesystem indexer
+
+========== NAUTILUS EXTENSIONS ==========
+ii  libnautilus-extension1a:amd64                               1:42.6-0ubuntu2                                                  amd64        libraries for nautilus components - runtime version
+ii  nautilus-extension-gnome-terminal                           3.44.0-1ubuntu1                                                  amd64        GNOME terminal emulator application - Nautilus extension
+ii  nautilus-share                                              0.7.3-2ubuntu6                                                   amd64        Nautilus extension to share folder using Samba
+
+========== DIRECTORY HANDLER ==========
+org.gnome.Nautilus.desktop
+
+========== FILES SETTINGS ==========
+--- org.gnome.nautilus.preferences
+org.gnome.nautilus.preferences always-use-location-entry false
+org.gnome.nautilus.preferences click-policy 'double'
+org.gnome.nautilus.preferences default-folder-viewer 'icon-view'
+org.gnome.nautilus.preferences default-sort-in-reverse-order false
+org.gnome.nautilus.preferences default-sort-order 'name'
+org.gnome.nautilus.preferences fts-enabled true
+org.gnome.nautilus.preferences install-mime-activation true
+org.gnome.nautilus.preferences mouse-back-button 8
+org.gnome.nautilus.preferences mouse-forward-button 9
+org.gnome.nautilus.preferences mouse-use-extra-buttons true
+org.gnome.nautilus.preferences open-folder-on-dnd-hover false
+org.gnome.nautilus.preferences recursive-search 'local-only'
+org.gnome.nautilus.preferences search-filter-time-type 'last_modified'
+org.gnome.nautilus.preferences search-view 'list-view'
+org.gnome.nautilus.preferences show-create-link false
+org.gnome.nautilus.preferences show-delete-permanently false
+org.gnome.nautilus.preferences show-directory-item-counts 'local-only'
+org.gnome.nautilus.preferences show-hidden-files false
+org.gnome.nautilus.preferences show-image-thumbnails 'local-only'
+org.gnome.nautilus.preferences tabs-open-position 'after-current-tab'
+org.gnome.nautilus.preferences thumbnail-limit uint64 50
+org.gnome.nautilus.preferences use-experimental-views false
+--- org.gnome.nautilus.icon-view
+org.gnome.nautilus.icon-view captions ['none', 'none', 'none']
+org.gnome.nautilus.icon-view default-zoom-level 'small'
+org.gnome.nautilus.icon-view text-ellipsis-limit ['3']
+--- org.gnome.nautilus.list-view
+org.gnome.nautilus.list-view default-column-order ['name', 'size', 'type', 'owner', 'group', 'permissions', 'mime_type', 'where', 'date_modified', 'date_modified_with_time', 'date_accessed', 'date_created', 'recency', 'starred']
+org.gnome.nautilus.list-view default-visible-columns ['name', 'size', 'date_modified', 'starred']
+org.gnome.nautilus.list-view default-zoom-level 'standard'
+org.gnome.nautilus.list-view use-tree-view false
+
+========== MOUNTS ==========
+Drive(0): SAMSUNG MZAL4512HBLU-00BL2
+  Type: GProxyDrive (GProxyVolumeMonitorUDisks2)
+  Volume(0): Windows-SSD
+    Type: GProxyVolume (GProxyVolumeMonitorUDisks2)
+Volume(0): Google account (redacted)
+  Type: GProxyVolume (GProxyVolumeMonitorGoa)
