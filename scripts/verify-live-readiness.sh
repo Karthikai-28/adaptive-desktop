@@ -122,6 +122,9 @@ has_source() {
   "${REPO}/scripts/verify-backup-restore.sh"
   "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
   "${REPO}/scripts/verify-stability-suite.sh"
+  echo
+  echo "== Recorded physical checks =="
+  "${REPO}/scripts/record-live-verification.py" status
   verify "Reboot and suspend/resume require physical-session runs"
   verify "Long-running memory check: run scripts/verify-shell-memory.py --seconds 14400 --interval 60"
 
