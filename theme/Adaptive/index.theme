@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=X-GNOME-Metatheme
+Name=Adaptive
+Comment=Adaptive Desktop visual system over Ubuntu's Yaru
+
+[X-GNOME-Metatheme]
+GtkTheme=Adaptive
+MetacityTheme=Yaru-dark
+IconTheme=AdaptiveFilesIcons
+CursorTheme=Yaru
+ButtonLayout=appmenu:minimize,maximize,close
