@@ -191,7 +191,7 @@ function positionRail() {
         return;
 
     const panelHeight = Main.panel.height;
-    const railWidth = 72;
+    const dockWidth = 72;
 
     rail.set_position(
         monitor.x,
@@ -199,7 +199,7 @@ function positionRail() {
     );
 
     rail.set_size(
-        railWidth,
+        dockWidth,
         monitor.height - panelHeight
     );
 }
@@ -323,6 +323,8 @@ function createRail() {
         style_class: 'adaptive-rail',
         vertical: true,
         reactive: true,
+        x_expand: false,
+        y_expand: false,
     });
 
     const topGroup = new St.BoxLayout({
@@ -365,11 +367,11 @@ function createRail() {
 
     rail.add_child(topGroup);
 
-    rail.add_child(
-        new St.Widget({
-            y_expand: true,
-        })
-    );
+    const spacer = new St.Widget({
+        y_expand: true,
+    });
+
+    rail.add_child(spacer);
 
     const bottomGroup = new St.BoxLayout({
         style_class: 'adaptive-rail-bottom',
