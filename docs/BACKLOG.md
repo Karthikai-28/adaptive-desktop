@@ -168,10 +168,10 @@ Status:
 - ✅ Grid/list.
 - ✅ Search/filters.
 - ✅ Preview/Inspector.
-- ⬜ Split view.
+- ✅ Split view.
 - ✅ Multi-select.
-- ⬜ Transfers.
-- ⬜ Conflict resolution.
+- ✅ Transfers.
+- ✅ Conflict resolution.
 - 🟡 Trash/recovery.
 - 🟡 Devices/network.
 - ✅ Empty/error states.

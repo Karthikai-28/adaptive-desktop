@@ -138,6 +138,10 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.show_hidden = False
         self.query = ""
         self.view_mode = "grid"
+        self.split_enabled = False
+        self.secondary_current = Gio.File.new_for_path(str(Path.home()))
+        self.secondary_items = []
+        self.transfer_log = []
 
         self.sidebar_labels = []
         self._last_width = -1
@@ -291,6 +295,13 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
 
         bar.append(self.grid_btn)
         bar.append(self.list_btn)
+
+        self.split_btn = Gtk.ToggleButton()
+        self.split_btn.add_css_class("tool-button")
+        self.split_btn.set_child(pic("split.svg", 14))
+        self.split_btn.set_tooltip_text("Split view")
+        self.split_btn.connect("toggled", self._split_changed)
+        bar.append(self.split_btn)
 
         self.hidden_btn = Gtk.ToggleButton()
         self.hidden_btn.add_css_class("tool-button")
@@ -450,10 +461,16 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         header.append(self.folder_summary)
         browser.append(header)
 
+        self.browser_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.browser_paned.set_wide_handle(False)
+        self.browser_paned.set_hexpand(True)
+        self.browser_paned.set_vexpand(True)
+        self.browser_paned.add_css_class("browser-paned")
+        browser.append(self.browser_paned)
+
         self.scroll = Gtk.ScrolledWindow()
         self.scroll.set_hexpand(True)
         self.scroll.set_vexpand(True)
-        browser.append(self.scroll)
 
         self.flow = Gtk.FlowBox()
         self.flow.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -470,7 +487,63 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.flow.set_valign(Gtk.Align.START)
         self.scroll.set_child(self.flow)
 
+        self.browser_paned.set_start_child(self.scroll)
+        self.browser_paned.set_resize_start_child(True)
+        self.browser_paned.set_shrink_start_child(False)
+
+        self.secondary_browser = self._build_secondary_browser()
+        self.secondary_browser.set_visible(False)
+        self.browser_paned.set_end_child(self.secondary_browser)
+        self.browser_paned.set_resize_end_child(True)
+        self.browser_paned.set_shrink_end_child(False)
+
         return browser
+
+    def _build_secondary_browser(self):
+        pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        pane.add_css_class("secondary-browser")
+        pane.set_hexpand(True)
+        pane.set_vexpand(True)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        header.add_css_class("secondary-header")
+
+        header.append(pic("folder-generic.svg", 14))
+
+        self.secondary_title = Gtk.Label(label="Home", xalign=0)
+        self.secondary_title.set_hexpand(True)
+        self.secondary_title.set_ellipsize(3)
+        self.secondary_title.add_css_class("folder-title")
+        header.append(self.secondary_title)
+
+        self.secondary_path = Gtk.Label(label=str(Path.home()), xalign=1)
+        self.secondary_path.set_ellipsize(3)
+        self.secondary_path.add_css_class("folder-summary")
+        header.append(self.secondary_path)
+
+        pane.append(header)
+
+        self.secondary_scroll = Gtk.ScrolledWindow()
+        self.secondary_scroll.set_hexpand(True)
+        self.secondary_scroll.set_vexpand(True)
+        pane.append(self.secondary_scroll)
+
+        self.secondary_flow = Gtk.FlowBox()
+        self.secondary_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.secondary_flow.set_row_spacing(5)
+        self.secondary_flow.set_column_spacing(5)
+        self.secondary_flow.set_margin_top(10)
+        self.secondary_flow.set_margin_bottom(10)
+        self.secondary_flow.set_margin_start(10)
+        self.secondary_flow.set_margin_end(10)
+        self.secondary_flow.set_min_children_per_line(1)
+        self.secondary_flow.set_max_children_per_line(12)
+        self.secondary_flow.set_hexpand(True)
+        self.secondary_flow.set_halign(Gtk.Align.FILL)
+        self.secondary_flow.set_valign(Gtk.Align.START)
+        self.secondary_scroll.set_child(self.secondary_flow)
+
+        return pane
 
     def _build_preview_panel(self):
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -792,15 +865,27 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.grid_btn.set_active(mode == "grid")
         self.list_btn.set_active(mode == "list")
         self._render_items()
+        self._render_secondary_items()
         self._last_content_width = -1
+
+    def _split_changed(self, button):
+        self.split_enabled = button.get_active()
+        self.secondary_browser.set_visible(self.split_enabled)
+
+        if self.split_enabled:
+            self.secondary_current = self.current
+            self.populate_secondary()
+            self._message("Split View", "Second pane opened for file transfers.")
+        else:
+            self._message("Split View", "Second pane hidden.")
+
+        self._show_location_preview()
 
     # ------------------------------------------------------------------
     # Filesystem
     # ------------------------------------------------------------------
 
     def populate(self):
-        self.items = []
-
         self.back_btn.set_sensitive(bool(self.back_stack))
         self.forward_btn.set_sensitive(bool(self.forward_stack))
         self.up_btn.set_sensitive(self.current.get_parent() is not None)
@@ -814,6 +899,21 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
 
         self.folder_title.set_text(title)
 
+        try:
+            self.items = self._read_items(self.current)
+
+        except GLib.Error as error:
+            self._render_error(error.message)
+            return
+
+        self._render_items()
+        self._show_location_preview()
+
+        if self.split_enabled and self.secondary_current.equal(self.current):
+            self.populate_secondary()
+
+    def _read_items(self, location):
+        items = []
         attributes = ",".join(
             [
                 "standard::name",
@@ -827,13 +927,13 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             ]
         )
 
-        try:
-            enumerator = self.current.enumerate_children(
-                attributes,
-                Gio.FileQueryInfoFlags.NONE,
-                None,
-            )
+        enumerator = location.enumerate_children(
+            attributes,
+            Gio.FileQueryInfoFlags.NONE,
+            None,
+        )
 
+        try:
             while True:
                 info = enumerator.next_file(None)
                 if info is None:
@@ -846,9 +946,9 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
                 if not child_name:
                     continue
 
-                child = self.current.get_child(child_name)
+                child = location.get_child(child_name)
 
-                self.items.append(
+                items.append(
                     Item(
                         file=child,
                         name=info.get_display_name() or child_name,
@@ -859,16 +959,11 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
                         permissions=fmt_mode(info.get_attribute_uint32("unix::mode")),
                     )
                 )
-
+        finally:
             enumerator.close(None)
 
-        except GLib.Error as error:
-            self._render_error(error.message)
-            return
-
-        self.items.sort(key=lambda item: (not item.is_dir, item.name.casefold()))
-        self._render_items()
-        self._show_location_preview()
+        items.sort(key=lambda item: (not item.is_dir, item.name.casefold()))
+        return items
 
     def _render_items(self):
         self._clear_box(self.flow)
@@ -916,6 +1011,127 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             self.selection_label.set_text(f"{len(self.selected_items)} selected")
         else:
             self.selection_label.set_text(self.selected.name if self.selected else "")
+
+    def populate_secondary(self):
+        if not self.split_enabled:
+            return
+
+        try:
+            self.secondary_items = self._read_items(self.secondary_current)
+            self._render_secondary_items()
+        except GLib.Error as error:
+            self.secondary_items = []
+            self._render_secondary_error(error.message)
+
+    def _render_secondary_items(self):
+        if not hasattr(self, "secondary_flow"):
+            return
+
+        self._clear_box(self.secondary_flow)
+
+        title = self.secondary_current.get_basename() or "Files"
+        if self.secondary_current.get_path() == str(Path.home()):
+            title = "Home"
+
+        self.secondary_title.set_text(title)
+        self.secondary_path.set_text(self._raw_path(self.secondary_current))
+
+        if self.view_mode == "grid":
+            self.secondary_flow.set_max_children_per_line(12)
+        else:
+            self.secondary_flow.set_max_children_per_line(1)
+
+        if not self.secondary_items:
+            empty = Gtk.Label(label="This folder is empty", xalign=0.5)
+            empty.add_css_class("browser-empty")
+            empty.set_margin_top(42)
+            empty.set_margin_bottom(42)
+            self.secondary_flow.append(empty)
+            return
+
+        for item in self.secondary_items:
+            self.secondary_flow.append(self._secondary_item_widget(item))
+
+    def _render_secondary_error(self, text):
+        self._clear_box(self.secondary_flow)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_margin_top(80)
+
+        title = Gtk.Label(label="Unable to open this location")
+        title.add_css_class("error-title")
+
+        detail = Gtk.Label(label=text)
+        detail.set_wrap(True)
+        detail.set_max_width_chars(36)
+        detail.add_css_class("error-detail")
+
+        box.append(title)
+        box.append(detail)
+        self.secondary_flow.append(box)
+
+    def _secondary_item_widget(self, item):
+        button = Gtk.Button()
+        button.add_css_class("item")
+
+        if self.view_mode == "list":
+            button.add_css_class("item-list")
+            button.set_size_request(-1, 44)
+        else:
+            button.set_size_request(104, 88)
+
+        horizontal = self.view_mode == "list"
+        row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL if horizontal else Gtk.Orientation.VERTICAL,
+            spacing=4,
+        )
+        row.set_halign(Gtk.Align.FILL)
+        row.set_valign(Gtk.Align.CENTER)
+
+        asset = folder_asset(item.name) if item.is_dir else "file-generic.svg"
+        row.append(pic(asset, 38 if horizontal else 44))
+
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        text_box.set_hexpand(True)
+
+        name = Gtk.Label(label=item.name, xalign=0 if horizontal else 0.5)
+        name.set_ellipsize(3)
+        name.set_max_width_chars(16)
+        name.add_css_class("item-name")
+        text_box.append(name)
+
+        if not item.is_dir:
+            secondary = Gtk.Label(
+                label=fmt_size(item.size),
+                xalign=0 if horizontal else 0.5,
+            )
+            secondary.add_css_class("item-secondary")
+            text_box.append(secondary)
+
+        row.append(text_box)
+        button.set_child(row)
+
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(0)
+        gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        gesture.connect("pressed", self._secondary_item_pressed, item)
+        button.add_controller(gesture)
+
+        return button
+
+    def _secondary_item_pressed(self, _gesture, n_press, _x, _y, item):
+        if n_press == 1:
+            self.preview_title.set_text(item.name)
+            self.preview_subtitle.set_text("Split pane target")
+            return
+
+        if n_press == 2:
+            if item.is_dir:
+                self.secondary_current = item.file
+                self.populate_secondary()
+            else:
+                self._open_file(item)
 
     def _item_widget(self, item):
         button = Gtk.Button()
@@ -1043,6 +1259,13 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.preview_actions.append(
             self._action_button("copy.svg", "Copy Paths", self._action_copy_paths)
         )
+        if self.split_enabled:
+            self.preview_actions.append(
+                self._action_button("copy.svg", "Copy to Other Pane", self._action_copy_to_split)
+            )
+            self.preview_actions.append(
+                self._action_button("open.svg", "Move to Other Pane", self._action_move_to_split)
+            )
         self.preview_actions.append(
             self._action_button("delete.svg", "Move Selection to Trash", self._action_trash_selection)
         )
@@ -1112,6 +1335,10 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.preview_actions.append(
             self._action_button("pin.svg", pin_label, self._toggle_pin_current)
         )
+        if self.transfer_log:
+            self.preview_actions.append(
+                self._action_button("info.svg", "Transfer Center", self._show_transfer_center)
+            )
 
     def _show_item_preview(self, item):
         self._clear_box(self.preview_content)
@@ -1158,6 +1385,13 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.preview_actions.append(
             self._action_button("copy.svg", "Copy Path", self._action_copy)
         )
+        if self.split_enabled:
+            self.preview_actions.append(
+                self._action_button("copy.svg", "Copy to Other Pane", self._action_copy_to_split)
+            )
+            self.preview_actions.append(
+                self._action_button("open.svg", "Move to Other Pane", self._action_move_to_split)
+            )
         self.preview_actions.append(
             self._action_button("delete.svg", "Move to Trash", self._action_trash)
         )
@@ -2018,6 +2252,235 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
 
         except Exception as error:
             self._message("Compress failed", str(error))
+
+    def _action_copy_to_split(self, *_):
+        self._start_transfer(move=False)
+
+    def _action_move_to_split(self, *_):
+        self._start_transfer(move=True)
+
+    def _selected_for_transfer(self):
+        if self.selected_items:
+            return list(self.selected_items.values())
+        if self.selected:
+            return [self.selected]
+        return []
+
+    def _start_transfer(self, move=False):
+        if not self.split_enabled:
+            self._message("Split view", "Open split view to choose a destination pane.")
+            return
+
+        items = self._selected_for_transfer()
+        if not items:
+            self._message("Transfer", "Select files or folders first.")
+            return
+
+        destination_root = self.secondary_current.get_path()
+        if not destination_root:
+            self._message(
+                "Transfer unavailable",
+                "Copy and move currently support local filesystem destinations.",
+            )
+            return
+
+        local_items = []
+        for item in items:
+            path = item.file.get_path()
+            if not path:
+                self._message(
+                    "Transfer unavailable",
+                    "Remote-to-local transfers are not enabled in this build.",
+                )
+                return
+            local_items.append((item, Path(path)))
+
+        destination = Path(destination_root)
+        conflicts = [
+            path.name
+            for _item, path in local_items
+            if (destination / path.name).exists()
+        ]
+
+        if conflicts:
+            self._show_conflict_dialog(
+                conflicts,
+                lambda policy: self._perform_transfer(local_items, destination, move, policy),
+            )
+            return
+
+        self._perform_transfer(local_items, destination, move, "replace")
+
+    def _show_conflict_dialog(self, conflicts, callback):
+        dialog = Gtk.Dialog(
+            title="Name Conflict",
+            transient_for=self,
+            modal=True,
+        )
+        dialog.add_button("Skip", 1)
+        dialog.add_button("Keep Both", 2)
+        dialog.add_button("Replace", 3)
+        dialog.set_default_response(2)
+
+        content = dialog.get_content_area()
+        content.set_margin_top(14)
+        content.set_margin_bottom(14)
+        content.set_margin_start(14)
+        content.set_margin_end(14)
+        content.set_spacing(8)
+
+        title = Gtk.Label(label="Some names already exist", xalign=0)
+        title.add_css_class("dialog-title")
+        content.append(title)
+
+        preview = ", ".join(conflicts[:4])
+        if len(conflicts) > 4:
+            preview = f"{preview}, and {len(conflicts) - 4} more"
+
+        detail = Gtk.Label(
+            label=f"Choose how to handle: {preview}",
+            xalign=0,
+        )
+        detail.set_wrap(True)
+        detail.add_css_class("dialog-help")
+        content.append(detail)
+
+        def response(dlg, response_id):
+            dlg.destroy()
+            policy = {
+                1: "skip",
+                2: "keep",
+                3: "replace",
+            }.get(response_id, "skip")
+            callback(policy)
+
+        dialog.connect("response", response)
+        dialog.present()
+
+    def _perform_transfer(self, local_items, destination, move, conflict_policy):
+        action = "Moved" if move else "Copied"
+        count = 0
+        failures = []
+
+        for item, source in local_items:
+            try:
+                target = destination / source.name
+
+                same_target = False
+                try:
+                    same_target = source.resolve() == target.resolve()
+                except Exception:
+                    same_target = source == target
+
+                if same_target and move:
+                    continue
+
+                if same_target:
+                    target = self._unique_destination(target)
+                elif target.exists():
+                    if conflict_policy == "skip":
+                        continue
+                    if conflict_policy == "keep":
+                        target = self._unique_destination(target)
+                    elif conflict_policy == "replace":
+                        self._remove_existing_target(target)
+
+                if move:
+                    shutil.move(str(source), str(target))
+                elif source.is_dir():
+                    shutil.copytree(str(source), str(target))
+                else:
+                    shutil.copy2(str(source), str(target))
+
+                count += 1
+                self.transfer_log.insert(
+                    0,
+                    {
+                        "action": action,
+                        "name": item.name,
+                        "destination": str(destination),
+                        "time": datetime.now().strftime("%I:%M %p"),
+                    },
+                )
+
+            except Exception as error:
+                failures.append(f"{item.name}: {error}")
+
+        self.transfer_log = self.transfer_log[:12]
+        self.selected = None
+        self.selected_button = None
+        self.selected_items = {}
+        self.selected_buttons = {}
+        self.populate()
+        self.populate_secondary()
+
+        if failures:
+            self._message("Transfer incomplete", "\n".join(failures[:4]))
+        else:
+            self._message(action, f"{count} item{'s' if count != 1 else ''} to {destination}")
+
+    def _unique_destination(self, target):
+        if not target.exists():
+            return target
+
+        stem = target.stem
+        suffix = target.suffix
+        parent = target.parent
+
+        for index in range(1, 1000):
+            candidate = parent / f"{stem} copy {index}{suffix}"
+            if not candidate.exists():
+                return candidate
+
+        raise RuntimeError(f"Unable to choose a unique name for {target.name}")
+
+    def _remove_existing_target(self, target):
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+
+    def _show_transfer_center(self, *_):
+        self._clear_box(self.preview_content)
+        self._clear_box(self.preview_actions)
+
+        self._replace_header_icon("copy.svg")
+        self.preview_title.set_text("Transfer Center")
+        self.preview_subtitle.set_text("Recent local copy and move actions")
+
+        if not self.transfer_log:
+            self.preview_content.append(
+                Gtk.Label(label="No transfers yet", xalign=0)
+            )
+            return
+
+        self.preview_content.append(self._section_label("RECENT TRANSFERS"))
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        list_box.add_css_class("folder-preview-list")
+
+        for entry in self.transfer_log:
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            row.add_css_class("folder-preview-row")
+
+            label = Gtk.Label(
+                label=f"{entry['action']} {entry['name']}",
+                xalign=0,
+            )
+            label.set_ellipsize(3)
+            label.add_css_class("folder-preview-name")
+
+            detail = Gtk.Label(
+                label=f"{entry['time']} · {entry['destination']}",
+                xalign=0,
+            )
+            detail.set_ellipsize(3)
+            detail.add_css_class("folder-preview-size")
+
+            row.append(label)
+            row.append(detail)
+            list_box.append(row)
+
+        self.preview_content.append(list_box)
 
     # ------------------------------------------------------------------
     # Config / misc

@@ -172,6 +172,18 @@ window {
     background: rgba(125, 151, 188, 0.10);
 }
 
+.browser-paned > separator,
+.secondary-browser {
+    border-left: 1px solid rgba(125, 151, 188, 0.08);
+}
+
+.secondary-header {
+    min-height: 32px;
+    padding: 0 11px;
+    border-bottom: 1px solid rgba(125, 151, 188, 0.07);
+    background: rgba(10, 18, 30, 0.62);
+}
+
 .browser {
     background:
         radial-gradient(
