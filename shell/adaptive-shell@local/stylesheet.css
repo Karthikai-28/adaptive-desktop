@@ -96,6 +96,12 @@
     icon-size: 22px;
 }
 
+.adaptive-system-status-value {
+    max-width: 150px;
+    color: #96A4B8;
+    font-size: 10px;
+}
+
 /* ---------- Overview redesign ---------- */
 
 /* Remove the stock Ubuntu/GNOME bottom dash. Our left rail owns navigation. */

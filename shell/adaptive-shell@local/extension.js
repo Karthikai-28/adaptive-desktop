@@ -28,6 +28,7 @@ class AdaptiveShellV16 {
         
         this._volumeSlider = null;
         this._volumeStream = null;
+        this._statusLabels = {};
         this._mixerControl = new Gvc.MixerControl({ name: 'Adaptive Shell Volume Control' });
         this._mixerControl.open();
         this._mixerControl.connect('state-changed', () => this._onMixerStateChanged());
@@ -484,6 +485,18 @@ class AdaptiveShellV16 {
         this._systemCenterButton.add_child(icon);
         
         let actions = SystemActions.getDefault();
+
+        this._statusLabels = {
+            network: this._statusRow('network-wireless-signal-excellent-symbolic', 'Network'),
+            bluetooth: this._statusRow('bluetooth-active-symbolic', 'Bluetooth'),
+            battery: this._statusRow('battery-good-symbolic', 'Power'),
+            audio: this._statusRow('audio-speakers-symbolic', 'Audio'),
+        };
+
+        for (const key in this._statusLabels)
+            this._systemCenterButton.menu.addMenuItem(this._statusLabels[key].item);
+
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
         let volumeItem = new PopupMenu.PopupBaseMenuItem({ activate: false });
         let volumeIcon = new St.Icon({
@@ -529,6 +542,11 @@ class AdaptiveShellV16 {
         let powerItem = new PopupMenu.PopupMenuItem('Power Off...');
         powerItem.connect('activate', () => actions.activatePowerOff());
         this._systemCenterButton.menu.addMenuItem(powerItem);
+
+        this._systemCenterButton.menu.connect('open-state-changed', (menu, open) => {
+            if (open)
+                this._refreshSystemCenterStatus();
+        });
         
         bottom.add_child(this._systemCenterButton);
 
@@ -541,6 +559,146 @@ class AdaptiveShellV16 {
                 trackFullscreen: true,
             }
         );
+    }
+
+    _statusRow(iconName, title) {
+        const item = new PopupMenu.PopupBaseMenuItem({
+            activate: false,
+            reactive: false,
+        });
+
+        const icon = new St.Icon({
+            icon_name: iconName,
+            style_class: 'popup-menu-icon',
+        });
+
+        const titleLabel = new St.Label({
+            text: title,
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+
+        const valueLabel = new St.Label({
+            text: 'Checking...',
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: 'adaptive-system-status-value',
+        });
+
+        item.add_child(icon);
+        item.add_child(titleLabel);
+        item.add_child(valueLabel);
+
+        return { item, valueLabel };
+    }
+
+    _setStatus(key, value) {
+        if (this._statusLabels[key])
+            this._statusLabels[key].valueLabel.set_text(value);
+    }
+
+    _refreshSystemCenterStatus() {
+        this._refreshNetworkStatus();
+        this._refreshBluetoothStatus();
+        this._refreshPowerStatus();
+        this._refreshAudioStatus();
+    }
+
+    _refreshNetworkStatus() {
+        this._readCommand(
+            ['nmcli', '-t', '-f', 'STATE', 'general'],
+            (text) => this._setStatus('network', this._humanStatus(text))
+        );
+    }
+
+    _refreshBluetoothStatus() {
+        this._readCommand(
+            ['bluetoothctl', 'show'],
+            (text) => {
+                if (!text) {
+                    this._setStatus('bluetooth', 'Unavailable');
+                    return;
+                }
+
+                const powered = this._matchLine(text, /Powered:\s+(yes|no)/i);
+                if (powered)
+                    this._setStatus('bluetooth', powered.toLowerCase() === 'yes' ? 'On' : 'Off');
+                else
+                    this._setStatus('bluetooth', 'Unavailable');
+            }
+        );
+    }
+
+    _refreshPowerStatus() {
+        this._readCommand(
+            ['upower', '-i', '/org/freedesktop/UPower/devices/DisplayDevice'],
+            (text) => {
+                if (!text) {
+                    this._setStatus('battery', 'Unavailable');
+                    return;
+                }
+
+                const percentage = this._matchLine(text, /percentage:\s+([^\n]+)/i);
+                const state = this._matchLine(text, /state:\s+([^\n]+)/i);
+
+                if (percentage && state)
+                    this._setStatus('battery', `${percentage.trim()} · ${this._humanStatus(state)}`);
+                else if (percentage)
+                    this._setStatus('battery', percentage.trim());
+                else
+                    this._setStatus('battery', 'Unavailable');
+            }
+        );
+    }
+
+    _refreshAudioStatus() {
+        if (!this._volumeStream) {
+            this._setStatus('audio', 'Unavailable');
+            return;
+        }
+
+        const description =
+            this._volumeStream.get_description() ||
+            this._volumeStream.get_name() ||
+            'Default output';
+
+        this._setStatus('audio', description);
+    }
+
+    _readCommand(argv, callback) {
+        let proc;
+
+        try {
+            proc = Gio.Subprocess.new(
+                argv,
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE
+            );
+        } catch (e) {
+            callback('');
+            return;
+        }
+
+        proc.communicate_utf8_async(null, null, (source, result) => {
+            try {
+                const [, stdout] = source.communicate_utf8_finish(result);
+                callback((stdout || '').trim());
+            } catch (e) {
+                callback('');
+            }
+        });
+    }
+
+    _matchLine(text, regex) {
+        const match = text.match(regex);
+        return match ? match[1] : '';
+    }
+
+    _humanStatus(value) {
+        const clean = (value || '').trim().replace(/-/g, ' ');
+
+        if (!clean)
+            return 'Unavailable';
+
+        return clean.charAt(0).toUpperCase() + clean.slice(1);
     }
 
     _dockButton(iconFile, name, callback) {
