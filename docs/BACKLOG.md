@@ -307,6 +307,12 @@ the handoff: do not mark the Figma-skin items complete without the exports.
   on this.
 - GNOME disables user extensions on the lock screen, so `gnome-extensions
   enable` looks like a no-op (state stays DISABLED, no error) until unlock.
+- Window-manager keybindings beat `media-keys` custom keybindings. A custom
+  shortcut that duplicates one in `org.gnome.desktop.wm.keybindings` never
+  grabs, and the only symptom is a "Failed to grab accelerator" line at login.
+- Apps launched from Files inherit its journal identifier, so Antigravity's
+  Electron errors appear under `org.gnome.Nautilus[pid]`. Check the pid with
+  `ps` before treating those as file-manager faults.
 - GNOME 42 caches an extension's JS module for the life of the shell process
   and `ReloadExtension` is deprecated, so disable/enable re-runs the old code.
   Changed rail source needs `reload-adaptive-shell.sh --restart-shell` (X11)
