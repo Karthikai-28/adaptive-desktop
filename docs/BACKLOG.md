@@ -127,21 +127,21 @@ Status:
 
 ### Current
 
-- 🟡 First functional shell menu exists with volume, settings, lock, suspend, logout, and power actions.
-- 🟡 Read-only status rows refresh on open for network, Bluetooth, power, and audio output.
+- ✅ First functional shell menu exists with volume, settings, lock, suspend, logout, and power actions.
+- ✅ Read-only status rows refresh on open for network, Bluetooth, power, and audio output.
 - 🔬 Audio output selection submenu exists and needs live device verification.
 - 🔬 Restart and shut down entries use GNOME-native confirmation actions where available.
-- 🟡 Performance row shows load and memory summary.
+- ✅ Performance row shows load and memory summary.
 
 ### Required
 
-- 🟡 Network status.
-- 🟡 Bluetooth status.
+- ✅ Network status.
+- ✅ Bluetooth status.
 - 🔬 Audio device selection.
-- 🟡 Audio output status.
+- ✅ Audio output status.
 - ✅ Volume.
-- 🟡 Battery/power status.
-- 🟡 Performance summary.
+- ✅ Battery/power status.
+- ✅ Performance summary.
 - ✅ Notifications/focus.
 - ✅ Settings launcher.
 - ✅ Lock.
@@ -255,12 +255,12 @@ Status:
 
 - ✅ Shell smoke tests.
 - 🟡 No-extension fallback test.
-- ⬜ GDM fallback test.
-- ⬜ Reboot test.
-- ⬜ Suspend/resume test.
-- ⬜ External monitor test.
-- ⬜ File transfer stress test.
-- ⬜ Long-running shell memory test.
+- 🔬 GDM fallback test.
+- 🔬 Reboot test.
+- 🔬 Suspend/resume test.
+- 🔬 External monitor test.
+- ✅ File transfer stress test.
+- 🔬 Long-running shell memory test.
 - ✅ Update compatibility check.
 - 🟡 Backup/restore test.
 
