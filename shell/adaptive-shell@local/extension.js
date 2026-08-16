@@ -1533,22 +1533,50 @@ class AdaptiveShellV16 {
         return false;
     }
 
+    // Deliberately not "the focused window is maximized". A quick-settings
+    // menu, a Ctrl+Alt+T terminal or an upload dialog takes focus away from
+    // the maximized window without moving it, and a focus-only test then said
+    // "nothing is maximized" and revealed the dock over content the user was
+    // still reading. What matters is whether a maximized window occupies this
+    // monitor at all.
     _dock26MonitorHasFocusedMaximized(index) {
         if (!this._dock26HideOnMaximized)
             return false;
 
-        const window = global.display.get_focus_window();
-        if (!window)
-            return false;
+        const focused = global.display.get_focus_window();
 
         try {
-            if (window.get_monitor() !== index)
-                return false;
+            if (
+                focused &&
+                focused.get_monitor() === index &&
+                this._dock26WindowFullyMaximized(focused)
+            )
+                return true;
         } catch (e) {
-            return false;
         }
 
-        return this._dock26WindowFullyMaximized(window);
+        try {
+            const workspace =
+                global.workspace_manager.get_active_workspace();
+
+            if (!workspace)
+                return false;
+
+            for (const window of workspace.list_windows()) {
+                try {
+                    if (
+                        window.get_monitor() === index &&
+                        !window.minimized &&
+                        this._dock26WindowFullyMaximized(window)
+                    )
+                        return true;
+                } catch (e) {
+                }
+            }
+        } catch (e) {
+        }
+
+        return false;
     }
 
     _dock26MonitorNeedsHide(index) {
@@ -1740,6 +1768,11 @@ class AdaptiveShellV16 {
         if (!this._rail)
             return;
 
+        // The pointer can still be over an icon when the dock slides away, and
+        // the tooltip would then be left floating on the wallpaper with no dock
+        // under it.
+        this._hideTooltip();
+
         this._rail.reactive = false;
         this._rail.remove_all_transitions();
 
@@ -1802,32 +1835,29 @@ class AdaptiveShellV16 {
         const hidden =
             this._dock26MonitorNeedsHide(index);
 
-        if (hidden) {
-            this._dockChrome.set_position(
-                monitor.x,
-                monitor.y + monitor.height - 1
-            );
-            this._dockChrome.set_size(
-                monitor.width,
-                1
-            );
+        // The reserved strip never changes size.
+        //
+        // It used to grow to the dock's height when the dock showed and shrink
+        // to 1px when it hid, which re-ran the work-area calculation and
+        // resized every maximized window on the monitor. Opening a menu or a
+        // terminal therefore made the window visibly jump, snap shorter, and
+        // snap back - the flicker in the screencast. An auto-hiding dock is an
+        // overlay: it reserves nothing and windows keep the full screen.
+        this._dockChrome.set_position(
+            monitor.x,
+            monitor.y + monitor.height - 1
+        );
+        this._dockChrome.set_size(
+            monitor.width,
+            1
+        );
 
+        if (hidden) {
             if (this._dock26EdgeRevealed)
                 this._dock26ShowDock(true);
             else
                 this._dock26HideDock(true);
         } else {
-            this._dockChrome.set_position(
-                monitor.x,
-                monitor.y +
-                    monitor.height -
-                    this._dock26ReservedHeight
-            );
-            this._dockChrome.set_size(
-                monitor.width,
-                this._dock26ReservedHeight
-            );
-
             this._dock26EdgeRevealed = false;
             this._dock26ShowDock(false);
         }
