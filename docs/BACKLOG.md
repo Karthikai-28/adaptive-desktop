@@ -266,11 +266,13 @@ Status:
 
 ## Immediate next work
 
-1. Verify docked navigation rail struts with maximized windows.
-2. Verify the restored Workspaces, Command, and System rail menus open and
-   land to the right of the rail.
-3. Verify GNOME overview search discovers registered projects.
-4. Continue System Center parity: safe toggles and reboot/shutdown confirmations.
+1. Click through the restored Workspaces and Command rail menus (System
+   Center is confirmed opening to the right of the rail).
+2. Type a project name in the overview and confirm results appear; the
+   provider itself answers `GetInitialResultSet` and passes `should_show()`.
+3. Continue System Center parity: safe toggles and reboot/shutdown confirmations.
+4. Verify audio output switching — five sinks are present on this machine,
+   so the submenu can finally be exercised.
 
 ## Known live-only traps
 
@@ -281,3 +283,11 @@ Status:
   on this.
 - GNOME disables user extensions on the lock screen, so `gnome-extensions
   enable` looks like a no-op (state stays DISABLED, no error) until unlock.
+- GNOME 42 caches an extension's JS module for the life of the shell process
+  and `ReloadExtension` is deprecated, so disable/enable re-runs the old code.
+  Changed rail source needs `reload-adaptive-shell.sh --restart-shell` (X11)
+  or a fresh login.
+- `adaptive-project-context.desktop` must keep `NoDisplay=false`. GNOME's
+  `loadRemoteSearchProviders` drops any provider whose `DesktopId` fails
+  `should_show()`, so hiding the service from the app grid also removes
+  project results from overview search.
