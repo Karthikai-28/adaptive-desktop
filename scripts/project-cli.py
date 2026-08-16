@@ -71,6 +71,75 @@ def do_switch(args):
     else:
         print(f"Project '{args.target}' not found.")
 
+def do_rename(args):
+    proxy = get_proxy()
+    pid = resolve_project_id(proxy, args.target)
+    if not pid:
+        print(f"Project '{args.target}' not found.")
+        return
+
+    res = proxy.call_sync(
+        "RenameProject",
+        GLib.Variant("(ss)", (pid, args.name)),
+        Gio.DBusCallFlags.NONE,
+        -1,
+        None,
+    )
+    print(f"Renamed project: {res.unpack()[0]}")
+
+def do_remove(args):
+    proxy = get_proxy()
+    pid = resolve_project_id(proxy, args.target)
+    if not pid:
+        print(f"Project '{args.target}' not found.")
+        return
+
+    res = proxy.call_sync(
+        "RemoveProject",
+        GLib.Variant("(s)", (pid,)),
+        Gio.DBusCallFlags.NONE,
+        -1,
+        None,
+    )
+    print(f"Removed project: {res.unpack()[0]}")
+
+def do_update(args):
+    proxy = get_proxy()
+    pid = resolve_project_id(proxy, args.target)
+    if not pid:
+        print(f"Project '{args.target}' not found.")
+        return
+
+    patch = {}
+    if args.accent is not None:
+        patch["accent"] = args.accent
+    if args.workspace is not None:
+        patch["workspace_index"] = args.workspace
+    if args.pin:
+        patch["pinned_dirs"] = [str(Path(path).resolve()) for path in args.pin]
+
+    res = proxy.call_sync(
+        "UpdateProject",
+        GLib.Variant("(ss)", (pid, json.dumps(patch))),
+        Gio.DBusCallFlags.NONE,
+        -1,
+        None,
+    )
+    print(f"Updated project: {res.unpack()[0]}")
+
+def resolve_project_id(proxy, target):
+    res = proxy.call_sync("ListProjects", None, Gio.DBusCallFlags.NONE, -1, None)
+    projects = json.loads(res.unpack()[0])
+
+    if target in projects:
+        return target
+
+    for pid, pdata in projects.items():
+        if pdata["name"].lower() == target.lower():
+            return pid
+
+    return None
+
 def do_list(args):
     proxy = get_proxy()
     res = proxy.call_sync("ListProjects", None, Gio.DBusCallFlags.NONE, -1, None)
@@ -107,6 +176,19 @@ def main():
     
     sw_p = sub.add_parser("switch", help="Switch active project")
     sw_p.add_argument("target", help="Project ID or name to switch to")
+
+    rename_p = sub.add_parser("rename", help="Rename a project")
+    rename_p.add_argument("target", help="Project ID or name")
+    rename_p.add_argument("name", help="New display name")
+
+    remove_p = sub.add_parser("remove", help="Remove a project")
+    remove_p.add_argument("target", help="Project ID or name")
+
+    update_p = sub.add_parser("update", help="Update optional project metadata")
+    update_p.add_argument("target", help="Project ID or name")
+    update_p.add_argument("--accent", help="Optional project accent color")
+    update_p.add_argument("--workspace", type=int, help="Workspace index to associate")
+    update_p.add_argument("--pin", action="append", help="Pinned project folder; repeat for more")
     
     args = parser.parse_args()
     
@@ -118,6 +200,12 @@ def main():
         do_add(args)
     elif args.command == "switch":
         do_switch(args)
+    elif args.command == "rename":
+        do_rename(args)
+    elif args.command == "remove":
+        do_remove(args)
+    elif args.command == "update":
+        do_update(args)
     elif args.command == "clear":
         do_clear(args)
 

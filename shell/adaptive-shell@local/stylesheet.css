@@ -1,18 +1,19 @@
-/* Adaptive Desktop Shell v1.5 — GNOME Shell 42 */
+/* Adaptive Desktop Shell v1.6 — GNOME Shell 42 */
 
 #panel {
-    background-color: rgba(7, 16, 26, 0.96);
+    background-color: rgba(7, 16, 26, 0.98);
     border-bottom: 1px solid rgba(120, 169, 255, 0.10);
     box-shadow: none;
 }
 
+/* ---------- top identity ---------- */
+
 .adaptive-brand-button {
-    min-width: 76px;
-    padding: 0 10px;
+    min-width: 78px;
     margin: 1px 2px 1px 6px;
+    padding: 0 10px;
     border-radius: 7px;
     background-color: transparent;
-    color: #78A9FF;
 }
 
 .adaptive-brand-button:hover {
@@ -27,36 +28,37 @@
 }
 
 .adaptive-project-label {
-    margin-left: 5px;
+    margin-left: 4px;
     color: #96A4B8;
     font-size: 9px;
     font-weight: 600;
 }
 
-/*
- * The real GNOME dateMenu remains intact. This style only changes its
- * appearance; clicking it still opens the normal calendar/notifications UI.
- */
+/* ---------- real GNOME clock/calendar ---------- */
+
 .adaptive-stock-clock {
+    min-height: 22px;
     margin: 1px 3px;
-    padding: 0 10px;
+    padding: 0 11px;
     border-radius: 7px;
-    background-color: rgba(17, 26, 40, 0.56);
-    border: 1px solid rgba(120, 169, 255, 0.08);
+    border: 1px solid rgba(120, 169, 255, 0.09);
+    background-color: rgba(17, 26, 40, 0.64);
     color: #F2F6EF;
 }
 
 .adaptive-stock-clock:hover,
 .adaptive-stock-clock:focus {
-    background-color: rgba(31, 48, 72, 0.76);
-    border-color: rgba(120, 169, 255, 0.18);
+    border-color: rgba(120, 169, 255, 0.19);
+    background-color: rgba(30, 47, 70, 0.82);
 }
+
+/* ---------- left rail ---------- */
 
 .adaptive-rail {
     width: 58px;
     padding: 7px 6px 8px 6px;
     spacing: 5px;
-    background-color: rgba(7, 16, 26, 0.97);
+    background-color: rgba(7, 16, 26, 0.98);
     border-right: 1px solid rgba(48, 66, 92, 0.32);
     box-shadow: 5px 0 20px rgba(0, 0, 0, 0.13);
 }
@@ -65,35 +67,458 @@
     spacing: 5px;
 }
 
-.adaptive-rail-bottom {
-    padding-bottom: 1px;
-}
-
 .adaptive-dock-button {
     width: 46px;
     height: 46px;
     padding: 0;
     border-radius: 10px;
-    background-color: transparent;
     border: 1px solid transparent;
+    background-color: transparent;
     color: #A9BBD3;
 }
 
 .adaptive-dock-button:hover {
-    background-color: rgba(27, 42, 61, 0.90);
-    border-color: rgba(120, 169, 255, 0.15);
+    border-color: rgba(120, 169, 255, 0.16);
+    background-color: rgba(27, 42, 61, 0.92);
 }
 
 .adaptive-dock-button:focus {
-    background-color: rgba(27, 42, 61, 0.90);
-    border-color: rgba(102, 224, 255, 0.28);
+    border-color: rgba(102, 224, 255, 0.30);
+    background-color: rgba(27, 42, 61, 0.92);
 }
 
 .adaptive-dock-button:active {
-    background-color: rgba(120, 169, 255, 0.14);
-    border-color: rgba(120, 169, 255, 0.26);
+    border-color: rgba(120, 169, 255, 0.28);
+    background-color: rgba(120, 169, 255, 0.15);
 }
 
 .adaptive-dock-icon {
     icon-size: 22px;
+}
+
+/* ---------- Overview redesign ---------- */
+
+/* Remove the stock Ubuntu/GNOME bottom dash. Our left rail owns navigation. */
+#dash {
+    opacity: 0;
+    height: 0;
+    min-height: 0;
+}
+
+#dash .dash-background {
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+#dash .dash-item-container {
+    opacity: 0;
+}
+
+/* Calm Adaptive overview background. */
+#overviewGroup {
+    background-color: #08111B;
+}
+
+.overview-controls {
+    spacing: 22px;
+}
+
+/* Search surface */
+.search-entry {
+    width: 360px;
+    min-height: 38px;
+    padding: 3px 13px;
+    border-radius: 12px;
+    border: 1px solid rgba(120, 169, 255, 0.15);
+    background-color: rgba(15, 27, 43, 0.88);
+    color: #F2F6EF;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
+
+.search-entry:hover,
+.search-entry:focus {
+    border-color: rgba(102, 224, 255, 0.28);
+    background-color: rgba(21, 36, 55, 0.94);
+}
+
+/* Workspace preview frames */
+.workspace-thumbnail {
+    border-radius: 14px;
+    background-color: rgba(17, 26, 40, 0.76);
+}
+
+.workspace-thumbnail-indicator {
+    border: 2px solid rgba(120, 169, 255, 0.92);
+    border-radius: 14px;
+}
+
+.workspace-thumbnails {
+    spacing: 12px;
+}
+
+/* App grid / overview labels */
+.app-well-app .overview-icon,
+.grid-search-result .overview-icon {
+    border-radius: 12px;
+}
+
+.app-well-app:hover .overview-icon,
+.grid-search-result:hover .overview-icon {
+    background-color: rgba(120, 169, 255, 0.10);
+}
+
+/* ===== Adaptive Calendar Center v1.6.2 =====
+ *
+ * Scoped to GNOME Shell's date/time menu classes and #calendarArea.
+ * Functional behavior remains GNOME-native.
+ */
+
+/* ---------------------------------------------------------------
+ * Overall popup
+ * --------------------------------------------------------------- */
+
+.calendar-menu .popup-menu-content {
+    padding: 0;
+    border-radius: 16px;
+    border: 1px solid rgba(120, 169, 255, 0.14);
+    background-color: rgba(7, 16, 26, 0.985);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
+}
+
+#calendarArea {
+    padding: 10px;
+    spacing: 10px;
+    color: #F2F6EF;
+}
+
+/* ---------------------------------------------------------------
+ * Left notification column
+ * --------------------------------------------------------------- */
+
+.message-list {
+    width: 350px;
+    padding: 4px 10px 8px 4px;
+    color: #F2F6EF;
+}
+
+.message-list-sections {
+    spacing: 9px;
+}
+
+.message-list-section {
+    spacing: 7px;
+}
+
+.message-list-section-title {
+    margin: 2px 4px 4px 4px;
+    color: #96A4B8;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.message-list-section-list {
+    spacing: 7px;
+}
+
+/* Empty state */
+.message-list-placeholder {
+    color: #73869F;
+}
+
+.message-list-placeholder > StIcon {
+    color: #5F7693;
+    icon-size: 54px;
+}
+
+.message-list-placeholder > StLabel {
+    color: #8799B0;
+    font-size: 15px;
+}
+
+/* Individual notifications */
+.message,
+.notification-banner {
+    margin: 0 2px;
+    padding: 10px 12px;
+    border-radius: 11px;
+    border: 1px solid rgba(120, 169, 255, 0.09);
+    background-color: rgba(17, 26, 40, 0.88);
+    box-shadow: none;
+}
+
+.message:hover,
+.notification-banner:hover {
+    border-color: rgba(120, 169, 255, 0.20);
+    background-color: rgba(24, 38, 58, 0.94);
+}
+
+.message:focus,
+.notification-banner:focus {
+    border-color: rgba(102, 224, 255, 0.28);
+    background-color: rgba(24, 38, 58, 0.96);
+}
+
+.message-content {
+    spacing: 6px;
+}
+
+.message-title {
+    color: #EFF5FC;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.message-body {
+    color: #A5B4C8;
+    font-size: 10px;
+}
+
+.message-secondary-bin {
+    color: #7F91A9;
+}
+
+/* Do Not Disturb */
+.dnd-button {
+    margin: 7px 3px 1px 3px;
+    padding: 7px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(120, 169, 255, 0.08);
+    background-color: rgba(13, 25, 40, 0.70);
+    color: #D6E0ED;
+}
+
+.dnd-button:hover {
+    background-color: rgba(24, 38, 58, 0.90);
+    border-color: rgba(120, 169, 255, 0.17);
+}
+
+#calendarArea .toggle-switch {
+    background-color: rgba(48, 66, 92, 0.82);
+}
+
+#calendarArea .toggle-switch:checked {
+    background-color: #78A9FF;
+}
+
+/* ---------------------------------------------------------------
+ * Divider / calendar column
+ * --------------------------------------------------------------- */
+
+.datemenu-calendar-column {
+    width: 294px;
+    padding: 5px 3px 4px 13px;
+    spacing: 8px;
+    border-left: 1px solid rgba(48, 66, 92, 0.36);
+    color: #D9E3EF;
+}
+
+.datemenu-displays-box {
+    spacing: 8px;
+}
+
+/* Today/date header */
+.datemenu-today-button {
+    min-height: 68px;
+    padding: 10px 11px;
+    border-radius: 11px;
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(16, 29, 47, 0.80);
+    color: #F2F6EF;
+    box-shadow: none;
+}
+
+.datemenu-today-button:hover,
+.datemenu-today-button:focus {
+    border-color: rgba(120, 169, 255, 0.22);
+    background-color: rgba(22, 38, 59, 0.92);
+}
+
+.datemenu-today-button .day-label {
+    color: #8FA2BB;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.datemenu-today-button .date-label {
+    color: #DCE8F5;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+/* Month navigation */
+.calendar {
+    padding: 4px 2px 2px 2px;
+    background-color: transparent;
+    color: #D5DFEB;
+}
+
+.calendar-month-label {
+    min-height: 27px;
+    margin: 1px 2px 4px 2px;
+    padding: 3px 10px;
+    border-radius: 8px;
+    color: #EEF4FB;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.pager-button {
+    width: 28px;
+    height: 28px;
+    margin: 1px;
+    border-radius: 8px;
+    color: #91A4BD;
+    background-color: transparent;
+}
+
+.pager-button:hover,
+.pager-button:focus {
+    color: #EAF4FF;
+    background-color: rgba(120, 169, 255, 0.10);
+}
+
+.pager-button:active {
+    background-color: rgba(120, 169, 255, 0.17);
+}
+
+/* Calendar grid */
+.calendar-day-base {
+    width: 28px;
+    height: 28px;
+    margin: 1px;
+    padding: 1px;
+    border-radius: 8px;
+    color: #C6D2E0;
+    font-size: 9px;
+    text-align: center;
+}
+
+.calendar-day-base:hover,
+.calendar-day-base:focus {
+    background-color: rgba(120, 169, 255, 0.10);
+    color: #F2F6EF;
+}
+
+.calendar-day-heading {
+    color: #71859F;
+    font-size: 8px;
+    font-weight: 700;
+    background-color: transparent;
+}
+
+.calendar-work-day {
+    color: #CCD7E4;
+}
+
+.calendar-nonwork-day {
+    color: #A8B7C9;
+}
+
+.calendar-other-month-day {
+    color: #556A84;
+    opacity: 0.55;
+}
+
+/* Replace Ubuntu orange today marker with Adaptive blue/cyan */
+.calendar-today {
+    color: #07101A;
+    font-weight: 800;
+    background-color: #78A9FF;
+    border: 1px solid rgba(102, 224, 255, 0.55);
+    box-shadow: 0 0 0 2px rgba(120, 169, 255, 0.09);
+}
+
+.calendar-today:hover,
+.calendar-today:focus,
+.calendar-today:selected {
+    color: #07101A;
+    background-color: #8CB7FF;
+    border-color: rgba(102, 224, 255, 0.75);
+}
+
+.calendar-day-with-events {
+    color: #E8EFF8;
+}
+
+.calendar-week-number {
+    color: #6E829C;
+    background-color: rgba(17, 26, 40, 0.68);
+}
+
+/* ---------------------------------------------------------------
+ * Events / world clocks / weather cards
+ * --------------------------------------------------------------- */
+
+.events-button,
+.world-clocks-button,
+.weather-button {
+    margin-top: 2px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(120, 169, 255, 0.09);
+    background-color: rgba(17, 26, 40, 0.82);
+    color: #DCE6F2;
+    box-shadow: none;
+}
+
+.events-button:hover,
+.events-button:focus,
+.world-clocks-button:hover,
+.world-clocks-button:focus,
+.weather-button:hover,
+.weather-button:focus {
+    border-color: rgba(120, 169, 255, 0.19);
+    background-color: rgba(24, 38, 58, 0.92);
+}
+
+.events-section-title,
+.events-title,
+.world-clocks-header,
+.weather-header {
+    color: #8295AE;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.events-list {
+    spacing: 6px;
+}
+
+.event-time {
+    color: #78A9FF;
+    font-size: 9px;
+}
+
+.events-button StLabel,
+.world-clocks-button StLabel,
+.weather-button StLabel {
+    color: #D8E3EF;
+}
+
+/* ---------------------------------------------------------------
+ * Compact notification control buttons
+ * --------------------------------------------------------------- */
+
+.message-list-clear-button,
+.message-list-section-close {
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 8px;
+    color: #8FA2BA;
+    background-color: transparent;
+}
+
+.message-list-clear-button:hover,
+.message-list-section-close:hover {
+    color: #F2F6EF;
+    background-color: rgba(120, 169, 255, 0.10);
+}
+
+/* Keep the top clock pill visually connected to the popup */
+.adaptive-stock-clock {
+    border-color: rgba(120, 169, 255, 0.15);
+    background-color: rgba(14, 27, 44, 0.90);
+    color: #F2F6EF;
+    font-weight: 650;
 }

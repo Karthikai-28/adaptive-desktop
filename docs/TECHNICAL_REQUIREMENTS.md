@@ -158,6 +158,36 @@ Must support:
 
 No personal or calibration-specific project names should be hardcoded in generic UI.
 
+Current local service:
+
+```text
+services/project-context/main.py
+```
+
+Persistent registry:
+
+```text
+~/.config/adaptive-desktop/projects.json
+```
+
+Install/verify:
+
+```bash
+./scripts/install-project-context-service.sh
+./scripts/verify-project-context-service.sh
+```
+
+CLI:
+
+```bash
+./scripts/project-cli.py add ~/some-project "Some Project" --active
+./scripts/project-cli.py list
+./scripts/project-cli.py switch "Some Project"
+./scripts/project-cli.py rename "Some Project" "New Name"
+./scripts/project-cli.py update "New Name" --accent "#78A9FF" --workspace 0 --pin ~/some-project/docs
+./scripts/project-cli.py remove "New Name"
+```
+
 ## File Explorer
 
 Must support:

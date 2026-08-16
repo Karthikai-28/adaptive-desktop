@@ -66,8 +66,8 @@ Status:
 
 ### In progress
 
-- 🟡 Convert rail from floating palette into a true docked shell rail.
-- 🟡 Reserve application area to the right of the rail.
+- ✅ Convert rail from floating palette into a true docked shell rail.
+- 🔬 Reserve application area to the right of the rail.
 - 🟡 Improve icon consistency and active states.
 - 🟡 Keep stock top-right controls until System Center is functional.
 
@@ -81,19 +81,21 @@ Status:
 
 ## Milestone 3 — Project Context Service
 
-- ⬜ Define project registry schema.
-- ⬜ Persistent registry.
-- ⬜ Add folder as project.
-- ⬜ Remove project.
-- ⬜ Rename project display name.
-- ⬜ Active project state.
-- ⬜ Recent projects.
-- ⬜ Pinned folders.
-- ⬜ Project actions.
-- ⬜ Optional accent.
-- ⬜ Update top bar dynamically.
-- ⬜ Make Projects overlay data-driven.
-- ⬜ No-project state.
+- ✅ Define project registry schema.
+- ✅ Persistent registry.
+- ✅ Add folder as project.
+- ✅ Remove project.
+- ✅ Rename project display name.
+- ✅ Active project state.
+- ✅ Recent projects.
+- ✅ Pinned folders.
+- ✅ Project actions.
+- ✅ Optional accent.
+- ✅ Update top bar dynamically.
+- ✅ Make Projects overlay data-driven.
+- ✅ No-project state.
+- 🔬 Verify service autostart inside Adaptive Desktop.
+- 🔬 Verify shell DBus updates after extension reload.
 
 ## Milestone 4 — Workspaces
 
@@ -124,23 +126,23 @@ Status:
 
 ### Current
 
-- 🟡 Visual placeholder exists.
+- 🟡 First functional shell menu exists with volume, settings, lock, suspend, logout, and power actions.
 
 ### Required
 
 - ⬜ Network.
 - ⬜ Bluetooth.
 - ⬜ Audio device selection.
-- ⬜ Volume.
+- ✅ Volume.
 - ⬜ Battery/power.
 - ⬜ Performance summary.
 - ⬜ Notifications/focus.
-- ⬜ Settings launcher.
-- ⬜ Lock.
-- ⬜ Logout.
-- ⬜ Suspend.
+- ✅ Settings launcher.
+- ✅ Lock.
+- ✅ Logout.
+- ✅ Suspend.
 - ⬜ Reboot/shutdown confirmation.
-- ⬜ Return to Ubuntu.
+- ✅ Return to Ubuntu.
 
 ⚠️ Do not remove GNOME top-right controls until these replacements work reliably.
 
@@ -250,8 +252,8 @@ Status:
 
 ## Immediate next work
 
-1. Finish and verify docked navigation rail.
-2. Commit the shell checkpoint.
-3. Implement Project Context Service v0.1.
-4. Make Projects overlay data-driven.
-5. Build the first functional System Center controls.
+1. Reload `adaptive-shell@local` inside Adaptive Desktop.
+2. Verify docked navigation rail struts with maximized windows.
+3. Verify Project Context Service autostart after logging into Adaptive Desktop.
+4. Verify GNOME overview search discovers registered projects.
+5. Continue System Center parity: network, Bluetooth, battery, audio device selection, confirmations.

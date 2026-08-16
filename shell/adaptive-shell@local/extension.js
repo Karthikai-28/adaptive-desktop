@@ -1,34 +1,58 @@
 const { St, Gio, GLib, Clutter } = imports.gi;
 const Main = imports.ui.main;
+const PanelMenu = imports.ui.panelMenu;
+const PopupMenu = imports.ui.popupMenu;
+const SystemActions = imports.misc.systemActions;
 const ExtensionUtils = imports.misc.extensionUtils;
+const Gvc = imports.gi.Gvc;
+const Slider = imports.ui.slider;
 
 const Me = ExtensionUtils.getCurrentExtension();
 
 let _shell = null;
 
-class AdaptiveShell {
+class AdaptiveShellV16 {
     constructor() {
         this._rail = null;
         this._brandButton = null;
+        this._projectButton = null;
+        this._systemCenterButton = null;
+        this._workspacesButton = null;
         this._projectLabel = null;
+        this._activeProjectId = null;
         this._monitorChangedId = 0;
         this._hiddenActors = [];
         this._clockActor = null;
+        this._clockDisplay = null;
+        this._projectProxy = null;
+        
+        this._volumeSlider = null;
+        this._volumeStream = null;
+        this._mixerControl = new Gvc.MixerControl({ name: 'Adaptive Shell Volume Control' });
+        this._mixerControl.open();
+        this._mixerControl.connect('state-changed', () => this._onMixerStateChanged());
+        this._mixerControl.connect('default-sink-changed', () => this._onMixerStateChanged());
+        this._mixerControl.connect('stream-added', (control, id) => {
+            if (this._volumeStream && this._volumeStream.get_id() === id) {
+                this._onMixerStateChanged();
+            }
+        });
+
         this._filesLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
             'adaptive-desktop',
             'scripts',
-            'adaptive-files-launch.sh',
+            'adaptive-files-launch-v1.6.sh',
         ]);
     }
 
     enable() {
-        log('[Adaptive Shell] enable v1.5');
+        log('[Adaptive Shell v1.6] enable');
 
-        this._hideStockLeftItems();
-        this._restoreAndStyleStockClock();
-        this._buildTopIdentity();
-        this._buildRail();
+        this._hideLegacyPanelItems();
+        this._restoreGNOMEClock();
+        this._installIdentity();
+        this._installRail();
 
         this._monitorChangedId = Main.layoutManager.connect(
             'monitors-changed',
@@ -36,16 +60,72 @@ class AdaptiveShell {
         );
 
         this._layoutRail();
+        this._connectToProjectContext();
 
-        log('[Adaptive Shell] dock ready');
-        log('[Adaptive Shell] stock clock/calendar restored');
+        log('[Adaptive Shell v1.6] functional rail installed');
+        log('[Adaptive Shell v1.6] GNOME dateMenu restored');
+    }
+
+    _connectToProjectContext() {
+        Gio.DBusProxy.new_for_bus(
+            Gio.BusType.SESSION,
+            Gio.DBusProxyFlags.NONE,
+            null,
+            'org.adaptive.ProjectContext',
+            '/org/adaptive/ProjectContext',
+            'org.adaptive.ProjectContext',
+            null,
+            (source, result) => {
+                try {
+                    this._projectProxy = Gio.DBusProxy.new_for_bus_finish(result);
+                    if (this._projectProxy) {
+                        this._projectProxy.connect('g-signal', (proxy, sender_name, signal_name, parameters) => {
+                            if (signal_name === 'ActiveProjectChanged') {
+                                let [id, name, path] = parameters.deep_unpack();
+                                this._activeProjectId = id;
+                                this._updateProjectLabel(name);
+                            }
+                        });
+                        
+                        this._projectProxy.call(
+                            'GetActiveProject',
+                            null,
+                            Gio.DBusCallFlags.NONE,
+                            -1,
+                            null,
+                            (proxy, res) => {
+                                try {
+                                    let variant = proxy.call_finish(res);
+                                    let [id, name, path] = variant.deep_unpack();
+                                    this._activeProjectId = id;
+                                    this._updateProjectLabel(name);
+                                } catch (e) {
+                                    logError(e, '[Adaptive Shell v1.6] GetActiveProject failed');
+                                }
+                            }
+                        );
+                    }
+                } catch (e) {
+                    logError(e, '[Adaptive Shell v1.6] Error connecting to ProjectContext DBus');
+                }
+            }
+        );
+    }
+
+    _updateProjectLabel(name) {
+        if (this._projectLabel) {
+            let display = name && name !== 'NONE' ? name.toUpperCase() : 'NONE';
+            this._projectLabel.set_text('PROJECT · ' + display);
+        }
     }
 
     disable() {
-        log('[Adaptive Shell] disable v1.5');
+        log('[Adaptive Shell v1.6] disable');
 
         if (this._monitorChangedId) {
-            Main.layoutManager.disconnect(this._monitorChangedId);
+            Main.layoutManager.disconnect(
+                this._monitorChangedId
+            );
             this._monitorChangedId = 0;
         }
 
@@ -60,13 +140,41 @@ class AdaptiveShell {
             this._brandButton = null;
         }
 
-        if (this._projectLabel) {
-            this._projectLabel.destroy();
-            this._projectLabel = null;
+        if (this._projectButton) {
+            this._projectButton.destroy();
+            this._projectButton = null;
+        }
+
+        if (this._systemCenterButton) {
+            this._systemCenterButton.destroy();
+            this._systemCenterButton = null;
+        }
+
+        if (this._workspacesButton) {
+            this._workspacesButton.destroy();
+            this._workspacesButton = null;
+        }
+
+        if (this._projectProxy) {
+            this._projectProxy = null;
+        }
+
+        if (this._mixerControl) {
+            this._mixerControl.close();
+            this._mixerControl = null;
         }
 
         if (this._clockActor) {
-            this._clockActor.remove_style_class_name('adaptive-stock-clock');
+            try {
+                this._clockActor.remove_style_class_name(
+                    'adaptive-stock-clock'
+                );
+            } catch (e) {
+                logError(
+                    e,
+                    '[Adaptive Shell v1.6] clock cleanup'
+                );
+            }
             this._clockActor = null;
         }
 
@@ -77,13 +185,17 @@ class AdaptiveShell {
                 else
                     item.actor.hide();
             } catch (e) {
-                logError(e, '[Adaptive Shell] restoring stock panel actor');
+                logError(
+                    e,
+                    '[Adaptive Shell v1.6] restore actor'
+                );
             }
         }
+
         this._hiddenActors = [];
     }
 
-    _panelActor(item) {
+    _actor(item) {
         if (!item)
             return null;
 
@@ -96,7 +208,7 @@ class AdaptiveShell {
         return item;
     }
 
-    _rememberAndHide(actor) {
+    _hideAndRemember(actor) {
         if (!actor)
             return;
 
@@ -107,47 +219,86 @@ class AdaptiveShell {
             });
             actor.hide();
         } catch (e) {
-            logError(e, '[Adaptive Shell] hiding stock panel actor');
+            logError(
+                e,
+                '[Adaptive Shell v1.6] hide actor'
+            );
         }
     }
 
-    _hideStockLeftItems() {
-        // We keep the stock dateMenu and all top-right system indicators.
-        // Only the legacy Activities / current-app labels are hidden.
-        this._rememberAndHide(
-            this._panelActor(Main.panel.statusArea.activities)
+    _hideLegacyPanelItems() {
+        // Preserve right-side system indicators and the center dateMenu.
+        // Remove only stock left-side Activities/current-app UI.
+        this._hideAndRemember(
+            this._actor(
+                Main.panel.statusArea.activities
+            )
         );
 
-        this._rememberAndHide(
-            this._panelActor(Main.panel.statusArea.appMenu)
+        this._hideAndRemember(
+            this._actor(
+                Main.panel.statusArea.appMenu
+            )
         );
     }
 
-    _restoreAndStyleStockClock() {
-        const dateMenu = Main.panel.statusArea.dateMenu;
-        const actor = this._panelActor(dateMenu);
+    _restoreGNOMEClock() {
+        const dateMenu =
+            Main.panel.statusArea.dateMenu;
 
-        if (!actor)
+        if (!dateMenu) {
+            log(
+                '[Adaptive Shell v1.6] dateMenu not found'
+            );
             return;
+        }
 
-        // A previous Adaptive Shell build hid this. Force the GNOME clock
-        // actor back on-screen. Keeping the real dateMenu preserves the
-        // calendar, notifications, appointments and GNOME time formatting.
+        const actor = this._actor(dateMenu);
+
+        if (!actor) {
+            log(
+                '[Adaptive Shell v1.6] dateMenu actor not found'
+            );
+            return;
+        }
+
         try {
+            // Undo prior Adaptive Shell builds that hid the stock time.
+            actor.opacity = 255;
+            actor.reactive = true;
             actor.show();
-            actor.add_style_class_name('adaptive-stock-clock');
+
+            if (Main.panel._centerBox)
+                Main.panel._centerBox.show();
+
+            // GNOME 42 dateMenu exposes _clockDisplay. Make it visible too
+            // when available, but do not replace it: clicking remains the
+            // native calendar/notifications menu.
+            if (dateMenu._clockDisplay) {
+                dateMenu._clockDisplay.show();
+                this._clockDisplay =
+                    dateMenu._clockDisplay;
+            }
+
+            actor.add_style_class_name(
+                'adaptive-stock-clock'
+            );
+
             this._clockActor = actor;
         } catch (e) {
-            logError(e, '[Adaptive Shell] restoring dateMenu');
+            logError(
+                e,
+                '[Adaptive Shell v1.6] restoring GNOME clock'
+            );
         }
     }
 
-    _buildTopIdentity() {
+    _installIdentity() {
         this._brandButton = new St.Button({
-            style_class: 'adaptive-brand-button',
             reactive: true,
             can_focus: true,
             track_hover: true,
+            style_class: 'adaptive-brand-button',
             accessible_name: 'Adaptive Desktop overview',
         });
 
@@ -163,27 +314,90 @@ class AdaptiveShell {
             () => this._showOverview()
         );
 
+        this._projectButton = new PanelMenu.Button(0.0, 'ProjectMenu', false);
+        this._projectButton.add_style_class_name('adaptive-project-button');
+        
         this._projectLabel = new St.Label({
             text: 'PROJECT · NONE',
             y_align: Clutter.ActorAlign.CENTER,
             style_class: 'adaptive-project-label',
+        });
+        this._projectButton.add_child(this._projectLabel);
+        
+        this._projectButton.menu.connect('open-state-changed', (menu, open) => {
+            if (open) {
+                this._populateProjectMenu();
+            }
         });
 
         Main.panel._leftBox.insert_child_at_index(
             this._brandButton,
             0
         );
+
         Main.panel._leftBox.insert_child_at_index(
-            this._projectLabel,
+            this._projectButton,
             1
         );
     }
 
-    _buildRail() {
+    _populateProjectMenu() {
+        this._projectButton.menu.removeAll();
+        
+        if (!this._projectProxy) {
+            let item = new PopupMenu.PopupMenuItem('Project Service offline');
+            item.setSensitive(false);
+            this._projectButton.menu.addMenuItem(item);
+            return;
+        }
+
+        this._projectProxy.call(
+            'ListProjects',
+            null,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            (proxy, res) => {
+                try {
+                    let variant = proxy.call_finish(res);
+                    let projects = JSON.parse(variant.deep_unpack()[0]);
+                    let hasItems = false;
+                    
+                    for (let pid in projects) {
+                        hasItems = true;
+                        let name = projects[pid].name;
+                        let isActive = (pid === this._activeProjectId);
+                        let item = new PopupMenu.PopupMenuItem(isActive ? `★ ${name}` : name);
+                        item.connect('activate', () => {
+                            this._projectProxy.call(
+                                'SetActiveProject',
+                                GLib.Variant.new('(s)', [pid]),
+                                Gio.DBusCallFlags.NONE,
+                                -1,
+                                null,
+                                null
+                            );
+                        });
+                        this._projectButton.menu.addMenuItem(item);
+                    }
+                    
+                    if (!hasItems) {
+                        let empty = new PopupMenu.PopupMenuItem('No projects found');
+                        empty.setSensitive(false);
+                        this._projectButton.menu.addMenuItem(empty);
+                    }
+                } catch (e) {
+                    logError(e, '[Adaptive Shell v1.6] ListProjects failed');
+                }
+            }
+        );
+    }
+
+    _installRail() {
         this._rail = new St.BoxLayout({
             vertical: true,
-            style_class: 'adaptive-rail',
             reactive: true,
+            style_class: 'adaptive-rail',
         });
 
         const top = new St.BoxLayout({
@@ -192,7 +406,7 @@ class AdaptiveShell {
         });
 
         top.add_child(
-            this._makeDockButton(
+            this._dockButton(
                 'overview.svg',
                 'Overview',
                 () => this._showOverview()
@@ -200,7 +414,7 @@ class AdaptiveShell {
         );
 
         top.add_child(
-            this._makeDockButton(
+            this._dockButton(
                 'files.svg',
                 'Adaptive Files',
                 () => this._openFiles()
@@ -208,23 +422,35 @@ class AdaptiveShell {
         );
 
         top.add_child(
-            this._makeDockButton(
+            this._dockButton(
                 'apps.svg',
                 'Applications',
                 () => this._showApplications()
             )
         );
 
-        top.add_child(
-            this._makeDockButton(
-                'workspaces.svg',
-                'Workspaces',
-                () => this._showWorkspaces()
-            )
-        );
+        this._workspacesButton = new PanelMenu.Button(0.0, 'WorkspacesMenu', false);
+        this._workspacesButton.add_style_class_name('adaptive-dock-button');
+        
+        const wsIconPath = GLib.build_filenamev([
+            Me.path, 'assets', 'dock', 'workspaces.svg'
+        ]);
+        const wsIcon = new St.Icon({
+            gicon: Gio.FileIcon.new(Gio.File.new_for_path(wsIconPath)),
+            style_class: 'adaptive-dock-icon',
+        });
+        this._workspacesButton.add_child(wsIcon);
+        
+        this._workspacesButton.menu.connect('open-state-changed', (menu, open) => {
+            if (open) {
+                this._populateWorkspacesMenu();
+            }
+        });
+        
+        top.add_child(this._workspacesButton);
 
         top.add_child(
-            this._makeDockButton(
+            this._dockButton(
                 'search.svg',
                 'Search',
                 () => this._showSearch()
@@ -233,23 +459,78 @@ class AdaptiveShell {
 
         this._rail.add_child(top);
 
-        const spacer = new St.Widget({
-            y_expand: true,
-        });
-        this._rail.add_child(spacer);
+        this._rail.add_child(
+            new St.Widget({
+                y_expand: true,
+            })
+        );
 
         const bottom = new St.BoxLayout({
             vertical: true,
-            style_class: 'adaptive-rail-group adaptive-rail-bottom',
+            style_class:
+                'adaptive-rail-group adaptive-rail-bottom',
         });
 
-        bottom.add_child(
-            this._makeDockButton(
-                'settings.svg',
-                'Settings',
-                () => this._openSettings()
-            )
-        );
+        this._systemCenterButton = new PanelMenu.Button(0.0, 'SystemCenterMenu', false);
+        this._systemCenterButton.add_style_class_name('adaptive-dock-button');
+        
+        const iconPath = GLib.build_filenamev([
+            Me.path, 'assets', 'dock', 'settings.svg'
+        ]);
+        const icon = new St.Icon({
+            gicon: Gio.FileIcon.new(Gio.File.new_for_path(iconPath)),
+            style_class: 'adaptive-dock-icon',
+        });
+        this._systemCenterButton.add_child(icon);
+        
+        let actions = SystemActions.getDefault();
+        
+        let volumeItem = new PopupMenu.PopupBaseMenuItem({ activate: false });
+        let volumeIcon = new St.Icon({
+            icon_name: 'audio-volume-high-symbolic',
+            style_class: 'popup-menu-icon'
+        });
+        this._volumeSlider = new Slider.Slider(0);
+        this._volumeSlider.x_expand = true;
+        this._volumeSlider.connect('notify::value', () => {
+            if (this._volumeStream && this._mixerControl) {
+                let volume = this._volumeSlider.value * this._mixerControl.get_vol_max_norm();
+                this._volumeStream.volume = volume;
+                this._volumeStream.push_volume();
+            }
+        });
+        
+        volumeItem.add_child(volumeIcon);
+        volumeItem.add_child(this._volumeSlider);
+        this._systemCenterButton.menu.addMenuItem(volumeItem);
+        
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        let settingsItem = new PopupMenu.PopupMenuItem('System Settings');
+        settingsItem.connect('activate', () => this._openSettings());
+        this._systemCenterButton.menu.addMenuItem(settingsItem);
+        
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        let lockItem = new PopupMenu.PopupMenuItem('Lock Screen');
+        lockItem.connect('activate', () => actions.activateLockScreen());
+        this._systemCenterButton.menu.addMenuItem(lockItem);
+        
+        let suspendItem = new PopupMenu.PopupMenuItem('Suspend');
+        suspendItem.connect('activate', () => actions.activateSuspend());
+        this._systemCenterButton.menu.addMenuItem(suspendItem);
+        
+        let logoutItem = new PopupMenu.PopupMenuItem('Return to Ubuntu...');
+        logoutItem.connect('activate', () => actions.activateLogout());
+        this._systemCenterButton.menu.addMenuItem(logoutItem);
+        
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        let powerItem = new PopupMenu.PopupMenuItem('Power Off...');
+        powerItem.connect('activate', () => actions.activatePowerOff());
+        this._systemCenterButton.menu.addMenuItem(powerItem);
+        
+        bottom.add_child(this._systemCenterButton);
 
         this._rail.add_child(bottom);
 
@@ -262,47 +543,53 @@ class AdaptiveShell {
         );
     }
 
-    _makeDockButton(iconFile, accessibleName, callback) {
-        const path = GLib.build_filenamev([
+    _dockButton(iconFile, name, callback) {
+        const iconPath = GLib.build_filenamev([
             Me.path,
             'assets',
             'dock',
             iconFile,
         ]);
 
-        const gicon = Gio.FileIcon.new(
-            Gio.File.new_for_path(path)
-        );
-
         const icon = new St.Icon({
-            gicon,
+            gicon: Gio.FileIcon.new(
+                Gio.File.new_for_path(iconPath)
+            ),
             style_class: 'adaptive-dock-icon',
         });
 
         const button = new St.Button({
-            style_class: 'adaptive-dock-button',
             reactive: true,
             can_focus: true,
             track_hover: true,
-            accessible_name: accessibleName,
+            style_class: 'adaptive-dock-button',
+            accessible_name: name,
         });
 
         button.set_child(icon);
 
-        button.connect('clicked', () => {
-            try {
-                callback();
-            } catch (e) {
-                logError(
-                    e,
-                    `[Adaptive Shell] ${accessibleName} action`
+        button.connect(
+            'clicked',
+            () => {
+                log(
+                    `[Adaptive Shell v1.6] click: ${name}`
                 );
-                Main.notifyError(
-                    'Adaptive Desktop',
-                    `${accessibleName} could not be opened.`
-                );
+
+                try {
+                    callback();
+                } catch (e) {
+                    logError(
+                        e,
+                        `[Adaptive Shell v1.6] ${name}`
+                    );
+
+                    Main.notifyError(
+                        'Adaptive Desktop',
+                        `${name} could not be opened.`
+                    );
+                }
             }
-        });
+        );
 
         return button;
     }
@@ -311,7 +598,9 @@ class AdaptiveShell {
         if (!this._rail)
             return;
 
-        const monitor = Main.layoutManager.primaryMonitor;
+        const monitor =
+            Main.layoutManager.primaryMonitor;
+
         if (!monitor)
             return;
 
@@ -320,8 +609,8 @@ class AdaptiveShell {
             24
         );
 
-        const railWidth = 58;
-        const railHeight = Math.max(
+        const width = 58;
+        const height = Math.max(
             1,
             monitor.height - panelHeight
         );
@@ -332,8 +621,8 @@ class AdaptiveShell {
         );
 
         this._rail.set_size(
-            railWidth,
-            railHeight
+            width,
+            height
         );
     }
 
@@ -342,57 +631,118 @@ class AdaptiveShell {
     }
 
     _showApplications() {
-        if (typeof Main.overview.showApps === 'function')
+        if (
+            Main.overview &&
+            typeof Main.overview.showApps ===
+                'function'
+        ) {
             Main.overview.showApps();
-        else
-            Main.overview.show();
+            return;
+        }
+
+        Main.overview.show();
     }
 
     _showWorkspaces() {
         Main.overview.show();
     }
+    
+    _onMixerStateChanged() {
+        if (this._mixerControl && this._mixerControl.get_state() === Gvc.MixerControlState.READY) {
+            this._volumeStream = this._mixerControl.get_default_sink();
+            if (this._volumeStream && this._volumeSlider) {
+                let volume = this._volumeStream.volume / this._mixerControl.get_vol_max_norm();
+                this._volumeSlider.value = volume;
+            }
+        }
+    }
+
+    _populateWorkspacesMenu() {
+        this._workspacesButton.menu.removeAll();
+        
+        const wm = global.workspace_manager;
+        const numWorkspaces = wm.get_n_workspaces();
+        const activeIndex = wm.get_active_workspace_index();
+        
+        let header = new PopupMenu.PopupMenuItem('WORKSPACES');
+        header.setSensitive(false);
+        this._workspacesButton.menu.addMenuItem(header);
+        
+        for (let i = 0; i < numWorkspaces; i++) {
+            let isActive = (i === activeIndex);
+            let label = isActive ? `★ Workspace ${i + 1}` : `Workspace ${i + 1}`;
+            let item = new PopupMenu.PopupMenuItem(label);
+            
+            item.connect('activate', () => {
+                let ws = wm.get_workspace_by_index(i);
+                if (ws) {
+                    ws.activate(global.get_current_time());
+                }
+            });
+            
+            this._workspacesButton.menu.addMenuItem(item);
+        }
+    }
 
     _showSearch() {
-        // GNOME Shell's overview is the system search surface. Once shown,
-        // typing immediately enters search without us depending on private
-        // search-controller APIs.
         Main.overview.show();
+
+        // GNOME Shell 42 provides the overview search entry.
+        // Focus it when available; otherwise typing after opening the
+        // overview still starts normal GNOME search.
+        GLib.idle_add(
+            GLib.PRIORITY_DEFAULT_IDLE,
+            () => {
+                try {
+                    if (
+                        Main.overview.searchEntry &&
+                        typeof Main.overview
+                            .searchEntry
+                            .grab_key_focus ===
+                            'function'
+                    ) {
+                        Main.overview
+                            .searchEntry
+                            .grab_key_focus();
+                    }
+                } catch (e) {
+                    logError(
+                        e,
+                        '[Adaptive Shell v1.6] search focus'
+                    );
+                }
+
+                return GLib.SOURCE_REMOVE;
+            }
+        );
     }
 
     _openFiles() {
-        if (GLib.file_test(
+        if (!GLib.file_test(
             this._filesLauncher,
             GLib.FileTest.IS_EXECUTABLE
         )) {
-            this._spawn([this._filesLauncher]);
-            return;
+            throw new Error(
+                `Missing ${this._filesLauncher}`
+            );
         }
 
-        // Fail-safe fallback: Files remains reachable even if the Adaptive
-        // launcher was accidentally removed.
-        this._spawn(['nautilus', '--new-window']);
+        this._spawn([
+            this._filesLauncher,
+        ]);
     }
 
     _openSettings() {
-        this._spawn(['gnome-control-center']);
+        this._spawn([
+            'gnome-control-center',
+        ]);
     }
 
     _spawn(argv) {
-        try {
-            Gio.Subprocess.new(
-                argv,
-                Gio.SubprocessFlags.NONE
-            );
-        } catch (e) {
-            logError(
-                e,
-                `[Adaptive Shell] spawn failed: ${argv.join(' ')}`
-            );
-            Main.notifyError(
-                'Adaptive Desktop',
-                `Could not start ${argv[0]}.`
-            );
-        }
+        Gio.Subprocess.new(
+            argv,
+            Gio.SubprocessFlags.NONE
+        );
     }
 }
 
@@ -400,7 +750,7 @@ function init() {
 }
 
 function enable() {
-    _shell = new AdaptiveShell();
+    _shell = new AdaptiveShellV16();
     _shell.enable();
 }
 

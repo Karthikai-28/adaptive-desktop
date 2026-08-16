@@ -2,7 +2,10 @@ const { St, Gio, GLib, Clutter } = imports.gi;
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
+const SystemActions = imports.misc.systemActions;
 const ExtensionUtils = imports.misc.extensionUtils;
+const Gvc = imports.gi.Gvc;
+const Slider = imports.ui.slider;
 
 const Me = ExtensionUtils.getCurrentExtension();
 
@@ -13,6 +16,8 @@ class AdaptiveShellV16 {
         this._rail = null;
         this._brandButton = null;
         this._projectButton = null;
+        this._systemCenterButton = null;
+        this._workspacesButton = null;
         this._projectLabel = null;
         this._activeProjectId = null;
         this._monitorChangedId = 0;
@@ -20,6 +25,18 @@ class AdaptiveShellV16 {
         this._clockActor = null;
         this._clockDisplay = null;
         this._projectProxy = null;
+        
+        this._volumeSlider = null;
+        this._volumeStream = null;
+        this._mixerControl = new Gvc.MixerControl({ name: 'Adaptive Shell Volume Control' });
+        this._mixerControl.open();
+        this._mixerControl.connect('state-changed', () => this._onMixerStateChanged());
+        this._mixerControl.connect('default-sink-changed', () => this._onMixerStateChanged());
+        this._mixerControl.connect('stream-added', (control, id) => {
+            if (this._volumeStream && this._volumeStream.get_id() === id) {
+                this._onMixerStateChanged();
+            }
+        });
 
         this._filesLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -128,8 +145,23 @@ class AdaptiveShellV16 {
             this._projectButton = null;
         }
 
+        if (this._systemCenterButton) {
+            this._systemCenterButton.destroy();
+            this._systemCenterButton = null;
+        }
+
+        if (this._workspacesButton) {
+            this._workspacesButton.destroy();
+            this._workspacesButton = null;
+        }
+
         if (this._projectProxy) {
             this._projectProxy = null;
+        }
+
+        if (this._mixerControl) {
+            this._mixerControl.close();
+            this._mixerControl = null;
         }
 
         if (this._clockActor) {
@@ -397,13 +429,25 @@ class AdaptiveShellV16 {
             )
         );
 
-        top.add_child(
-            this._dockButton(
-                'workspaces.svg',
-                'Workspaces',
-                () => this._showWorkspaces()
-            )
-        );
+        this._workspacesButton = new PanelMenu.Button(0.0, 'WorkspacesMenu', false);
+        this._workspacesButton.add_style_class_name('adaptive-dock-button');
+        
+        const wsIconPath = GLib.build_filenamev([
+            Me.path, 'assets', 'dock', 'workspaces.svg'
+        ]);
+        const wsIcon = new St.Icon({
+            gicon: Gio.FileIcon.new(Gio.File.new_for_path(wsIconPath)),
+            style_class: 'adaptive-dock-icon',
+        });
+        this._workspacesButton.add_child(wsIcon);
+        
+        this._workspacesButton.menu.connect('open-state-changed', (menu, open) => {
+            if (open) {
+                this._populateWorkspacesMenu();
+            }
+        });
+        
+        top.add_child(this._workspacesButton);
 
         top.add_child(
             this._dockButton(
@@ -427,13 +471,66 @@ class AdaptiveShellV16 {
                 'adaptive-rail-group adaptive-rail-bottom',
         });
 
-        bottom.add_child(
-            this._dockButton(
-                'settings.svg',
-                'Settings',
-                () => this._openSettings()
-            )
-        );
+        this._systemCenterButton = new PanelMenu.Button(0.0, 'SystemCenterMenu', false);
+        this._systemCenterButton.add_style_class_name('adaptive-dock-button');
+        
+        const iconPath = GLib.build_filenamev([
+            Me.path, 'assets', 'dock', 'settings.svg'
+        ]);
+        const icon = new St.Icon({
+            gicon: Gio.FileIcon.new(Gio.File.new_for_path(iconPath)),
+            style_class: 'adaptive-dock-icon',
+        });
+        this._systemCenterButton.add_child(icon);
+        
+        let actions = SystemActions.getDefault();
+        
+        let volumeItem = new PopupMenu.PopupBaseMenuItem({ activate: false });
+        let volumeIcon = new St.Icon({
+            icon_name: 'audio-volume-high-symbolic',
+            style_class: 'popup-menu-icon'
+        });
+        this._volumeSlider = new Slider.Slider(0);
+        this._volumeSlider.x_expand = true;
+        this._volumeSlider.connect('notify::value', () => {
+            if (this._volumeStream && this._mixerControl) {
+                let volume = this._volumeSlider.value * this._mixerControl.get_vol_max_norm();
+                this._volumeStream.volume = volume;
+                this._volumeStream.push_volume();
+            }
+        });
+        
+        volumeItem.add_child(volumeIcon);
+        volumeItem.add_child(this._volumeSlider);
+        this._systemCenterButton.menu.addMenuItem(volumeItem);
+        
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        let settingsItem = new PopupMenu.PopupMenuItem('System Settings');
+        settingsItem.connect('activate', () => this._openSettings());
+        this._systemCenterButton.menu.addMenuItem(settingsItem);
+        
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        let lockItem = new PopupMenu.PopupMenuItem('Lock Screen');
+        lockItem.connect('activate', () => actions.activateLockScreen());
+        this._systemCenterButton.menu.addMenuItem(lockItem);
+        
+        let suspendItem = new PopupMenu.PopupMenuItem('Suspend');
+        suspendItem.connect('activate', () => actions.activateSuspend());
+        this._systemCenterButton.menu.addMenuItem(suspendItem);
+        
+        let logoutItem = new PopupMenu.PopupMenuItem('Return to Ubuntu...');
+        logoutItem.connect('activate', () => actions.activateLogout());
+        this._systemCenterButton.menu.addMenuItem(logoutItem);
+        
+        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        let powerItem = new PopupMenu.PopupMenuItem('Power Off...');
+        powerItem.connect('activate', () => actions.activatePowerOff());
+        this._systemCenterButton.menu.addMenuItem(powerItem);
+        
+        bottom.add_child(this._systemCenterButton);
 
         this._rail.add_child(bottom);
 
@@ -548,6 +645,43 @@ class AdaptiveShellV16 {
 
     _showWorkspaces() {
         Main.overview.show();
+    }
+    
+    _onMixerStateChanged() {
+        if (this._mixerControl && this._mixerControl.get_state() === Gvc.MixerControlState.READY) {
+            this._volumeStream = this._mixerControl.get_default_sink();
+            if (this._volumeStream && this._volumeSlider) {
+                let volume = this._volumeStream.volume / this._mixerControl.get_vol_max_norm();
+                this._volumeSlider.value = volume;
+            }
+        }
+    }
+
+    _populateWorkspacesMenu() {
+        this._workspacesButton.menu.removeAll();
+        
+        const wm = global.workspace_manager;
+        const numWorkspaces = wm.get_n_workspaces();
+        const activeIndex = wm.get_active_workspace_index();
+        
+        let header = new PopupMenu.PopupMenuItem('WORKSPACES');
+        header.setSensitive(false);
+        this._workspacesButton.menu.addMenuItem(header);
+        
+        for (let i = 0; i < numWorkspaces; i++) {
+            let isActive = (i === activeIndex);
+            let label = isActive ? `★ Workspace ${i + 1}` : `Workspace ${i + 1}`;
+            let item = new PopupMenu.PopupMenuItem(label);
+            
+            item.connect('activate', () => {
+                let ws = wm.get_workspace_by_index(i);
+                if (ws) {
+                    ws.activate(global.get_current_time());
+                }
+            });
+            
+            this._workspacesButton.menu.addMenuItem(item);
+        }
     }
 
     _showSearch() {
