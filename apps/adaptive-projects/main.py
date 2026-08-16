@@ -37,6 +37,14 @@ def git(repo, *args, timeout=8):
         return ""
 
 
+def _human_size(value):
+    for unit in ("B", "K", "M", "G"):
+        if value < 1024 or unit == "G":
+            return f"{value:.0f}{unit}" if unit != "B" else f"{value}B"
+        value /= 1024
+    return f"{value:.0f}G"
+
+
 def relative(stamp):
     if not stamp:
         return "no commits"
@@ -297,6 +305,280 @@ class Projects(Gtk.ApplicationWindow):
         card.set_child(box)
         return card
 
+    # --------------------------------------------------------------- analysis
+
+    def _analyze(self, path):
+        """Where change concentrates, what moves together, and what to read
+        first. All of it derived from history rather than guessed at."""
+        raw = git(path, "log", "--no-merges", "--format=\x01%an",
+                  "--name-only", "-n", "800", timeout=25)
+
+        churn, owners, pairs = {}, {}, {}
+
+        for block in raw.split("\x01"):
+            lines = [l for l in block.splitlines() if l.strip()]
+            if not lines:
+                continue
+
+            author, files = lines[0], lines[1:]
+
+            for f in files:
+                churn[f] = churn.get(f, 0) + 1
+                owners.setdefault(f, {})
+                owners[f][author] = owners[f].get(author, 0) + 1
+
+            # Files touched in the same commit tend to be coupled. Huge
+            # commits say nothing about coupling, so they are skipped.
+            if 1 < len(files) <= 12:
+                for i, a in enumerate(files):
+                    for b in files[i + 1:]:
+                        key = (a, b) if a < b else (b, a)
+                        pairs[key] = pairs.get(key, 0) + 1
+
+        tracked = [f for f in git(path, "ls-files").splitlines() if f]
+
+        # Entry points worth reading before anything else.
+        interesting = (
+            "readme", "contributing", "makefile", "dockerfile", "docker-compose",
+            "package.json", "pyproject.toml", "requirements.txt", "cargo.toml",
+            "go.mod", "setup.py", "main.py", "main.go", "index.js", "index.ts",
+            "app.py", "cli.py", "__main__.py", "meson.build", "cmakelists.txt",
+        )
+        keys = [f for f in tracked
+                if f.rsplit("/", 1)[-1].lower() in interesting or
+                f.lower().startswith("readme")]
+        keys.sort(key=lambda f: (f.count("/"), len(f)))
+
+        # Cheap signals about how the project is kept.
+        tests = [f for f in tracked
+                 if "test" in f.lower() or "spec" in f.lower()]
+        ci = [f for f in tracked
+              if f.startswith(".github/workflows") or "gitlab-ci" in f
+              or "jenkinsfile" in f.lower()]
+        docs = [f for f in tracked if f.lower().startswith("doc")]
+
+        sizes = []
+        for f in tracked:
+            try:
+                sizes.append((f, (Path(path) / f).stat().st_size))
+            except Exception:
+                pass
+        sizes.sort(key=lambda kv: -kv[1])
+
+        return {
+            "churn": sorted(churn.items(), key=lambda kv: -kv[1]),
+            "owners": owners,
+            "pairs": sorted(pairs.items(), key=lambda kv: -kv[1]),
+            "keys": keys[:10],
+            "tests": tests,
+            "ci": ci,
+            "docs": docs,
+            "sizes": sizes[:8],
+            "tracked": len(tracked),
+        }
+
+    def _show_analysis(self, project):
+        child = self.detail_holder.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self.detail_holder.remove(child)
+            child = nxt
+
+        head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        head.add_css_class("header")
+
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        back = Gtk.Button(label="\u2190  Project")
+        back.add_css_class("back")
+        back.connect("clicked", lambda *_: self._show_detail(project))
+        bar.append(back)
+        head.append(bar)
+
+        title = Gtk.Label(label=f"Understanding {project['name']}", xalign=0)
+        title.add_css_class("greeting")
+        head.append(title)
+
+        note = Gtk.Label(
+            label="Read from the last 800 commits and the working tree",
+            xalign=0)
+        note.add_css_class("greeting-sub")
+        head.append(note)
+
+        self.detail_holder.append(head)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        body.add_css_class("detail-body")
+
+        pending = Gtk.Label(label="Reading history\u2026", xalign=0)
+        pending.add_css_class("greeting-sub")
+        body.append(pending)
+
+        scroll.set_child(body)
+        self.detail_holder.append(scroll)
+        self.stack.set_visible_child_name("detail")
+
+        # Let the frame with "Reading history" paint before the git pass.
+        GLib.idle_add(self._fill_analysis, project, body, pending)
+
+    def _fill_analysis(self, project, body, pending):
+        data = self._analyze(project["path"])
+        body.remove(pending)
+
+        body.append(self._section("START HERE"))
+        body.append(self._panel(
+            "ENTRY POINTS  ·  READ THESE FIRST",
+            self._file_list([(f, "") for f in data["keys"]] or
+                            [("no obvious entry point", "")])))
+
+        body.append(self._section("WHERE THE CHANGE IS"))
+        body.append(self._columns(
+            self._panel("HOTSPOTS  ·  MOST-CHANGED FILES",
+                        self._hotspots(data["churn"], data["owners"])),
+            self._panel("MOVES TOGETHER  ·  CHANGED IN THE SAME COMMIT",
+                        self._coupling(data["pairs"])),
+        ))
+
+        body.append(self._section("HOW IT IS KEPT"))
+        body.append(self._columns(
+            self._panel("SIGNALS", self._signals(data)),
+            self._panel("LARGEST FILES  ·  WHERE THE WEIGHT IS",
+                        self._file_list([
+                            (f, _human_size(s)) for f, s in data["sizes"]])),
+        ))
+
+        return GLib.SOURCE_REMOVE
+
+    def _file_list(self, rows):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+
+        for name, note in rows:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+            label = Gtk.Label(label=name, xalign=0)
+            label.add_css_class("commit-subject")
+            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            label.set_hexpand(True)
+            row.append(label)
+
+            if note:
+                value = Gtk.Label(label=note)
+                value.add_css_class("author-count")
+                row.append(value)
+
+            box.append(row)
+
+        return box
+
+    def _hotspots(self, churn, owners):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+
+        if not churn:
+            return box
+
+        peak = churn[0][1]
+
+        for name, count in churn[:10]:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+            label = Gtk.Label(label=name, xalign=0)
+            label.add_css_class("author")
+            label.set_size_request(230, -1)
+            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            row.append(label)
+
+            meter = Gtk.DrawingArea()
+            meter.set_content_height(13)
+            meter.set_hexpand(True)
+
+            # Many hands on one hot file is the interesting case, so the bar
+            # warms as the number of authors climbs.
+            hands = len(owners.get(name, {}))
+
+            def draw(_a, cr, width, height, share=count / peak, hands=hands):
+                cr.set_source_rgba(1, 1, 1, 0.06)
+                cr.rectangle(0, 0, width, height)
+                cr.fill()
+                if hands > 2:
+                    cr.set_source_rgba(0.95, 0.79, 0.42, 0.9)
+                else:
+                    cr.set_source_rgba(0.47, 0.66, 1.0, 0.9)
+                cr.rectangle(0, 0, width * share, height)
+                cr.fill()
+
+            meter.set_draw_func(draw)
+            row.append(meter)
+
+            value = Gtk.Label(
+                label=f"{count}\u00d7 · {hands} author" + ("s" if hands != 1 else ""))
+            value.add_css_class("author-count")
+            row.append(value)
+
+            box.append(row)
+
+        return box
+
+    def _coupling(self, pairs):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+
+        if not pairs:
+            no = Gtk.Label(label="no repeated pairings", xalign=0)
+            no.add_css_class("commit-when")
+            box.append(no)
+            return box
+
+        for (a, b), count in pairs[:8]:
+            if count < 2:
+                break
+
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+            top = Gtk.Label(label=a, xalign=0)
+            top.add_css_class("commit-subject")
+            top.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            row.append(top)
+
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+            bottom = Gtk.Label(label=f"\u21b3 {b}", xalign=0)
+            bottom.add_css_class("commit-when")
+            bottom.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            bottom.set_hexpand(True)
+            line.append(bottom)
+
+            value = Gtk.Label(label=f"{count}\u00d7")
+            value.add_css_class("author-count")
+            line.append(value)
+
+            row.append(line)
+            box.append(row)
+
+        return box
+
+    def _signals(self, data):
+        rows = []
+
+        tests = len(data["tests"])
+        share = (100 * tests / data["tracked"]) if data["tracked"] else 0
+        rows.append((
+            "Tests",
+            f"{tests} files · {share:.0f}% of tree" if tests else "none found",
+        ))
+        rows.append((
+            "Continuous integration",
+            ", ".join(data["ci"][:2]) if data["ci"] else "none found",
+        ))
+        rows.append((
+            "Documentation",
+            f"{len(data['docs'])} files" if data["docs"] else "none found",
+        ))
+        rows.append(("Tracked files", str(data["tracked"])))
+
+        return self._file_list(rows)
+
     # --------------------------------------------------------------- actions
 
     def _on_filter(self, entry):
@@ -416,6 +698,7 @@ class Projects(Gtk.ApplicationWindow):
         bar.append(spacer)
 
         for label, handler in (
+            ("Analyze", lambda *_: self._show_analysis(project)),
             ("Set active", lambda *_: self._set_active(project)),
             ("Open in Files", lambda *_: self._open_files(project)),
             ("Terminal here", lambda *_: self._open_terminal(project)),
