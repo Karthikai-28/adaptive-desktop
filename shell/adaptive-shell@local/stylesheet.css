@@ -52,123 +52,120 @@
     background-color: rgba(30, 47, 70, 0.82);
 }
 
-/* ---------- left rail ---------- */
+/* ---------- interactive bottom dock ---------- */
 
-/* Width is owned by _layoutRail() in extension.js so the strut and the
-   painted rail can never disagree. */
+/* Favorites + running applications share one icon. Running-window dots live
+   below each icon, so opening another window never creates a duplicate app
+   icon. The whole dock is positioned by _layoutRail() in extension.js. */
 .adaptive-rail {
-    padding: 8px 8px 10px 8px;
-    spacing: 8px;
-    background-color: rgba(7, 16, 26, 0.98);
-    border-right: 1px solid rgba(48, 66, 92, 0.32);
-    box-shadow: 5px 0 20px rgba(0, 0, 0, 0.13);
+    padding: 8px 12px 7px 12px;
+    spacing: 7px;
+    border-radius: 20px;
+    border: 1px solid rgba(120, 169, 255, 0.18);
+    background-color: rgba(7, 16, 26, 0.92);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.36);
 }
 
-.adaptive-rail-group {
+.adaptive-window-list {
     spacing: 5px;
 }
 
 .adaptive-dock-button {
-    height: 40px;
-    padding: 0 9px;
-    border-radius: 10px;
+    width: 52px;
+    height: 56px;
+    padding: 3px 4px 2px 4px;
+    border-radius: 14px;
     border: 1px solid transparent;
     background-color: transparent;
     color: #A9BBD3;
-    text-align: left;
-}
-
-.adaptive-dock-content {
-    spacing: 10px;
-}
-
-.adaptive-dock-label {
-    max-width: 104px;
-    color: #D8E3EF;
-    font-size: 11px;
-    font-weight: 650;
 }
 
 .adaptive-dock-button:hover {
     border-color: rgba(120, 169, 255, 0.16);
-    background-color: rgba(27, 42, 61, 0.92);
+    background-color: rgba(27, 42, 61, 0.86);
 }
 
 .adaptive-dock-button:focus {
-    border-color: rgba(102, 224, 255, 0.30);
-    background-color: rgba(27, 42, 61, 0.92);
-}
-
-.adaptive-dock-button:active {
-    border-color: rgba(120, 169, 255, 0.28);
-    background-color: rgba(120, 169, 255, 0.15);
+    border-color: rgba(102, 224, 255, 0.34);
+    background-color: rgba(27, 42, 61, 0.90);
 }
 
 .adaptive-dock-button.active {
-    border-color: rgba(102, 224, 255, 0.32);
-    background-color: rgba(120, 169, 255, 0.14);
-    color: #E8F1FF;
+    border-color: rgba(102, 224, 255, 0.22);
+    background-color: rgba(120, 169, 255, 0.10);
 }
 
+.adaptive-app-dock-content {
+    spacing: 2px;
+}
+
+.adaptive-app-icon,
 .adaptive-dock-icon {
-    icon-size: 20px;
+    icon-size: 40px;
 }
 
-.adaptive-rail-section-label {
-    margin: 8px 8px 3px 8px;
-    color: #71859F;
+.adaptive-running-indicators {
+    height: 6px;
+    spacing: 3px;
+}
+
+.adaptive-running-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: rgba(150, 164, 184, 0.76);
+}
+
+.adaptive-running-dot.active {
+    background-color: #66E0FF;
+}
+
+.adaptive-running-count {
+    margin-left: 1px;
+    color: #96A4B8;
     font-size: 8px;
-    font-weight: 800;
+    font-weight: 700;
 }
 
-.adaptive-window-group {
-    padding-top: 2px;
+/* Vertical separator between application icons and the Applications launcher. */
+.adaptive-rail-rule {
+    width: 1px;
+    height: 38px;
+    margin: 9px 2px 7px 3px;
+    background-color: rgba(48, 66, 92, 0.58);
 }
 
-.adaptive-window-list {
-    spacing: 4px;
+.adaptive-utility-dock-button {
+    margin-left: 1px;
 }
 
-.adaptive-window-button {
-    height: 34px;
-    padding: 0 8px;
+.adaptive-tooltip {
+    padding: 6px 10px;
     border-radius: 8px;
-    border: 1px solid transparent;
-    background-color: transparent;
-    color: #A9BBD3;
-    text-align: left;
-}
-
-.adaptive-window-button:hover,
-.adaptive-window-button:focus {
-    border-color: rgba(120, 169, 255, 0.15);
-    background-color: rgba(24, 38, 58, 0.82);
-}
-
-.adaptive-window-button.active {
-    border-color: rgba(102, 224, 255, 0.30);
-    background-color: rgba(120, 169, 255, 0.13);
-}
-
-.adaptive-window-content {
-    spacing: 8px;
-}
-
-.adaptive-window-icon {
-    icon-size: 18px;
-}
-
-.adaptive-window-label {
-    max-width: 106px;
-    color: #C7D4E4;
-    font-size: 10px;
+    border: 1px solid rgba(48, 66, 92, 0.58);
+    background-color: rgba(17, 26, 40, 0.98);
+    color: #F2F6EF;
+    font-size: 11px;
     font-weight: 600;
+    box-shadow: 0 7px 20px rgba(0, 0, 0, 0.38);
 }
 
-.adaptive-window-empty {
-    padding: 5px 8px;
-    color: #6F8198;
-    font-size: 10px;
+.adaptive-dock-popup .popup-menu-content {
+    border-radius: 12px;
+    border: 1px solid rgba(120, 169, 255, 0.14);
+    background-color: rgba(9, 19, 31, 0.98);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+}
+
+.adaptive-dock-popup .popup-menu-item {
+    min-height: 30px;
+    border-radius: 8px;
+    color: #E8EEF7;
+}
+
+.adaptive-dock-popup .popup-menu-item:focus,
+.adaptive-dock-popup .popup-menu-item:hover {
+    background-color: rgba(120, 169, 255, 0.12);
 }
 
 .adaptive-system-status-value {
@@ -179,7 +176,7 @@
 
 /* ---------- Overview redesign ---------- */
 
-/* Remove the stock Ubuntu/GNOME bottom dash. Our left rail owns navigation. */
+/* Remove the stock Ubuntu/GNOME overview dash. The Adaptive bottom dock owns navigation. */
 #dash {
     opacity: 0;
     height: 0;
@@ -602,4 +599,367 @@
     background-color: rgba(14, 27, 44, 0.90);
     color: #F2F6EF;
     font-weight: 650;
+}
+
+
+/* Adaptive bottom dock stability v2.1 */
+.adaptive-dock-reservation {
+    background-color: transparent;
+}
+
+.adaptive-rail {
+    margin-bottom: 7px;
+    padding: 5px 10px 4px 10px;
+    spacing: 6px;
+    border-radius: 18px;
+}
+
+.adaptive-window-list {
+    spacing: 4px;
+}
+
+.adaptive-dock-button {
+    width: 48px;
+    height: 50px;
+    padding: 2px 3px 1px 3px;
+    border-radius: 13px;
+}
+
+.adaptive-app-icon,
+.adaptive-dock-icon {
+    icon-size: 36px;
+}
+
+.adaptive-app-dock-content {
+    spacing: 1px;
+}
+
+.adaptive-running-indicators {
+    height: 5px;
+    spacing: 3px;
+}
+
+.adaptive-rail-rule {
+    width: 1px;
+    height: 34px;
+    margin: 8px 2px 6px 2px;
+}
+
+.adaptive-dock-popup .popup-menu-content {
+    min-width: 190px;
+}
+
+
+/* Adaptive bottom dock geometry v2.2
+ *
+ * The dock is positioned explicitly in JavaScript. No CSS margin may
+ * alter its physical screen position.
+ */
+.adaptive-dock-reservation {
+    margin: 0;
+    padding: 0;
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+.adaptive-rail {
+    margin: 0;
+    padding: 4px 9px 3px 9px;
+    spacing: 5px;
+    border-radius: 16px;
+}
+
+.adaptive-window-list {
+    spacing: 3px;
+}
+
+.adaptive-dock-button {
+    width: 46px;
+    height: 48px;
+    padding: 1px 2px;
+    border-radius: 12px;
+}
+
+.adaptive-app-icon,
+.adaptive-dock-icon {
+    icon-size: 34px;
+}
+
+.adaptive-app-dock-content {
+    spacing: 1px;
+}
+
+.adaptive-running-indicators {
+    height: 4px;
+    spacing: 3px;
+}
+
+.adaptive-running-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+}
+
+.adaptive-rail-rule {
+    width: 1px;
+    height: 30px;
+    margin: 8px 2px 5px 2px;
+}
+
+
+/* Adaptive dock visual customization v2.3 START */
+.adaptive-dock-reservation {
+    margin: 0;
+    padding: 0;
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+.adaptive-rail {
+    margin: 0;
+    padding: 5px 10px 4px 10px;
+    spacing: 4px;
+    border-radius: 18px;
+    background-color: rgba(112, 180, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.21);
+}
+
+.adaptive-window-list {
+    spacing: 3px;
+}
+
+.adaptive-dock-button {
+    width: 48px;
+    height: 48px;
+    padding: 1px 2px;
+    border-radius: 12px;
+    background-color: transparent;
+    border: 1px solid transparent;
+}
+
+.adaptive-dock-button:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.adaptive-app-icon,
+.adaptive-dock-icon {
+    icon-size: 36px;
+}
+
+.adaptive-app-dock-content {
+    spacing: 1px;
+}
+
+.adaptive-running-indicators {
+    height: 5px;
+    spacing: 3px;
+}
+
+.adaptive-running-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+}
+
+.adaptive-rail-rule {
+    width: 1px;
+    height: 30px;
+    margin: 7px 3px 4px 3px;
+    background-color: rgba(255, 255, 255, 0.14);
+}
+/* Adaptive dock visual customization v2.3 END */
+
+
+
+/* Adaptive monitor-aware dock v2.6 START */
+.adaptive-dock-hot-edge {
+    background-color: transparent;
+    border: 0;
+}
+
+.adaptive-dock-reservation {
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+.adaptive-rail {
+    margin: 0;
+    padding: 4px 13px 3px 13px;
+    spacing: 4px;
+    border-radius: 17px;
+    background-color: rgba(18, 18, 20, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow:
+        0 10px 30px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.adaptive-window-list {
+    spacing: 3px;
+}
+
+.adaptive-show-apps-button {
+    margin-left: 3px;
+    margin-right: 3px;
+}
+/* Adaptive monitor-aware dock v2.6 END */
+
+/* ===== Adaptive lock screen =====
+ *
+ * Applies in unlock-dialog session mode, which the extension opts into via
+ * session-modes in metadata.json - GNOME otherwise disables user extensions
+ * while locked and the lock screen would fall back to stock Yaru.
+ *
+ * Presentation only. Authentication, notifications and switch-user remain
+ * GNOME's own: nothing here changes how the session unlocks.
+ */
+
+/* Deep canvas behind the shield, so the wallpaper reads as Adaptive rather
+   than as a bright desktop photo behind a dark dialog. */
+#lockDialogGroup {
+    background-color: #07101A;
+}
+
+.screen-shield-background {
+    background-color: #07101A;
+}
+
+/* ---------- clock ---------- */
+
+.unlock-dialog-clock {
+    spacing: 6px;
+    color: #F2F6EF;
+}
+
+.unlock-dialog-clock-time {
+    color: #F2F6EF;
+    font-size: 68px;
+    font-weight: 200;
+    letter-spacing: -1px;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+}
+
+.unlock-dialog-clock-date {
+    margin-top: 2px;
+    color: #96A4B8;
+    font-size: 17px;
+    font-weight: 500;
+}
+
+/* The "press a key" line: quiet, and spaced away from the date. */
+.unlock-dialog-clock-hint {
+    margin-top: 18px;
+    padding: 5px 14px;
+    border-radius: 9px;
+    border: 1px solid rgba(48, 66, 92, 0.42);
+    background-color: rgba(17, 26, 40, 0.72);
+    color: #78A9FF;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+}
+
+/* ---------- unlock prompt ---------- */
+
+.unlock-dialog {
+    background-color: transparent;
+}
+
+.login-dialog-prompt-layout {
+    spacing: 10px;
+}
+
+.login-dialog-prompt-label {
+    color: #C7D4E4;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.login-dialog-prompt-entry {
+    width: 320px;
+    min-height: 34px;
+    padding: 4px 12px;
+    border-radius: 11px;
+    border: 1px solid rgba(48, 66, 92, 0.62);
+    background-color: rgba(7, 16, 26, 0.92);
+    color: #F2F6EF;
+    caret-color: #78A9FF;
+    selected-color: #F2F6EF;
+    selection-background-color: #244E7A;
+}
+
+.login-dialog-prompt-entry:focus {
+    border-color: rgba(120, 169, 255, 0.62);
+    background-color: rgba(17, 26, 40, 0.96);
+}
+
+.login-dialog-message,
+.login-dialog-message-warning,
+.caps-lock-warning-label {
+    color: #F3C96B;
+    font-size: 11px;
+}
+
+/* ---------- buttons ---------- */
+
+.unlock-dialog .modal-dialog-button,
+.login-dialog-button-box .modal-dialog-button {
+    min-height: 28px;
+    padding: 4px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(48, 66, 92, 0.55);
+    background-color: rgba(17, 26, 40, 0.9);
+    color: #F2F6EF;
+}
+
+.unlock-dialog .modal-dialog-button:hover,
+.unlock-dialog .modal-dialog-button:focus {
+    border-color: rgba(120, 169, 255, 0.5);
+    background-color: rgba(30, 47, 70, 0.95);
+}
+
+.unlock-dialog .modal-dialog-button:default {
+    border-color: rgba(120, 169, 255, 0.55);
+    background-color: rgba(120, 169, 255, 0.22);
+}
+
+.switch-user-button {
+    color: #96A4B8;
+}
+
+/* ---------- notifications on the shield ---------- */
+
+.unlock-dialog-notifications-container {
+    width: 330px;
+    spacing: 7px;
+}
+
+.unlock-dialog-notifications-container .message,
+.unlock-dialog-notification-source {
+    padding: 9px 11px;
+    border-radius: 11px;
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(17, 26, 40, 0.88);
+    color: #F2F6EF;
+}
+
+.unlock-dialog-notification-label {
+    color: #C7D4E4;
+    font-size: 11px;
+}
+
+.unlock-dialog-notification-count-text {
+    padding: 0 7px;
+    border-radius: 8px;
+    background-color: rgba(120, 169, 255, 0.20);
+    color: #E8F1FF;
+    font-size: 10px;
+    font-weight: 700;
 }

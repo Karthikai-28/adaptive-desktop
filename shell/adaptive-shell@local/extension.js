@@ -103,6 +103,21 @@ class AdaptiveShellV16 {
     enable() {
         log('[Adaptive Shell v1.6] enable');
 
+        // The extension stays enabled in unlock-dialog mode so the lock screen
+        // keeps the Adaptive stylesheet. None of the desktop furniture belongs
+        // there: building a dock, a panel identity or D-Bus watchers over the
+        // lock screen would put interactive shell chrome in front of a locked
+        // session. The stylesheet is loaded by the extension system itself, so
+        // returning here still styles the lock screen.
+        if (Main.sessionMode.currentMode === 'unlock-dialog' ||
+            Main.sessionMode.isLocked) {
+            this._lockedOnly = true;
+            log('[Adaptive Shell] locked session: stylesheet only');
+            return;
+        }
+
+        this._lockedOnly = false;
+
         this._hideLegacyPanelItems();
         this._restoreGNOMEClock();
         this._installIdentity();
@@ -238,6 +253,14 @@ class AdaptiveShellV16 {
 
     disable() {
         log('[Adaptive Shell] disable');
+
+        // Nothing was built when enabling into a locked session, so there is
+        // nothing to tear down. Running the full teardown would touch actors
+        // that were never created.
+        if (this._lockedOnly) {
+            this._lockedOnly = false;
+            return;
+        }
 
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
