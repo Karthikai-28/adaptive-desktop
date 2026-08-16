@@ -231,12 +231,12 @@ Status:
 
 ## Milestone 11 — Lock/Login/Session
 
-- ⬜ Adaptive lock treatment.
-- ⬜ Login compatibility.
-- ⬜ Session status.
-- ⬜ Return to Ubuntu.
-- ⬜ Session save behavior.
-- ⬜ Failed-session recovery.
+- 🟡 Adaptive lock treatment.
+- 🟡 Login compatibility.
+- ✅ Session status.
+- ✅ Return to Ubuntu.
+- ✅ Session save behavior.
+- ✅ Failed-session recovery.
 
 ## Milestone 12 — Visual system completion
 

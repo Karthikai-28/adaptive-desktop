@@ -33,7 +33,7 @@ SECTIONS = [
     Section("Power & Battery", "Power mode, suspend, and battery behavior.", ["gnome-control-center", "power"]),
     Section("Accessibility", "Visual, hearing, typing, and pointing accessibility.", ["gnome-control-center", "universal-access"]),
     Section("Developer & Advanced", "Diagnostics, shell verification, and project CLI.", ["./scripts/verify-shell-source.sh"]),
-    Section("Updates, Recovery & Session", "Recovery runbook, validation scripts, and uninstall flow.", ["./scripts/verify-session-isolation.sh"]),
+    Section("Updates, Recovery & Session", "Recovery runbook, validation scripts, and uninstall flow.", ["./scripts/session-cli.py", "status"]),
     Section("About", "Adaptive Desktop version and Ubuntu base.", ["gnome-control-center", "info-overview"]),
 ]
 
