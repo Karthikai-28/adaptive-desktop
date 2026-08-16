@@ -100,12 +100,12 @@ Status:
 
 ## Milestone 4 — Workspaces
 
-- ⬜ Read GNOME workspace state.
-- ⬜ Workspace switch UI.
-- ⬜ Project-to-workspace mapping.
-- ⬜ Restore project workspace.
+- ✅ Read GNOME workspace state.
+- ✅ Workspace switch UI.
+- ✅ Project-to-workspace mapping.
+- ✅ Restore project workspace.
 - ⬜ Remember window placement where safe.
-- ⬜ Workspace overview redesign.
+- 🟡 Workspace overview redesign.
 - ⬜ Keyboard shortcuts.
 - ⬜ Multi-monitor behavior.
 - ⬜ Reduced-motion behavior.

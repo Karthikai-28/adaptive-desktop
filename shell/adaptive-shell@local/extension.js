@@ -100,6 +100,7 @@ class AdaptiveShellV16 {
                                 let [id, name, path] = parameters.deep_unpack();
                                 this._activeProjectId = id;
                                 this._updateProjectLabel(name);
+                                this._restoreProjectWorkspace(id);
                             }
                         });
                         
@@ -115,6 +116,7 @@ class AdaptiveShellV16 {
                                     let [id, name, path] = variant.deep_unpack();
                                     this._activeProjectId = id;
                                     this._updateProjectLabel(name);
+                                    this._restoreProjectWorkspace(id);
                                 } catch (e) {
                                     logError(e, '[Adaptive Shell v1.6] GetActiveProject failed');
                                 }
@@ -133,6 +135,36 @@ class AdaptiveShellV16 {
             let display = name && name !== 'NONE' ? name.toUpperCase() : 'NONE';
             this._projectLabel.set_text('PROJECT · ' + display);
         }
+    }
+
+    _restoreProjectWorkspace(projectId) {
+        if (!projectId || !this._projectProxy)
+            return;
+
+        this._projectProxy.call(
+            'GetProject',
+            GLib.Variant.new('(s)', [projectId]),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            (proxy, res) => {
+                try {
+                    const variant = proxy.call_finish(res);
+                    const [rawProject] = variant.deep_unpack();
+                    const project = JSON.parse(rawProject || '{}');
+                    const workspaceIndex = Number(project.workspace_index);
+
+                    if (!Number.isInteger(workspaceIndex) || workspaceIndex < 0)
+                        return;
+
+                    const workspace = global.workspace_manager.get_workspace_by_index(workspaceIndex);
+                    if (workspace)
+                        workspace.activate(global.get_current_time());
+                } catch (e) {
+                    logError(e, '[Adaptive Shell v1.6] restore project workspace');
+                }
+            }
+        );
     }
 
     disable() {
@@ -1155,6 +1187,27 @@ class AdaptiveShellV16 {
         let header = new PopupMenu.PopupMenuItem('WORKSPACES');
         header.setSensitive(false);
         this._workspacesButton.menu.addMenuItem(header);
+
+        if (this._activeProjectId && this._projectProxy) {
+            const pinItem = new PopupMenu.PopupMenuItem(
+                `Pin active project to Workspace ${activeIndex + 1}`
+            );
+            pinItem.connect('activate', () => {
+                this._projectProxy.call(
+                    'UpdateProject',
+                    GLib.Variant.new('(ss)', [
+                        this._activeProjectId,
+                        JSON.stringify({ workspace_index: activeIndex }),
+                    ]),
+                    Gio.DBusCallFlags.NONE,
+                    -1,
+                    null,
+                    null
+                );
+            });
+            this._workspacesButton.menu.addMenuItem(pinItem);
+            this._workspacesButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        }
         
         for (let i = 0; i < numWorkspaces; i++) {
             let isActive = (i === activeIndex);
