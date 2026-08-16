@@ -21,6 +21,8 @@ const LOCK_AMBIENT_AFTER_S = 12;
 const LOCK_AMBIENT_OPACITY = 145;
 const LOCK_DRIFT_INTERVAL_S = 90;
 const LOCK_DRIFT_RADIUS_PX = 14;
+// Idle time on the lock screen before the screen-saver state takes over.
+const AOD_IDLE_MS = 30 * 1000;
 
 let _shell = null;
 
@@ -243,6 +245,30 @@ class AdaptiveShellV16 {
     _lockScreenStart() {
         this._lockAttempts = 0;
 
+        // Installed up front and driven by its own timer. Tying either to the
+        // unlock dialog meant both died with it: screenShield.js destroys the
+        // dialog when it blanks, which is exactly when the always-on layer is
+        // supposed to take over.
+        this._aodInstall();
+
+        if (!this._lockTickId) {
+            this._lockTickId = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT,
+                1,
+                () => {
+                    try {
+                        this._lockTick();
+                    } catch (e) {
+                        logError(e, '[Adaptive Shell] lock tick');
+                        this._lockTickId = 0;
+                        return GLib.SOURCE_REMOVE;
+                    }
+
+                    return GLib.SOURCE_CONTINUE;
+                }
+            );
+        }
+
         // The dialog is built lazily, so it may not exist the moment the
         // extension is enabled into unlock-dialog mode.
         this._lockAttachId = GLib.timeout_add(
@@ -317,7 +343,6 @@ class AdaptiveShellV16 {
 
         this._lockClock = clock;
         this._lockActivity = activity;
-        this._aodInstall();
 
         // GNOME's own _updateClock() writes the wall clock's HH:MM into the
         // same label once a minute, which wiped the seconds every time the
@@ -339,33 +364,17 @@ class AdaptiveShellV16 {
 
         this._lockTick();
 
-        // One second, because the clock now shows seconds.
-        this._lockTickId = GLib.timeout_add_seconds(
-            GLib.PRIORITY_DEFAULT,
-            1,
-            () => {
-                try {
-                    this._lockTick();
-                } catch (e) {
-                    logError(e, '[Adaptive Shell] lock tick');
-                    this._lockTickId = 0;
-                    return GLib.SOURCE_REMOVE;
-                }
-
-                return GLib.SOURCE_CONTINUE;
-            }
-        );
-
-        clock.connect('destroy', () => this._lockScreenStop());
+        // Only the dialog's own bits are dropped here. The session is still
+        // locked, so the always-on layer and the timer keep running.
+        clock.connect('destroy', () => this._lockDetachDialog());
 
         log('[Adaptive Shell] lock screen clock extended');
         return true;
     }
 
     _lockTick() {
-        if (!this._lockClock || !this._lockClock._time)
-            return;
-
+        // The dialog may be gone while the session stays locked; the always-on
+        // layer below is what keeps the time on screen after that.
         this._lockApplyTime();
 
         if (this._lockActivity) {
@@ -452,6 +461,12 @@ class AdaptiveShellV16 {
         box.add_child(this._aodDate);
 
         group.add_child(box);
+
+        try {
+            group.set_child_above_sibling(box, null);
+        } catch (e) {
+        }
+
         this._aodBox = box;
 
         this._aodLayout();
@@ -484,16 +499,49 @@ class AdaptiveShellV16 {
         this._aodTime.text = now.format(this._lockTimeFormat || '%H:%M:%S').trim();
         this._aodDate.text = now.format('%A %e %B').replace(/\s+/g, ' ').trim();
 
-        // Only shown once GNOME has faded its own dialog away, so the two
-        // clocks are never on screen together.
-        const dialog = Main.screenShield ? Main.screenShield._dialog : null;
-        const dialogVisible = !!(dialog && dialog.visible && dialog.opacity > 40);
+        // Drive the screen-saver state directly instead of waiting for GNOME
+        // to fade its dialog. With the always-on switch on, the session never
+        // goes idle by GNOME's reckoning, so that fade never happens and the
+        // lock UI would simply sit there for ever. Phones do this by idle
+        // time, so this does too: after AOD_IDLE_MS with no input the dialog
+        // steps aside and the bare clock takes the screen; any input brings it
+        // straight back.
+        let idle = 0;
 
-        this._aodBox.visible = !dialogVisible;
+        try {
+            idle = global.backend.get_core_idle_monitor().get_idletime();
+        } catch (e) {
+        }
+
+        const show = idle >= AOD_IDLE_MS;
+        const dialog = Main.screenShield ? Main.screenShield._dialog : null;
+
+        if (dialog) {
+            try {
+                dialog.visible = !show;
+            } catch (e) {
+            }
+        }
+
+        if (show !== this._aodShown) {
+            this._aodShown = show;
+            log(`[Adaptive Shell] always-on layer ${show ? 'shown' : 'hidden'}`);
+        }
+
+        this._aodBox.visible = show;
         this._aodLayout();
     }
 
     _aodRemove() {
+        try {
+            const dialog = Main.screenShield ? Main.screenShield._dialog : null;
+            if (dialog)
+                dialog.visible = true;
+        } catch (e) {
+        }
+
+        this._aodShown = false;
+
         if (!this._aodBox)
             return;
 
@@ -508,8 +556,6 @@ class AdaptiveShellV16 {
     }
 
     _lockApplyTime() {
-        if (!this._lockClock || !this._lockClock._time)
-            return;
 
         // The 12/24-hour preference is read once and cached: this runs every
         // second, and building a Gio.Settings each time would be wasteful.
@@ -526,6 +572,9 @@ class AdaptiveShellV16 {
             } catch (e) {
             }
         }
+
+        if (!this._lockClock || !this._lockClock._time)
+            return;
 
         const now = GLib.DateTime.new_now_local();
         this._lockClock._time.text = now.format(this._lockTimeFormat).trim();
@@ -556,6 +605,20 @@ class AdaptiveShellV16 {
         } catch (e) {
             return '';
         }
+    }
+
+    _lockDetachDialog() {
+        if (this._lockClock && this._lockClock._adaptiveUpdateClock) {
+            try {
+                this._lockClock._updateClock =
+                    this._lockClock._adaptiveUpdateClock;
+                this._lockClock._adaptiveUpdateClock = null;
+            } catch (e) {
+            }
+        }
+
+        this._lockClock = null;
+        this._lockActivity = null;
     }
 
     _lockScreenStop() {
