@@ -160,11 +160,11 @@ Status:
 ### Remaining
 
 - ⬜ Home/Recents.
-- ⬜ Project Files.
-- ⬜ Folder browse.
+- 🟡 Project Files.
+- 🟡 Folder browse.
 - ⬜ Grid/list.
 - ⬜ Search/filters.
-- ⬜ Preview/Inspector.
+- 🟡 Preview/Inspector.
 - ⬜ Split view.
 - ⬜ Multi-select.
 - ⬜ Transfers.
@@ -173,7 +173,14 @@ Status:
 - ⬜ Devices/network.
 - ⬜ Empty/error states.
 - ⬜ Linux permissions/hidden files.
-- ⬜ Decide Nautilus integration vs separate frontend.
+- ✅ Decide Nautilus integration vs separate frontend.
+
+### Current
+
+- ✅ Standalone Adaptive Files app exists.
+- ✅ Nautilus native preview/inspector layer exists.
+- ✅ Project registry format is understood by Adaptive Files.
+- 🟡 Nautilus preview has a Project tab backed by Project Context Service.
 
 ## Milestone 8 — Settings
 

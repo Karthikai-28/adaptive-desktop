@@ -19,6 +19,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import json
 import stat
 import subprocess
 import traceback
@@ -428,6 +429,10 @@ class PreviewController:
         self.last_selection = []
         self.active_metadata_box = None
 
+        self._active_project_id = None
+        self._dbus_proxy = None
+        self._init_dbus_proxy()
+
         self._configure_process_theme()
 
         try:
@@ -460,6 +465,32 @@ class PreviewController:
 
     def release(self):
         self._window = None
+
+    def _init_dbus_proxy(self):
+        try:
+            self._dbus_proxy = Gio.DBusProxy.new_for_bus_sync(
+                Gio.BusType.SESSION,
+                Gio.DBusProxyFlags.NONE,
+                None,
+                "org.adaptive.ProjectContext",
+                "/org/adaptive/ProjectContext",
+                "org.adaptive.ProjectContext",
+                None,
+            )
+            self._dbus_proxy.connect("g-signal", self._on_dbus_signal)
+        except Exception as e:
+            self._dbus_proxy = None
+            _log(f"DBus ProjectContext error: {e}")
+
+    def _on_dbus_signal(self, proxy, sender_name, signal_name, parameters):
+        if signal_name == "ActiveProjectChanged":
+            try:
+                self._active_project_id = parameters.unpack()[0]
+            except Exception:
+                self._active_project_id = None
+            GLib.idle_add(self._render_project)
+        elif signal_name == "ProjectListChanged":
+            GLib.idle_add(self._render_project)
 
     def _configure_process_theme(self):
         try:
@@ -552,10 +583,12 @@ class PreviewController:
         preview_scroll, preview_body = self._make_scroll_body()
         storage_scroll, storage_body = self._make_scroll_body()
         network_scroll, network_body = self._make_scroll_body()
+        project_scroll, project_body = self._make_scroll_body()
 
         stack.add_titled(preview_scroll, "preview", "Preview")
         stack.add_titled(storage_scroll, "storage", "Storage")
         stack.add_titled(network_scroll, "network", "Network")
+        stack.add_titled(project_scroll, "project", "Project")
 
         panel.pack_start(stack, True, True, 0)
 
@@ -567,12 +600,14 @@ class PreviewController:
         self.preview_body = preview_body
         self.storage_body = storage_body
         self.network_body = network_body
+        self.project_body = project_body
 
         stack.connect("notify::visible-child-name", self._on_stack_changed)
 
         self._render_empty_preview()
         self._render_storage()
         self._render_network()
+        self._render_project()
 
     def _make_scroll_body(self):
         scroll = Gtk.ScrolledWindow()
@@ -596,6 +631,8 @@ class PreviewController:
             self._render_storage()
         elif name == "network":
             self._render_network()
+        elif name == "project":
+            self._render_project()
 
     def _on_window_size_allocate(self, _window, allocation):
         width = allocation.width
@@ -2670,6 +2707,105 @@ class PreviewController:
         self.preview_body.pack_start(card, False, False, 0)
         self.preview_body.show_all()
 
+    def _render_project(self):
+        self._clear(self.project_body)
+        
+        card = self._card()
+        _css(card, "adaptive-project-card")
+        
+        headline = Gtk.Label(label="PROJECT CONTEXT", xalign=0)
+        _css(headline, "adaptive-metadata-key")
+        card.pack_start(headline, False, False, 0)
+        
+        if not self._dbus_proxy:
+            err = Gtk.Label(label="Project Context Service offline", xalign=0)
+            _css(err, "adaptive-muted")
+            card.pack_start(err, False, False, 8)
+            self.project_body.pack_start(card, False, False, 0)
+            self.project_body.show_all()
+            return
+            
+        try:
+            res = self._dbus_proxy.call_sync(
+                "GetActiveProject",
+                None,
+                Gio.DBusCallFlags.NONE,
+                -1,
+                None,
+            )
+            pid, name, path = res.unpack()
+            self._active_project_id = pid or None
+            
+            if pid:
+                title = Gtk.Label(label=name, xalign=0)
+                _css(title, "adaptive-empty-title", "adaptive-project-active-badge")
+                card.pack_start(title, False, False, 4)
+                
+                path_label = Gtk.Label(label=path, xalign=0)
+                path_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                _css(path_label, "adaptive-muted")
+                card.pack_start(path_label, False, False, 0)
+            else:
+                title = Gtk.Label(label="No active project", xalign=0)
+                _css(title, "adaptive-muted")
+                card.pack_start(title, False, False, 4)
+                
+        except Exception as e:
+            _log_exception("GetActiveProject failed")
+            
+        self.project_body.pack_start(card, False, False, 0)
+        
+        try:
+            res = self._dbus_proxy.call_sync(
+                "ListProjects",
+                None,
+                Gio.DBusCallFlags.NONE,
+                -1,
+                None,
+            )
+            projects = json.loads(res.unpack()[0])
+            
+            list_card = self._card()
+            _css(list_card, "adaptive-project-card")
+            
+            list_head = Gtk.Label(label="AVAILABLE PROJECTS", xalign=0)
+            _css(list_head, "adaptive-metadata-key")
+            list_card.pack_start(list_head, False, False, 8)
+            
+            if not projects:
+                empty = Gtk.Label(label="No projects found", xalign=0)
+                _css(empty, "adaptive-muted")
+                list_card.pack_start(empty, False, False, 0)
+            else:
+                for pid, pdata in projects.items():
+                    is_active = (pid == self._active_project_id)
+                    btn = Gtk.Button(label="★ " + pdata["name"] if is_active else pdata["name"])
+                    btn.set_halign(Gtk.Align.FILL)
+                    _css(btn, "adaptive-project-list-row")
+                    if is_active:
+                        _css(btn, "adaptive-project-active-badge")
+                    
+                    def set_active(button, target_id=pid):
+                        try:
+                            self._dbus_proxy.call_sync(
+                                "SetActiveProject",
+                                GLib.Variant.new("(s)", [target_id]),
+                                Gio.DBusCallFlags.NONE,
+                                -1,
+                                None
+                            )
+                        except Exception as e:
+                            _log_exception("SetActiveProject failed")
+                            
+                    btn.connect("clicked", set_active)
+                    list_card.pack_start(btn, False, False, 2)
+            
+            self.project_body.pack_start(list_card, False, False, 0)
+        except Exception as e:
+            _log_exception("ListProjects failed")
+            
+        self.project_body.show_all()
+
 
 class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.LocationWidgetProvider):
     """
@@ -2770,6 +2906,14 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
                 lambda *_: controller.show_tab("network"),
             )
             strip.pack_start(network, False, False, 0)
+
+            project = Gtk.Button(label="Project")
+            _css(project, "adaptive-location-button")
+            project.connect(
+                "clicked",
+                lambda *_: controller.show_tab("project"),
+            )
+            strip.pack_start(project, False, False, 0)
 
             path = Gtk.Label(label=uri or "", xalign=1)
             path.set_hexpand(True)

@@ -361,7 +361,7 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             self._side_heading(self.sidebar_box, "PROJECTS")
             for project in projects:
                 name = project.get("name")
-                root = project.get("root")
+                root = project.get("root") or project.get("path")
                 if not name or not root:
                     continue
 
@@ -1937,8 +1937,12 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             if isinstance(data, list):
                 return data
 
-            if isinstance(data, dict) and isinstance(data.get("projects"), list):
-                return data["projects"]
+            if isinstance(data, dict):
+                projects = data.get("projects")
+                if isinstance(projects, list):
+                    return projects
+                elif isinstance(projects, dict):
+                    return list(projects.values())
 
         except Exception:
             pass

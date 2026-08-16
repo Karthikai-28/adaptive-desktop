@@ -448,3 +448,30 @@
 .adaptive-code-preview text {
     background-color: transparent;
 }
+
+/* v1.5 — Project Context */
+.adaptive-project-card {
+    border-radius: 9px;
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(10, 22, 36, 0.62);
+    padding: 10px;
+}
+
+.adaptive-project-list-row {
+    background-color: transparent;
+    color: #96A4B8;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 6px;
+    font-size: 11.5px;
+}
+
+.adaptive-project-list-row:hover {
+    background-color: rgba(120, 169, 255, 0.12);
+    color: #EDF4FC;
+}
+
+.adaptive-project-active-badge {
+    color: #66E0FF;
+    font-weight: 700;
+}
