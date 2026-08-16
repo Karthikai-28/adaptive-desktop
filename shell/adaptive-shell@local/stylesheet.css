@@ -973,3 +973,24 @@
     font-size: 10px;
     font-weight: 700;
 }
+
+/* Always-on layer: shown once GNOME fades its unlock dialog away, so the
+   screen is never just black. Dim by design - this can sit lit for hours. */
+.adaptive-aod {
+    spacing: 10px;
+    background-color: transparent;
+}
+
+.adaptive-aod-time {
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 92px;
+    font-weight: 200;
+    letter-spacing: 1px;
+}
+
+.adaptive-aod-date {
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 17px;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+}

@@ -11,6 +11,8 @@ const AppFavorites = imports.ui.appFavorites;
 const ExtensionUtils = imports.misc.extensionUtils;
 const Gvc = imports.gi.Gvc;
 
+const Pango = imports.gi.Pango;
+
 const Me = ExtensionUtils.getCurrentExtension();
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
@@ -65,6 +67,9 @@ class AdaptiveShellV16 {
         this._lockAttempts = 0;
         this._lockActive = false;
         this._sessionModeId = 0;
+        this._aodBox = null;
+        this._aodTime = null;
+        this._aodDate = null;
 
         this._commandLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -300,8 +305,19 @@ class AdaptiveShellV16 {
             clock.add_child(activity);
         }
 
+        // St.Label ellipsizes by default. The label was sized for "01:20", so
+        // appending seconds overflowed it and Pango replaced them with an
+        // ellipsis - the seconds showed up as dots.
+        try {
+            clock._time.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            clock._time.clutter_text.line_wrap = false;
+            clock._time.x_expand = true;
+        } catch (e) {
+        }
+
         this._lockClock = clock;
         this._lockActivity = activity;
+        this._aodInstall();
 
         // GNOME's own _updateClock() writes the wall clock's HH:MM into the
         // same label once a minute, which wiped the seconds every time the
@@ -357,6 +373,8 @@ class AdaptiveShellV16 {
             this._lockActivity.visible = !!this._lockActivity.text;
         }
 
+        this._aodUpdate();
+
         this._lockTicks = (this._lockTicks || 0) + 1;
         this._lockAmbientStep();
     }
@@ -397,6 +415,96 @@ class AdaptiveShellV16 {
             duration: 2500,
             mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
         });
+    }
+
+    // Always-on layer.
+    //
+    // GNOME fades its unlock dialog out once the session is idle, leaving a
+    // plain black shield - which is why the screen went "just black". This
+    // clock lives on the shield group itself rather than inside that dialog,
+    // so it survives the fade the way a phone's always-on display does.
+    _aodInstall() {
+        if (this._aodBox)
+            return;
+
+        const group = Main.layoutManager.screenShieldGroup;
+        if (!group)
+            return;
+
+        const box = new St.BoxLayout({
+            vertical: true,
+            style_class: 'adaptive-aod',
+            reactive: false,
+        });
+
+        this._aodTime = new St.Label({
+            style_class: 'adaptive-aod-time',
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+        this._aodTime.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+
+        this._aodDate = new St.Label({
+            style_class: 'adaptive-aod-date',
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+
+        box.add_child(this._aodTime);
+        box.add_child(this._aodDate);
+
+        group.add_child(box);
+        this._aodBox = box;
+
+        this._aodLayout();
+        this._aodUpdate();
+    }
+
+    _aodLayout() {
+        if (!this._aodBox)
+            return;
+
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!monitor)
+            return;
+
+        const [, width] = this._aodBox.get_preferred_width(-1);
+        const [, height] = this._aodBox.get_preferred_height(width);
+
+        this._aodBox.set_position(
+            monitor.x + Math.round((monitor.width - width) / 2),
+            monitor.y + Math.round((monitor.height - height) / 2)
+        );
+    }
+
+    _aodUpdate() {
+        if (!this._aodBox)
+            return;
+
+        const now = GLib.DateTime.new_now_local();
+
+        this._aodTime.text = now.format(this._lockTimeFormat || '%H:%M:%S').trim();
+        this._aodDate.text = now.format('%A %e %B').replace(/\s+/g, ' ').trim();
+
+        // Only shown once GNOME has faded its own dialog away, so the two
+        // clocks are never on screen together.
+        const dialog = Main.screenShield ? Main.screenShield._dialog : null;
+        const dialogVisible = !!(dialog && dialog.visible && dialog.opacity > 40);
+
+        this._aodBox.visible = !dialogVisible;
+        this._aodLayout();
+    }
+
+    _aodRemove() {
+        if (!this._aodBox)
+            return;
+
+        try {
+            this._aodBox.destroy();
+        } catch (e) {
+        }
+
+        this._aodBox = null;
+        this._aodTime = null;
+        this._aodDate = null;
     }
 
     _lockApplyTime() {
@@ -488,6 +596,7 @@ class AdaptiveShellV16 {
             this._lockClock = null;
         }
 
+        this._aodRemove();
         this._lockTicks = 0;
         this._lockTimeFormat = undefined;
     }
