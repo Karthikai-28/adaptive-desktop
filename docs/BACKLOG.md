@@ -68,7 +68,7 @@ Status:
 
 - ✅ Convert rail from floating palette into a true docked shell rail.
 - 🔬 Reserve application area to the right of the rail.
-- 🟡 Add icon+text dock labels and live open-window switching.
+- ✅ Add icon+text dock labels and live open-window switching.
 - 🟡 Improve icon consistency and active states.
 - 🟡 Keep stock top-right controls until System Center is functional.
 
@@ -104,9 +104,9 @@ Status:
 - ✅ Workspace switch UI.
 - ✅ Project-to-workspace mapping.
 - ✅ Restore project workspace.
-- ⬜ Remember window placement where safe.
+- ✅ Remember window placement where safe.
 - 🟡 Workspace overview redesign.
-- ⬜ Keyboard shortcuts.
+- ✅ Keyboard shortcuts.
 - ⬜ Multi-monitor behavior.
 - ⬜ Reduced-motion behavior.
 
@@ -121,7 +121,7 @@ Status:
 - ✅ Recent actions.
 - ✅ Keyboard navigation.
 - ✅ Extensible provider model.
-- 🟡 Permission/safety model.
+- ✅ Permission/safety model.
 
 ## Milestone 6 — System Center
 
@@ -142,7 +142,7 @@ Status:
 - ✅ Volume.
 - 🟡 Battery/power status.
 - 🟡 Performance summary.
-- ⬜ Notifications/focus.
+- ✅ Notifications/focus.
 - ✅ Settings launcher.
 - ✅ Lock.
 - ✅ Logout.
@@ -212,18 +212,18 @@ Status:
 
 - 🟡 Notification center.
 - 🟡 Critical/normal policy.
-- 🟡 Focus profiles.
+- ✅ Focus profiles.
 - ✅ Project focus profile.
 - ✅ Focus timer.
 - 🟡 Quiet/fullscreen behavior.
 
 ## Milestone 10 — Window management
 
-- 🟡 Smart tiling.
+- ✅ Smart tiling.
 - ✅ Split presets.
 - 🟡 Snapping.
-- 🟡 Project-aware placement.
-- 🟡 Visible open-window switching from the dock.
+- ✅ Project-aware placement.
+- ✅ Visible open-window switching from the dock.
 - ✅ Restore.
 - 🟡 Fullscreen behavior.
 - ⬜ Multi-monitor behavior.

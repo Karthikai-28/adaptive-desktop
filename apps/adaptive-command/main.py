@@ -81,6 +81,8 @@ class CommandWindow(Gtk.ApplicationWindow):
             Result("Focus On", "Hide notification banners", lambda: self._spawn(["./scripts/focus-cli.py", "on"])),
             Result("Focus Off", "Show notification banners", lambda: self._spawn(["./scripts/focus-cli.py", "off"])),
             Result("Smart Tile Window", "Window action", lambda: self._spawn(["./scripts/window-cli.py", "tile", "smart"])),
+            Result("Save Project Window Placement", "Window action", lambda: self._spawn(["./scripts/window-cli.py", "save-project"])),
+            Result("Restore Project Window Placement", "Window action", lambda: self._spawn(["./scripts/window-cli.py", "restore-project"])),
         ]
         return [item for item in actions if self._match(item, query)]
 

@@ -1301,6 +1301,8 @@ class AdaptiveShellV16 {
             this._addCommandItem('Maximize Active Window Around Dock', () => this._spawn([this._windowCli, 'tile', 'maximize']));
             this._addCommandItem('Save Active Window Placement', () => this._spawn([this._windowCli, 'save']));
             this._addCommandItem('Restore Active Window Placement', () => this._spawn([this._windowCli, 'restore']));
+            this._addCommandItem('Save Project Window Placement', () => this._spawn([this._windowCli, 'save-project']));
+            this._addCommandItem('Restore Project Window Placement', () => this._spawn([this._windowCli, 'restore-project']));
         }
 
         if (GLib.file_test(this._appearanceCli, GLib.FileTest.IS_EXECUTABLE)) {
@@ -1467,6 +1469,8 @@ class AdaptiveShellV16 {
                 'Maximize Active Window Around Dock': ['tile', 'maximize'],
                 'Save Active Window Placement': ['save'],
                 'Restore Active Window Placement': ['restore'],
+                'Save Project Window Placement': ['save-project'],
+                'Restore Project Window Placement': ['restore-project'],
             };
 
             if (windowCommands[label]) {
