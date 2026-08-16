@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Adaptive Project Context Service
+Exec=/home/karthi/adaptive-desktop/services/project-context/main.py
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Phase=Initialization
+AutostartCondition=GNOME3 if-session adaptive-desktop

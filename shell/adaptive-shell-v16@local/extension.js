@@ -1,5 +1,7 @@
 const { St, Gio, GLib, Clutter } = imports.gi;
 const Main = imports.ui.main;
+const PanelMenu = imports.ui.panelMenu;
+const PopupMenu = imports.ui.popupMenu;
 const ExtensionUtils = imports.misc.extensionUtils;
 
 const Me = ExtensionUtils.getCurrentExtension();
@@ -10,11 +12,14 @@ class AdaptiveShellV16 {
     constructor() {
         this._rail = null;
         this._brandButton = null;
+        this._projectButton = null;
         this._projectLabel = null;
+        this._activeProjectId = null;
         this._monitorChangedId = 0;
         this._hiddenActors = [];
         this._clockActor = null;
         this._clockDisplay = null;
+        this._projectProxy = null;
 
         this._filesLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -38,9 +43,63 @@ class AdaptiveShellV16 {
         );
 
         this._layoutRail();
+        this._connectToProjectContext();
 
         log('[Adaptive Shell v1.6] functional rail installed');
         log('[Adaptive Shell v1.6] GNOME dateMenu restored');
+    }
+
+    _connectToProjectContext() {
+        Gio.DBusProxy.new_for_bus(
+            Gio.BusType.SESSION,
+            Gio.DBusProxyFlags.NONE,
+            null,
+            'org.adaptive.ProjectContext',
+            '/org/adaptive/ProjectContext',
+            'org.adaptive.ProjectContext',
+            null,
+            (source, result) => {
+                try {
+                    this._projectProxy = Gio.DBusProxy.new_for_bus_finish(result);
+                    if (this._projectProxy) {
+                        this._projectProxy.connect('g-signal', (proxy, sender_name, signal_name, parameters) => {
+                            if (signal_name === 'ActiveProjectChanged') {
+                                let [id, name, path] = parameters.deep_unpack();
+                                this._activeProjectId = id;
+                                this._updateProjectLabel(name);
+                            }
+                        });
+                        
+                        this._projectProxy.call(
+                            'GetActiveProject',
+                            null,
+                            Gio.DBusCallFlags.NONE,
+                            -1,
+                            null,
+                            (proxy, res) => {
+                                try {
+                                    let variant = proxy.call_finish(res);
+                                    let [id, name, path] = variant.deep_unpack();
+                                    this._activeProjectId = id;
+                                    this._updateProjectLabel(name);
+                                } catch (e) {
+                                    logError(e, '[Adaptive Shell v1.6] GetActiveProject failed');
+                                }
+                            }
+                        );
+                    }
+                } catch (e) {
+                    logError(e, '[Adaptive Shell v1.6] Error connecting to ProjectContext DBus');
+                }
+            }
+        );
+    }
+
+    _updateProjectLabel(name) {
+        if (this._projectLabel) {
+            let display = name && name !== 'NONE' ? name.toUpperCase() : 'NONE';
+            this._projectLabel.set_text('PROJECT · ' + display);
+        }
     }
 
     disable() {
@@ -64,9 +123,13 @@ class AdaptiveShellV16 {
             this._brandButton = null;
         }
 
-        if (this._projectLabel) {
-            this._projectLabel.destroy();
-            this._projectLabel = null;
+        if (this._projectButton) {
+            this._projectButton.destroy();
+            this._projectButton = null;
+        }
+
+        if (this._projectProxy) {
+            this._projectProxy = null;
         }
 
         if (this._clockActor) {
@@ -219,10 +282,20 @@ class AdaptiveShellV16 {
             () => this._showOverview()
         );
 
+        this._projectButton = new PanelMenu.Button(0.0, 'ProjectMenu', false);
+        this._projectButton.add_style_class_name('adaptive-project-button');
+        
         this._projectLabel = new St.Label({
             text: 'PROJECT · NONE',
             y_align: Clutter.ActorAlign.CENTER,
             style_class: 'adaptive-project-label',
+        });
+        this._projectButton.add_child(this._projectLabel);
+        
+        this._projectButton.menu.connect('open-state-changed', (menu, open) => {
+            if (open) {
+                this._populateProjectMenu();
+            }
         });
 
         Main.panel._leftBox.insert_child_at_index(
@@ -231,8 +304,60 @@ class AdaptiveShellV16 {
         );
 
         Main.panel._leftBox.insert_child_at_index(
-            this._projectLabel,
+            this._projectButton,
             1
+        );
+    }
+
+    _populateProjectMenu() {
+        this._projectButton.menu.removeAll();
+        
+        if (!this._projectProxy) {
+            let item = new PopupMenu.PopupMenuItem('Project Service offline');
+            item.setSensitive(false);
+            this._projectButton.menu.addMenuItem(item);
+            return;
+        }
+
+        this._projectProxy.call(
+            'ListProjects',
+            null,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            (proxy, res) => {
+                try {
+                    let variant = proxy.call_finish(res);
+                    let projects = JSON.parse(variant.deep_unpack()[0]);
+                    let hasItems = false;
+                    
+                    for (let pid in projects) {
+                        hasItems = true;
+                        let name = projects[pid].name;
+                        let isActive = (pid === this._activeProjectId);
+                        let item = new PopupMenu.PopupMenuItem(isActive ? `★ ${name}` : name);
+                        item.connect('activate', () => {
+                            this._projectProxy.call(
+                                'SetActiveProject',
+                                GLib.Variant.new('(s)', [pid]),
+                                Gio.DBusCallFlags.NONE,
+                                -1,
+                                null,
+                                null
+                            );
+                        });
+                        this._projectButton.menu.addMenuItem(item);
+                    }
+                    
+                    if (!hasItems) {
+                        let empty = new PopupMenu.PopupMenuItem('No projects found');
+                        empty.setSensitive(false);
+                        this._projectButton.menu.addMenuItem(empty);
+                    }
+                } catch (e) {
+                    logError(e, '[Adaptive Shell v1.6] ListProjects failed');
+                }
+            }
         );
     }
 
