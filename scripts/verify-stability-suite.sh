@@ -22,6 +22,7 @@ echo
 echo "== Backup inventory =="
 test -d "${REPO}/backups"
 find "${REPO}/backups" -maxdepth 1 -mindepth 1 -type d | sort | tail -10
+"${REPO}/scripts/verify-backup-restore.sh"
 
 echo
 echo "== Update compatibility =="

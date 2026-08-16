@@ -119,6 +119,7 @@ has_source() {
   echo
   echo "== Stability exercises =="
   "${REPO}/scripts/verify-file-transfer-stress.py"
+  "${REPO}/scripts/verify-backup-restore.sh"
   "${REPO}/scripts/verify-stability-suite.sh"
   verify "Reboot, suspend/resume, and long-running memory checks require timed physical-session runs"
 

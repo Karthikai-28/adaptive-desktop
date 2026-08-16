@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 
-STATE_DIR = Path.home() / ".config" / "adaptive-desktop"
+STATE_DIR = Path(os.environ.get("ADAPTIVE_STATE_DIR", Path.home() / ".config" / "adaptive-desktop"))
 SESSION_STATE = STATE_DIR / "session-state.json"
 
 

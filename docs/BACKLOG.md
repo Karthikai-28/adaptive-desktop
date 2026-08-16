@@ -262,7 +262,7 @@ Status:
 - ✅ File transfer stress test.
 - 🔬 Long-running shell memory test.
 - ✅ Update compatibility check.
-- 🔬 Backup/restore test.
+- ✅ Backup/restore test.
 
 ## Immediate next work
 
