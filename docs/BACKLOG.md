@@ -114,11 +114,11 @@ Status:
 
 - ⬜ Global shortcut.
 - 🟡 Application search.
-- ⬜ File/folder search.
+- 🟡 File/folder search.
 - ✅ Project switching.
 - ✅ Desktop actions.
-- ⬜ Settings search.
-- ⬜ Recent actions.
+- ✅ Settings search.
+- ✅ Recent actions.
 - 🟡 Keyboard navigation.
 - 🟡 Extensible provider model.
 - 🟡 Permission/safety model.

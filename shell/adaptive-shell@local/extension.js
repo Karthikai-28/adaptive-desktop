@@ -70,6 +70,12 @@ class AdaptiveShellV16 {
             'scripts',
             'window-cli.py',
         ]);
+        this._commandHistoryFile = GLib.build_filenamev([
+            GLib.get_home_dir(),
+            '.config',
+            'adaptive-desktop',
+            'command-history.json',
+        ]);
     }
 
     enable() {
@@ -1283,6 +1289,19 @@ class AdaptiveShellV16 {
             this._addCommandItem('Restore Active Window Placement', () => this._spawn([this._windowCli, 'restore']));
         }
 
+        const recentActions = this._loadCommandHistory();
+        if (recentActions.length) {
+            this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this._addCommandHeader('RECENT');
+            for (const action of recentActions.slice(0, 5))
+                this._addCommandItem(action.label, () => this._runRememberedCommand(action.label), false);
+        }
+
+        this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._addCommandHeader('SETTINGS');
+        for (const section of this._settingsSections())
+            this._addCommandItem(section.label, () => this._runSettingsSection(section));
+
         this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._addCommandHeader('APPLICATIONS');
 
@@ -1361,10 +1380,12 @@ class AdaptiveShellV16 {
         this._commandButton.menu.addMenuItem(item);
     }
 
-    _addCommandItem(label, callback) {
+    _addCommandItem(label, callback, remember = true) {
         const item = new PopupMenu.PopupMenuItem(label);
         item.connect('activate', () => {
             try {
+                if (remember)
+                    this._rememberCommand(label);
                 callback();
             } catch (e) {
                 logError(e, `[Adaptive Shell v1.6] command ${label}`);
@@ -1372,6 +1393,91 @@ class AdaptiveShellV16 {
             }
         });
         this._commandButton.menu.addMenuItem(item);
+    }
+
+    _settingsSections() {
+        return [
+            { label: 'Appearance Settings', argv: ['gnome-control-center', 'appearance'] },
+            { label: 'Display Settings', argv: ['gnome-control-center', 'display'] },
+            { label: 'Sound Settings', argv: ['gnome-control-center', 'sound'] },
+            { label: 'Keyboard Settings', argv: ['gnome-control-center', 'keyboard'] },
+            { label: 'Network Settings', argv: ['gnome-control-center', 'network'] },
+            { label: 'Power Settings', argv: ['gnome-control-center', 'power'] },
+            { label: 'Privacy Settings', argv: ['gnome-control-center', 'privacy'] },
+            { label: 'Accessibility Settings', argv: ['gnome-control-center', 'universal-access'] },
+        ];
+    }
+
+    _runSettingsSection(section) {
+        this._spawn(section.argv);
+    }
+
+    _runRememberedCommand(label) {
+        const setting = this._settingsSections().find(section => section.label === label);
+        if (setting) {
+            this._runSettingsSection(setting);
+            return;
+        }
+
+        if (label === 'Search apps and files...') {
+            this._showSearch();
+            return;
+        }
+
+        if (label === 'Open Adaptive Files') {
+            this._openFiles();
+            return;
+        }
+
+        if (label === 'Open System Settings') {
+            this._openSettings();
+            return;
+        }
+
+        if (GLib.file_test(this._windowCli, GLib.FileTest.IS_EXECUTABLE)) {
+            const windowCommands = {
+                'Smart Tile Active Window': ['tile', 'smart'],
+                'Tile Active Window Left': ['tile', 'left'],
+                'Tile Active Window Right': ['tile', 'right'],
+                'Center Active Window': ['tile', 'center'],
+                'Maximize Active Window Around Dock': ['tile', 'maximize'],
+                'Save Active Window Placement': ['save'],
+                'Restore Active Window Placement': ['restore'],
+            };
+
+            if (windowCommands[label]) {
+                this._spawn([this._windowCli, ...windowCommands[label]]);
+                return;
+            }
+        }
+
+        this._showSearch();
+    }
+
+    _loadCommandHistory() {
+        try {
+            const file = Gio.File.new_for_path(this._commandHistoryFile);
+            const [, contents] = file.load_contents(null);
+            return JSON.parse(imports.byteArray.toString(contents));
+        } catch (e) {
+            return [];
+        }
+    }
+
+    _rememberCommand(label) {
+        const history = this._loadCommandHistory().filter(item => item.label !== label);
+        history.unshift({ label });
+
+        try {
+            const dir = GLib.path_get_dirname(this._commandHistoryFile);
+            GLib.mkdir_with_parents(dir, 0o755);
+            GLib.file_set_contents(
+                this._commandHistoryFile,
+                JSON.stringify(history.slice(0, 12))
+            );
+        } catch (e) {
+            logError(e, '[Adaptive Shell v1.6] remember command');
+        }
     }
 
     _showSearch() {
