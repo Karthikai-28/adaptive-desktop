@@ -63,6 +63,8 @@ class AdaptiveShellV16 {
         this._lockAttachId = 0;
         this._lockTickId = 0;
         this._lockAttempts = 0;
+        this._lockActive = false;
+        this._sessionModeId = 0;
 
         this._commandLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -170,9 +172,19 @@ class AdaptiveShellV16 {
             () => this._queueWindowListRefresh()
         );
 
+        // Locking does not re-run enable(). An extension that supports both
+        // "user" and "unlock-dialog" is left running across the transition
+        // rather than being disabled and re-enabled, so the lock screen work
+        // has to hang off the session mode changing, not off enable().
+        this._sessionModeId = Main.sessionMode.connect(
+            'updated',
+            () => this._onSessionModeChanged()
+        );
+
         this._connectToProjectContext();
         this._queueWindowListRefresh();
         this._syncDockActive();
+        this._onSessionModeChanged();
 
         log('[Adaptive Shell] interactive bottom dock installed');
         log('[Adaptive Shell] GNOME dateMenu restored');
@@ -185,6 +197,43 @@ class AdaptiveShellV16 {
     // Everything below runs only while the session is locked. It adds to
     // GNOME's unlock dialog and never touches authentication: the prompt, the
     // password entry and the unlock path stay exactly as GNOME built them.
+
+    _onSessionModeChanged() {
+        const locked =
+            Main.sessionMode.currentMode === 'unlock-dialog' ||
+            Main.sessionMode.isLocked;
+
+        if (locked === this._lockActive)
+            return;
+
+        this._lockActive = locked;
+
+        if (locked) {
+            // The extension keeps running while locked, so the desktop's own
+            // chrome has to be put away by hand - a dock floating over the
+            // lock screen would be both wrong and clickable.
+            this._lockHideDesktopChrome(true);
+            this._lockScreenStart();
+        } else {
+            this._lockScreenStop();
+            this._lockHideDesktopChrome(false);
+        }
+    }
+
+    _lockHideDesktopChrome(hidden) {
+        for (const actor of [this._rail, this._dockChrome]) {
+            if (!actor)
+                continue;
+
+            try {
+                actor.visible = !hidden;
+            } catch (e) {
+            }
+        }
+
+        if (hidden)
+            this._hideTooltip();
+    }
 
     _lockScreenStart() {
         this._lockAttempts = 0;
@@ -539,6 +588,14 @@ class AdaptiveShellV16 {
             this._lockScreenStop();
             return;
         }
+
+        if (this._sessionModeId) {
+            Main.sessionMode.disconnect(this._sessionModeId);
+            this._sessionModeId = 0;
+        }
+
+        this._lockScreenStop();
+        this._lockActive = false;
 
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
