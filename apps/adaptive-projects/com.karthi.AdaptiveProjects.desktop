@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Projects
+GenericName=Project Mode
+Comment=Every git repository on this machine, sorted by recent work
+Keywords=project;projects;git;repository;repo;workspace;
+Exec=/home/karthi/adaptive-desktop/scripts/adaptive-projects-launch.sh
+Icon=folder-open
+Terminal=false
+Categories=Development;
+StartupNotify=true
+StartupWMClass=com.karthi.AdaptiveProjects

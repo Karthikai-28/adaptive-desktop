@@ -22,6 +22,7 @@ except Exception:
 
 for name in [
     "adaptive-command",
+    "adaptive-projects",
     "adaptive-window-smart",
     "adaptive-window-left",
     "adaptive-window-right",
@@ -53,6 +54,7 @@ set_binding() {
 }
 
 set_binding "adaptive-command" "Adaptive Command" "${REPO}/scripts/adaptive-command-launch.sh" "<Alt>space"
+set_binding "adaptive-projects" "Adaptive Projects" "${REPO}/scripts/adaptive-projects-launch.sh" "<Super>p"
 set_binding "adaptive-window-smart" "Adaptive Smart Tile" "${REPO}/scripts/window-cli.py tile smart" "<Super><Alt>space"
 set_binding "adaptive-window-left" "Adaptive Tile Left" "${REPO}/scripts/window-cli.py tile left" "<Super><Alt>Left"
 set_binding "adaptive-window-right" "Adaptive Tile Right" "${REPO}/scripts/window-cli.py tile right" "<Super><Alt>Right"
@@ -69,17 +71,17 @@ set_binding "adaptive-window-restore-project" "Adaptive Restore Project Window P
 # accelerator". Drop just those two accelerators; workspace switching keeps
 # Super+Page_Up/Down and Ctrl+Alt+Left/Right.
 #
-release_wm_accelerator() {
-    local key="$1"
-    local unwanted="$2"
+release_accelerator() {
+    local schema="$1"
+    local key="$2"
+    local unwanted="$3"
 
-    python3 - "$key" "$unwanted" <<'PY'
+    python3 - "$schema" "$key" "$unwanted" <<'PY'
 import ast
 import subprocess
 import sys
 
-key, unwanted = sys.argv[1], sys.argv[2]
-schema = "org.gnome.desktop.wm.keybindings"
+schema, key, unwanted = sys.argv[1], sys.argv[2], sys.argv[3]
 
 raw = subprocess.check_output(["gsettings", "get", schema, key], text=True).strip()
 if raw.startswith("@as "):
@@ -107,8 +109,12 @@ PY
 }
 
 echo "Resolving accelerator conflicts:"
-release_wm_accelerator switch-to-workspace-left '<Super><Alt>Left'
-release_wm_accelerator switch-to-workspace-right '<Super><Alt>Right'
+release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-left '<Super><Alt>Left'
+release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-right '<Super><Alt>Right'
+
+# Super+P opens project mode. Mutter's switch-monitor also lists it but
+# keeps XF86Display, so releasing this one leaves that function reachable.
+release_accelerator org.gnome.mutter.keybindings switch-monitor '<Super>p'
 
 #
 # Alt+Space opens the Command palette. GNOME's activate-window-menu holds it by
@@ -125,6 +131,7 @@ echo
 cat <<'EOF'
 Installed Adaptive Desktop shortcuts:
   Alt+Space          Command palette
+  Super+P            Project mode
   Super+Alt+Space    Smart tile active window
   Super+Alt+Left     Tile active window left
   Super+Alt+Right    Tile active window right
