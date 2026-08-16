@@ -253,16 +253,16 @@ Status:
 
 ## Milestone 13 — Stability
 
-- ⬜ Shell smoke tests.
-- ⬜ No-extension fallback test.
+- ✅ Shell smoke tests.
+- 🟡 No-extension fallback test.
 - ⬜ GDM fallback test.
 - ⬜ Reboot test.
 - ⬜ Suspend/resume test.
 - ⬜ External monitor test.
 - ⬜ File transfer stress test.
 - ⬜ Long-running shell memory test.
-- ⬜ Update compatibility check.
-- ⬜ Backup/restore test.
+- ✅ Update compatibility check.
+- 🟡 Backup/restore test.
 
 ## Immediate next work
 
