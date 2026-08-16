@@ -62,6 +62,55 @@ set_binding "adaptive-window-fullscreen" "Adaptive Toggle Fullscreen" "${REPO}/s
 set_binding "adaptive-window-save-project" "Adaptive Save Project Window Placement" "${REPO}/scripts/window-cli.py save-project" "<Super><Alt>s"
 set_binding "adaptive-window-restore-project" "Adaptive Restore Project Window Placement" "${REPO}/scripts/window-cli.py restore-project" "<Super><Alt>r"
 
+#
+# GNOME's own switch-to-workspace-left/right also list Super+Alt+Left/Right.
+# Window-manager keybindings win the grab, so the Adaptive window-placement
+# shortcuts silently never bind and gnome-shell logs "Failed to grab
+# accelerator". Drop just those two accelerators; workspace switching keeps
+# Super+Page_Up/Down and Ctrl+Alt+Left/Right.
+#
+release_wm_accelerator() {
+    local key="$1"
+    local unwanted="$2"
+
+    python3 - "$key" "$unwanted" <<'PY'
+import ast
+import subprocess
+import sys
+
+key, unwanted = sys.argv[1], sys.argv[2]
+schema = "org.gnome.desktop.wm.keybindings"
+
+raw = subprocess.check_output(["gsettings", "get", schema, key], text=True).strip()
+if raw.startswith("@as "):
+    raw = raw[4:]
+
+try:
+    values = list(ast.literal_eval(raw))
+except Exception:
+    sys.exit(0)
+
+if unwanted not in values:
+    sys.exit(0)
+
+kept = [v for v in values if v != unwanted]
+
+# Never strip a binding down to nothing; that would leave the action
+# unreachable, which is worse than the conflict.
+if not kept:
+    print(f"  kept {unwanted} on {key}: it is the only binding left")
+    sys.exit(0)
+
+subprocess.run(["gsettings", "set", schema, key, repr(kept)], check=True)
+print(f"  released {unwanted} from {key} -> {kept}")
+PY
+}
+
+echo "Resolving accelerator conflicts:"
+release_wm_accelerator switch-to-workspace-left '<Super><Alt>Left'
+release_wm_accelerator switch-to-workspace-right '<Super><Alt>Right'
+echo
+
 cat <<'EOF'
 Installed Adaptive Desktop shortcuts:
   Super+Space        Command palette
