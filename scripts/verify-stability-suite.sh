@@ -40,6 +40,7 @@ for path in [
     print(f"OK {path}")
 PY
 node --check "${REPO}/shell/adaptive-shell@local/extension.js"
+python3 "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
 
 echo
 echo "Stability suite complete."

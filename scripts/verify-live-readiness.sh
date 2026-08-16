@@ -120,8 +120,10 @@ has_source() {
   echo "== Stability exercises =="
   "${REPO}/scripts/verify-file-transfer-stress.py"
   "${REPO}/scripts/verify-backup-restore.sh"
+  "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
   "${REPO}/scripts/verify-stability-suite.sh"
-  verify "Reboot, suspend/resume, and long-running memory checks require timed physical-session runs"
+  verify "Reboot and suspend/resume require physical-session runs"
+  verify "Long-running memory check: run scripts/verify-shell-memory.py --seconds 14400 --interval 60"
 
   echo
   echo "Live readiness report complete."
