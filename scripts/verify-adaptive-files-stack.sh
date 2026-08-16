@@ -65,9 +65,19 @@ grep -q '#define APPLICATION_ID "org.gnome.Nautilus"' \
   || fail "fork was built with a different APPLICATION_ID"
 pass "fork owns org.gnome.Nautilus"
 
-echo
-echo "inode/directory default:"
-xdg-mime query default inode/directory || true
+# Retiring the standalone app left its desktop entry registered as the folder
+# handler, pointing at a launcher that no longer existed. Assert on both
+# resolvers: apps go through GIO, while xdg-mime applies its own precedence.
+EXPECTED="org.gnome.Nautilus.desktop"
+
+actual_xdg="$(xdg-mime query default inode/directory 2>/dev/null || true)"
+test "$actual_xdg" = "$EXPECTED" \
+  || fail "xdg-mime folder handler is '$actual_xdg', expected $EXPECTED"
+pass "xdg-mime folder handler"
+
+gio mime inode/directory 2>/dev/null | grep -q "$EXPECTED" \
+  || fail "GIO folder handler is not $EXPECTED"
+pass "GIO folder handler"
 
 echo
 echo "Adaptive Files stack verified."
