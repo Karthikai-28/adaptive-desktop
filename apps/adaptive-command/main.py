@@ -33,6 +33,9 @@ REPO = HERE.parent.parent
 # Typing should feel immediate, so results refresh on a short debounce rather
 # than on every keystroke.
 DEBOUNCE_MS = 90
+# Focus can bounce for a moment after the window maps; auto-dismiss only
+# once things have settled.
+FOCUS_GRACE_S = 0.6
 FILE_RESULTS = 8
 APP_RESULTS = 6
 MAX_ROWS = 24
@@ -134,6 +137,7 @@ class Palette(Gtk.ApplicationWindow):
         self._file_results = []
         self._apps = []
         self._was_active = False
+        self._opened_at = time.monotonic()
 
         self._load_css()
         self._build()
@@ -171,12 +175,18 @@ class Palette(Gtk.ApplicationWindow):
         x = area.x + max(0, (area.width - width) // 2)
         y = area.y + max(0, int(area.height * 0.16))
 
+        # Move and focus in one go. Launched from a keybinding there is no
+        # startup timestamp to present with, so mutter logs "_NET_ACTIVE_WINDOW
+        # message with a timestamp of 0" and focus becomes a coin toss - and a
+        # launcher that opens unfocused is useless.
         subprocess.run(
-            ["xdotool", "windowmove", str(xid), str(x), str(y)],
+            ["xdotool", "windowmove", str(xid), str(x), str(y),
+             "windowraise", str(xid), "windowfocus", str(xid)],
             capture_output=True,
             check=False,
         )
 
+        self._opened_at = time.monotonic()
         return GLib.SOURCE_REMOVE
 
     # ---------------------------------------------------------------- chrome
@@ -285,13 +295,20 @@ class Palette(Gtk.ApplicationWindow):
         self._paint_selection()
 
     def _on_active_changed(self, *_):
-        # Spotlight behaviour: clicking away dismisses the palette. Only after
-        # it has actually held focus though - a launcher that closes on the
-        # first not-yet-focused notification never stays on screen at all.
+        # Spotlight behaviour: clicking away dismisses the palette. Only once it
+        # has actually held focus, and not during the settling moment right
+        # after mapping, when focus can bounce before the window is really up.
         if self.is_active():
             self._was_active = True
-        elif self._was_active:
-            self.close()
+            return
+
+        if not self._was_active:
+            return
+
+        if time.monotonic() - self._opened_at < FOCUS_GRACE_S:
+            return
+
+        self.close()
 
     # ---------------------------------------------------------------- search
 
@@ -536,11 +553,19 @@ class Palette(Gtk.ApplicationWindow):
         except Exception:
             return []
 
+        home = str(Path.home())
+
         results = []
         for pid, project in projects.items():
             name = project.get("name", pid)
             where = project.get("path", "")
-            score = score_match(query, name, where) if query.folded else 60
+
+            # Match the path below home only. The "/home/<user>" prefix is in
+            # every project path, so searching your own username would
+            # otherwise score every project as a hit.
+            below_home = where[len(home):] if where.startswith(home) else where
+
+            score = score_match(query, name, below_home) if query.folded else 60
 
             if not score:
                 continue
