@@ -107,8 +107,8 @@ Status:
 - ✅ Remember window placement where safe.
 - 🟡 Workspace overview redesign.
 - ✅ Keyboard shortcuts.
-- ⬜ Multi-monitor behavior.
-- ⬜ Reduced-motion behavior.
+- 🟡 Multi-monitor behavior.
+- ✅ Reduced-motion behavior.
 
 ## Milestone 5 — Universal Command
 
@@ -226,7 +226,7 @@ Status:
 - ✅ Visible open-window switching from the dock.
 - ✅ Restore.
 - 🟡 Fullscreen behavior.
-- ⬜ Multi-monitor behavior.
+- ✅ Multi-monitor behavior.
 - 🟡 Overview integration.
 
 ## Milestone 11 — Lock/Login/Session

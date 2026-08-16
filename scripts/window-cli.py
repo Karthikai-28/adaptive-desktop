@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,83 @@ def geometry():
         raise RuntimeError(result.stderr.strip() or "Unable to read display geometry")
     width, height = result.stdout.strip().split()
     return int(width), int(height)
+
+
+def monitors():
+    def fallback():
+        try:
+            width, height = geometry()
+            return [{"name": "display", "x": 0, "y": 0, "width": width, "height": height, "primary": True}]
+        except Exception:
+            return []
+
+    result = subprocess.run(
+        ["xrandr", "--query"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    if result.returncode:
+        return fallback()
+
+    pattern = re.compile(
+        r"^(?P<name>\S+) connected(?P<primary> primary)? "
+        r"(?P<width>\d+)x(?P<height>\d+)\+(?P<x>-?\d+)\+(?P<y>-?\d+)"
+    )
+    values = []
+
+    for line in result.stdout.splitlines():
+        match = pattern.match(line)
+        if not match:
+            continue
+
+        values.append(
+            {
+                "name": match.group("name"),
+                "x": int(match.group("x")),
+                "y": int(match.group("y")),
+                "width": int(match.group("width")),
+                "height": int(match.group("height")),
+                "primary": bool(match.group("primary")),
+            }
+        )
+
+    if values:
+        return values
+
+    return fallback()
+
+
+def active_monitor(window):
+    current = window_geometry(window)
+    center_x = current["x"] + current["width"] // 2
+    center_y = current["y"] + current["height"] // 2
+    available = monitors()
+    if not available:
+        raise RuntimeError("No monitor geometry available")
+
+    for monitor in available:
+        if (
+            monitor["x"] <= center_x < monitor["x"] + monitor["width"]
+            and monitor["y"] <= center_y < monitor["y"] + monitor["height"]
+        ):
+            return monitor
+
+    return next((monitor for monitor in available if monitor["primary"]), available[0])
+
+
+def usable_area(monitor):
+    dock = DOCK_WIDTH if monitor.get("primary") else 0
+    top = TOP_BAR_HEIGHT
+
+    return {
+        "x": monitor["x"] + dock,
+        "y": monitor["y"] + top,
+        "width": max(320, monitor["width"] - dock),
+        "height": max(240, monitor["height"] - top),
+    }
 
 
 def window_geometry(window):
@@ -82,15 +160,17 @@ def move_resize(window, x, y, width, height):
 
 def tile(args):
     window = active_window()
-    width, height = geometry()
-    top = TOP_BAR_HEIGHT
-    usable_height = max(240, height - top)
+    area = usable_area(active_monitor(window))
+    width = area["width"]
+    top = area["y"]
+    left = area["x"]
+    usable_height = area["height"]
 
     preset = args.preset
     if preset == "smart":
         current = window_geometry(window)
-        midpoint = DOCK_WIDTH + max(1, (width - DOCK_WIDTH) // 2)
-        if current["x"] < midpoint and current["width"] < (width - DOCK_WIDTH) * 0.70:
+        midpoint = left + max(1, width // 2)
+        if current["x"] < midpoint and current["width"] < width * 0.70:
             preset = "right"
         elif current["x"] >= midpoint:
             preset = "center"
@@ -98,18 +178,18 @@ def tile(args):
             preset = "left"
 
     if preset == "left":
-        move_resize(window, DOCK_WIDTH, top, max(320, (width - DOCK_WIDTH) // 2), usable_height)
+        move_resize(window, left, top, max(320, width // 2), usable_height)
     elif preset == "right":
-        half = max(320, (width - DOCK_WIDTH) // 2)
-        move_resize(window, DOCK_WIDTH + half, top, half, usable_height)
+        half = max(320, width // 2)
+        move_resize(window, left + half, top, half, usable_height)
     elif preset == "center":
-        target_width = max(720, int((width - DOCK_WIDTH) * 0.66))
+        target_width = max(720, int(width * 0.66))
         target_height = max(520, int(usable_height * 0.78))
-        x = DOCK_WIDTH + max(0, ((width - DOCK_WIDTH) - target_width) // 2)
+        x = left + max(0, (width - target_width) // 2)
         y = top + max(0, (usable_height - target_height) // 2)
         move_resize(window, x, y, target_width, target_height)
     elif preset == "maximize":
-        move_resize(window, DOCK_WIDTH, top, max(640, width - DOCK_WIDTH), usable_height)
+        move_resize(window, left, top, max(640, width), usable_height)
     else:
         raise RuntimeError(f"Unknown preset: {preset}")
 
@@ -140,17 +220,17 @@ def placement_key(name, project=False):
     return f"project:{project_id}:{name}"
 
 
-def clamp_placement(placement):
-    display_width, display_height = geometry()
-    min_x = DOCK_WIDTH
-    min_y = TOP_BAR_HEIGHT
-    max_width = max(320, display_width - DOCK_WIDTH)
-    max_height = max(240, display_height - TOP_BAR_HEIGHT)
+def clamp_placement(placement, window):
+    area = usable_area(active_monitor(window))
+    min_x = area["x"]
+    min_y = area["y"]
+    max_width = area["width"]
+    max_height = area["height"]
 
     width = min(max(320, int(placement["width"])), max_width)
     height = min(max(240, int(placement["height"])), max_height)
-    x = min(max(min_x, int(placement["x"])), max(min_x, display_width - width))
-    y = min(max(min_y, int(placement["y"])), max(min_y, display_height - height))
+    x = min(max(min_x, int(placement["x"])), max(min_x, min_x + max_width - width))
+    y = min(max(min_y, int(placement["y"])), max(min_y, min_y + max_height - height))
 
     return {"x": x, "y": y, "width": width, "height": height}
 
@@ -180,7 +260,7 @@ def restore(args):
         label = f"{args.name} for active project" if args.project else args.name
         raise RuntimeError(f"No saved placement: {label}")
 
-    safe = clamp_placement(placement)
+    safe = clamp_placement(placement, window)
     move_resize(
         window,
         safe["x"],
@@ -218,6 +298,10 @@ def main():
     restore_project_parser = sub.add_parser("restore-project", help="Restore active project window placement")
     restore_project_parser.add_argument("name", nargs="?", default="default")
     restore_project_parser.set_defaults(func=lambda args: restore(argparse.Namespace(name=args.name, project=True)))
+
+    sub.add_parser("monitors", help="List detected monitors").set_defaults(
+        func=lambda _args: print(json.dumps(monitors(), indent=2)) or 0
+    )
 
     args = parser.parse_args()
     try:

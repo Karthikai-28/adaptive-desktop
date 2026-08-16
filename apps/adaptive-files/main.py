@@ -1692,13 +1692,34 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             GLib.source_remove(self._storage_anim_source)
             self._storage_anim_source = None
 
-        self._storage_anim_value = 0.0
         self._storage_target = max(0.0, min(1.0, target))
 
+        if not self._animations_enabled():
+            self._storage_anim_value = self._storage_target
+            if hasattr(self, "storage_drawing"):
+                self.storage_drawing.queue_draw()
+            return
+
+        self._storage_anim_value = 0.0
         self._storage_anim_source = GLib.timeout_add(
             16,
             self._storage_animation_tick,
         )
+
+    def _animations_enabled(self):
+        result = subprocess.run(
+            [
+                "gsettings",
+                "get",
+                "org.gnome.desktop.interface",
+                "enable-animations",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        return result.returncode != 0 or result.stdout.strip() != "false"
 
     def _storage_animation_tick(self):
         distance = self._storage_target - self._storage_anim_value
