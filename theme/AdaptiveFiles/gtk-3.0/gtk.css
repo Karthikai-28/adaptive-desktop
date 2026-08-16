@@ -180,8 +180,11 @@ entry {
     box-shadow: none;
     background-color: alpha(@af_surface_2, 0.88);
     color: @af_text;
-    selection-background-color: alpha(@af_accent, 0.45);
-    selection-color: @af_text;
+}
+
+entry selection {
+    background-color: alpha(@af_accent, 0.45);
+    color: @af_text;
 }
 
 entry:hover {
@@ -205,21 +208,25 @@ entry.search {
 
 /* Pathbar / linked navigation */
 .linked button,
-.path-bar button {
+.path-bar button,
+pathbar button {
     min-height: 28px;
     padding: 2px 8px;
+    margin: 0;
     border-radius: 7px;
     border-color: alpha(@af_divider, 0.22);
     background-color: alpha(@af_surface_2, 0.62);
 }
 
 .linked button:hover,
-.path-bar button:hover {
+.path-bar button:hover,
+pathbar button:hover {
     background-color: @af_surface_hover;
 }
 
 .linked button:checked,
-.path-bar button:checked {
+.path-bar button:checked,
+pathbar button:checked {
     color: @af_text;
     background-color: alpha(@af_accent, 0.16);
     border-color: alpha(@af_accent, 0.30);
@@ -257,9 +264,10 @@ treeview.view:hover {
 }
 
 rubberband,
-.rubberband {
-    border: 1px solid alpha(@af_accent, 0.70);
-    background-color: alpha(@af_accent, 0.14);
+.rubberband,
+.content-view.view rubberband {
+    border: 1px solid alpha(@af_cyan, 0.60);
+    background-color: alpha(@af_accent, 0.18);
 }
 
 /* ---------------------------------------------------------
@@ -297,7 +305,7 @@ placessidebar row:selected,
 .sidebar row:selected,
 .navigation-sidebar row:selected {
     background-color: alpha(@af_accent, 0.16);
-    color: @af_text;
+    color: @af_cyan;
 }
 
 placessidebar row image,
@@ -391,11 +399,12 @@ notebook > header > tabs > tab:checked {
 popover,
 popover.background,
 menu,
-.menu {
-    padding: 5px;
-    border: 1px solid alpha(@af_divider, 0.46);
+.menu,
+.context-menu {
+    padding: 6px;
+    border: 1px solid alpha(@af_divider, 0.50);
     border-radius: 10px;
-    box-shadow: 0 8px 24px alpha(#000000, 0.40);
+    box-shadow: 0 8px 28px alpha(#000000, 0.45);
     background-color: @af_surface;
     color: @af_text;
 }
