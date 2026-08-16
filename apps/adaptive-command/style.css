@@ -1,0 +1,43 @@
+window {
+    background: #08111B;
+    color: #F2F6EF;
+}
+
+.root {
+    background: #08111B;
+}
+
+searchentry {
+    min-height: 42px;
+    font-size: 15px;
+}
+
+.result {
+    min-height: 52px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: #111A28;
+}
+
+.result:hover,
+.result:focus {
+    border-color: rgba(120, 169, 255, 0.24);
+    background: #162233;
+}
+
+.result-title {
+    color: #F2F6EF;
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.result-subtitle {
+    color: #96A4B8;
+    font-size: 10px;
+}
+
+.empty {
+    color: #96A4B8;
+    padding: 30px;
+}

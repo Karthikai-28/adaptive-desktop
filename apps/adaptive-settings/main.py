@@ -22,7 +22,7 @@ SECTIONS = [
     Section("Projects & Workspaces", "Project registry, active project, and workspace mapping.", ["./scripts/project-cli.py", "list"]),
     Section("Windows & Multitasking", "Window switching, workspaces, and multitasking behavior.", ["./scripts/window-cli.py", "tile", "center"]),
     Section("Notifications & Focus", "Notification policy and focus behavior.", ["./scripts/focus-cli.py", "status"]),
-    Section("Search & Commands", "Command menu and search providers."),
+    Section("Search & Commands", "Command menu and search providers.", ["./scripts/adaptive-command-launch.sh"]),
     Section("Display & Graphics", "Monitors, scale, refresh, and graphics.", ["gnome-control-center", "display"]),
     Section("Sound", "Volume and audio devices.", ["gnome-control-center", "sound"]),
     Section("Input & Gestures", "Keyboard, mouse, touchpad, and shortcuts.", ["gnome-control-center", "keyboard"]),

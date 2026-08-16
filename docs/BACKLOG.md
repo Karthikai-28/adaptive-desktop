@@ -112,15 +112,15 @@ Status:
 
 ## Milestone 5 — Universal Command
 
-- ⬜ Global shortcut.
-- 🟡 Application search.
-- 🟡 File/folder search.
+- ✅ Global shortcut.
+- ✅ Application search.
+- ✅ File/folder search.
 - ✅ Project switching.
 - ✅ Desktop actions.
 - ✅ Settings search.
 - ✅ Recent actions.
-- 🟡 Keyboard navigation.
-- 🟡 Extensible provider model.
+- ✅ Keyboard navigation.
+- ✅ Extensible provider model.
 - 🟡 Permission/safety model.
 
 ## Milestone 6 — System Center

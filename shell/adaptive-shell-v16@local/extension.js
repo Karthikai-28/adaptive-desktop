@@ -58,6 +58,12 @@ class AdaptiveShellV16 {
             'scripts',
             'adaptive-settings-launch.sh',
         ]);
+        this._commandLauncher = GLib.build_filenamev([
+            GLib.get_home_dir(),
+            'adaptive-desktop',
+            'scripts',
+            'adaptive-command-launch.sh',
+        ]);
         this._focusCli = GLib.build_filenamev([
             GLib.get_home_dir(),
             'adaptive-desktop',
@@ -1277,6 +1283,8 @@ class AdaptiveShellV16 {
 
         this._addCommandHeader('COMMANDS');
 
+        if (GLib.file_test(this._commandLauncher, GLib.FileTest.IS_EXECUTABLE))
+            this._addCommandItem('Open Command Palette', () => this._spawn([this._commandLauncher]));
         this._addCommandItem('Search apps and files...', () => this._showSearch());
         this._addCommandItem('Open Adaptive Files', () => this._openFiles());
         this._addCommandItem('Open System Settings', () => this._openSettings());
