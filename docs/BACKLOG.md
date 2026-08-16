@@ -213,7 +213,7 @@ Status:
 - 🟡 Notification center.
 - 🟡 Critical/normal policy.
 - 🟡 Focus profiles.
-- ⬜ Project focus profile.
+- ✅ Project focus profile.
 - ✅ Focus timer.
 - 🟡 Quiet/fullscreen behavior.
 

@@ -1268,6 +1268,8 @@ class AdaptiveShellV16 {
         this._addCommandItem('Search apps and files...', () => this._showSearch());
         this._addCommandItem('Open Adaptive Files', () => this._openFiles());
         this._addCommandItem('Open System Settings', () => this._openSettings());
+        if (GLib.file_test(this._focusCli, GLib.FileTest.IS_EXECUTABLE))
+            this._addCommandItem('Apply Project Focus', () => this._spawn([this._focusCli, 'apply-project']));
 
         if (GLib.file_test(this._windowCli, GLib.FileTest.IS_EXECUTABLE)) {
             this._commandButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());

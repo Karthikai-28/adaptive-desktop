@@ -117,6 +117,8 @@ def do_update(args):
         patch["workspace_index"] = args.workspace
     if args.pin:
         patch["pinned_dirs"] = [str(Path(path).resolve()) for path in args.pin]
+    if args.focus is not None:
+        patch["metadata"] = {"focus": args.focus}
 
     res = proxy.call_sync(
         "UpdateProject",
@@ -189,6 +191,7 @@ def main():
     update_p.add_argument("--accent", help="Optional project accent color")
     update_p.add_argument("--workspace", type=int, help="Workspace index to associate")
     update_p.add_argument("--pin", action="append", help="Pinned project folder; repeat for more")
+    update_p.add_argument("--focus", choices=["on", "off"], help="Project focus preference")
     
     args = parser.parse_args()
     
