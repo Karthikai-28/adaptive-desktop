@@ -12,3 +12,13 @@ logs/
 session-audit.txt
 system-baseline.txt
 disk-audit.txt
+
+# Ubuntu Nautilus source/build baseline
+vendor/nautilus-ubuntu/
+vendor/NAUTILUS_SOURCE_PATH
+build/adaptive-nautilus/
+.local/adaptive-nautilus/
+
+# Build/test logs
+nautilus-build*.log
+nautilus-baseline-tests.log
