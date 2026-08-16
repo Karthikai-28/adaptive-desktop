@@ -79,8 +79,28 @@ has_source() {
   echo "== Adaptive visual system =="
   test -f "${HOME}/.local/share/themes/Adaptive/gtk-3.0/gtk.css" \
     || fail "Adaptive GTK theme is not installed"
-  rg -q 'Yaru-dark/gtk-3.0/gtk.css' "${HOME}/.local/share/themes/Adaptive/gtk-3.0/gtk.css" \
-    || fail "Adaptive theme does not build on Yaru; unstyled widgets would fall back to raw Adwaita"
+
+  # Parse it rather than grepping for an import line. The theme used to import
+  # Yaru's gtk.css, which is a stub pointing at a GResource that is only
+  # registered when GTK loads Yaru by name - so the base silently never loaded
+  # while a grep for the import string still passed.
+  python3 - "${HOME}/.local/share/themes/Adaptive/gtk-3.0/gtk.css" <<'PY' \
+    || fail "Adaptive GTK theme does not parse cleanly"
+import sys
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+
+errors = []
+provider = Gtk.CssProvider()
+provider.connect("parsing-error", lambda p, s, e: errors.append(e.message))
+provider.load_from_path(sys.argv[1])
+
+for message in errors:
+    print(f"  css: {message}", file=sys.stderr)
+
+sys.exit(1 if errors else 0)
+PY
   rg -q 'Inherits=Yaru' "${REPO}/icons/AdaptiveFilesIcons/index.theme" \
     || fail "AdaptiveFilesIcons does not inherit Yaru"
   pass "Adaptive GTK theme and icon inheritance are installed"
