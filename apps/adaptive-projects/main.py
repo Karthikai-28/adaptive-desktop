@@ -66,7 +66,7 @@ class Projects(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
         self.set_title("Projects")
-        self.set_default_size(1180, 780)
+        self.set_default_size(1360, 900)
         self.add_css_class("adaptive-projects")
 
         self.projects = self._load()
@@ -436,7 +436,13 @@ class Projects(Gtk.ApplicationWindow):
         where.add_css_class("greeting-sub")
         head.append(where)
 
-        stats = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        stats = Gtk.FlowBox()
+        stats.set_selection_mode(Gtk.SelectionMode.NONE)
+        stats.set_max_children_per_line(6)
+        stats.set_min_children_per_line(2)
+        stats.set_row_spacing(8)
+        stats.set_column_spacing(8)
+        stats.set_homogeneous(True)
         stats.add_css_class("stats")
 
         first = min((c[0] for c in data["commits"]), default=0)
@@ -467,25 +473,48 @@ class Projects(Gtk.ApplicationWindow):
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         body.add_css_class("detail-body")
 
+        # Time series get the full width - they are read left to right across
+        # 26 weeks or 24 hours. Everything else pairs up into two columns.
+        body.append(self._section("ACTIVITY"))
         body.append(self._panel("COMMIT ACTIVITY  ·  LAST 26 WEEKS",
                                 self._heatmap(data["commits"])))
         body.append(self._panel("COMMITS PER WEEK  ·  LAST 26 WEEKS",
                                 self._trend(data["commits"])))
-        body.append(self._panel("WHEN THE WORK HAPPENS",
+        body.append(self._panel("WHEN THE WORK HAPPENS  ·  WEEKDAY BY HOUR",
                                 self._punchcard(data["punch"])))
-        body.append(self._panel("WHAT IT IS MADE OF",
-                                self._languages(data["exts"], len(data["files"]))))
-        body.append(self._panel("WHERE THE CODE LIVES",
-                                self._treemap(data["dirs"], len(data["files"]))))
-        body.append(self._panel("WHO WORKS ON IT",
-                                self._authors(data["authors"])))
-        body.append(self._panel("RECENT HISTORY",
-                                self._history(data["commits"])))
+
+        body.append(self._section("COMPOSITION"))
+        body.append(self._columns(
+            self._panel("WHAT IT IS MADE OF",
+                        self._languages(data["exts"], len(data["files"]))),
+            self._panel("WHERE THE CODE LIVES",
+                        self._treemap(data["dirs"], len(data["files"]))),
+        ))
+
+        body.append(self._section("PEOPLE & HISTORY"))
+        body.append(self._columns(
+            self._panel("WHO WORKS ON IT", self._authors(data["authors"])),
+            self._panel("RECENT HISTORY", self._history(data["commits"])),
+        ))
 
         scroll.set_child(body)
         self.detail_holder.append(scroll)
 
         self.stack.set_visible_child_name("detail")
+
+    def _section(self, title):
+        label = Gtk.Label(label=title, xalign=0)
+        label.add_css_class("section-title")
+        return label
+
+    def _columns(self, left, right):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        row.set_homogeneous(True)
+        left.set_hexpand(True)
+        right.set_hexpand(True)
+        row.append(left)
+        row.append(right)
+        return row
 
     def _panel(self, title, content):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -508,10 +537,10 @@ class Projects(Gtk.ApplicationWindow):
         peak = max(days.values(), default=1)
 
         area = Gtk.DrawingArea()
-        area.set_content_height(104)
+        area.set_content_height(150)
 
         def draw(_a, cr, width, _h, *_):
-            cell, gap = 12, 3
+            cell, gap = 17, 4
             weeks = 26
             for w in range(weeks):
                 for d in range(7):
@@ -550,7 +579,7 @@ class Projects(Gtk.ApplicationWindow):
         peak = max(buckets) or 1
 
         area = Gtk.DrawingArea()
-        area.set_content_height(90)
+        area.set_content_height(140)
 
         def draw(_a, cr, width, height, *_):
             step = width / max(weeks - 1, 1)
@@ -597,15 +626,15 @@ class Projects(Gtk.ApplicationWindow):
         peak = max(punch.values(), default=1)
 
         area = Gtk.DrawingArea()
-        area.set_content_height(132)
+        area.set_content_height(190)
 
         def draw(_a, cr, width, height, *_):
-            left, top = 34, 8
+            left, top = 44, 10
             cell_w = (width - left - 8) / 24
             cell_h = (height - top - 16) / 7
 
             cr.select_font_face("Ubuntu")
-            cr.set_font_size(8)
+            cr.set_font_size(10)
 
             for day in range(7):
                 cr.set_source_rgba(1, 1, 1, 0.42)
@@ -654,7 +683,7 @@ class Projects(Gtk.ApplicationWindow):
             row.append(label)
 
             meter = Gtk.DrawingArea()
-            meter.set_content_height(12)
+            meter.set_content_height(16)
             meter.set_hexpand(True)
 
             def draw(_a, cr, width, height, share=count / peak):
@@ -689,7 +718,7 @@ class Projects(Gtk.ApplicationWindow):
         top = exts[:6]
 
         bar = Gtk.DrawingArea()
-        bar.set_content_height(16)
+        bar.set_content_height(26)
 
         def draw(_a, cr, width, height, *_):
             x = 0.0
@@ -739,7 +768,7 @@ class Projects(Gtk.ApplicationWindow):
             row.append(who)
 
             meter = Gtk.DrawingArea()
-            meter.set_content_height(10)
+            meter.set_content_height(14)
             meter.set_hexpand(True)
 
             def draw(_a, cr, width, height, share=count / peak):
