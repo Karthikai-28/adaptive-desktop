@@ -1,0 +1,78 @@
+window {
+    background: #08111B;
+    color: #F2F6EF;
+}
+
+.root {
+    background: #08111B;
+}
+
+.sidebar {
+    padding: 14px;
+    background: rgba(7, 16, 26, 0.98);
+    border-right: 1px solid rgba(48, 66, 92, 0.40);
+}
+
+.app-title {
+    color: #F2F6EF;
+    font-size: 20px;
+    font-weight: 800;
+}
+
+searchentry {
+    min-height: 34px;
+}
+
+.nav-item {
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: transparent;
+    color: #B8C7DA;
+    font-size: 12px;
+}
+
+.nav-item:hover {
+    background: rgba(120, 169, 255, 0.10);
+}
+
+.nav-item.active {
+    background: rgba(120, 169, 255, 0.16);
+    color: #F2F6EF;
+}
+
+.content {
+    padding: 28px;
+    background: #08111B;
+}
+
+.section-title {
+    color: #F2F6EF;
+    font-size: 26px;
+    font-weight: 800;
+}
+
+.section-detail {
+    color: #96A4B8;
+    font-size: 13px;
+}
+
+.card {
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(120, 169, 255, 0.12);
+    background: #111A28;
+}
+
+.state {
+    color: #D8E3EF;
+    font-size: 12px;
+}
+
+.primary-action {
+    min-height: 34px;
+    border-radius: 8px;
+    background: #78A9FF;
+    color: #07101A;
+    font-weight: 800;
+}

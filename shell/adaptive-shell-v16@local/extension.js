@@ -52,6 +52,12 @@ class AdaptiveShellV16 {
             'scripts',
             'adaptive-files-launch-v1.6.sh',
         ]);
+        this._settingsLauncher = GLib.build_filenamev([
+            GLib.get_home_dir(),
+            'adaptive-desktop',
+            'scripts',
+            'adaptive-settings-launch.sh',
+        ]);
     }
 
     enable() {
@@ -1381,6 +1387,13 @@ class AdaptiveShellV16 {
     }
 
     _openSettings() {
+        if (GLib.file_test(this._settingsLauncher, GLib.FileTest.IS_EXECUTABLE)) {
+            this._spawn([
+                this._settingsLauncher,
+            ]);
+            return;
+        }
+
         this._spawn([
             'gnome-control-center',
         ]);

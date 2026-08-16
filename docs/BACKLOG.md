@@ -188,25 +188,25 @@ Status:
 ## Milestone 8 — Settings
 
 - ✅ 18-section information architecture defined.
-- ⬜ Settings shell.
-- ⬜ Search.
-- ⬜ Appearance.
-- ⬜ Projects & Workspaces.
-- ⬜ Windows & Multitasking.
-- ⬜ Notifications & Focus.
-- ⬜ Search & Commands.
-- ⬜ Display & Graphics.
-- ⬜ Sound.
-- ⬜ Input & Gestures.
-- ⬜ Network & Connectivity.
-- ⬜ Files & Storage.
-- ⬜ Privacy & Security.
-- ⬜ Accounts & Sync.
-- ⬜ Power & Battery.
-- ⬜ Accessibility.
-- ⬜ Developer & Advanced.
-- ⬜ Updates/Recovery/Session.
-- ⬜ About.
+- ✅ Settings shell.
+- ✅ Search.
+- 🟡 Appearance.
+- 🟡 Projects & Workspaces.
+- 🟡 Windows & Multitasking.
+- 🟡 Notifications & Focus.
+- 🟡 Search & Commands.
+- 🟡 Display & Graphics.
+- 🟡 Sound.
+- 🟡 Input & Gestures.
+- 🟡 Network & Connectivity.
+- 🟡 Files & Storage.
+- 🟡 Privacy & Security.
+- 🟡 Accounts & Sync.
+- 🟡 Power & Battery.
+- 🟡 Accessibility.
+- 🟡 Developer & Advanced.
+- 🟡 Updates/Recovery/Session.
+- 🟡 About.
 
 ## Milestone 9 — Notifications and Focus
 
