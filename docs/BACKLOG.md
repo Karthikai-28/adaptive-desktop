@@ -95,7 +95,7 @@ Status:
 - ✅ Update top bar dynamically.
 - ✅ Make Projects overlay data-driven.
 - ✅ No-project state.
-- 🔬 Verify service autostart inside Adaptive Desktop.
+- ✅ Verify service autostart inside Adaptive Desktop.
 - ✅ Verify shell DBus updates after extension reload.
 
 ## Milestone 4 — Workspaces
@@ -256,7 +256,7 @@ Status:
 - ✅ Shell smoke tests.
 - ✅ No-extension fallback test.
 - 🔬 GDM fallback test.
-- 🔬 Reboot test.
+- ✅ Reboot test.
 - 🔬 Suspend/resume test.
 - 🔬 External monitor test.
 - ✅ File transfer stress test.
@@ -266,8 +266,18 @@ Status:
 
 ## Immediate next work
 
-1. Reload `adaptive-shell@local` inside Adaptive Desktop.
-2. Verify docked navigation rail struts with maximized windows.
-3. Verify Project Context Service autostart after logging into Adaptive Desktop.
-4. Verify GNOME overview search discovers registered projects.
-5. Continue System Center parity: safe toggles and reboot/shutdown confirmations.
+1. Verify docked navigation rail struts with maximized windows.
+2. Verify the restored Workspaces, Command, and System rail menus open and
+   land to the right of the rail.
+3. Verify GNOME overview search discovers registered projects.
+4. Continue System Center parity: safe toggles and reboot/shutdown confirmations.
+
+## Known live-only traps
+
+- Only one Adaptive rail extension may be enabled. `adaptive-shell-v16@local`
+  is a retired duplicate kept for rollback; when both it and
+  `adaptive-shell@local` are enabled, two rails stack and every dock label
+  renders with its first glyph covered. `verify-live-readiness.sh` now fails
+  on this.
+- GNOME disables user extensions on the lock screen, so `gnome-extensions
+  enable` looks like a no-op (state stays DISABLED, no error) until unlock.

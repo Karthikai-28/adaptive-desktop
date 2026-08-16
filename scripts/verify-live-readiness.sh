@@ -62,6 +62,15 @@ has_source() {
     else
       verify "Adaptive Shell extension was not queryable from this process; reload inside the desktop session"
     fi
+
+    # Two enabled rails stack on top of each other and only show up as
+    # doubled labels on screen, so guard the enabled list itself.
+    enabled_rails="$(gsettings get org.gnome.shell enabled-extensions \
+      | grep -o "adaptive-shell[^']*@local" | sort -u | wc -l)"
+    if [[ "$enabled_rails" -gt 1 ]]; then
+      fail "more than one Adaptive rail extension is enabled: $(gsettings get org.gnome.shell enabled-extensions)"
+    fi
+    pass "exactly one Adaptive rail extension is enabled"
   else
     verify "Reload adaptive-shell@local inside Adaptive Desktop and inspect maximized windows"
   fi
