@@ -1,9 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Adaptive Project Context Service
-Exec=/home/karthi/adaptive-desktop/services/project-context/main.py
+Exec=/home/karthi/adaptive-desktop/scripts/project-context-autostart.sh
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Phase=Initialization
-AutostartCondition=GNOME3 if-session adaptive-desktop
+# No Autostart-Phase: the service is a plain session D-Bus service and never
+# registers with gnome-session, so a phase only makes login wait for its
+# registration timeout.

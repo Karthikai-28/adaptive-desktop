@@ -3,12 +3,17 @@ set -Eeuo pipefail
 
 REPO="${HOME}/adaptive-desktop"
 CLI="${REPO}/scripts/project-cli.py"
+AUTOSTART_SCRIPT="${REPO}/scripts/project-context-autostart.sh"
 AUTOSTART="${HOME}/.config/autostart/adaptive-project-context.desktop"
 SEARCH_PROVIDER="${HOME}/.local/share/gnome-shell/search-providers/org.adaptive.ProjectContext.search-provider.ini"
 
 test -x "${REPO}/services/project-context/main.py"
+test -x "$AUTOSTART_SCRIPT"
 test -f "$AUTOSTART"
 test -f "$SEARCH_PROVIDER"
+grep -q "Exec=${AUTOSTART_SCRIPT}" "$AUTOSTART"
+bash -n "$AUTOSTART_SCRIPT"
+desktop-file-validate "$AUTOSTART"
 
 python3 -m py_compile \
   "${REPO}/services/project-context/main.py" \
