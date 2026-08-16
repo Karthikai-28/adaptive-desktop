@@ -884,6 +884,18 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         else:
             self.flow.set_max_children_per_line(1)
 
+        if not self.visible_items:
+            empty = Gtk.Label(
+                label="No matching files" if self.query else "This folder is empty",
+                xalign=0.5,
+            )
+            empty.add_css_class("browser-empty")
+            empty.set_margin_top(42)
+            empty.set_margin_bottom(42)
+            empty.set_margin_start(18)
+            empty.set_margin_end(18)
+            self.flow.append(empty)
+
         for item in self.visible_items:
             self.flow.append(self._item_widget(item))
 

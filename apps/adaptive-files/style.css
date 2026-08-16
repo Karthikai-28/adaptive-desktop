@@ -226,6 +226,12 @@ window {
     font-size: 8.5px;
 }
 
+.browser-empty {
+    color: #71849e;
+    font-size: 12px;
+    font-weight: 650;
+}
+
 .item-list {
     margin: 0 2px;
     padding: 3px 8px;
@@ -515,4 +521,3 @@ dialog {
 .storage-detail-card {
     padding: 12px;
 }
-

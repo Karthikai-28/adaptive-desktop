@@ -162,20 +162,20 @@ Status:
 
 ### Remaining
 
-- ⬜ Home/Recents.
-- 🟡 Project Files.
-- 🟡 Folder browse.
-- ⬜ Grid/list.
-- ⬜ Search/filters.
-- 🟡 Preview/Inspector.
+- 🟡 Home/Recents.
+- ✅ Project Files.
+- ✅ Folder browse.
+- ✅ Grid/list.
+- ✅ Search/filters.
+- ✅ Preview/Inspector.
 - ⬜ Split view.
 - ⬜ Multi-select.
 - ⬜ Transfers.
 - ⬜ Conflict resolution.
-- ⬜ Trash/recovery.
-- ⬜ Devices/network.
-- ⬜ Empty/error states.
-- ⬜ Linux permissions/hidden files.
+- 🟡 Trash/recovery.
+- 🟡 Devices/network.
+- ✅ Empty/error states.
+- ✅ Linux permissions/hidden files.
 - ✅ Decide Nautilus integration vs separate frontend.
 
 ### Current
