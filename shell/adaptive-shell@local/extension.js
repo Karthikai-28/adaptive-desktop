@@ -1,11 +1,15 @@
-const { St, Gio, GLib, Clutter, Shell } = imports.gi;
+// Adaptive monitor-aware Dock v2.6
+// Adaptive dock visual customization v2.3
+// Width follows natural content width, so the dock grows/shrinks
+// automatically as favorites/running applications change.
+
+const { St, Gio, GLib, Clutter, Shell, Meta } = imports.gi;
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
-const SystemActions = imports.misc.systemActions;
+const AppFavorites = imports.ui.appFavorites;
 const ExtensionUtils = imports.misc.extensionUtils;
 const Gvc = imports.gi.Gvc;
-const Slider = imports.ui.slider;
 
 const Me = ExtensionUtils.getCurrentExtension();
 
@@ -13,17 +17,23 @@ let _shell = null;
 
 class AdaptiveShellV16 {
     constructor() {
+        // Bottom application dock. The historic member name `_rail` is kept so
+        // existing verification/recovery scripts remain compatible while the
+        // actor itself is now a centered horizontal dock.
         this._rail = null;
+        // Adaptive bottom dock stability v2.1.
+        // The transparent dock chrome owns the bottom work-area strut.
+        this._dockChrome = null;
+        this._dockAppsBox = null;
+        this._dockButtons = [];
+        this._dockMenus = [];
+        this._dockMenuManager = null;
+        this._showAppsButton = null;
+        this._favorites = null;
+        this._favoritesChangedId = 0;
+        this._appStateChangedId = 0;
         this._brandButton = null;
         this._projectButton = null;
-        this._systemCenterButton = null;
-        this._workspacesButton = null;
-        this._commandButton = null;
-        this._homeButton = null;
-        this._filesButton = null;
-        this._appsButton = null;
-        this._windowList = null;
-        this._menuManager = null;
         this._projectLabel = null;
         this._activeProjectId = null;
         this._monitorChangedId = 0;
@@ -37,20 +47,9 @@ class AdaptiveShellV16 {
         this._clockActor = null;
         this._clockDisplay = null;
         this._projectProxy = null;
-        
-        this._volumeSlider = null;
-        this._volumeStream = null;
-        this._statusLabels = {};
-        this._audioOutputMenu = null;
-        this._mixerControl = new Gvc.MixerControl({ name: 'Adaptive Shell Volume Control' });
-        this._mixerControl.open();
-        this._mixerControl.connect('state-changed', () => this._onMixerStateChanged());
-        this._mixerControl.connect('default-sink-changed', () => this._onMixerStateChanged());
-        this._mixerControl.connect('stream-added', (control, id) => {
-            if (this._volumeStream && this._volumeStream.get_id() === id) {
-                this._onMixerStateChanged();
-            }
-        });
+        this._tooltip = null;
+        this._tooltipTimeoutId = 0;
+        this._dockDemagnifyId = 0;
 
         this._commandLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -76,6 +75,28 @@ class AdaptiveShellV16 {
             'scripts',
             'appearance-cli.py',
         ]);
+        // Dock v2.6: one visible Dock, hot edge on every monitor.
+        this._dock26HotEdges = [];
+        this._dock26TargetMonitor = -1;
+        this._dock26FocusWindow = null;
+        this._dock26FocusSignalIds = [];
+        this._dock26FullscreenSignalId = 0;
+        this._dock26FocusChangedId = 0;
+        this._dock26MonitorsChangedId = 0;
+        this._dock26WindowEnteredMonitorId = 0;
+        this._dock26RevealTimerId = 0;
+        this._dock26HideTimerId = 0;
+        this._dock26EdgeRevealed = false;
+        this._dock26HideOnMaximized = true;
+        this._dock26ReservedHeight = 70;
+        this._dock26SurfaceHeight = 54;
+        this._dock26BottomGap = 6;
+        this._dock26HotEdgeHeight = 5;
+        this._dock26RevealDelayMs = 110;
+        this._dock26HideDelayMs = 320;
+        this._dock26RevealDurationMs = 145;
+        this._dock26HideDurationMs = 145;
+
     }
 
     enable() {
@@ -96,7 +117,7 @@ class AdaptiveShellV16 {
         );
         this._focusWindowId = global.display.connect(
             'notify::focus-window',
-            () => this._queueWindowListRefresh()
+            () => this._syncDockActive()
         );
         this._overviewShowingId = Main.overview.connect(
             'showing',
@@ -107,13 +128,26 @@ class AdaptiveShellV16 {
             () => this._syncDockActive()
         );
 
-        this._layoutRail();
-        this._syncDockActive();
+        this._favorites = AppFavorites.getAppFavorites();
+        this._favoritesChangedId = this._favorites.connect(
+            'changed',
+            () => this._queueWindowListRefresh()
+        );
+
+        const appSystem = Shell.AppSystem.get_default();
+        this._appStateChangedId = appSystem.connect(
+            'app-state-changed',
+            () => this._queueWindowListRefresh()
+        );
+
         this._connectToProjectContext();
         this._queueWindowListRefresh();
+        this._syncDockActive();
 
-        log('[Adaptive Shell v1.6] functional rail installed');
-        log('[Adaptive Shell v1.6] GNOME dateMenu restored');
+        log('[Adaptive Shell] interactive bottom dock installed');
+        log('[Adaptive Shell] GNOME dateMenu restored');
+        this._dock26ConnectRuntime();
+
     }
 
     _connectToProjectContext() {
@@ -202,12 +236,10 @@ class AdaptiveShellV16 {
     }
 
     disable() {
-        log('[Adaptive Shell v1.6] disable');
+        log('[Adaptive Shell] disable');
 
         if (this._monitorChangedId) {
-            Main.layoutManager.disconnect(
-                this._monitorChangedId
-            );
+            Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
         }
 
@@ -231,18 +263,61 @@ class AdaptiveShellV16 {
             this._focusWindowId = 0;
         }
 
+        if (this._favorites && this._favoritesChangedId) {
+            try {
+                this._favorites.disconnect(this._favoritesChangedId);
+            } catch (e) {
+                logError(e, '[Adaptive Shell] disconnect favorites');
+            }
+            this._favoritesChangedId = 0;
+        }
+
+        if (this._appStateChangedId) {
+            try {
+                Shell.AppSystem.get_default().disconnect(this._appStateChangedId);
+            } catch (e) {
+                logError(e, '[Adaptive Shell] disconnect app-state');
+            }
+            this._appStateChangedId = 0;
+        }
+
         if (this._windowRefreshId) {
             GLib.Source.remove(this._windowRefreshId);
             this._windowRefreshId = 0;
         }
 
+        if (this._tooltipTimeoutId) {
+            GLib.Source.remove(this._tooltipTimeoutId);
+            this._tooltipTimeoutId = 0;
+        }
+
+        if (this._dockDemagnifyId) {
+            GLib.Source.remove(this._dockDemagnifyId);
+            this._dockDemagnifyId = 0;
+        }
+
+        this._dock26Cleanup();
         this._disconnectWindowSignals();
+        this._destroyDockMenus();
+        this._hideTooltip();
 
         if (this._rail) {
             Main.layoutManager.removeChrome(this._rail);
             this._rail.destroy();
             this._rail = null;
         }
+
+        if (this._dockChrome) {
+            Main.layoutManager.removeChrome(this._dockChrome);
+            this._dockChrome.destroy();
+            this._dockChrome = null;
+        }
+
+        this._dockAppsBox = null;
+        this._dockButtons = [];
+        this._showAppsButton = null;
+        this._favorites = null;
+        this._dockMenuManager = null;
 
         if (this._brandButton) {
             this._brandButton.destroy();
@@ -254,45 +329,14 @@ class AdaptiveShellV16 {
             this._projectButton = null;
         }
 
-        if (this._systemCenterButton) {
-            this._systemCenterButton.destroy();
-            this._systemCenterButton = null;
-        }
-
-        this._audioOutputMenu = null;
-
-        if (this._workspacesButton) {
-            this._workspacesButton.destroy();
-            this._workspacesButton = null;
-        }
-
-        if (this._commandButton) {
-            this._commandButton.destroy();
-            this._commandButton = null;
-        }
-
-        this._menuManager = null;
-        this._windowList = null;
-
-        if (this._projectProxy) {
+        if (this._projectProxy)
             this._projectProxy = null;
-        }
-
-        if (this._mixerControl) {
-            this._mixerControl.close();
-            this._mixerControl = null;
-        }
 
         if (this._clockActor) {
             try {
-                this._clockActor.remove_style_class_name(
-                    'adaptive-stock-clock'
-                );
+                this._clockActor.remove_style_class_name('adaptive-stock-clock');
             } catch (e) {
-                logError(
-                    e,
-                    '[Adaptive Shell v1.6] clock cleanup'
-                );
+                logError(e, '[Adaptive Shell] clock cleanup');
             }
             this._clockActor = null;
         }
@@ -304,10 +348,7 @@ class AdaptiveShellV16 {
                 else
                     item.actor.hide();
             } catch (e) {
-                logError(
-                    e,
-                    '[Adaptive Shell v1.6] restore actor'
-                );
+                logError(e, '[Adaptive Shell] restore actor');
             }
         }
 
@@ -517,406 +558,75 @@ class AdaptiveShellV16 {
     }
 
     _installRail() {
+        this._dockChrome = new St.Widget({
+            reactive: false,
+            style_class: 'adaptive-dock-reservation',
+        });
+
         this._rail = new St.BoxLayout({
-            vertical: true,
+            vertical: false,
             reactive: true,
+            track_hover: true,
             style_class: 'adaptive-rail',
         });
 
-        const top = new St.BoxLayout({
-            vertical: true,
-            style_class: 'adaptive-rail-group',
+        this._dockMenuManager = new PopupMenu.PopupMenuManager({
+            actor: this._rail,
         });
 
-        this._homeButton = this._dockButton(
-            'overview.svg',
-            'Home',
-            () => this._toggleOverview()
-        );
-        top.add_child(this._homeButton);
+        this._dockAppsBox = new St.BoxLayout({
+            vertical: false,
+            reactive: true,
+            style_class: 'adaptive-window-list',
+        });
+        this._rail.add_child(this._dockAppsBox);
 
-        this._filesButton = this._dockButton(
-            'files.svg',
-            'Adaptive Files',
-            () => this._openFiles()
-        );
-        top.add_child(this._filesButton);
+        const separator = new St.Widget({
+            style_class: 'adaptive-rail-rule',
+        });
+        this._rail.add_child(separator);
 
-        this._appsButton = this._dockButton(
+        this._showAppsButton = this._utilityDockButton(
             'apps.svg',
             'Applications',
             () => this._showApplications()
         );
-        top.add_child(this._appsButton);
-
-        this._workspacesButton = this._railMenuButton(
-            'workspaces.svg',
-            'Workspaces'
+        this._showAppsButton.add_style_class_name(
+            'adaptive-show-apps-button'
         );
+        this._rail.add_child(this._showAppsButton);
 
-        this._workspacesButton.menu.connect('open-state-changed', (menu, open) => {
-            this._setActorActive(this._workspacesButton, open);
-            if (open) {
-                this._populateWorkspacesMenu();
+        this._rail.connect(
+            'enter-event',
+            () => {
+                this._dock26CancelHide();
+                return Clutter.EVENT_PROPAGATE;
             }
-        });
-        
-        top.add_child(this._workspacesButton);
-
-        // The rail button and Alt+Space open the same palette. Two command
-        // surfaces that answer the same question would only drift apart, and
-        // the search itself belongs in the app process, not in the shell.
-        this._commandButton = this._dockButton(
-            'search.svg',
-            'Command',
-            () => this._openCommand()
-        );
-        top.add_child(this._commandButton);
-
-        this._rail.add_child(top);
-
-        const openGroup = new St.BoxLayout({
-            vertical: true,
-            style_class: 'adaptive-rail-group adaptive-window-group',
-        });
-
-        openGroup.add_child(
-            new St.Label({
-                text: 'OPEN',
-                style_class: 'adaptive-rail-section-label',
-                x_align: Clutter.ActorAlign.START,
-            })
         );
 
-        this._windowList = new St.BoxLayout({
-            vertical: true,
-            style_class: 'adaptive-window-list',
-        });
-
-        openGroup.add_child(this._windowList);
-        this._rail.add_child(openGroup);
-
-        this._rail.add_child(
-            new St.Widget({
-                y_expand: true,
-            })
-        );
-
-        const bottom = new St.BoxLayout({
-            vertical: true,
-            style_class:
-                'adaptive-rail-group adaptive-rail-bottom',
-        });
-
-        this._systemCenterButton = this._railMenuButton('settings.svg', 'System');
-        this._systemCenterButton.menu.connect('open-state-changed', (_menu, open) => {
-            this._setActorActive(this._systemCenterButton, open);
-        });
-        
-        let actions = SystemActions.getDefault();
-
-        this._statusLabels = {
-            network: this._statusRow('network-wireless-signal-excellent-symbolic', 'Network'),
-            bluetooth: this._statusRow('bluetooth-active-symbolic', 'Bluetooth'),
-            battery: this._statusRow('battery-good-symbolic', 'Power'),
-            audio: this._statusRow('audio-speakers-symbolic', 'Audio'),
-            performance: this._statusRow('utilities-system-monitor-symbolic', 'System'),
-        };
-
-        for (const key in this._statusLabels)
-            this._systemCenterButton.menu.addMenuItem(this._statusLabels[key].item);
-
-        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        let volumeItem = new PopupMenu.PopupBaseMenuItem({ activate: false });
-        let volumeIcon = new St.Icon({
-            icon_name: 'audio-volume-high-symbolic',
-            style_class: 'popup-menu-icon'
-        });
-        this._volumeSlider = new Slider.Slider(0);
-        this._volumeSlider.x_expand = true;
-        this._volumeSlider.connect('notify::value', () => {
-            if (this._volumeStream && this._mixerControl) {
-                let volume = this._volumeSlider.value * this._mixerControl.get_vol_max_norm();
-                this._volumeStream.volume = volume;
-                this._volumeStream.push_volume();
+        this._rail.connect(
+            'leave-event',
+            () => {
+                this._dock26ScheduleHide();
+                return Clutter.EVENT_PROPAGATE;
             }
-        });
-        
-        volumeItem.add_child(volumeIcon);
-        volumeItem.add_child(this._volumeSlider);
-        this._systemCenterButton.menu.addMenuItem(volumeItem);
-
-        this._audioOutputMenu = new PopupMenu.PopupSubMenuMenuItem('Audio Output');
-        this._audioOutputMenu.menu.connect('open-state-changed', (menu, open) => {
-            if (open)
-                this._populateAudioOutputMenu();
-        });
-        this._systemCenterButton.menu.addMenuItem(this._audioOutputMenu);
-        
-        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        let settingsItem = new PopupMenu.PopupMenuItem('System Settings');
-        settingsItem.connect('activate', () => this._openSettings());
-        this._systemCenterButton.menu.addMenuItem(settingsItem);
-        
-        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        let focusOnItem = new PopupMenu.PopupMenuItem('Focus On');
-        focusOnItem.connect('activate', () => this._runFocus('on'));
-        this._systemCenterButton.menu.addMenuItem(focusOnItem);
-
-        let focusOffItem = new PopupMenu.PopupMenuItem('Focus Off');
-        focusOffItem.connect('activate', () => this._runFocus('off'));
-        this._systemCenterButton.menu.addMenuItem(focusOffItem);
-
-        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        let lockItem = new PopupMenu.PopupMenuItem('Lock Screen');
-        lockItem.connect('activate', () => actions.activateLockScreen());
-        this._systemCenterButton.menu.addMenuItem(lockItem);
-        
-        let suspendItem = new PopupMenu.PopupMenuItem('Suspend');
-        suspendItem.connect('activate', () => actions.activateSuspend());
-        this._systemCenterButton.menu.addMenuItem(suspendItem);
-        
-        let logoutItem = new PopupMenu.PopupMenuItem('Return to Ubuntu...');
-        logoutItem.connect('activate', () => actions.activateLogout());
-        this._systemCenterButton.menu.addMenuItem(logoutItem);
-        
-        this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        let restartItem = new PopupMenu.PopupMenuItem('Restart...');
-        restartItem.connect('activate', () => {
-            this._activateSystemAction(actions, 'activateRestart', 'Restart');
-        });
-        this._systemCenterButton.menu.addMenuItem(restartItem);
-
-        let powerItem = new PopupMenu.PopupMenuItem('Shut Down...');
-        powerItem.connect('activate', () => {
-            this._activateSystemAction(actions, 'activatePowerOff', 'Shut Down');
-        });
-        this._systemCenterButton.menu.addMenuItem(powerItem);
-
-        this._systemCenterButton.menu.connect('open-state-changed', (menu, open) => {
-            if (open)
-                this._refreshSystemCenterStatus();
-        });
-        
-        bottom.add_child(this._systemCenterButton);
-
-        this._rail.add_child(bottom);
+        );
 
         Main.layoutManager.addChrome(
-            this._rail,
+            this._dockChrome,
             {
                 affectsStruts: true,
                 trackFullscreen: true,
             }
         );
-    }
 
-    _statusRow(iconName, title) {
-        const item = new PopupMenu.PopupBaseMenuItem({
-            activate: false,
-            reactive: false,
-        });
-
-        const icon = new St.Icon({
-            icon_name: iconName,
-            style_class: 'popup-menu-icon',
-        });
-
-        const titleLabel = new St.Label({
-            text: title,
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-
-        const valueLabel = new St.Label({
-            text: 'Checking...',
-            y_align: Clutter.ActorAlign.CENTER,
-            style_class: 'adaptive-system-status-value',
-        });
-
-        item.add_child(icon);
-        item.add_child(titleLabel);
-        item.add_child(valueLabel);
-
-        return { item, valueLabel };
-    }
-
-    _setStatus(key, value) {
-        if (this._statusLabels[key])
-            this._statusLabels[key].valueLabel.set_text(value);
-    }
-
-    _refreshSystemCenterStatus() {
-        this._refreshNetworkStatus();
-        this._refreshBluetoothStatus();
-        this._refreshPowerStatus();
-        this._refreshAudioStatus();
-        this._refreshPerformanceStatus();
-    }
-
-    _refreshNetworkStatus() {
-        this._readCommand(
-            ['nmcli', '-t', '-f', 'STATE', 'general'],
-            (text) => this._setStatus('network', this._humanStatus(text))
-        );
-    }
-
-    _refreshBluetoothStatus() {
-        this._readCommand(
-            ['bluetoothctl', 'show'],
-            (text) => {
-                if (!text) {
-                    this._setStatus('bluetooth', 'Unavailable');
-                    return;
-                }
-
-                const powered = this._matchLine(text, /Powered:\s+(yes|no)/i);
-                if (powered)
-                    this._setStatus('bluetooth', powered.toLowerCase() === 'yes' ? 'On' : 'Off');
-                else
-                    this._setStatus('bluetooth', 'Unavailable');
+        Main.layoutManager.addChrome(
+            this._rail,
+            {
+                affectsStruts: false,
+                trackFullscreen: false,
             }
         );
-    }
-
-    _refreshPowerStatus() {
-        this._readCommand(
-            ['upower', '-i', '/org/freedesktop/UPower/devices/DisplayDevice'],
-            (text) => {
-                if (!text) {
-                    this._setStatus('battery', 'Unavailable');
-                    return;
-                }
-
-                const percentage = this._matchLine(text, /percentage:\s+([^\n]+)/i);
-                const state = this._matchLine(text, /state:\s+([^\n]+)/i);
-
-                if (percentage && state)
-                    this._setStatus('battery', `${percentage.trim()} · ${this._humanStatus(state)}`);
-                else if (percentage)
-                    this._setStatus('battery', percentage.trim());
-                else
-                    this._setStatus('battery', 'Unavailable');
-            }
-        );
-    }
-
-    _refreshAudioStatus() {
-        if (!this._volumeStream) {
-            this._setStatus('audio', 'Unavailable');
-            return;
-        }
-
-        const description =
-            this._volumeStream.get_description() ||
-            this._volumeStream.get_name() ||
-            'Default output';
-
-        this._setStatus('audio', description);
-    }
-
-    _refreshPerformanceStatus() {
-        this._readCommand(['cat', '/proc/loadavg'], (loadText) => {
-            this._readCommand(['cat', '/proc/meminfo'], (memText) => {
-                const load = (loadText || '').split(/\s+/)[0] || '';
-                const total = this._matchLine(memText, /^MemTotal:\s+(\d+)/m);
-                const available = this._matchLine(memText, /^MemAvailable:\s+(\d+)/m);
-
-                if (!load && (!total || !available)) {
-                    this._setStatus('performance', 'Unavailable');
-                    return;
-                }
-
-                if (total && available) {
-                    const used = Math.max(0, Number(total) - Number(available));
-                    const percent = Math.round((used / Number(total)) * 100);
-                    this._setStatus('performance', `Load ${load || 'n/a'} · RAM ${percent}%`);
-                    return;
-                }
-
-                this._setStatus('performance', `Load ${load}`);
-            });
-        });
-    }
-
-    _populateAudioOutputMenu() {
-        if (!this._audioOutputMenu)
-            return;
-
-        this._audioOutputMenu.menu.removeAll();
-
-        if (
-            !this._mixerControl ||
-            this._mixerControl.get_state() !== Gvc.MixerControlState.READY ||
-            typeof this._mixerControl.get_sinks !== 'function'
-        ) {
-            const offline = new PopupMenu.PopupMenuItem('Audio service unavailable');
-            offline.setSensitive(false);
-            this._audioOutputMenu.menu.addMenuItem(offline);
-            return;
-        }
-
-        const sinks = this._mixerControl.get_sinks() || [];
-
-        if (!sinks.length) {
-            const empty = new PopupMenu.PopupMenuItem('No output devices');
-            empty.setSensitive(false);
-            this._audioOutputMenu.menu.addMenuItem(empty);
-            return;
-        }
-
-        for (const sink of sinks) {
-            const label =
-                sink.get_description() ||
-                sink.get_name() ||
-                'Audio output';
-            const isActive =
-                this._volumeStream &&
-                sink.get_id &&
-                this._volumeStream.get_id &&
-                sink.get_id() === this._volumeStream.get_id();
-            const item = new PopupMenu.PopupMenuItem(isActive ? `★ ${label}` : label);
-
-            item.connect('activate', () => {
-                try {
-                    if (typeof this._mixerControl.set_default_sink === 'function') {
-                        this._mixerControl.set_default_sink(sink);
-                        this._volumeStream = sink;
-                        this._refreshAudioStatus();
-                    }
-                } catch (e) {
-                    logError(e, '[Adaptive Shell v1.6] set audio output');
-                    Main.notifyError('Adaptive Desktop', 'Audio output could not be changed.');
-                }
-            });
-
-            this._audioOutputMenu.menu.addMenuItem(item);
-        }
-    }
-
-    _activateSystemAction(actions, methodName, label) {
-        try {
-            if (actions && typeof actions[methodName] === 'function') {
-                actions[methodName]();
-                return;
-            }
-
-            Main.notifyError(
-                'Adaptive Desktop',
-                `${label} is not available from this GNOME session.`
-            );
-        } catch (e) {
-            logError(e, `[Adaptive Shell v1.6] ${label}`);
-            Main.notifyError(
-                'Adaptive Desktop',
-                `${label} could not be started.`
-            );
-        }
     }
 
     _readCommand(argv, callback) {
@@ -956,36 +666,8 @@ class AdaptiveShellV16 {
         return clean.charAt(0).toUpperCase() + clean.slice(1);
     }
 
-    _railMenuButton(iconFile, labelText) {
-        const button = new St.Button({
-            reactive: true,
-            can_focus: true,
-            track_hover: true,
-            style_class: 'adaptive-dock-button',
-            accessible_name: labelText,
-        });
-
-        button.set_child(this._dockContent(iconFile, labelText));
-
-        // Rail menus open to the right of the rail, not below the button,
-        // so they never cover the rest of the rail.
-        const menu = new PopupMenu.PopupMenu(button, 0.0, St.Side.LEFT);
-        menu.actor.add_style_class_name('panel-menu');
-        menu.actor.hide();
-        Main.uiGroup.add_actor(menu.actor);
-
-        if (!this._menuManager)
-            this._menuManager = new PopupMenu.PopupMenuManager(this._rail);
-
-        this._menuManager.addMenu(menu);
-
-        button.menu = menu;
-        button.connect('clicked', () => menu.toggle());
-        button.connect('destroy', () => menu.destroy());
-
-        return button;
-    }
-
+    // Icon-only, as in the design: the rail is a column of marks, not a list of
+    // rows. Names live in the tooltip so nothing is lost.
     _dockContent(iconFile, labelText) {
         const iconPath = GLib.build_filenamev([
             Me.path,
@@ -994,38 +676,120 @@ class AdaptiveShellV16 {
             iconFile,
         ]);
 
-        const box = new St.BoxLayout({
-            vertical: false,
-            style_class: 'adaptive-dock-content',
-            x_expand: true,
+        return new St.Icon({
+            gicon: Gio.FileIcon.new(Gio.File.new_for_path(iconPath)),
+            style_class: 'adaptive-dock-icon',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+    }
+
+    _addTooltip(actor, text) {
+        actor.connect('notify::hover', () => {
+            if (actor.hover) {
+                if (this._dockDemagnifyId) {
+                    GLib.Source.remove(this._dockDemagnifyId);
+                    this._dockDemagnifyId = 0;
+                }
+
+                if (this._tooltipTimeoutId) {
+                    GLib.Source.remove(this._tooltipTimeoutId);
+                    this._tooltipTimeoutId = 0;
+                }
+
+                this._magnifyDock(actor);
+
+                this._tooltipTimeoutId = GLib.timeout_add(
+                    GLib.PRIORITY_DEFAULT,
+                    280,
+                    () => {
+                        this._tooltipTimeoutId = 0;
+                        if (actor.hover)
+                            this._showTooltip(actor, text);
+                        return GLib.SOURCE_REMOVE;
+                    }
+                );
+            } else {
+                if (this._tooltipTimeoutId) {
+                    GLib.Source.remove(this._tooltipTimeoutId);
+                    this._tooltipTimeoutId = 0;
+                }
+
+                this._hideTooltip();
+                this._scheduleDockDemagnify();
+            }
         });
 
-        box.add_child(
-            new St.Icon({
-                gicon: Gio.FileIcon.new(
-                    Gio.File.new_for_path(iconPath)
-                ),
-                style_class: 'adaptive-dock-icon',
-            })
-        );
+        actor.connect('destroy', () => {
+            if (this._tooltipTimeoutId) {
+                GLib.Source.remove(this._tooltipTimeoutId);
+                this._tooltipTimeoutId = 0;
+            }
+            this._hideTooltip();
+        });
+    }
 
-        box.add_child(
-            new St.Label({
-                text: labelText,
-                y_align: Clutter.ActorAlign.CENTER,
-                style_class: 'adaptive-dock-label',
-            })
-        );
+    _scheduleDockDemagnify() {
+        if (this._dockDemagnifyId)
+            GLib.Source.remove(this._dockDemagnifyId);
 
-        return box;
+        this._dockDemagnifyId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            85,
+            () => {
+                this._dockDemagnifyId = 0;
+                const hovered = this._dockButtons.find(
+                    button => button && button.hover
+                );
+                this._magnifyDock(hovered || null);
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+    }
+
+    _showTooltip(actor, text) {
+        this._hideTooltip();
+
+        this._tooltip = new St.Label({
+            text,
+            style_class: 'adaptive-tooltip',
+        });
+        Main.layoutManager.addChrome(this._tooltip);
+
+        const [x, y] = actor.get_transformed_position();
+        const [, naturalWidth] = this._tooltip.get_preferred_width(-1);
+        const [, naturalHeight] = this._tooltip.get_preferred_height(naturalWidth);
+
+        const monitor = Main.layoutManager.primaryMonitor;
+        let targetX = Math.round(x + actor.get_width() / 2 - naturalWidth / 2);
+        const targetY = Math.round(y - naturalHeight - 12);
+
+        if (monitor) {
+            targetX = Math.max(
+                monitor.x + 8,
+                Math.min(targetX, monitor.x + monitor.width - naturalWidth - 8)
+            );
+        }
+
+        this._tooltip.set_position(targetX, targetY);
+    }
+
+    _hideTooltip() {
+        if (!this._tooltip)
+            return;
+
+        Main.layoutManager.removeChrome(this._tooltip);
+        this._tooltip.destroy();
+        this._tooltip = null;
     }
 
     _queueWindowListRefresh() {
         if (this._windowRefreshId)
             return;
 
-        this._windowRefreshId = GLib.idle_add(
-            GLib.PRIORITY_DEFAULT_IDLE,
+        this._windowRefreshId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            110,
             () => {
                 this._windowRefreshId = 0;
                 this._refreshWindowList();
@@ -1039,52 +803,97 @@ class AdaptiveShellV16 {
             try {
                 item.window.disconnect(item.id);
             } catch (e) {
-                logError(e, '[Adaptive Shell v1.6] disconnect window signal');
+                logError(e, '[Adaptive Shell] disconnect window signal');
             }
         }
-
         this._windowSignalIds = [];
     }
 
+    _destroyDockMenus() {
+        for (const menu of this._dockMenus) {
+            try {
+                menu.destroy();
+            } catch (e) {
+                logError(e, '[Adaptive Shell] destroy dock menu');
+            }
+        }
+        this._dockMenus = [];
+    }
+
     _refreshWindowList() {
-        if (!this._windowList)
+        if (!this._dockAppsBox)
             return;
 
         this._disconnectWindowSignals();
-        this._windowList.destroy_all_children();
+        this._destroyDockMenus();
+        this._dockAppsBox.destroy_all_children();
+        this._dockButtons = [];
 
-        const windows = global.get_window_actors()
-            .map(actor => actor.meta_window)
-            .filter(window => this._isDockWindow(window))
-            .sort((a, b) => this._windowSortKey(a).localeCompare(this._windowSortKey(b)));
+        const favorites = this._favorites || AppFavorites.getAppFavorites();
+        const favoriteApps = favorites.getFavorites();
+        const favoriteIds = new Set(favoriteApps.map(app => app.get_id()));
 
-        if (!windows.length) {
-            this._windowList.add_child(
-                new St.Label({
-                    text: 'No open windows',
-                    style_class: 'adaptive-window-empty',
-                    x_align: Clutter.ActorAlign.START,
-                })
-            );
-            return;
-        }
+        const runningApps = Shell.AppSystem.get_default().get_running()
+            .filter(app => !favoriteIds.has(app.get_id()))
+            .sort((a, b) => this._appRecentTime(b) - this._appRecentTime(a));
 
-        for (const window of windows) {
-            this._windowList.add_child(this._windowButton(window));
+        const apps = favoriteApps.concat(runningApps);
 
-            try {
-                this._windowSignalIds.push({
-                    window,
-                    id: window.connect('unmanaged', () => this._queueWindowListRefresh()),
-                });
-                this._windowSignalIds.push({
-                    window,
-                    id: window.connect('notify::title', () => this._queueWindowListRefresh()),
-                });
-            } catch (e) {
-                logError(e, '[Adaptive Shell v1.6] connect window signal');
+        for (const app of apps) {
+            const windows = this._appWindows(app);
+            const favorite = favorites.isFavorite(app.get_id());
+
+            if (!favorite && windows.length === 0)
+                continue;
+
+            const button = this._appDockButton(app, windows, favorite);
+            button._adaptiveDockApp = app;
+            this._dockAppsBox.add_child(button);
+            this._dockButtons.push(button);
+
+            for (const window of windows) {
+                try {
+                    this._windowSignalIds.push({
+                        window,
+                        id: window.connect(
+                            'unmanaged',
+                            () => this._queueWindowListRefresh()
+                        ),
+                    });
+                } catch (e) {
+                    logError(e, '[Adaptive Shell] connect window signal');
+                }
             }
         }
+
+        if (this._showAppsButton && !this._dockButtons.includes(this._showAppsButton))
+            this._dockButtons.push(this._showAppsButton);
+
+        this._syncDockActive();
+        this._layoutRail();
+    }
+
+    _appWindows(app) {
+        try {
+            return app.get_windows()
+                .filter(window => this._isDockWindow(window))
+                .sort((a, b) => this._windowRecentTime(b) - this._windowRecentTime(a));
+        } catch (e) {
+            return [];
+        }
+    }
+
+    _windowRecentTime(window) {
+        try {
+            return window.get_user_time ? window.get_user_time() : 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    _appRecentTime(app) {
+        const windows = this._appWindows(app);
+        return windows.length ? this._windowRecentTime(windows[0]) : 0;
     }
 
     _isDockWindow(window) {
@@ -1094,145 +903,309 @@ class AdaptiveShellV16 {
         try {
             if (window.skip_taskbar)
                 return false;
-
             if (window.is_override_redirect && window.is_override_redirect())
                 return false;
-
             return true;
         } catch (e) {
             return false;
         }
     }
 
-    _windowSortKey(window) {
-        try {
-            const app = Shell.WindowTracker.get_default().get_window_app(window);
-            const appName = app ? app.get_name() : '';
-            return `${appName} ${window.get_title() || ''}`;
-        } catch (e) {
-            return window.get_title() || '';
-        }
-    }
-
-    _windowButton(window) {
-        const app = Shell.WindowTracker.get_default().get_window_app(window);
-        const appName = app ? app.get_name() : 'Window';
-        const title = window.get_title() || appName;
-        const isActive = global.display.focus_window === window;
+    _appDockButton(app, windows, favorite) {
+        const appName = app.get_name() || app.get_id() || 'Application';
+        const isActive = this._isFocusedApp(app);
 
         const button = new St.Button({
             reactive: true,
             can_focus: true,
             track_hover: true,
-            style_class: isActive ? 'adaptive-window-button active' : 'adaptive-window-button',
-            accessible_name: `Switch to ${title}`,
+            style_class: isActive ? 'adaptive-dock-button active' : 'adaptive-dock-button',
+            accessible_name: appName,
         });
+        button.set_pivot_point(0.5, 1.0);
 
-        const row = new St.BoxLayout({
-            vertical: false,
-            style_class: 'adaptive-window-content',
-            x_expand: true,
+        const content = new St.BoxLayout({
+            vertical: true,
+            style_class: 'adaptive-app-dock-content',
+            x_align: Clutter.ActorAlign.CENTER,
         });
 
         let icon;
-        if (app)
-            icon = app.create_icon_texture(18);
-        else
+        try {
+            icon = app.create_icon_texture(36);
+        } catch (e) {
             icon = new St.Icon({
                 icon_name: 'application-x-executable-symbolic',
-                style_class: 'adaptive-window-icon',
+                icon_size: 36,
             });
+        }
+        icon.add_style_class_name('adaptive-app-icon');
+        content.add_child(icon);
+        content.add_child(this._windowIndicators(windows.length, isActive));
+        button.set_child(content);
 
-        icon.add_style_class_name('adaptive-window-icon');
-        row.add_child(icon);
+        this._addTooltip(button, appName);
+        button.connect('clicked', () => this._activateDockApp(app));
 
-        row.add_child(
-            new St.Label({
-                text: title,
-                y_align: Clutter.ActorAlign.CENTER,
-                style_class: 'adaptive-window-label',
-            })
-        );
+        button.connect('button-press-event', (_actor, event) => {
+            const mouseButton = event.get_button();
 
-        button.set_child(row);
-        button.connect('clicked', () => {
-            try {
-                Main.activateWindow(window);
-            } catch (e) {
-                logError(e, '[Adaptive Shell v1.6] activate window');
+            if (mouseButton === 2) {
+                this._openNewWindow(app);
+                return Clutter.EVENT_STOP;
             }
+
+            if (mouseButton === 3) {
+                this._hideTooltip();
+                this._openDockMenu(button, app, windows, favorite);
+                return Clutter.EVENT_STOP;
+            }
+
+            return Clutter.EVENT_PROPAGATE;
         });
 
         return button;
     }
 
-    _dockButton(iconFile, name, callback) {
+    _windowIndicators(windowCount, active) {
+        const row = new St.BoxLayout({
+            vertical: false,
+            style_class: active
+                ? 'adaptive-running-indicators active'
+                : 'adaptive-running-indicators',
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+
+        if (windowCount <= 0)
+            return row;
+
+        const visibleDots = Math.min(windowCount, 5);
+        for (let i = 0; i < visibleDots; i++) {
+            row.add_child(new St.Widget({
+                style_class: active ? 'adaptive-running-dot active' : 'adaptive-running-dot',
+            }));
+        }
+
+        if (windowCount > 5) {
+            row.add_child(new St.Label({
+                text: `${windowCount}`,
+                style_class: 'adaptive-running-count',
+            }));
+        }
+
+        return row;
+    }
+
+    _isFocusedApp(app) {
+        const focus = global.display.focus_window;
+        if (!focus)
+            return false;
+
+        try {
+            return Shell.WindowTracker.get_default().get_window_app(focus) === app;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _activateDockApp(app) {
+        const windows = this._appWindows(app);
+
+        if (windows.length === 0) {
+            app.activate();
+            return;
+        }
+
+        const focus = global.display.focus_window;
+        const tracker = Shell.WindowTracker.get_default();
+        const focusedApp = focus ? tracker.get_window_app(focus) : null;
+
+        let target = windows[0];
+        if (focusedApp === app && windows.length > 1) {
+            const index = windows.indexOf(focus);
+            target = windows[(index + 1 + windows.length) % windows.length];
+        }
+
+        Main.activateWindow(target);
+    }
+
+    _openNewWindow(app) {
+        try {
+            if (
+                typeof app.can_open_new_window === 'function' &&
+                !app.can_open_new_window()
+            ) {
+                app.activate();
+                return;
+            }
+
+            if (typeof app.open_new_window === 'function') {
+                app.open_new_window(-1);
+                return;
+            }
+
+            app.activate();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] open new window');
+        }
+    }
+
+    _openDockMenu(button, app, windows, favorite) {
+        this._destroyDockMenus();
+        this._hideTooltip();
+
+        const menu = new PopupMenu.PopupMenu(button, 0.5, St.Side.BOTTOM);
+        menu.actor.add_style_class_name('adaptive-dock-popup');
+        Main.uiGroup.add_actor(menu.actor);
+        menu.actor.hide();
+        this._dockMenuManager.addMenu(menu);
+        this._dockMenus.push(menu);
+
+        const openItem = new PopupMenu.PopupMenuItem(
+            windows.length ? 'Activate' : 'Open'
+        );
+        openItem.connect('activate', () => this._activateDockApp(app));
+        menu.addMenuItem(openItem);
+
+        const canOpenNew =
+            typeof app.can_open_new_window !== 'function' ||
+            app.can_open_new_window();
+
+        if (canOpenNew) {
+            const newWindowItem = new PopupMenu.PopupMenuItem('New Window');
+            newWindowItem.connect('activate', () => this._openNewWindow(app));
+            menu.addMenuItem(newWindowItem);
+        }
+
+        if (windows.length > 1) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            for (const window of windows) {
+                const title = window.get_title() || app.get_name() || 'Window';
+                const windowItem = new PopupMenu.PopupMenuItem(title);
+                windowItem.connect('activate', () => Main.activateWindow(window));
+                menu.addMenuItem(windowItem);
+            }
+        }
+
+        const appId = app.get_id();
+        const canFavorite =
+            !!appId &&
+            !(typeof app.is_window_backed === 'function' && app.is_window_backed());
+
+        if (canFavorite) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+            const favoriteNow = this._favorites
+                ? this._favorites.isFavorite(appId)
+                : favorite;
+
+            const favoriteItem = new PopupMenu.PopupMenuItem(
+                favoriteNow ? 'Remove from Favorites' : 'Add to Favorites'
+            );
+
+            favoriteItem.connect('activate', () => {
+                const currentlyFavorite = this._favorites.isFavorite(appId);
+                if (currentlyFavorite)
+                    this._favorites.removeFavorite(appId);
+                else
+                    this._favorites.addFavorite(appId);
+
+                menu.close();
+                this._queueWindowListRefresh();
+            });
+            menu.addMenuItem(favoriteItem);
+        }
+
+        if (windows.length > 0) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            const closeItem = new PopupMenu.PopupMenuItem(
+                windows.length === 1 ? 'Close Window' : `Close ${windows.length} Windows`
+            );
+            closeItem.connect('activate', () => {
+                const timestamp = global.get_current_time();
+                for (const window of this._appWindows(app)) {
+                    try {
+                        window.delete(timestamp);
+                    } catch (e) {
+                        logError(e, '[Adaptive Shell] close window');
+                    }
+                }
+            });
+            menu.addMenuItem(closeItem);
+        }
+
+        menu.connect('open-state-changed', (_menu, open) => {
+            if (!open)
+                this._scheduleDockDemagnify();
+        });
+
+        menu.open();
+    }
+
+    _utilityDockButton(iconFile, name, callback) {
         const button = new St.Button({
             reactive: true,
             can_focus: true,
             track_hover: true,
-            style_class: 'adaptive-dock-button',
+            style_class: 'adaptive-dock-button adaptive-utility-dock-button',
             accessible_name: name,
         });
-
+        button.set_pivot_point(0.5, 1.0);
         button.set_child(this._dockContent(iconFile, name));
-
-        button.connect(
-            'clicked',
-            () => {
-                log(
-                    `[Adaptive Shell v1.6] click: ${name}`
-                );
-
-                try {
-                    callback();
-                } catch (e) {
-                    logError(
-                        e,
-                        `[Adaptive Shell v1.6] ${name}`
-                    );
-
-                    Main.notifyError(
-                        'Adaptive Desktop',
-                        `${name} could not be opened.`
-                    );
-                }
-            }
-        );
-
+        button.connect('clicked', callback);
+        this._addTooltip(button, name);
         return button;
     }
 
+    _magnifyDock(activeButton) {
+        const activeIndex =
+            activeButton
+                ? this._dockButtons.indexOf(activeButton)
+                : -1;
+
+        for (
+            let i = 0;
+            i < this._dockButtons.length;
+            i++
+        ) {
+            const button = this._dockButtons[i];
+
+            if (!button)
+                continue;
+
+            let scale = 1.0;
+            let lift = 0;
+
+            if (activeIndex >= 0) {
+                const distance =
+                    Math.abs(i - activeIndex);
+
+                if (distance === 0) {
+                    scale = 1.18;
+                    lift = -5;
+                } else if (distance === 1) {
+                    scale = 1.08;
+                    lift = -1;
+                }
+            }
+
+            button.remove_all_transitions();
+
+            button.ease({
+                scale_x: scale,
+                scale_y: scale,
+                translation_y: lift,
+                duration: 120,
+                mode:
+                    Clutter.AnimationMode
+                        .EASE_OUT_QUAD,
+            });
+        }
+    }
+
     _layoutRail() {
-        if (!this._rail)
-            return;
-
-        const monitor =
-            Main.layoutManager.primaryMonitor;
-
-        if (!monitor)
-            return;
-
-        const panelHeight = Math.max(
-            Main.panel.height || 0,
-            24
-        );
-
-        const width = 172;
-        const height = Math.max(
-            1,
-            monitor.height - panelHeight
-        );
-
-        this._rail.set_position(
-            monitor.x,
-            monitor.y + panelHeight
-        );
-
-        this._rail.set_size(
-            width,
-            height
-        );
+        this._dock26EnsureTargetMonitor();
+        this._dock26Layout();
     }
 
     _showOverview() {
@@ -1248,19 +1221,38 @@ class AdaptiveShellV16 {
         this._syncDockActive();
     }
 
+    // Pressing the button a second time should put the desktop back, rather
+    // than re-showing a grid that is already on screen.
     _showApplications() {
-        if (
-            Main.overview &&
-            typeof Main.overview.showApps ===
-                'function'
-        ) {
-            Main.overview.showApps();
+        if (this._appsShowing()) {
+            Main.overview.hide();
             this._syncDockActive();
             return;
         }
 
-        Main.overview.show();
+        if (Main.overview && typeof Main.overview.showApps === 'function')
+            Main.overview.showApps();
+        else
+            Main.overview.show();
+
         this._syncDockActive();
+    }
+
+    _appsShowing() {
+        if (!Main.overview.visible)
+            return false;
+
+        // GNOME 42's own ControlsManager._toggleAppsPage() reads this same
+        // flag, so it stays true to whatever the shell thinks is showing.
+        // (viewSelector, the pre-40 way to ask, no longer exists.)
+        const dash = Main.overview.dash;
+        return !!(dash && dash.showAppsButton && dash.showAppsButton.checked);
+    }
+
+    _toggleWorkspaces() {
+        // The overview is GNOME's real workspace switcher; a rail menu could
+        // only ever list what dynamic workspaces happened to exist.
+        this._toggleOverview();
     }
 
     _showWorkspaces() {
@@ -1279,123 +1271,703 @@ class AdaptiveShellV16 {
     }
 
     _syncDockActive() {
-        this._setActorActive(
-            this._homeButton,
-            Main.overview && Main.overview.visible
+        for (const button of this._dockButtons) {
+            if (!button || !button._adaptiveDockApp)
+                continue;
+
+            this._setActorActive(
+                button,
+                this._isFocusedApp(button._adaptiveDockApp)
+            );
+        }
+
+        const appsUp = !!(
+            Main.overview &&
+            Main.overview.visible &&
+            this._appsShowing()
+        );
+        this._setActorActive(this._showAppsButton, appsUp);
+    }
+
+    _dock26MonitorCount() {
+        try {
+            return Main.layoutManager.monitors.length;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    _dock26PrimaryMonitorIndex() {
+        try {
+            const index = global.display.get_primary_monitor();
+            if (
+                Number.isInteger(index) &&
+                index >= 0 &&
+                index < this._dock26MonitorCount()
+            )
+                return index;
+        } catch (e) {
+        }
+        return 0;
+    }
+
+    _dock26Monitor(index) {
+        const monitors = Main.layoutManager.monitors || [];
+        if (
+            Number.isInteger(index) &&
+            index >= 0 &&
+            index < monitors.length
+        )
+            return monitors[index];
+
+        const fallback = this._dock26PrimaryMonitorIndex();
+        return monitors[fallback] ||
+            Main.layoutManager.primaryMonitor ||
+            null;
+    }
+
+    _dock26WindowMonitor(window) {
+        if (window) {
+            try {
+                const index = window.get_monitor();
+                if (
+                    Number.isInteger(index) &&
+                    index >= 0 &&
+                    index < this._dock26MonitorCount()
+                )
+                    return index;
+            } catch (e) {
+            }
+        }
+
+        try {
+            const current = global.display.get_current_monitor();
+            if (
+                Number.isInteger(current) &&
+                current >= 0 &&
+                current < this._dock26MonitorCount()
+            )
+                return current;
+        } catch (e) {
+        }
+
+        return this._dock26PrimaryMonitorIndex();
+    }
+
+    _dock26EnsureTargetMonitor() {
+        const count = this._dock26MonitorCount();
+
+        if (!count) {
+            this._dock26TargetMonitor = -1;
+            return;
+        }
+
+        if (
+            !Number.isInteger(this._dock26TargetMonitor) ||
+            this._dock26TargetMonitor < 0 ||
+            this._dock26TargetMonitor >= count
+        ) {
+            this._dock26TargetMonitor =
+                this._dock26WindowMonitor(
+                    global.display.get_focus_window()
+                );
+        }
+    }
+
+    _dock26DestroyHotEdges() {
+        for (const entry of this._dock26HotEdges) {
+            if (!entry || !entry.actor)
+                continue;
+
+            try {
+                Main.layoutManager.removeChrome(entry.actor);
+            } catch (e) {
+            }
+
+            try {
+                entry.actor.destroy();
+            } catch (e) {
+            }
+        }
+
+        this._dock26HotEdges = [];
+    }
+
+    _dock26RebuildHotEdges() {
+        this._dock26DestroyHotEdges();
+
+        const monitors = Main.layoutManager.monitors || [];
+
+        monitors.forEach((monitor, index) => {
+            const edge = new St.Widget({
+                reactive: true,
+                track_hover: true,
+                style_class: 'adaptive-dock-hot-edge',
+            });
+
+            edge.set_position(
+                monitor.x,
+                monitor.y + monitor.height -
+                    this._dock26HotEdgeHeight
+            );
+            edge.set_size(
+                monitor.width,
+                this._dock26HotEdgeHeight
+            );
+
+            edge.connect(
+                'enter-event',
+                () => {
+                    this._dock26OnEdgeEnter(index);
+                    return Clutter.EVENT_PROPAGATE;
+                }
+            );
+
+            edge.connect(
+                'leave-event',
+                () => {
+                    this._dock26CancelReveal();
+                    this._dock26ScheduleHide(index);
+                    return Clutter.EVENT_PROPAGATE;
+                }
+            );
+
+            Main.layoutManager.addChrome(
+                edge,
+                {
+                    affectsStruts: false,
+                    trackFullscreen: false,
+                }
+            );
+
+            this._dock26HotEdges.push({
+                actor: edge,
+                index,
+            });
+        });
+
+        this._dock26EnsureTargetMonitor();
+        this._dock26SyncTargetFromFocus(false);
+        this._dock26Layout();
+    }
+
+    _dock26EdgeForMonitor(index) {
+        const entry = this._dock26HotEdges.find(
+            item => item.index === index
+        );
+        return entry ? entry.actor : null;
+    }
+
+    _dock26WindowFullyMaximized(window) {
+        if (!window)
+            return false;
+
+        try {
+            if (
+                typeof window.is_maximized === 'function'
+            )
+                return !!window.is_maximized();
+        } catch (e) {
+        }
+
+        try {
+            const flags = window.get_maximize_flags();
+            return !!(
+                (flags & Meta.MaximizeFlags.HORIZONTAL) &&
+                (flags & Meta.MaximizeFlags.VERTICAL)
+            );
+        } catch (e) {
+        }
+
+        try {
+            return !!(
+                window.maximized_horizontally &&
+                window.maximized_vertically
+            );
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Mutter's get_monitor_in_fullscreen() tracks the *topmost* window, so it
+    // flips false the moment anything stacks above the fullscreen window - a
+    // quick-settings menu, a Ctrl+Alt+T terminal, a file-picker for an upload.
+    // The dock would then reveal itself over content that is still fullscreen.
+    // So it is only one of two signals: the workspace scan below reports a
+    // fullscreen window on this monitor no matter what sits on top of it.
+    _dock26MonitorInFullscreen(index) {
+        try {
+            if (
+                typeof global.display
+                    .get_monitor_in_fullscreen === 'function'
+            ) {
+                if (!!global.display.get_monitor_in_fullscreen(index))
+                    return true;
+            }
+        } catch (e) {
+        }
+
+        try {
+            const workspace =
+                global.workspace_manager.get_active_workspace();
+
+            if (!workspace)
+                return false;
+
+            for (const window of workspace.list_windows()) {
+                try {
+                    // A minimized fullscreen window is not on screen, so it
+                    // must not keep the dock suppressed.
+                    if (
+                        window.get_monitor() === index &&
+                        window.is_fullscreen() &&
+                        !window.minimized
+                    )
+                        return true;
+                } catch (e) {
+                }
+            }
+        } catch (e) {
+        }
+
+        return false;
+    }
+
+    _dock26MonitorHasFocusedMaximized(index) {
+        if (!this._dock26HideOnMaximized)
+            return false;
+
+        const window = global.display.get_focus_window();
+        if (!window)
+            return false;
+
+        try {
+            if (window.get_monitor() !== index)
+                return false;
+        } catch (e) {
+            return false;
+        }
+
+        return this._dock26WindowFullyMaximized(window);
+    }
+
+    _dock26MonitorNeedsHide(index) {
+        return (
+            this._dock26MonitorInFullscreen(index) ||
+            this._dock26MonitorHasFocusedMaximized(index)
         );
     }
-    
-    _onMixerStateChanged() {
-        if (this._mixerControl && this._mixerControl.get_state() === Gvc.MixerControlState.READY) {
-            this._volumeStream = this._mixerControl.get_default_sink();
-            if (this._volumeStream && this._volumeSlider) {
-                let volume = this._volumeStream.volume / this._mixerControl.get_vol_max_norm();
-                this._volumeSlider.value = volume;
+
+    _dock26SyncTargetFromFocus(forceMove = true) {
+        const window = global.display.get_focus_window();
+        const index = this._dock26WindowMonitor(window);
+
+        if (
+            !forceMove &&
+            this._dock26TargetMonitor >= 0
+        ) {
+            this._dock26WatchFocusWindow();
+            return;
+        }
+
+        if (
+            Number.isInteger(index) &&
+            index >= 0
+        )
+            this._dock26TargetMonitor = index;
+
+        this._dock26EdgeRevealed = false;
+        this._dock26WatchFocusWindow();
+        this._dock26SyncVisibility();
+    }
+
+    _dock26DisconnectFocusWindow() {
+        if (!this._dock26FocusWindow) {
+            this._dock26FocusSignalIds = [];
+            return;
+        }
+
+        for (const id of this._dock26FocusSignalIds) {
+            try {
+                this._dock26FocusWindow.disconnect(id);
+            } catch (e) {
+            }
+        }
+
+        this._dock26FocusSignalIds = [];
+        this._dock26FocusWindow = null;
+    }
+
+    _dock26WatchFocusWindow() {
+        this._dock26DisconnectFocusWindow();
+
+        const window = global.display.get_focus_window();
+        if (!window)
+            return;
+
+        this._dock26FocusWindow = window;
+
+        const changed = () => {
+            this._dock26TargetMonitor =
+                this._dock26WindowMonitor(window);
+            this._dock26EdgeRevealed = false;
+            this._dock26SyncVisibility();
+        };
+
+        for (const signal of [
+            'notify::maximized-horizontally',
+            'notify::maximized-vertically',
+            'notify::fullscreen',
+            'size-changed',
+            'position-changed',
+        ]) {
+            try {
+                const id = window.connect(signal, changed);
+                this._dock26FocusSignalIds.push(id);
+            } catch (e) {
             }
         }
     }
 
-    _populateWorkspacesMenu() {
-        this._workspacesButton.menu.removeAll();
-        
-        const wm = global.workspace_manager;
-        const numWorkspaces = wm.get_n_workspaces();
-        const activeIndex = wm.get_active_workspace_index();
-        
-        let header = new PopupMenu.PopupMenuItem('WORKSPACES');
-        header.setSensitive(false);
-        this._workspacesButton.menu.addMenuItem(header);
+    _dock26CancelReveal() {
+        if (!this._dock26RevealTimerId)
+            return;
 
-        if (this._activeProjectId && this._projectProxy) {
-            const pinItem = new PopupMenu.PopupMenuItem(
-                `Pin active project to Workspace ${activeIndex + 1}`
-            );
-            pinItem.connect('activate', () => {
-                this._projectProxy.call(
-                    'UpdateProject',
-                    GLib.Variant.new('(ss)', [
-                        this._activeProjectId,
-                        JSON.stringify({ workspace_index: activeIndex }),
-                    ]),
-                    Gio.DBusCallFlags.NONE,
-                    -1,
-                    null,
-                    null
-                );
-            });
-            this._workspacesButton.menu.addMenuItem(pinItem);
-            this._workspacesButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        GLib.Source.remove(this._dock26RevealTimerId);
+        this._dock26RevealTimerId = 0;
+    }
+
+    _dock26CancelHide() {
+        if (!this._dock26HideTimerId)
+            return;
+
+        GLib.Source.remove(this._dock26HideTimerId);
+        this._dock26HideTimerId = 0;
+    }
+
+    _dock26OnEdgeEnter(index) {
+        this._dock26CancelHide();
+        this._dock26CancelReveal();
+
+        this._dock26TargetMonitor = index;
+
+        if (!this._dock26MonitorNeedsHide(index)) {
+            this._dock26EdgeRevealed = true;
+            this._dock26Layout();
+            return;
         }
-        
-        for (let i = 0; i < numWorkspaces; i++) {
-            let isActive = (i === activeIndex);
-            let label = isActive ? `★ Workspace ${i + 1}` : `Workspace ${i + 1}`;
-            let item = new PopupMenu.PopupMenuItem(label);
-            
-            item.connect('activate', () => {
-                let ws = wm.get_workspace_by_index(i);
-                if (ws) {
-                    ws.activate(global.get_current_time());
+
+        this._dock26EdgeRevealed = false;
+        this._dock26Layout();
+
+        this._dock26RevealTimerId =
+            GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT,
+                this._dock26RevealDelayMs,
+                () => {
+                    this._dock26RevealTimerId = 0;
+
+                    const edge =
+                        this._dock26EdgeForMonitor(index);
+
+                    if (!edge || !edge.hover)
+                        return GLib.SOURCE_REMOVE;
+
+                    this._dock26TargetMonitor = index;
+                    this._dock26EdgeRevealed = true;
+                    this._dock26Layout();
+
+                    return GLib.SOURCE_REMOVE;
                 }
-            });
-            
-            this._workspacesButton.menu.addMenuItem(item);
+            );
+    }
+
+    _dock26ScheduleHide(
+        index = this._dock26TargetMonitor
+    ) {
+        this._dock26CancelHide();
+
+        if (!this._dock26MonitorNeedsHide(index))
+            return;
+
+        this._dock26HideTimerId =
+            GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT,
+                this._dock26HideDelayMs,
+                () => {
+                    this._dock26HideTimerId = 0;
+
+                    const edge =
+                        this._dock26EdgeForMonitor(index);
+
+                    if (
+                        (this._rail && this._rail.hover) ||
+                        (edge && edge.hover)
+                    )
+                        return GLib.SOURCE_REMOVE;
+
+                    this._dock26EdgeRevealed = false;
+                    this._dock26Layout();
+
+                    return GLib.SOURCE_REMOVE;
+                }
+            );
+    }
+
+    _dock26ShowDock(animated) {
+        if (!this._rail)
+            return;
+
+        this._rail.reactive = true;
+        this._rail.show();
+        this._rail.remove_all_transitions();
+
+        if (!animated) {
+            this._rail.opacity = 255;
+            this._rail.translation_y = 0;
+            return;
+        }
+
+        this._rail.ease({
+            opacity: 255,
+            translation_y: 0,
+            duration: this._dock26RevealDurationMs,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+    }
+
+    _dock26HideDock(animated) {
+        if (!this._rail)
+            return;
+
+        this._rail.reactive = false;
+        this._rail.remove_all_transitions();
+
+        const offset =
+            this._dock26SurfaceHeight +
+            this._dock26BottomGap + 8;
+
+        if (!animated) {
+            this._rail.opacity = 0;
+            this._rail.translation_y = offset;
+            return;
+        }
+
+        this._rail.ease({
+            opacity: 0,
+            translation_y: offset,
+            duration: this._dock26HideDurationMs,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+    }
+
+    _dock26Layout() {
+        if (!this._rail || !this._dockChrome)
+            return;
+
+        this._dock26EnsureTargetMonitor();
+
+        const index = this._dock26TargetMonitor;
+        const monitor = this._dock26Monitor(index);
+        if (!monitor)
+            return;
+
+        const [, naturalWidth] =
+            this._rail.get_preferred_width(-1);
+
+        const width = Math.max(
+            100,
+            Math.min(
+                Math.ceil(naturalWidth),
+                monitor.width - 24
+            )
+        );
+
+        const x =
+            monitor.x +
+            Math.round((monitor.width - width) / 2);
+
+        const y =
+            monitor.y +
+            monitor.height -
+            this._dock26SurfaceHeight -
+            this._dock26BottomGap;
+
+        this._rail.set_position(x, y);
+        this._rail.set_size(
+            width,
+            this._dock26SurfaceHeight
+        );
+
+        const hidden =
+            this._dock26MonitorNeedsHide(index);
+
+        if (hidden) {
+            this._dockChrome.set_position(
+                monitor.x,
+                monitor.y + monitor.height - 1
+            );
+            this._dockChrome.set_size(
+                monitor.width,
+                1
+            );
+
+            if (this._dock26EdgeRevealed)
+                this._dock26ShowDock(true);
+            else
+                this._dock26HideDock(true);
+        } else {
+            this._dockChrome.set_position(
+                monitor.x,
+                monitor.y +
+                    monitor.height -
+                    this._dock26ReservedHeight
+            );
+            this._dockChrome.set_size(
+                monitor.width,
+                this._dock26ReservedHeight
+            );
+
+            this._dock26EdgeRevealed = false;
+            this._dock26ShowDock(false);
+        }
+
+        try {
+            if (
+                typeof Main.layoutManager
+                    ._queueUpdateRegions === 'function'
+            )
+                Main.layoutManager._queueUpdateRegions();
+        } catch (e) {
+            logError(
+                e,
+                '[Adaptive Shell] v2.6 work-area update'
+            );
         }
     }
 
-    _settingsSections() {
-        return [
-            { label: 'Appearance Settings', argv: ['gnome-control-center', 'appearance'] },
-            { label: 'Display Settings', argv: ['gnome-control-center', 'display'] },
-            { label: 'Sound Settings', argv: ['gnome-control-center', 'sound'] },
-            { label: 'Keyboard Settings', argv: ['gnome-control-center', 'keyboard'] },
-            { label: 'Network Settings', argv: ['gnome-control-center', 'network'] },
-            { label: 'Power Settings', argv: ['gnome-control-center', 'power'] },
-            { label: 'Privacy Settings', argv: ['gnome-control-center', 'privacy'] },
-            { label: 'Accessibility Settings', argv: ['gnome-control-center', 'universal-access'] },
-        ];
+    _dock26SyncVisibility() {
+        this._dock26EnsureTargetMonitor();
+        this._dock26Layout();
+    }
+
+    _dock26ConnectRuntime() {
+        this._dock26RebuildHotEdges();
+
+        if (!this._dock26FullscreenSignalId) {
+            try {
+                this._dock26FullscreenSignalId =
+                    global.display.connect(
+                        'in-fullscreen-changed',
+                        () => {
+                            this._dock26EdgeRevealed = false;
+                            this._dock26SyncVisibility();
+                        }
+                    );
+            } catch (e) {
+                logError(
+                    e,
+                    '[Adaptive Shell] v2.6 fullscreen signal'
+                );
+            }
+        }
+
+        if (!this._dock26FocusChangedId) {
+            this._dock26FocusChangedId =
+                global.display.connect(
+                    'notify::focus-window',
+                    () =>
+                        this._dock26SyncTargetFromFocus(true)
+                );
+        }
+
+        if (!this._dock26WindowEnteredMonitorId) {
+            try {
+                this._dock26WindowEnteredMonitorId =
+                    global.display.connect(
+                        'window-entered-monitor',
+                        (_display, monitorIndex, window) => {
+                            if (
+                                window ===
+                                global.display.get_focus_window()
+                            ) {
+                                this._dock26TargetMonitor =
+                                    monitorIndex;
+                                this._dock26EdgeRevealed = false;
+                                this._dock26SyncVisibility();
+                            }
+                        }
+                    );
+            } catch (e) {
+            }
+        }
+
+        if (!this._dock26MonitorsChangedId) {
+            this._dock26MonitorsChangedId =
+                Main.layoutManager.connect(
+                    'monitors-changed',
+                    () => this._dock26RebuildHotEdges()
+                );
+        }
+
+        this._dock26SyncTargetFromFocus(true);
+    }
+
+    _dock26Cleanup() {
+        this._dock26CancelReveal();
+        this._dock26CancelHide();
+        this._dock26DisconnectFocusWindow();
+        this._dock26DestroyHotEdges();
+
+        if (this._dock26FullscreenSignalId) {
+            try {
+                global.display.disconnect(
+                    this._dock26FullscreenSignalId
+                );
+            } catch (e) {
+            }
+            this._dock26FullscreenSignalId = 0;
+        }
+
+        if (this._dock26FocusChangedId) {
+            try {
+                global.display.disconnect(
+                    this._dock26FocusChangedId
+                );
+            } catch (e) {
+            }
+            this._dock26FocusChangedId = 0;
+        }
+
+        if (this._dock26WindowEnteredMonitorId) {
+            try {
+                global.display.disconnect(
+                    this._dock26WindowEnteredMonitorId
+                );
+            } catch (e) {
+            }
+            this._dock26WindowEnteredMonitorId = 0;
+        }
+
+        if (this._dock26MonitorsChangedId) {
+            try {
+                Main.layoutManager.disconnect(
+                    this._dock26MonitorsChangedId
+                );
+            } catch (e) {
+            }
+            this._dock26MonitorsChangedId = 0;
+        }
+    }
+
+    _syncDockVisibility() {
+        this._dock26SyncVisibility();
     }
 
     _runSettingsSection(section) {
         this._spawn(section.argv);
     }
 
-    _showSearch() {
-        Main.overview.show();
-
-        // GNOME Shell 42 provides the overview search entry.
-        // Focus it when available; otherwise typing after opening the
-        // overview still starts normal GNOME search.
-        GLib.idle_add(
-            GLib.PRIORITY_DEFAULT_IDLE,
-            () => {
-                try {
-                    if (
-                        Main.overview.searchEntry &&
-                        typeof Main.overview
-                            .searchEntry
-                            .grab_key_focus ===
-                            'function'
-                    ) {
-                        Main.overview
-                            .searchEntry
-                            .grab_key_focus();
-                    }
-                } catch (e) {
-                    logError(
-                        e,
-                        '[Adaptive Shell v1.6] search focus'
-                    );
-                }
-
-                return GLib.SOURCE_REMOVE;
-            }
-        );
-    }
-
-    // Activating the app rather than spawning a binary is what gives the
-    // Ubuntu dock behaviour: an already-open window is focused instead of a
-    // second one being created.
     _activateApp(desktopId, fallbackArgv) {
         const app = Shell.AppSystem.get_default().lookup_app(desktopId);
 
