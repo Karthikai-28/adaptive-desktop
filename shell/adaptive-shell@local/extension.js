@@ -548,9 +548,17 @@ class AdaptiveShellV16 {
         this._systemCenterButton.menu.addMenuItem(logoutItem);
         
         this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        let powerItem = new PopupMenu.PopupMenuItem('Power Off...');
-        powerItem.connect('activate', () => actions.activatePowerOff());
+
+        let restartItem = new PopupMenu.PopupMenuItem('Restart...');
+        restartItem.connect('activate', () => {
+            this._activateSystemAction(actions, 'activateRestart', 'Restart');
+        });
+        this._systemCenterButton.menu.addMenuItem(restartItem);
+
+        let powerItem = new PopupMenu.PopupMenuItem('Shut Down...');
+        powerItem.connect('activate', () => {
+            this._activateSystemAction(actions, 'activatePowerOff', 'Shut Down');
+        });
         this._systemCenterButton.menu.addMenuItem(powerItem);
 
         this._systemCenterButton.menu.connect('open-state-changed', (menu, open) => {
@@ -726,6 +734,26 @@ class AdaptiveShellV16 {
             });
 
             this._audioOutputMenu.menu.addMenuItem(item);
+        }
+    }
+
+    _activateSystemAction(actions, methodName, label) {
+        try {
+            if (actions && typeof actions[methodName] === 'function') {
+                actions[methodName]();
+                return;
+            }
+
+            Main.notifyError(
+                'Adaptive Desktop',
+                `${label} is not available from this GNOME session.`
+            );
+        } catch (e) {
+            logError(e, `[Adaptive Shell v1.6] ${label}`);
+            Main.notifyError(
+                'Adaptive Desktop',
+                `${label} could not be started.`
+            );
         }
     }
 

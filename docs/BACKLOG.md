@@ -129,6 +129,7 @@ Status:
 - 🟡 First functional shell menu exists with volume, settings, lock, suspend, logout, and power actions.
 - 🟡 Read-only status rows refresh on open for network, Bluetooth, power, and audio output.
 - 🔬 Audio output selection submenu exists and needs live device verification.
+- 🔬 Restart and shut down entries use GNOME-native confirmation actions where available.
 
 ### Required
 
@@ -144,7 +145,7 @@ Status:
 - ✅ Lock.
 - ✅ Logout.
 - ✅ Suspend.
-- ⬜ Reboot/shutdown confirmation.
+- 🔬 Reboot/shutdown confirmation.
 - ✅ Return to Ubuntu.
 
 ⚠️ Do not remove GNOME top-right controls until these replacements work reliably.
