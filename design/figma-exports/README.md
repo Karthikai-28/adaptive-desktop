@@ -28,7 +28,7 @@ rail-states.png
 | Export | Drives |
 | --- | --- |
 | `files-*` | `AdaptiveFiles` GTK theme over the forked Nautilus |
-| `settings-*` | GTK4/libadwaita skin over `gnome-control-center` |
+| `settings-*` | GTK3 skin over `gnome-control-center` (41.7, links `libgtk-3` only) |
 | `quick-settings-*` | Shell CSS for the top-right panel in `adaptive-shell@local` |
 | `rail-*` | `.adaptive-rail` and dock button states |
 

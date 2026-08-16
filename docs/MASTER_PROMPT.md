@@ -731,13 +731,21 @@ An older extension existed as:
 adaptive-shell@local
 ```
 
-A fresh UUID was introduced to avoid stale GNOME Shell JavaScript caching:
+A fresh UUID was once introduced to avoid stale GNOME Shell JavaScript caching:
 
 ```text
 adaptive-shell-v16@local
 ```
 
-The fresh UUID should be treated as the active development extension unless diagnostics prove otherwise.
+**This is retired.** `adaptive-shell@local` is canonical; the v16 UUID is kept
+for rollback history only. A new UUID never solved the caching problem anyway —
+GNOME 42 caches an extension's JS for the life of the shell process regardless
+of its name, and `ReloadExtension` is deprecated. Use
+`./scripts/reload-adaptive-shell.sh --restart-shell` on X11, or log in again.
+
+Only one Adaptive rail extension may be enabled at a time. With both enabled the
+rails stack and every dock label renders with its first glyph covered;
+`verify-live-readiness.sh` fails on this now.
 
 ---
 
@@ -1175,7 +1183,10 @@ Introduced:
 adaptive-shell-v16@local
 ```
 
-and per-user `org.gnome.Nautilus.desktop` routing.
+and per-user `org.gnome.Nautilus.desktop` routing. Both approaches are
+historical. Files activation now goes through
+`scripts/adaptive-files-dispatch.sh` and per-user D-Bus services; see
+Milestone 7 in `docs/BACKLOG.md`.
 
 ## v1.6.1
 
@@ -1390,10 +1401,11 @@ Continue in roughly this order.
 Verify that:
 
 ```text
-adaptive-shell-v16@local
+adaptive-shell@local
 ```
 
-is the actual live extension after login.
+is the actual live extension after login, and that it is the *only* enabled
+Adaptive rail.
 
 Confirm old:
 
