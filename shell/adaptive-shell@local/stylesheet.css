@@ -104,6 +104,12 @@
     background-color: rgba(120, 169, 255, 0.15);
 }
 
+.adaptive-dock-button.active {
+    border-color: rgba(102, 224, 255, 0.32);
+    background-color: rgba(120, 169, 255, 0.14);
+    color: #E8F1FF;
+}
+
 .adaptive-dock-icon {
     icon-size: 20px;
 }

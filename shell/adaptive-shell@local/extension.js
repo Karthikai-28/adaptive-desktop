@@ -19,10 +19,15 @@ class AdaptiveShellV16 {
         this._systemCenterButton = null;
         this._workspacesButton = null;
         this._commandButton = null;
+        this._homeButton = null;
+        this._filesButton = null;
+        this._appsButton = null;
         this._windowList = null;
         this._projectLabel = null;
         this._activeProjectId = null;
         this._monitorChangedId = 0;
+        this._overviewShowingId = 0;
+        this._overviewHiddenId = 0;
         this._windowCreatedId = 0;
         this._focusWindowId = 0;
         this._windowRefreshId = 0;
@@ -110,8 +115,17 @@ class AdaptiveShellV16 {
             'notify::focus-window',
             () => this._queueWindowListRefresh()
         );
+        this._overviewShowingId = Main.overview.connect(
+            'showing',
+            () => this._syncDockActive()
+        );
+        this._overviewHiddenId = Main.overview.connect(
+            'hidden',
+            () => this._syncDockActive()
+        );
 
         this._layoutRail();
+        this._syncDockActive();
         this._connectToProjectContext();
         this._queueWindowListRefresh();
 
@@ -212,6 +226,16 @@ class AdaptiveShellV16 {
                 this._monitorChangedId
             );
             this._monitorChangedId = 0;
+        }
+
+        if (this._overviewShowingId) {
+            Main.overview.disconnect(this._overviewShowingId);
+            this._overviewShowingId = 0;
+        }
+
+        if (this._overviewHiddenId) {
+            Main.overview.disconnect(this._overviewHiddenId);
+            this._overviewHiddenId = 0;
         }
 
         if (this._windowCreatedId) {
@@ -516,35 +540,33 @@ class AdaptiveShellV16 {
             style_class: 'adaptive-rail-group',
         });
 
-        top.add_child(
-            this._dockButton(
-                'overview.svg',
-                'Home',
-                () => this._toggleOverview()
-            )
+        this._homeButton = this._dockButton(
+            'overview.svg',
+            'Home',
+            () => this._toggleOverview()
         );
+        top.add_child(this._homeButton);
 
-        top.add_child(
-            this._dockButton(
-                'files.svg',
-                'Adaptive Files',
-                () => this._openFiles()
-            )
+        this._filesButton = this._dockButton(
+            'files.svg',
+            'Adaptive Files',
+            () => this._openFiles()
         );
+        top.add_child(this._filesButton);
 
-        top.add_child(
-            this._dockButton(
-                'apps.svg',
-                'Applications',
-                () => this._showApplications()
-            )
+        this._appsButton = this._dockButton(
+            'apps.svg',
+            'Applications',
+            () => this._showApplications()
         );
+        top.add_child(this._appsButton);
 
         this._workspacesButton = new PanelMenu.Button(0.0, 'WorkspacesMenu', false);
         this._workspacesButton.add_style_class_name('adaptive-dock-button');
         this._workspacesButton.add_child(this._dockContent('workspaces.svg', 'Workspaces'));
         
         this._workspacesButton.menu.connect('open-state-changed', (menu, open) => {
+            this._setActorActive(this._workspacesButton, open);
             if (open) {
                 this._populateWorkspacesMenu();
             }
@@ -556,6 +578,7 @@ class AdaptiveShellV16 {
         this._commandButton.add_style_class_name('adaptive-dock-button');
         this._commandButton.add_child(this._dockContent('search.svg', 'Command'));
         this._commandButton.menu.connect('open-state-changed', (menu, open) => {
+            this._setActorActive(this._commandButton, open);
             if (open)
                 this._populateCommandMenu();
         });
@@ -599,6 +622,9 @@ class AdaptiveShellV16 {
         this._systemCenterButton = new PanelMenu.Button(0.0, 'SystemCenterMenu', false);
         this._systemCenterButton.add_style_class_name('adaptive-dock-button');
         this._systemCenterButton.add_child(this._dockContent('settings.svg', 'System'));
+        this._systemCenterButton.menu.connect('open-state-changed', (_menu, open) => {
+            this._setActorActive(this._systemCenterButton, open);
+        });
         
         let actions = SystemActions.getDefault();
 
@@ -1201,6 +1227,8 @@ class AdaptiveShellV16 {
             Main.overview.hide();
         else
             Main.overview.show();
+
+        this._syncDockActive();
     }
 
     _showApplications() {
@@ -1210,14 +1238,34 @@ class AdaptiveShellV16 {
                 'function'
         ) {
             Main.overview.showApps();
+            this._syncDockActive();
             return;
         }
 
         Main.overview.show();
+        this._syncDockActive();
     }
 
     _showWorkspaces() {
         Main.overview.show();
+        this._syncDockActive();
+    }
+
+    _setActorActive(actor, active) {
+        if (!actor)
+            return;
+
+        if (active)
+            actor.add_style_class_name('active');
+        else
+            actor.remove_style_class_name('active');
+    }
+
+    _syncDockActive() {
+        this._setActorActive(
+            this._homeButton,
+            Main.overview && Main.overview.visible
+        );
     }
     
     _onMixerStateChanged() {

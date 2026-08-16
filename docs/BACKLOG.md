@@ -69,7 +69,7 @@ Status:
 - ✅ Convert rail from floating palette into a true docked shell rail.
 - 🔬 Reserve application area to the right of the rail.
 - ✅ Add icon+text dock labels and live open-window switching.
-- 🟡 Improve icon consistency and active states.
+- ✅ Improve icon consistency and active states.
 - 🟡 Keep stock top-right controls until System Center is functional.
 
 ### Acceptance criteria
@@ -240,10 +240,10 @@ Status:
 
 ## Milestone 12 — Visual system completion
 
-- 🟡 Core palette defined.
-- 🟡 Initial shell CSS implemented.
+- ✅ Core palette defined.
+- ✅ Initial shell CSS implemented.
 - ✅ Tokenize colors/spacing.
-- ⬜ Final icon family.
+- ✅ Final icon family.
 - ✅ Typography scale.
 - ✅ Motion tokens.
 - ✅ Reduced-motion mode.
