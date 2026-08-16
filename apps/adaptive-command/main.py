@@ -37,6 +37,16 @@ FILE_RESULTS = 8
 APP_RESULTS = 6
 MAX_ROWS = 24
 
+# Category weights. A launcher is judged on short queries, where "set" means
+# Settings and "fire" means the browser - a filename that merely starts with
+# the same letters should not outrank them. Files carry no bonus and have their
+# match score scaled down, so they win only when nothing else matches well.
+WEIGHT_APP = 45
+WEIGHT_SETTINGS = 40
+WEIGHT_PROJECT = 35
+WEIGHT_ACTION = 30
+FILE_SCALE = 0.6
+
 # Machine-owned trees. Matches here are real, but they are almost never what
 # someone typing into a desktop search is reaching for.
 SYSTEM_TREES = (
@@ -410,7 +420,7 @@ class Palette(Gtk.ApplicationWindow):
                         action=lambda p=entry: self._open_path(p),
                         # Live hits are current by definition, so they edge out
                         # equally-good matches from the stale index.
-                        score=score + 45 - min(depth, 6),
+                        score=int(score * FILE_SCALE) + 10 - min(depth, 6),
                     )
                 )
 
@@ -444,11 +454,13 @@ class Palette(Gtk.ApplicationWindow):
             if not score:
                 continue
 
+            score = int(score * FILE_SCALE)
+
             # A search for "term" should surface your own files before
             # /boot/grub/terminal.mod, so home outweighs everything else and
             # machine-owned trees are pushed down.
             if line.startswith(home):
-                score += 40
+                score += 12
             elif any(line.startswith(p) for p in SYSTEM_TREES):
                 score -= 25
 
@@ -507,7 +519,7 @@ class Palette(Gtk.ApplicationWindow):
                     gicon=app.get_icon(),
                     badge="App",
                     action=lambda a=app: a.launch([], None),
-                    score=score + 6,
+                    score=score + WEIGHT_APP,
                 )
             )
 
@@ -541,7 +553,7 @@ class Palette(Gtk.ApplicationWindow):
                     icon="folder-open-symbolic",
                     badge="Project",
                     action=lambda target=pid: self._run(["./scripts/project-cli.py", "switch", target]),
-                    score=score + 4,
+                    score=score + WEIGHT_PROJECT,
                 )
             )
 
@@ -575,7 +587,7 @@ class Palette(Gtk.ApplicationWindow):
                     icon="preferences-system-symbolic",
                     badge="Settings",
                     action=lambda p=panel: self._run(["gnome-control-center", p]),
-                    score=score,
+                    score=score + WEIGHT_SETTINGS,
                 )
             )
 
@@ -623,7 +635,7 @@ class Palette(Gtk.ApplicationWindow):
                     badge="Action",
                     key_hint=key,
                     action=action,
-                    score=score,
+                    score=score + WEIGHT_ACTION,
                 )
             )
 
