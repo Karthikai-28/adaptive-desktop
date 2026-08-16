@@ -1347,6 +1347,7 @@ class AdaptiveShellV16 {
             this._addCommandItem('Tile Active Window Right', () => this._spawn([this._windowCli, 'tile', 'right']));
             this._addCommandItem('Center Active Window', () => this._spawn([this._windowCli, 'tile', 'center']));
             this._addCommandItem('Maximize Active Window Around Dock', () => this._spawn([this._windowCli, 'tile', 'maximize']));
+            this._addCommandItem('Toggle Active Window Fullscreen', () => this._spawn([this._windowCli, 'fullscreen']));
             this._addCommandItem('Save Active Window Placement', () => this._spawn([this._windowCli, 'save']));
             this._addCommandItem('Restore Active Window Placement', () => this._spawn([this._windowCli, 'restore']));
             this._addCommandItem('Save Project Window Placement', () => this._spawn([this._windowCli, 'save-project']));
@@ -1515,6 +1516,7 @@ class AdaptiveShellV16 {
                 'Tile Active Window Right': ['tile', 'right'],
                 'Center Active Window': ['tile', 'center'],
                 'Maximize Active Window Around Dock': ['tile', 'maximize'],
+                'Toggle Active Window Fullscreen': ['fullscreen'],
                 'Save Active Window Placement': ['save'],
                 'Restore Active Window Placement': ['restore'],
                 'Save Project Window Placement': ['save-project'],

@@ -172,8 +172,8 @@ Status:
 - ✅ Multi-select.
 - ✅ Transfers.
 - ✅ Conflict resolution.
-- 🟡 Trash/recovery.
-- 🟡 Devices/network.
+- ✅ Trash/recovery.
+- ✅ Devices/network.
 - ✅ Empty/error states.
 - ✅ Linux permissions/hidden files.
 - ✅ Decide Nautilus integration vs separate frontend.
@@ -221,11 +221,11 @@ Status:
 
 - ✅ Smart tiling.
 - ✅ Split presets.
-- 🟡 Snapping.
+- ✅ Snapping.
 - ✅ Project-aware placement.
 - ✅ Visible open-window switching from the dock.
 - ✅ Restore.
-- 🟡 Fullscreen behavior.
+- ✅ Fullscreen behavior.
 - ✅ Multi-monitor behavior.
 - 🟡 Overview integration.
 

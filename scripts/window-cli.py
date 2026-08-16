@@ -158,6 +158,10 @@ def move_resize(window, x, y, width, height):
         raise RuntimeError(result.stderr.strip())
 
 
+def wmctrl(*args):
+    return subprocess.run(["wmctrl", *args], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
 def tile(args):
     window = active_window()
     area = usable_area(active_monitor(window))
@@ -193,6 +197,21 @@ def tile(args):
     else:
         raise RuntimeError(f"Unknown preset: {preset}")
 
+    return 0
+
+
+def snap(args):
+    args.preset = args.edge
+    return tile(args)
+
+
+def fullscreen(_args):
+    result = wmctrl("-r", ":ACTIVE:", "-b", "toggle,fullscreen")
+    if result.returncode:
+        result = run("key", "F11")
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "Unable to toggle fullscreen")
+    print("Toggled fullscreen for active window")
     return 0
 
 
@@ -280,6 +299,12 @@ def main():
     tile_parser = sub.add_parser("tile", help="Tile the active window")
     tile_parser.add_argument("preset", choices=["left", "right", "center", "maximize", "smart"])
     tile_parser.set_defaults(func=tile)
+
+    snap_parser = sub.add_parser("snap", help="Snap the active window to an edge")
+    snap_parser.add_argument("edge", choices=["left", "right", "center", "maximize"])
+    snap_parser.set_defaults(func=snap)
+
+    sub.add_parser("fullscreen", help="Toggle fullscreen for the active window").set_defaults(func=fullscreen)
 
     save_parser = sub.add_parser("save", help="Save active window placement")
     save_parser.add_argument("name", nargs="?", default="default")

@@ -27,6 +27,7 @@ for name in [
     "adaptive-window-right",
     "adaptive-window-center",
     "adaptive-window-maximize",
+    "adaptive-window-fullscreen",
     "adaptive-window-save-project",
     "adaptive-window-restore-project",
 ]:
@@ -57,6 +58,7 @@ set_binding "adaptive-window-left" "Adaptive Tile Left" "${REPO}/scripts/window-
 set_binding "adaptive-window-right" "Adaptive Tile Right" "${REPO}/scripts/window-cli.py tile right" "<Super><Alt>Right"
 set_binding "adaptive-window-center" "Adaptive Center Window" "${REPO}/scripts/window-cli.py tile center" "<Super><Alt>Down"
 set_binding "adaptive-window-maximize" "Adaptive Maximize Around Dock" "${REPO}/scripts/window-cli.py tile maximize" "<Super><Alt>Up"
+set_binding "adaptive-window-fullscreen" "Adaptive Toggle Fullscreen" "${REPO}/scripts/window-cli.py fullscreen" "<Super><Alt>f"
 set_binding "adaptive-window-save-project" "Adaptive Save Project Window Placement" "${REPO}/scripts/window-cli.py save-project" "<Super><Alt>s"
 set_binding "adaptive-window-restore-project" "Adaptive Restore Project Window Placement" "${REPO}/scripts/window-cli.py restore-project" "<Super><Alt>r"
 
@@ -68,6 +70,7 @@ Installed Adaptive Desktop shortcuts:
   Super+Alt+Right    Tile active window right
   Super+Alt+Down     Center active window
   Super+Alt+Up       Maximize active window around dock
+  Super+Alt+F        Toggle fullscreen
   Super+Alt+S        Save active project window placement
   Super+Alt+R        Restore active project window placement
 EOF

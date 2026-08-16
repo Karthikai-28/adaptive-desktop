@@ -38,6 +38,7 @@ class Item:
     modified: str
     created: str
     permissions: str
+    original_path: str = ""
 
 
 def fmt_time(dt):
@@ -407,6 +408,7 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self._reload_remote_sidebar()
 
         self._side_heading(self.sidebar_box, "LOCATIONS")
+        self._reload_mount_sidebar()
         self._side_item(
             self.sidebar_box,
             "Filesystem",
@@ -930,6 +932,7 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
                 "time::modified",
                 "time::created",
                 "unix::mode",
+                "trash::orig-path",
             ]
         )
 
@@ -963,6 +966,7 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
                         modified=fmt_time(info.get_modification_date_time()),
                         created=fmt_time(info.get_creation_date_time()),
                         permissions=fmt_mode(info.get_attribute_uint32("unix::mode")),
+                        original_path=info.get_attribute_as_string("trash::orig-path") or "",
                     )
                 )
         finally:
@@ -1391,6 +1395,10 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
         self.preview_actions.append(
             self._action_button("copy.svg", "Copy Path", self._action_copy)
         )
+        if self._is_trash_location() and item.original_path:
+            self.preview_actions.append(
+                self._action_button("open.svg", "Restore from Trash", self._action_restore_from_trash)
+            )
         if self.split_enabled:
             self.preview_actions.append(
                 self._action_button("copy.svg", "Copy to Other Pane", self._action_copy_to_split)
@@ -1879,6 +1887,30 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
                 lambda u=uri: self._connect_remote_uri(u, save=False),
             )
 
+    def _reload_mount_sidebar(self):
+        monitor = Gio.VolumeMonitor.get()
+        try:
+            home_mount = Gio.File.new_for_path(str(Path.home())).find_enclosing_mount(None)
+            home_root = home_mount.get_root().get_uri() if home_mount else ""
+        except Exception:
+            home_root = ""
+
+        for mount in monitor.get_mounts():
+            try:
+                root = mount.get_root()
+                if home_root and root.get_uri() == home_root:
+                    continue
+
+                name = mount.get_name() or file_display(root)
+                self._side_item(
+                    self.sidebar_box,
+                    name,
+                    "storage.svg",
+                    lambda target=root: self.navigate(target),
+                )
+            except Exception:
+                continue
+
     def _show_connect_dialog(self):
         dialog = Gtk.Dialog(
             title="Connect to Server",
@@ -2201,6 +2233,32 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             self._message("Some items were not moved", "\n".join(failures[:4]))
         else:
             self._message("Moved to Trash", f"{count} items")
+
+    def _action_restore_from_trash(self, *_):
+        if not self.selected or not self.selected.original_path:
+            return
+
+        target = Gio.File.new_for_path(self.selected.original_path)
+
+        try:
+            parent = target.get_parent()
+            if parent:
+                parent.make_directory_with_parents(None)
+            self.selected.file.move(
+                target,
+                Gio.FileCopyFlags.NONE,
+                None,
+                None,
+            )
+            name = self.selected.name
+            self.selected = None
+            self.selected_button = None
+            self.selected_items = {}
+            self.selected_buttons = {}
+            self.populate()
+            self._message("Restored", name)
+        except GLib.Error as error:
+            self._message("Restore failed", error.message)
 
     def _action_rename(self, *_):
         if not self.selected:
