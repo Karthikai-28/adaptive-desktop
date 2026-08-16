@@ -130,6 +130,7 @@ Status:
 - 🟡 Read-only status rows refresh on open for network, Bluetooth, power, and audio output.
 - 🔬 Audio output selection submenu exists and needs live device verification.
 - 🔬 Restart and shut down entries use GNOME-native confirmation actions where available.
+- 🟡 Performance row shows load and memory summary.
 
 ### Required
 
@@ -139,7 +140,7 @@ Status:
 - 🟡 Audio output status.
 - ✅ Volume.
 - 🟡 Battery/power status.
-- ⬜ Performance summary.
+- 🟡 Performance summary.
 - ⬜ Notifications/focus.
 - ✅ Settings launcher.
 - ✅ Lock.

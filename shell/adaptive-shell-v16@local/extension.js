@@ -494,6 +494,7 @@ class AdaptiveShellV16 {
             bluetooth: this._statusRow('bluetooth-active-symbolic', 'Bluetooth'),
             battery: this._statusRow('battery-good-symbolic', 'Power'),
             audio: this._statusRow('audio-speakers-symbolic', 'Audio'),
+            performance: this._statusRow('utilities-system-monitor-symbolic', 'System'),
         };
 
         for (const key in this._statusLabels)
@@ -619,6 +620,7 @@ class AdaptiveShellV16 {
         this._refreshBluetoothStatus();
         this._refreshPowerStatus();
         this._refreshAudioStatus();
+        this._refreshPerformanceStatus();
     }
 
     _refreshNetworkStatus() {
@@ -680,6 +682,30 @@ class AdaptiveShellV16 {
             'Default output';
 
         this._setStatus('audio', description);
+    }
+
+    _refreshPerformanceStatus() {
+        this._readCommand(['cat', '/proc/loadavg'], (loadText) => {
+            this._readCommand(['cat', '/proc/meminfo'], (memText) => {
+                const load = (loadText || '').split(/\s+/)[0] || '';
+                const total = this._matchLine(memText, /^MemTotal:\s+(\d+)/m);
+                const available = this._matchLine(memText, /^MemAvailable:\s+(\d+)/m);
+
+                if (!load && (!total || !available)) {
+                    this._setStatus('performance', 'Unavailable');
+                    return;
+                }
+
+                if (total && available) {
+                    const used = Math.max(0, Number(total) - Number(available));
+                    const percent = Math.round((used / Number(total)) * 100);
+                    this._setStatus('performance', `Load ${load || 'n/a'} · RAM ${percent}%`);
+                    return;
+                }
+
+                this._setStatus('performance', `Load ${load}`);
+            });
+        });
     }
 
     _populateAudioOutputMenu() {
