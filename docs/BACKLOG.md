@@ -128,11 +128,13 @@ Status:
 
 - 🟡 First functional shell menu exists with volume, settings, lock, suspend, logout, and power actions.
 - 🟡 Read-only status rows refresh on open for network, Bluetooth, power, and audio output.
+- 🔬 Audio output selection submenu exists and needs live device verification.
 
 ### Required
 
 - 🟡 Network status.
 - 🟡 Bluetooth status.
+- 🔬 Audio device selection.
 - 🟡 Audio output status.
 - ✅ Volume.
 - 🟡 Battery/power status.
@@ -257,4 +259,4 @@ Status:
 2. Verify docked navigation rail struts with maximized windows.
 3. Verify Project Context Service autostart after logging into Adaptive Desktop.
 4. Verify GNOME overview search discovers registered projects.
-5. Continue System Center parity: safe toggles, audio device selection, reboot/shutdown confirmations.
+5. Continue System Center parity: safe toggles and reboot/shutdown confirmations.

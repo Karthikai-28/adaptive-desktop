@@ -29,6 +29,7 @@ class AdaptiveShellV16 {
         this._volumeSlider = null;
         this._volumeStream = null;
         this._statusLabels = {};
+        this._audioOutputMenu = null;
         this._mixerControl = new Gvc.MixerControl({ name: 'Adaptive Shell Volume Control' });
         this._mixerControl.open();
         this._mixerControl.connect('state-changed', () => this._onMixerStateChanged());
@@ -150,6 +151,8 @@ class AdaptiveShellV16 {
             this._systemCenterButton.destroy();
             this._systemCenterButton = null;
         }
+
+        this._audioOutputMenu = null;
 
         if (this._workspacesButton) {
             this._workspacesButton.destroy();
@@ -516,6 +519,13 @@ class AdaptiveShellV16 {
         volumeItem.add_child(volumeIcon);
         volumeItem.add_child(this._volumeSlider);
         this._systemCenterButton.menu.addMenuItem(volumeItem);
+
+        this._audioOutputMenu = new PopupMenu.PopupSubMenuMenuItem('Audio Output');
+        this._audioOutputMenu.menu.connect('open-state-changed', (menu, open) => {
+            if (open)
+                this._populateAudioOutputMenu();
+        });
+        this._systemCenterButton.menu.addMenuItem(this._audioOutputMenu);
         
         this._systemCenterButton.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
@@ -662,6 +672,61 @@ class AdaptiveShellV16 {
             'Default output';
 
         this._setStatus('audio', description);
+    }
+
+    _populateAudioOutputMenu() {
+        if (!this._audioOutputMenu)
+            return;
+
+        this._audioOutputMenu.menu.removeAll();
+
+        if (
+            !this._mixerControl ||
+            this._mixerControl.get_state() !== Gvc.MixerControlState.READY ||
+            typeof this._mixerControl.get_sinks !== 'function'
+        ) {
+            const offline = new PopupMenu.PopupMenuItem('Audio service unavailable');
+            offline.setSensitive(false);
+            this._audioOutputMenu.menu.addMenuItem(offline);
+            return;
+        }
+
+        const sinks = this._mixerControl.get_sinks() || [];
+
+        if (!sinks.length) {
+            const empty = new PopupMenu.PopupMenuItem('No output devices');
+            empty.setSensitive(false);
+            this._audioOutputMenu.menu.addMenuItem(empty);
+            return;
+        }
+
+        for (const sink of sinks) {
+            const label =
+                sink.get_description() ||
+                sink.get_name() ||
+                'Audio output';
+            const isActive =
+                this._volumeStream &&
+                sink.get_id &&
+                this._volumeStream.get_id &&
+                sink.get_id() === this._volumeStream.get_id();
+            const item = new PopupMenu.PopupMenuItem(isActive ? `★ ${label}` : label);
+
+            item.connect('activate', () => {
+                try {
+                    if (typeof this._mixerControl.set_default_sink === 'function') {
+                        this._mixerControl.set_default_sink(sink);
+                        this._volumeStream = sink;
+                        this._refreshAudioStatus();
+                    }
+                } catch (e) {
+                    logError(e, '[Adaptive Shell v1.6] set audio output');
+                    Main.notifyError('Adaptive Desktop', 'Audio output could not be changed.');
+                }
+            });
+
+            this._audioOutputMenu.menu.addMenuItem(item);
+        }
     }
 
     _readCommand(argv, callback) {
