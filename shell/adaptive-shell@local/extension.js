@@ -50,6 +50,12 @@ class AdaptiveShellV16 {
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
         this._dockDemagnifyId = 0;
+        this._lockedOnly = false;
+        this._lockClock = null;
+        this._lockActivity = null;
+        this._lockAttachId = 0;
+        this._lockTickId = 0;
+        this._lockAttempts = 0;
 
         this._commandLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -112,7 +118,8 @@ class AdaptiveShellV16 {
         if (Main.sessionMode.currentMode === 'unlock-dialog' ||
             Main.sessionMode.isLocked) {
             this._lockedOnly = true;
-            log('[Adaptive Shell] locked session: stylesheet only');
+            log('[Adaptive Shell] locked session: lock screen only');
+            this._lockScreenStart();
             return;
         }
 
@@ -164,6 +171,186 @@ class AdaptiveShellV16 {
         log('[Adaptive Shell] GNOME dateMenu restored');
         this._dock26ConnectRuntime();
 
+    }
+
+    // ---------------------------------------------------------------- lock
+    //
+    // Everything below runs only while the session is locked. It adds to
+    // GNOME's unlock dialog and never touches authentication: the prompt, the
+    // password entry and the unlock path stay exactly as GNOME built them.
+
+    _lockScreenStart() {
+        this._lockAttempts = 0;
+
+        // The dialog is built lazily, so it may not exist the moment the
+        // extension is enabled into unlock-dialog mode.
+        this._lockAttachId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            300,
+            () => {
+                let done = false;
+
+                try {
+                    done = this._lockScreenAttach();
+                } catch (e) {
+                    logError(e, '[Adaptive Shell] lock screen attach');
+                    done = true;
+                }
+
+                this._lockAttempts += 1;
+
+                if (done || this._lockAttempts > 25) {
+                    this._lockAttachId = 0;
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+    }
+
+    _lockScreenAttach() {
+        const shield = Main.screenShield;
+        const dialog = shield ? shield._dialog : null;
+
+        if (!dialog || !dialog._clock || !dialog._clock._time)
+            return false;
+
+        const clock = dialog._clock;
+
+        if (clock._adaptiveLock)
+            return true;
+
+        clock._adaptiveLock = true;
+
+        // GNOME leaves the prompt column at its natural alignment, which puts
+        // the password box off to one side of the shield.
+        try {
+            dialog._promptBox.x_align = Clutter.ActorAlign.CENTER;
+            dialog._promptBox.x_expand = true;
+        } catch (e) {
+        }
+
+        const activity = new St.Label({
+            style_class: 'adaptive-lock-activity',
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+        activity.clutter_text.line_wrap = true;
+        activity.visible = false;
+
+        try {
+            clock.insert_child_below(activity, clock._hint);
+        } catch (e) {
+            clock.add_child(activity);
+        }
+
+        this._lockClock = clock;
+        this._lockActivity = activity;
+
+        this._lockTick();
+
+        // One second, because the clock now shows seconds.
+        this._lockTickId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            1,
+            () => {
+                try {
+                    this._lockTick();
+                } catch (e) {
+                    logError(e, '[Adaptive Shell] lock tick');
+                    this._lockTickId = 0;
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+
+        clock.connect('destroy', () => this._lockScreenStop());
+
+        log('[Adaptive Shell] lock screen clock extended');
+        return true;
+    }
+
+    _lockTick() {
+        if (!this._lockClock || !this._lockClock._time)
+            return;
+
+        const now = GLib.DateTime.new_now_local();
+
+        // GNOME's WallClock only ticks per minute, so the seconds are
+        // formatted here, honouring the session's 12/24-hour preference.
+        let format = '%H:%M:%S';
+
+        try {
+            const iface = new Gio.Settings({
+                schema_id: 'org.gnome.desktop.interface',
+            });
+
+            if (iface.get_string('clock-format') === '12h')
+                format = '%l:%M:%S %p';
+        } catch (e) {
+        }
+
+        this._lockClock._time.text = now.format(format).trim();
+
+        if (this._lockActivity)
+            this._lockActivity.text = this._lockActivitySummary();
+
+        if (this._lockActivity)
+            this._lockActivity.visible = !!this._lockActivity.text;
+    }
+
+    _lockActivitySummary() {
+        try {
+            const running = Shell.AppSystem.get_default().get_running();
+
+            if (!running.length)
+                return '';
+
+            const names = running
+                .map(app => app.get_name())
+                .filter(name => !!name)
+                .sort();
+
+            const shown = names.slice(0, 4).join(' · ');
+            const extra = names.length - Math.min(names.length, 4);
+
+            const label = running.length === 1
+                ? '1 APP RUNNING'
+                : `${running.length} APPS RUNNING`;
+
+            return extra > 0
+                ? `${label}\n${shown} +${extra}`
+                : `${label}\n${shown}`;
+        } catch (e) {
+            return '';
+        }
+    }
+
+    _lockScreenStop() {
+        if (this._lockAttachId) {
+            GLib.Source.remove(this._lockAttachId);
+            this._lockAttachId = 0;
+        }
+
+        if (this._lockTickId) {
+            GLib.Source.remove(this._lockTickId);
+            this._lockTickId = 0;
+        }
+
+        if (this._lockActivity) {
+            try {
+                this._lockActivity.destroy();
+            } catch (e) {
+            }
+            this._lockActivity = null;
+        }
+
+        if (this._lockClock) {
+            this._lockClock._adaptiveLock = false;
+            this._lockClock = null;
+        }
     }
 
     _connectToProjectContext() {
@@ -259,6 +446,7 @@ class AdaptiveShellV16 {
         // that were never created.
         if (this._lockedOnly) {
             this._lockedOnly = false;
+            this._lockScreenStop();
             return;
         }
 

@@ -815,52 +815,66 @@
  *
  * Applies in unlock-dialog session mode, which the extension opts into via
  * session-modes in metadata.json - GNOME otherwise disables user extensions
- * while locked and the lock screen would fall back to stock Yaru.
+ * while locked and the lock screen falls back to stock Yaru.
  *
- * Presentation only. Authentication, notifications and switch-user remain
- * GNOME's own: nothing here changes how the session unlocks.
+ * OLED treatment: the panel is driven to true black so unlit pixels stay
+ * unlit, and only the clock, date and activity line carry white. Presentation
+ * only - authentication and the unlock path remain GNOME's own.
  */
 
-/* Deep canvas behind the shield, so the wallpaper reads as Adaptive rather
-   than as a bright desktop photo behind a dark dialog. */
-#lockDialogGroup {
-    background-color: #07101A;
-}
-
-.screen-shield-background {
-    background-color: #07101A;
+#lockDialogGroup,
+.screen-shield-background,
+.unlock-dialog,
+#lockDialogGroup .screen-shield-background {
+    background-color: #000000;
+    background-image: none;
 }
 
 /* ---------- clock ---------- */
 
 .unlock-dialog-clock {
-    spacing: 6px;
-    color: #F2F6EF;
+    spacing: 8px;
+    padding: 0;
+    color: #FFFFFF;
 }
 
+/* Seconds are appended by the extension, so the glyphs change every second.
+   Tabular-ish spacing keeps the line from shifting as digits change width. */
 .unlock-dialog-clock-time {
-    color: #F2F6EF;
-    font-size: 68px;
+    color: #FFFFFF;
+    font-size: 76px;
     font-weight: 200;
-    letter-spacing: -1px;
-    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+    font-feature-settings: "tnum";
+    letter-spacing: 1px;
 }
 
 .unlock-dialog-clock-date {
     margin-top: 2px;
-    color: #96A4B8;
-    font-size: 17px;
-    font-weight: 500;
+    color: #FFFFFF;
+    font-size: 18px;
+    font-weight: 400;
+    letter-spacing: 0.4px;
 }
 
-/* The "press a key" line: quiet, and spaced away from the date. */
+/* Running-process line. Dim white rather than an accent colour: on an OLED
+   panel a coloured glow is exactly what this treatment is avoiding. */
+.adaptive-lock-activity {
+    margin-top: 16px;
+    max-width: 640px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.8px;
+    text-align: center;
+}
+
 .unlock-dialog-clock-hint {
-    margin-top: 18px;
-    padding: 5px 14px;
+    margin-top: 20px;
+    padding: 4px 12px;
     border-radius: 9px;
-    border: 1px solid rgba(48, 66, 92, 0.42);
-    background-color: rgba(17, 26, 40, 0.72);
-    color: #78A9FF;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background-color: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.68);
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.6px;
@@ -868,98 +882,94 @@
 
 /* ---------- unlock prompt ---------- */
 
-.unlock-dialog {
-    background-color: transparent;
-}
-
+/* The prompt column is centred on the shield by the extension; these keep the
+   entry itself centred within that column. */
 .login-dialog-prompt-layout {
-    spacing: 10px;
+    spacing: 12px;
+    text-align: center;
 }
 
 .login-dialog-prompt-label {
-    color: #C7D4E4;
+    color: rgba(255, 255, 255, 0.72);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
+    text-align: center;
 }
 
 .login-dialog-prompt-entry {
-    width: 320px;
-    min-height: 34px;
-    padding: 4px 12px;
-    border-radius: 11px;
-    border: 1px solid rgba(48, 66, 92, 0.62);
-    background-color: rgba(7, 16, 26, 0.92);
-    color: #F2F6EF;
-    caret-color: #78A9FF;
-    selected-color: #F2F6EF;
-    selection-background-color: #244E7A;
+    width: 300px;
+    min-height: 36px;
+    padding: 4px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #FFFFFF;
+    caret-color: #FFFFFF;
+    selection-background-color: rgba(255, 255, 255, 0.24);
 }
 
 .login-dialog-prompt-entry:focus {
-    border-color: rgba(120, 169, 255, 0.62);
-    background-color: rgba(17, 26, 40, 0.96);
+    border-color: rgba(255, 255, 255, 0.55);
+    background-color: rgba(255, 255, 255, 0.10);
 }
 
 .login-dialog-message,
 .login-dialog-message-warning,
 .caps-lock-warning-label {
-    color: #F3C96B;
+    color: rgba(255, 255, 255, 0.72);
     font-size: 11px;
+    text-align: center;
 }
 
 /* ---------- buttons ---------- */
 
 .unlock-dialog .modal-dialog-button,
 .login-dialog-button-box .modal-dialog-button {
-    min-height: 28px;
+    min-height: 30px;
     padding: 4px 16px;
-    border-radius: 10px;
-    border: 1px solid rgba(48, 66, 92, 0.55);
-    background-color: rgba(17, 26, 40, 0.9);
-    color: #F2F6EF;
+    border-radius: 11px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #FFFFFF;
 }
 
 .unlock-dialog .modal-dialog-button:hover,
 .unlock-dialog .modal-dialog-button:focus {
-    border-color: rgba(120, 169, 255, 0.5);
-    background-color: rgba(30, 47, 70, 0.95);
-}
-
-.unlock-dialog .modal-dialog-button:default {
-    border-color: rgba(120, 169, 255, 0.55);
-    background-color: rgba(120, 169, 255, 0.22);
+    border-color: rgba(255, 255, 255, 0.42);
+    background-color: rgba(255, 255, 255, 0.11);
 }
 
 .switch-user-button {
-    color: #96A4B8;
+    color: rgba(255, 255, 255, 0.6);
 }
 
 /* ---------- notifications on the shield ---------- */
 
 .unlock-dialog-notifications-container {
     width: 330px;
-    spacing: 7px;
+    spacing: 6px;
+    background-color: transparent;
 }
 
 .unlock-dialog-notifications-container .message,
 .unlock-dialog-notification-source {
     padding: 9px 11px;
     border-radius: 11px;
-    border: 1px solid rgba(120, 169, 255, 0.10);
-    background-color: rgba(17, 26, 40, 0.88);
-    color: #F2F6EF;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #FFFFFF;
 }
 
 .unlock-dialog-notification-label {
-    color: #C7D4E4;
+    color: rgba(255, 255, 255, 0.66);
     font-size: 11px;
 }
 
 .unlock-dialog-notification-count-text {
     padding: 0 7px;
     border-radius: 8px;
-    background-color: rgba(120, 169, 255, 0.20);
-    color: #E8F1FF;
+    background-color: rgba(255, 255, 255, 0.14);
+    color: #FFFFFF;
     font-size: 10px;
     font-weight: 700;
 }
