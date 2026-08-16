@@ -340,6 +340,12 @@ class AdaptiveFilesWindow(Gtk.ApplicationWindow):
             "home.svg",
             lambda: self.navigate(Gio.File.new_for_path(str(Path.home()))),
         )
+        self._side_item(
+            self.sidebar_box,
+            "Recent",
+            "star.svg",
+            lambda: self.navigate(Gio.File.new_for_uri("recent:///")),
+        )
 
         for label, asset, path in (
             ("Documents", "documents.svg", Path.home() / "Documents"),

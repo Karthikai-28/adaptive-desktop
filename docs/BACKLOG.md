@@ -162,7 +162,7 @@ Status:
 
 ### Remaining
 
-- 🟡 Home/Recents.
+- ✅ Home/Recents.
 - ✅ Project Files.
 - ✅ Folder browse.
 - ✅ Grid/list.
@@ -190,23 +190,23 @@ Status:
 - ✅ 18-section information architecture defined.
 - ✅ Settings shell.
 - ✅ Search.
-- 🟡 Appearance.
-- 🟡 Projects & Workspaces.
-- 🟡 Windows & Multitasking.
-- 🟡 Notifications & Focus.
-- 🟡 Search & Commands.
-- 🟡 Display & Graphics.
-- 🟡 Sound.
-- 🟡 Input & Gestures.
-- 🟡 Network & Connectivity.
-- 🟡 Files & Storage.
-- 🟡 Privacy & Security.
-- 🟡 Accounts & Sync.
-- 🟡 Power & Battery.
-- 🟡 Accessibility.
-- 🟡 Developer & Advanced.
-- 🟡 Updates/Recovery/Session.
-- 🟡 About.
+- ✅ Appearance.
+- ✅ Projects & Workspaces.
+- ✅ Windows & Multitasking.
+- ✅ Notifications & Focus.
+- ✅ Search & Commands.
+- ✅ Display & Graphics.
+- ✅ Sound.
+- ✅ Input & Gestures.
+- ✅ Network & Connectivity.
+- ✅ Files & Storage.
+- ✅ Privacy & Security.
+- ✅ Accounts & Sync.
+- ✅ Power & Battery.
+- ✅ Accessibility.
+- ✅ Developer & Advanced.
+- ✅ Updates/Recovery/Session.
+- ✅ About.
 
 ## Milestone 9 — Notifications and Focus
 
