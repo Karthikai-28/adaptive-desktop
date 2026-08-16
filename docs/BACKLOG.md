@@ -180,33 +180,29 @@ Status:
 
 ### Current
 
-- ✅ Standalone Adaptive Files app exists.
+- ✅ Forked Nautilus is the Adaptive session's file manager, activated the way
+  Ubuntu activates its own. One instance, windows reused, no stock Nautilus
+  being killed.
+- ✅ Standalone GTK4 Adaptive Files app retired in favour of the fork.
 - ✅ Nautilus native preview/inspector layer exists.
 - ✅ Project registry format is understood by Adaptive Files.
 - 🔬 Nautilus preview has a Project tab backed by Project Context Service.
+- ⬜ Files window skinned to the Figma frames.
 
 ## Milestone 8 — Settings
 
+Settings is `gnome-control-center` under our skin, not a reimplementation.
+It is GTK3 on Ubuntu 22.04 (41.7), so the session GTK theme is what makes it
+ours. The previous ✅ marks here described an 18-section launcher menu whose
+sections mostly ran `gnome-control-center <panel>`; that app has been retired,
+so the marks are restated against what is actually true.
+
 - ✅ 18-section information architecture defined.
-- ✅ Settings shell.
-- ✅ Search.
-- ✅ Appearance.
-- ✅ Projects & Workspaces.
-- ✅ Windows & Multitasking.
-- ✅ Notifications & Focus.
-- ✅ Search & Commands.
-- ✅ Display & Graphics.
-- ✅ Sound.
-- ✅ Input & Gestures.
-- ✅ Network & Connectivity.
-- ✅ Files & Storage.
-- ✅ Privacy & Security.
-- ✅ Accounts & Sync.
-- ✅ Power & Battery.
-- ✅ Accessibility.
-- ✅ Developer & Advanced.
-- ✅ Updates/Recovery/Session.
-- ✅ About.
+- ✅ Panels reachable from the rail and Command menu.
+- ⬜ Settings skinned to the Figma frames.
+- ⬜ Adaptive-only sections (Projects & Workspaces, Search & Commands,
+  Updates/Recovery/Session) still need a home; `gnome-control-center` has no
+  panel for them.
 
 ## Milestone 9 — Notifications and Focus
 
@@ -264,14 +260,33 @@ Status:
 - ✅ Update compatibility check.
 - ✅ Backup/restore test.
 
+## Milestone 14 — One visual system over Ubuntu's apps
+
+Direction: keep Ubuntu's engine and behaviour, own the appearance. Applies to
+Files, Settings, and the top-right system panel alike.
+
+- ✅ Forked Nautilus wired in as the session file manager.
+- ✅ Bespoke Files and Settings apps retired.
+- ⬜ `theme/Adaptive` GTK3 theme importing Yaru-dark, then overriding it with
+  `tokens/adaptive.tokens.json`, set via the Adaptive dconf profile.
+- ⬜ `AdaptiveFilesIcons` inherits Yaru instead of Adwaita.
+- ⬜ Top-right panel restyled in shell CSS; rail System button removed once it
+  lands, so system controls live in one place.
+- ⬜ Session wrapper reinstall (needs sudo) to pick up `XDG_DATA_DIRS`.
+
+Blocked on `design/figma-exports/` — see the README there.
+
 ## Immediate next work
 
-1. Click through the restored Workspaces and Command rail menus (System
+1. Reinstall the session wrapper so `XDG_DATA_DIRS` takes effect:
+   `./scripts/install-adaptive-session.sh` (asks for sudo), then log out and in.
+2. Export the Figma frames into `design/figma-exports/`, then build
+   `theme/Adaptive`.
+3. Click through the restored Workspaces and Command rail menus (System
    Center is confirmed opening to the right of the rail).
-2. Type a project name in the overview and confirm results appear; the
+4. Type a project name in the overview and confirm results appear; the
    provider itself answers `GetInitialResultSet` and passes `should_show()`.
-3. Continue System Center parity: safe toggles and reboot/shutdown confirmations.
-4. Verify audio output switching — five sinks are present on this machine,
+5. Verify audio output switching — five sinks are present on this machine,
    so the submenu can finally be exercised.
 
 ## Known live-only traps
