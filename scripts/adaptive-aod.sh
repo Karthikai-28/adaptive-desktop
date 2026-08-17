@@ -34,6 +34,17 @@ usage() {
     exit 2
 }
 
+on_battery() {
+    local supply
+    for supply in /sys/class/power_supply/A{C,DP}*/online \
+                  /sys/class/power_supply/*/online; do
+        [[ -r "$supply" ]] || continue
+        [[ "$(cat "$supply")" == "1" ]] && return 1
+        return 0
+    done
+    return 1
+}
+
 require_adaptive() {
     if [[ "${DCONF_PROFILE:-}" != "adaptive" ]]; then
         echo "Not inside the Adaptive session (DCONF_PROFILE='${DCONF_PROFILE:-}')." >&2
@@ -64,15 +75,25 @@ status() {
 case "${1:-}" in
 on)
     require_adaptive
+
+    if on_battery; then
+        echo "On battery - refusing." >&2
+        echo "An always-on display on battery is how a laptop cooks in a bag." >&2
+        echo "Plug in the mains and run this again." >&2
+        exit 1
+    fi
+
     mkdir -p "$STATE_DIR"
 
     if [[ ! -f "$STATE_FILE" ]]; then
         {
-            echo "IDLE_DELAY=$(gsettings get $SESSION idle-delay)"
-            echo "AC_TYPE=$(gsettings get $POWER sleep-inactive-ac-type)"
-            echo "BATT_TYPE=$(gsettings get $POWER sleep-inactive-battery-type)"
-            echo "BATT_TIMEOUT=$(gsettings get $POWER sleep-inactive-battery-timeout)"
-            echo "IDLE_DIM=$(gsettings get $POWER idle-dim)"
+            echo "IDLE_DELAY='$(gsettings get $SESSION idle-delay)'"
+            echo "AC_TYPE='$(gsettings get $POWER sleep-inactive-ac-type)'"
+            echo "IDLE_DIM='$(gsettings get $POWER idle-dim)'"
+            # xset's numeric timeouts, or "off" leaves DPMS enabled with every
+            # timeout at zero - which never powers the panel down.
+            echo "DPMS_TIMES='$(xset q | awk '/Standby:/ {print $2, $4, $6}')'"
+            echo "SAVER_TIME='$(xset q | awk '/timeout:/ {print $2}')'"
         } > "$STATE_FILE"
     fi
 
@@ -80,7 +101,10 @@ on)
     gsettings set $SESSION idle-delay 0
     gsettings set $POWER idle-dim false
     gsettings set $POWER sleep-inactive-ac-type nothing
-    gsettings set $POWER sleep-inactive-battery-type nothing
+
+    # Battery suspend is never disabled. Turning it off is what left this
+    # laptop awake in a bag: no idle, no blank, no sleep, on battery. An
+    # always-on display is a mains-power feature.
 
     # X keeps its own screen-saver and DPMS timers, independent of GNOME's
     # settings. They are usually zero here, but DPMS still reports itself as
@@ -103,13 +127,30 @@ off)
         # shellcheck disable=SC1090
         source "$STATE_FILE"
         gsettings set $SESSION idle-delay "${IDLE_DELAY##* }"
-        gsettings set $POWER idle-dim "$IDLE_DIM"
-        gsettings set $POWER sleep-inactive-ac-type "$AC_TYPE"
-        gsettings set $POWER sleep-inactive-battery-type "$BATT_TYPE"
-        gsettings set $POWER sleep-inactive-battery-timeout "${BATT_TIMEOUT##* }"
+        gsettings set $POWER idle-dim "${IDLE_DIM//\'/}"
+        gsettings set $POWER sleep-inactive-ac-type "${AC_TYPE//\'/}"
+        # Battery suspend is never changed by "on", so there is nothing to
+        # restore for it - and nothing that can leave the machine unable to
+        # sleep on battery.
         if command -v xset >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
             xset +dpms
             xset s on
+
+            # Restore the numbers too. Re-enabling DPMS with zero timeouts
+            # looks correct and still never blanks.
+            times="${DPMS_TIMES//\'/}"
+            if [[ -n "$times" && "$times" != "0 0 0" ]]; then
+                xset dpms $times
+            else
+                xset dpms 300 600 900
+            fi
+
+            saver="${SAVER_TIME//\'/}"
+            if [[ -n "$saver" && "$saver" != "0" ]]; then
+                xset s "$saver"
+            else
+                xset s 300
+            fi
         fi
 
         rm -f "$STATE_FILE"
@@ -118,8 +159,6 @@ off)
         gsettings reset $SESSION idle-delay
         gsettings reset $POWER idle-dim
         gsettings reset $POWER sleep-inactive-ac-type
-        gsettings reset $POWER sleep-inactive-battery-type
-        gsettings reset $POWER sleep-inactive-battery-timeout
         echo "No saved state; reset to GNOME defaults."
     fi
     ;;

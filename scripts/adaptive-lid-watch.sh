@@ -10,9 +10,17 @@ set -Eeuo pipefail
 # lid-close-suspend-with-external-monitor is false, so closing the lid on a
 # docked machine does nothing at all - no suspend, and therefore no lock.
 #
-# Suspending instead would be the wrong fix: a docked laptop with the lid shut
-# is still a working machine on the external display. Locking is the part that
-# was missing, so that is the only thing this does.
+# Locking alone was the wrong call. A laptop with the lid shut goes to sleep -
+# that is what every other machine does, and what stops it cooking in a bag. So
+# the lid suspends, after locking so the screen is never left unlocked on wake.
+#
+# Clamshell use - lid shut, working on an external display - is opt-in, because
+# defaulting to it is how a laptop ends up awake in a bag:
+#
+#     touch ~/.config/adaptive-desktop/clamshell
+#
+# With that file present the lid only locks, and only while an external display
+# is actually connected. Pull the display and the lid suspends again.
 #
 # Watches the ACPI lid state rather than logind's LidClosed property, because
 # login1 does not emit a change signal for it - a property that has to be
@@ -39,6 +47,18 @@ fi
 # Overridable so the close transition can be exercised without a hinge.
 LID_GLOB="${ADAPTIVE_LID_GLOB:-/proc/acpi/button/lid/*/state}"
 
+external_display_connected() {
+    # "connected" without "disconnected"; xrandr prints both words.
+    xrandr --query 2>/dev/null \
+        | grep -vE "^eDP|^LVDS" \
+        | grep -qE "^[A-Za-z0-9-]+ connected"
+}
+
+clamshell_wanted() {
+    [[ -f "${HOME}/.config/adaptive-desktop/clamshell" ]] \
+        && external_display_connected
+}
+
 lid_state() {
     local file
     for file in $LID_GLOB; do
@@ -64,8 +84,16 @@ while sleep "$INTERVAL"; do
     # Only the moment of closing matters. Locking repeatedly while the lid
     # stays shut would fight anything else touching the session.
     if [[ "$previous" == "open" && "$current" == "closed" ]]; then
-        printf '%s lid closed - locking\n' "$(date -Is)" >>"$LOG_FILE"
         loginctl lock-session 2>>"$LOG_FILE" || true
+
+        if clamshell_wanted; then
+            printf '%s lid closed - clamshell, locked only\n' \
+                "$(date -Is)" >>"$LOG_FILE"
+        else
+            printf '%s lid closed - locking and suspending\n' \
+                "$(date -Is)" >>"$LOG_FILE"
+            systemctl suspend 2>>"$LOG_FILE" || true
+        fi
     fi
 
     previous="$current"

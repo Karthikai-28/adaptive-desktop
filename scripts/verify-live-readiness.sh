@@ -115,6 +115,10 @@ PY
   fi
 
   echo
+  echo "== Power =="
+  "${REPO}/scripts/adaptive-power-check.sh"
+
+  echo
   echo "== Project context =="
   "${REPO}/scripts/verify-project-context-service.sh"
   test -f "${HOME}/.config/autostart/adaptive-project-context.desktop" \
