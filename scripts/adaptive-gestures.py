@@ -6,13 +6,16 @@ which is why three fingers do nothing here. This reads libinput's own gesture
 stream and turns it into window actions, the way libinput-gestures and touchegg
 do, without adding a PPA.
 
-    three fingers left / right   previous / next window   (Alt+Tab, but cycling)
-    three fingers up             overview
-    three fingers down           close the overview
+    three fingers left / right   the app to the left / right
+    three fingers up             overview, as the Super key gives
+    three fingers down           minimise everything, back to the desktop
+                                 (swipe down again to bring it all back)
 
-Window switching cycles through _NET_CLIENT_LIST_STACKING rather than tapping
-Alt+Tab, because a tapped Alt+Tab only ever toggles between the last two
-windows - repeating the gesture would flip back and forth instead of moving on.
+Left and right walk _NET_CLIENT_LIST, the order windows were opened in, not
+_NET_CLIENT_LIST_STACKING. Stacking order is most-recently-used and reshuffles
+itself on every switch, so "right" would stop meaning the same neighbour after
+the first gesture. Creation order is a stable ring: right always moves the same
+way round it, left always comes back.
 
 Needs read access to the touchpad device:
 
@@ -61,8 +64,8 @@ def sh(*args):
 
 
 def windows():
-    """Normal windows on the current desktop, in stacking order."""
-    raw = sh("xprop", "-root", "_NET_CLIENT_LIST_STACKING")
+    """Normal windows on the current desktop, in the order they were opened."""
+    raw = sh("xprop", "-root", "_NET_CLIENT_LIST")
     ids = re.findall(r"0x[0-9a-fA-F]+", raw)
 
     current = sh("xprop", "-root", "_NET_CURRENT_DESKTOP")
@@ -111,6 +114,36 @@ def cycle(step, dry_run=False):
                        capture_output=True)
 
 
+def show_desktop(dry_run=False):
+    """Minimise everything, or restore it if the desktop is already bare.
+
+    Toggling matters: without it a second swipe down on an empty desktop does
+    nothing, and there is no gesture left to undo the first one.
+    """
+    stack = windows()
+    if not stack:
+        log("show desktop: nothing to minimise")
+        return
+
+    hidden = []
+    for wid in stack:
+        state = sh("xprop", "-id", wid, "_NET_WM_STATE")
+        if "_NET_WM_STATE_HIDDEN" in state:
+            hidden.append(wid)
+
+    restoring = len(hidden) == len(stack)
+    log(f"show desktop: {'restoring' if restoring else 'minimising'} "
+        f"{len(stack)} window(s)")
+
+    if dry_run:
+        return
+
+    for wid in stack:
+        action = "windowactivate" if restoring else "windowminimize"
+        subprocess.run(["xdotool", action, str(int(wid, 16))],
+                       capture_output=True)
+
+
 def overview(show, dry_run=False):
     log(f"overview {'show' if show else 'hide'}")
     if dry_run:
@@ -130,7 +163,7 @@ def act(direction, dry_run=False):
     elif direction == "up":
         overview(True, dry_run)
     elif direction == "down":
-        overview(False, dry_run)
+        show_desktop(dry_run)
 
 
 def run(stream, fingers_wanted=3, dry_run=False):
