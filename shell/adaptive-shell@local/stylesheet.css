@@ -6,34 +6,6 @@
     box-shadow: none;
 }
 
-/* ---------- top identity ---------- */
-
-.adaptive-brand-button {
-    min-width: 78px;
-    margin: 1px 2px 1px 6px;
-    padding: 0 10px;
-    border-radius: 7px;
-    background-color: transparent;
-}
-
-.adaptive-brand-button:hover {
-    background-color: rgba(120, 169, 255, 0.10);
-}
-
-.adaptive-brand-label {
-    color: #78A9FF;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-}
-
-.adaptive-project-label {
-    margin-left: 4px;
-    color: #96A4B8;
-    font-size: 9px;
-    font-weight: 600;
-}
-
 /* ---------- real GNOME clock/calendar ---------- */
 
 .adaptive-stock-clock {

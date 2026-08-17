@@ -43,9 +43,6 @@ class AdaptiveShellV16 {
         this._favorites = null;
         this._favoritesChangedId = 0;
         this._appStateChangedId = 0;
-        this._brandButton = null;
-        this._projectButton = null;
-        this._projectLabel = null;
         this._activeProjectId = null;
         this._monitorChangedId = 0;
         this._overviewShowingId = 0;
@@ -144,7 +141,6 @@ class AdaptiveShellV16 {
 
         this._hideLegacyPanelItems();
         this._restoreGNOMEClock();
-        this._installIdentity();
         this._installRail();
 
         this._monitorChangedId = Main.layoutManager.connect(
@@ -232,8 +228,6 @@ class AdaptiveShellV16 {
         for (const actor of [
             this._rail,
             this._dockChrome,
-            this._brandButton,
-            this._projectButton ? this._projectButton.container : null,
         ]) {
             if (!actor)
                 continue;
@@ -761,7 +755,6 @@ class AdaptiveShellV16 {
                             if (signal_name === 'ActiveProjectChanged') {
                                 let [id, name, path] = parameters.deep_unpack();
                                 this._activeProjectId = id;
-                                this._updateProjectLabel(name);
                                 this._restoreProjectWorkspace(id);
                             }
                         });
@@ -777,7 +770,6 @@ class AdaptiveShellV16 {
                                     let variant = proxy.call_finish(res);
                                     let [id, name, path] = variant.deep_unpack();
                                     this._activeProjectId = id;
-                                    this._updateProjectLabel(name);
                                     this._restoreProjectWorkspace(id);
                                 } catch (e) {
                                     // At login the shell can be up before the
@@ -812,13 +804,6 @@ class AdaptiveShellV16 {
                 }
             }
         );
-    }
-
-    _updateProjectLabel(name) {
-        if (this._projectLabel) {
-            let display = name && name !== 'NONE' ? name.toUpperCase() : 'NONE';
-            this._projectLabel.set_text('PROJECT · ' + display);
-        }
     }
 
     _restoreProjectWorkspace(projectId) {
@@ -957,16 +942,6 @@ class AdaptiveShellV16 {
         this._favorites = null;
         this._dockMenuManager = null;
 
-        if (this._brandButton) {
-            this._brandButton.destroy();
-            this._brandButton = null;
-        }
-
-        if (this._projectButton) {
-            this._projectButton.destroy();
-            this._projectButton = null;
-        }
-
         if (this._projectProxy)
             this._projectProxy = null;
 
@@ -1089,110 +1064,6 @@ class AdaptiveShellV16 {
                 '[Adaptive Shell v1.6] restoring GNOME clock'
             );
         }
-    }
-
-    _installIdentity() {
-        this._brandButton = new St.Button({
-            reactive: true,
-            can_focus: true,
-            track_hover: true,
-            style_class: 'adaptive-brand-button',
-            accessible_name: 'Adaptive Desktop overview',
-        });
-
-        const brand = new St.Label({
-            text: 'ADAPTIVE',
-            y_align: Clutter.ActorAlign.CENTER,
-            style_class: 'adaptive-brand-label',
-        });
-
-        this._brandButton.set_child(brand);
-        this._brandButton.connect(
-            'clicked',
-            () => this._toggleOverview()
-        );
-
-        this._projectButton = new PanelMenu.Button(0.0, 'ProjectMenu', false);
-        this._projectButton.add_style_class_name('adaptive-project-button');
-        
-        this._projectLabel = new St.Label({
-            text: 'PROJECT · NONE',
-            y_align: Clutter.ActorAlign.CENTER,
-            style_class: 'adaptive-project-label',
-        });
-        this._projectButton.add_child(this._projectLabel);
-        
-        this._projectButton.menu.connect('open-state-changed', (menu, open) => {
-            if (open) {
-                this._populateProjectMenu();
-            }
-        });
-
-        Main.panel._leftBox.insert_child_at_index(
-            this._brandButton,
-            0
-        );
-
-        // A PanelMenu.Button already lives inside its own container, so it has
-        // to go through addToStatusArea instead of being reparented directly.
-        Main.panel.addToStatusArea(
-            'adaptive-project',
-            this._projectButton,
-            1,
-            'left'
-        );
-    }
-
-    _populateProjectMenu() {
-        this._projectButton.menu.removeAll();
-        
-        if (!this._projectProxy) {
-            let item = new PopupMenu.PopupMenuItem('Project Service offline');
-            item.setSensitive(false);
-            this._projectButton.menu.addMenuItem(item);
-            return;
-        }
-
-        this._projectProxy.call(
-            'ListProjects',
-            null,
-            Gio.DBusCallFlags.NONE,
-            -1,
-            null,
-            (proxy, res) => {
-                try {
-                    let variant = proxy.call_finish(res);
-                    let projects = JSON.parse(variant.deep_unpack()[0]);
-                    let hasItems = false;
-                    
-                    for (let pid in projects) {
-                        hasItems = true;
-                        let name = projects[pid].name;
-                        let isActive = (pid === this._activeProjectId);
-                        let item = new PopupMenu.PopupMenuItem(isActive ? `★ ${name}` : name);
-                        item.connect('activate', () => {
-                            this._projectProxy.call(
-                                'SetActiveProject',
-                                GLib.Variant.new('(s)', [pid]),
-                                Gio.DBusCallFlags.NONE,
-                                -1,
-                                null,
-                                null
-                            );
-                        });
-                        this._projectButton.menu.addMenuItem(item);
-                    }
-                    
-                    if (!hasItems) {
-                        let empty = new PopupMenu.PopupMenuItem('No projects found');
-                        empty.setSensitive(false);
-                        this._projectButton.menu.addMenuItem(empty);
-                    }
-                } catch (e) {
-                    logError(e, '[Adaptive Shell v1.6] ListProjects failed');
-                }
-            }
-        );
     }
 
     _installRail() {
