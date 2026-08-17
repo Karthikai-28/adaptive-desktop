@@ -25,6 +25,10 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 REGISTRY = Path.home() / ".config/adaptive-desktop/projects.json"
 
+# Notes live outside the repositories they describe, so reading a project
+# never leaves anything behind to commit.
+NOTES_DIR = Path.home() / ".local/share/adaptive-desktop/notes"
+
 # Accent per recency band, so the grid reads as a heat map of attention.
 FRESH_D, WARM_D, COOL_D = 3, 30, 180
 
@@ -80,8 +84,20 @@ class Projects(Gtk.ApplicationWindow):
 
         self.projects = self._load()
         self.query = ""
+        self.doc_scale = 13
+        self._doc_css = Gtk.CssProvider()
+        self._notes_save_id = 0
+        self._doc_current = None
 
         self._load_css()
+
+        display = Gdk.Display.get_default()
+        if display:
+            Gtk.StyleContext.add_provider_for_display(
+                display, self._doc_css,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+        self._apply_doc_scale()
+
         self._build()
         self._render()
 
@@ -582,115 +598,247 @@ class Projects(Gtk.ApplicationWindow):
 
     # ------------------------------------------------------------------ learn
 
-    def _markdown(self, text):
-        """Markdown to Pango markup.
+    def _md_escape(self, value):
+        return (value.replace("&", "&amp;")
+                     .replace("<", "&lt;")
+                     .replace(">", "&gt;"))
 
-        Enough of the language to read documentation comfortably - headings,
-        emphasis, code, lists, quotes and rules. Pango is not HTML, so this
-        renders structure rather than trying to be a browser.
-        """
-        def esc(value):
-            return (value.replace("&", "&amp;")
-                         .replace("<", "&lt;")
-                         .replace(">", "&gt;"))
+    def _md_inline(self, body):
+        """Inline markdown to Pango markup. Input must already be escaped."""
+        body = re.sub(r"`([^`]+)`",
+                      r'<tt><span foreground="#66E0FF">\1</span></tt>', body)
+        body = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", body)
+        body = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?![*\w])", r"<i>\1</i>", body)
+        body = re.sub(r"\[([^\]]+)\]\([^)]*\)",
+                      r'<span foreground="#78A9FF" underline="single">\1</span>',
+                      body)
+        return body
 
-        sizes = {1: "xx-large", 2: "x-large", 3: "large",
-                 4: "medium", 5: "medium", 6: "small"}
+    # One combined pass, so a keyword inside a string is not coloured twice.
+    _CODE_TOKENS = re.compile(
+        r'(?P<str>"[^"\n]*"|\'[^\'\n]*\')'
+        r"|(?P<com>#[^\n]*|//[^\n]*)"
+        r"|(?P<num>\b\d+(?:\.\d+)?\b)"
+        r"|(?P<kw>\b(?:def|class|return|import|from|if|elif|else|for|while|"
+        r"try|except|finally|with|as|lambda|yield|pass|raise|assert|"
+        r"function|const|let|var|new|await|async|export|default|"
+        r"public|private|protected|static|void|struct|enum|interface|"
+        r"true|false|null|None|True|False|self|this|echo|local)\b)"
+    )
 
-        out, in_code = [], False
-        table = []
+    def _md_highlight(self, code):
+        """Language-agnostic colouring: strings, comments, numbers, keywords -
+        enough to make a block readable without a parser per language."""
+        def paint(match):
+            kind = match.lastgroup
+            colour = {"str": "#65D9B5", "com": "#6F8198",
+                      "num": "#F3C96B", "kw": "#9A8BFF"}[kind]
+            weight = ' weight="bold"' if kind == "kw" else ""
+            style = ' style="italic"' if kind == "com" else ""
+            return (f'<span foreground="{colour}"{weight}{style}>'
+                    f"{match.group()}</span>")
+
+        return self._CODE_TOKENS.sub(paint, self._md_escape(code))
+
+    def _md_blocks(self, text):
+        """Split into blocks so each becomes its own widget - one label cannot
+        give a code block its own frame or a copy button."""
+        blocks, buffer, table = [], [], []
+        code, lang = None, ""
+
+        def flush_text():
+            if buffer:
+                blocks.append(("text", "\n".join(buffer)))
+                buffer.clear()
 
         def flush_table():
-            """Render collected pipe-table rows as an aligned monospace block."""
-            if not table:
-                return
-
-            rows = []
-            for row in table:
-                # The whole row is monospace already, so inline-code ticks
-                # would only be noise.
-                cells = [c.strip().replace("`", "")
-                         for c in row.strip().strip("|").split("|")]
-                if all(re.fullmatch(r":?-{2,}:?", c or "-") for c in cells):
-                    continue  # the |---|---| separator
-                rows.append(cells)
-
-            table.clear()
-
-            if not rows:
-                return
-
-            width = max(len(r) for r in rows)
-            rows = [r + [""] * (width - len(r)) for r in rows]
-            sizes = [max(len(r[i]) for r in rows) for i in range(width)]
-
-            for index, row in enumerate(rows):
-                cells = "  ".join(
-                    cell.ljust(sizes[i]) for i, cell in enumerate(row))
-                if index == 0:
-                    out.append(f'<tt><b>{cells}</b></tt>')
-                    out.append('<tt><span foreground="#30425C">'
-                               + "\u2500" * min(len(cells), 78) + "</span></tt>")
-                else:
-                    out.append(f"<tt>{cells}</tt>")
+            if table:
+                blocks.append(("table", list(table)))
+                table.clear()
 
         for line in text.splitlines():
-            if line.lstrip().startswith("```"):
-                flush_table()
-                in_code = not in_code
+            if code is not None:
+                if line.lstrip().startswith("```"):
+                    blocks.append(("code", lang, "\n".join(code)))
+                    code, lang = None, ""
+                else:
+                    code.append(line)
                 continue
 
-            if not in_code and line.lstrip().startswith("|"):
-                table.append(esc(line))
+            fence = re.match(r"^\s*```\s*([\w+-]+)?", line)
+            if fence:
+                flush_text()
+                flush_table()
+                code, lang = [], fence.group(1) or ""
+                continue
+
+            if line.lstrip().startswith("|"):
+                flush_text()
+                table.append(line)
                 continue
 
             flush_table()
 
-            if in_code:
-                out.append(f'<tt><span foreground="#96A4B8">{esc(line)}</span></tt>')
+            heading = re.match(r"^(#{1,6})\s+(.*)$", line)
+            if heading:
+                flush_text()
+                blocks.append(("head", len(heading.group(1)), heading.group(2)))
                 continue
 
             if re.match(r"^\s*([-*_])\1{2,}\s*$", line):
-                out.append('<span foreground="#30425C">'
-                           + "\u2500" * 48 + "</span>")
+                flush_text()
+                blocks.append(("rule",))
                 continue
 
-            heading = re.match(r"^(#{1,6})\s+(.*)$", line)
-            if heading:
-                level = len(heading.group(1))
-                out.append("")
-                out.append(f'<span size="{sizes[level]}" weight="bold">'
-                           f"{esc(heading.group(2))}</span>")
-                continue
+            buffer.append(line)
 
-            body = esc(line)
+        if code is not None:
+            blocks.append(("code", lang, "\n".join(code)))
+
+        flush_text()
+        flush_table()
+        return blocks
+
+    def _md_text_widget(self, raw):
+        out = []
+
+        for line in raw.splitlines():
+            body = self._md_escape(line)
 
             quote = re.match(r"^\s*&gt;\s?(.*)$", body)
+            bullet = re.match(r"^(\s*)[-*+]\s+(.*)$", body)
+            number = re.match(r"^(\s*)(\d+)\.\s+(.*)$", body)
+
             if quote:
                 body = ('<span foreground="#66E0FF">\u2503</span>  '
-                        f'<i>{quote.group(1)}</i>')
+                        f"<i>{quote.group(1)}</i>")
+            elif bullet:
+                body = (f"{bullet.group(1)}   "
+                        f'<span foreground="#78A9FF">\u2022</span>  '
+                        f"{bullet.group(2)}")
+            elif number:
+                body = (f"{number.group(1)}   "
+                        f'<span foreground="#78A9FF">{number.group(2)}.</span>'
+                        f"  {number.group(3)}")
+
+            out.append(self._md_inline(body))
+
+        label = Gtk.Label(xalign=0, yalign=0)
+        label.add_css_class("doc-body")
+        label.set_wrap(True)
+        label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        label.set_selectable(True)
+        label.set_markup("\n".join(out))
+        return label
+
+    def _md_code_widget(self, lang, code):
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        frame.add_css_class("code-block")
+
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        bar.add_css_class("code-bar")
+
+        name = Gtk.Label(label=(lang or "text").upper(), xalign=0)
+        name.add_css_class("code-lang")
+        name.set_hexpand(True)
+        bar.append(name)
+
+        copy = Gtk.Button(label="Copy")
+        copy.add_css_class("code-copy")
+
+        def do_copy(button):
+            display = Gdk.Display.get_default()
+            if display:
+                display.get_clipboard().set(code)
+
+            button.set_label("Copied")
+
+            def restore():
+                button.set_label("Copy")
+                return GLib.SOURCE_REMOVE
+
+            GLib.timeout_add(1200, restore)
+
+        copy.connect("clicked", do_copy)
+        bar.append(copy)
+        frame.append(bar)
+
+        body = Gtk.Label(xalign=0, yalign=0)
+        body.add_css_class("doc-code")
+        body.set_selectable(True)
+        body.set_wrap(False)
+        body.set_markup(self._md_highlight(code))
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroll.set_child(body)
+        frame.append(scroll)
+        return frame
+
+    def _md_table_widget(self, lines):
+        rows = []
+        for line in lines:
+            cells = [c.strip().replace("`", "")
+                     for c in line.strip().strip("|").split("|")]
+            if all(re.fullmatch(r":?-{2,}:?", c or "-") for c in cells):
+                continue
+            rows.append(cells)
+
+        if not rows:
+            return Gtk.Box()
+
+        width = max(len(r) for r in rows)
+        rows = [r + [""] * (width - len(r)) for r in rows]
+        sizes = [max(len(r[i]) for r in rows) for i in range(width)]
+
+        out = []
+        for index, row in enumerate(rows):
+            cells = "  ".join(self._md_escape(cell).ljust(sizes[i] + 2)
+                              for i, cell in enumerate(row))
+            if index == 0:
+                out.append(f"<b>{cells}</b>")
+                out.append('<span foreground="#30425C">'
+                           + "\u2500" * min(len(cells), 92) + "</span>")
             else:
-                bullet = re.match(r"^(\s*)[-*+]\s+(.*)$", body)
-                if bullet:
-                    body = f"{bullet.group(1)}   \u2022  {bullet.group(2)}"
-                else:
-                    number = re.match(r"^(\s*)(\d+)\.\s+(.*)$", body)
-                    if number:
-                        body = (f"{number.group(1)}   {number.group(2)}."
-                                f"  {number.group(3)}")
+                out.append(cells)
 
-            body = re.sub(r"`([^`]+)`",
-                          r'<tt><span foreground="#66E0FF">\1</span></tt>', body)
-            body = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", body)
-            body = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?![*\w])", r"<i>\1</i>", body)
-            body = re.sub(r"\[([^\]]+)\]\([^)]*\)",
-                          r'<span foreground="#78A9FF" underline="single">\1</span>',
-                          body)
+        label = Gtk.Label(xalign=0, yalign=0)
+        label.add_css_class("doc-table")
+        label.set_selectable(True)
+        label.set_markup("\n".join(out))
 
-            out.append(body)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroll.set_child(label)
+        return scroll
 
-        flush_table()
-        return "\n".join(out)
+    def _md_render(self, container, text):
+        child = container.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            container.remove(child)
+            child = nxt
+
+        for block in self._md_blocks(text):
+            kind = block[0]
+
+            if kind == "head":
+                label = Gtk.Label(label="", xalign=0)
+                label.add_css_class(f"doc-h{min(block[1], 3)}")
+                label.set_wrap(True)
+                label.set_selectable(True)
+                label.set_markup(self._md_inline(self._md_escape(block[2])))
+                container.append(label)
+            elif kind == "code":
+                container.append(self._md_code_widget(block[1], block[2]))
+            elif kind == "table":
+                container.append(self._md_table_widget(block[1]))
+            elif kind == "rule":
+                rule = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                rule.add_css_class("doc-rule")
+                container.append(rule)
+            elif block[1].strip():
+                container.append(self._md_text_widget(block[1]))
 
     def _show_learn(self, project):
         child = self.detail_holder.get_first_child()
@@ -720,11 +868,26 @@ class Projects(Gtk.ApplicationWindow):
         head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         head.add_css_class("header")
 
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         back = Gtk.Button(label="\u2190  Project")
         back.add_css_class("back")
         back.connect("clicked", lambda *_: self._show_detail(project))
         bar.append(back)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        bar.append(spacer)
+
+        for label, step in (("A\u2212", -1), ("A+", 1)):
+            zoom = Gtk.Button(label=label)
+            zoom.add_css_class("action")
+            zoom.connect("clicked", lambda _b, s=step: self._doc_zoom(s))
+            bar.append(zoom)
+
+        notes_toggle = Gtk.ToggleButton(label="Notes")
+        notes_toggle.add_css_class("action")
+        bar.append(notes_toggle)
+
         head.append(bar)
 
         title = Gtk.Label(label=f"Learn {project['name']}", xalign=0)
@@ -760,13 +923,15 @@ class Projects(Gtk.ApplicationWindow):
                                  Gtk.PolicyType.AUTOMATIC)
         reader_scroll.set_hexpand(True)
 
-        reader = Gtk.Label(xalign=0, yalign=0)
-        reader.add_css_class("doc-body")
-        reader.set_wrap(True)
-        reader.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        reader.set_selectable(True)
+        reader = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
+        reader.add_css_class("doc-page")
         reader_scroll.set_child(reader)
         split.append(reader_scroll)
+
+        notes_pane, notes_view, notes_status, notes_where = self._notes_pane()
+        split.append(notes_pane)
+        notes_toggle.connect(
+            "toggled", lambda b: notes_pane.set_visible(b.get_active()))
 
         self.detail_holder.append(split)
 
@@ -779,8 +944,10 @@ class Projects(Gtk.ApplicationWindow):
             except Exception as error:
                 text = f"Could not read {name}: {error}"
 
-            reader.set_markup(self._markdown(text))
+            self._md_render(reader, text)
             reader_scroll.get_vadjustment().set_value(0)
+            self._load_notes(project, name, notes_view, notes_status,
+                             notes_where)
 
             for button, doc in self._doc_buttons:
                 if doc == name:
@@ -813,9 +980,131 @@ class Projects(Gtk.ApplicationWindow):
         if docs:
             show(docs[0])
         else:
-            reader.set_markup("<i>Nothing to read here yet.</i>")
+            empty = Gtk.Label(label="Nothing to read here yet.", xalign=0)
+            empty.add_css_class("doc-body")
+            reader.append(empty)
+
+        notes_view.get_buffer().connect(
+            "changed",
+            lambda *_: self._queue_notes_save(project, notes_view,
+                                              notes_status))
 
         self.stack.set_visible_child_name("detail")
+
+
+    # ------------------------------------------------------------------ notes
+
+    def _notes_pane(self):
+        pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        pane.add_css_class("notes-pane")
+        pane.set_size_request(340, -1)
+        pane.set_visible(False)
+
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        title = Gtk.Label(label="YOUR NOTES", xalign=0)
+        title.add_css_class("panel-title")
+        title.set_hexpand(True)
+        head.append(title)
+
+        status = Gtk.Label(label="")
+        status.add_css_class("notes-status")
+        head.append(status)
+        pane.append(head)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+
+        view = Gtk.TextView()
+        view.add_css_class("notes-view")
+        view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        view.set_top_margin(10)
+        view.set_bottom_margin(10)
+        view.set_left_margin(12)
+        view.set_right_margin(12)
+        scroll.set_child(view)
+        pane.append(scroll)
+
+        where = Gtk.Label(label="", xalign=0)
+        where.add_css_class("notes-path")
+        where.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        pane.append(where)
+
+        return pane, view, status, where
+
+    def _notes_path(self, project, doc):
+        safe_project = re.sub(r"[^\w.-]", "_", project["name"])
+        # Strip the document's own extension before adding ours, or notes for
+        # README.md land in README.md.md.
+        stem = re.sub(r"\.(md|markdown|MD)$", "", doc)
+        safe_doc = re.sub(r"[^\w.-]", "_", stem)
+        return NOTES_DIR / safe_project / f"{safe_doc}.md"
+
+    def _load_notes(self, project, doc, view, status, where):
+        self._doc_current = (project, doc)
+        target = self._notes_path(project, doc)
+
+        existing = ""
+        if target.exists():
+            try:
+                existing = target.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        self._notes_loading = True
+        view.get_buffer().set_text(existing)
+        self._notes_loading = False
+
+        status.set_text("saved" if existing else "")
+        where.set_text(str(target).replace(str(Path.home()), "~"))
+
+    def _queue_notes_save(self, project, view, status):
+        if getattr(self, "_notes_loading", False):
+            return
+
+        if self._notes_save_id:
+            GLib.source_remove(self._notes_save_id)
+
+        # Debounced: writing on every keystroke would hit the disk constantly.
+        self._notes_save_id = GLib.timeout_add(
+            700, self._save_notes, view, status)
+
+    def _save_notes(self, view, status):
+        self._notes_save_id = 0
+
+        if not self._doc_current:
+            return GLib.SOURCE_REMOVE
+
+        project, doc = self._doc_current
+        buffer = view.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(),
+                               buffer.get_end_iter(), False)
+
+        target = self._notes_path(project, doc)
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+            status.set_text("saved " + time.strftime("%H:%M:%S"))
+        except Exception as error:
+            status.set_text(f"not saved: {error}")
+
+        return GLib.SOURCE_REMOVE
+
+    def _doc_zoom(self, direction):
+        self.doc_scale = max(9, min(26, self.doc_scale + direction))
+        self._apply_doc_scale()
+
+    def _apply_doc_scale(self):
+        size = self.doc_scale
+        self._doc_css.load_from_data(f"""
+        .doc-body {{ font-size: {size}px; }}
+        .doc-code, .doc-table {{ font-size: {max(9, size - 1)}px; }}
+        .doc-h1 {{ font-size: {size + 12}px; }}
+        .doc-h2 {{ font-size: {size + 6}px; }}
+        .doc-h3 {{ font-size: {size + 2}px; }}
+        .notes-view {{ font-size: {size}px; }}
+        """.encode())
 
     # --------------------------------------------------------------- actions
 

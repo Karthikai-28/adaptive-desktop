@@ -256,3 +256,94 @@ window.adaptive-projects { background-color: @ad_bg; }
     color: alpha(@ad_text, 0.9);
     font-size: 13px;
 }
+
+/* ---------- rendered document ---------- */
+
+.doc-page { padding: 24px 30px 40px 30px; }
+
+.doc-h1, .doc-h2, .doc-h3 {
+    margin-top: 10px;
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-weight: 700;
+}
+
+.doc-h1 { color: #FFFFFF; }
+.doc-h2 { color: alpha(@ad_text, 0.95); }
+.doc-h3 { color: @ad_cyan; }
+
+.doc-rule {
+    margin: 6px 0;
+    background-color: alpha(@ad_divider, 0.5);
+}
+
+.doc-table {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background-color: @ad_bg_deep;
+    color: alpha(@ad_text, 0.88);
+    font-family: monospace;
+}
+
+/* Code blocks get their own surface, a language tag and a copy button. */
+.code-block {
+    border-radius: 12px;
+    border: 1px solid alpha(@ad_divider, 0.55);
+    background-color: @ad_bg_deep;
+}
+
+.code-bar {
+    padding: 5px 8px 5px 12px;
+    border-bottom: 1px solid alpha(@ad_divider, 0.42);
+    background-color: alpha(@ad_surface_2, 0.6);
+}
+
+.code-lang {
+    color: @ad_muted;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+.code-copy {
+    min-height: 20px;
+    padding: 1px 10px;
+    border-radius: 7px;
+    border: 1px solid alpha(@ad_divider, 0.6);
+    background-color: @ad_surface;
+    background-image: none;
+    color: @ad_text;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.code-copy:hover {
+    border-color: alpha(@ad_cyan, 0.5);
+    background-color: @ad_surface_2;
+}
+
+.doc-code {
+    padding: 12px 14px;
+    color: alpha(@ad_text, 0.92);
+    font-family: monospace;
+}
+
+/* ---------- notes ---------- */
+
+.notes-pane {
+    padding: 14px 14px 10px 14px;
+    border-left: 1px solid alpha(@ad_divider, 0.42);
+    background-color: @ad_bg_deep;
+}
+
+.notes-view {
+    border-radius: 10px;
+    border: 1px solid alpha(@ad_divider, 0.42);
+    background-color: @ad_bg;
+    color: @ad_text;
+}
+
+.notes-view text { background-color: transparent; color: @ad_text; }
+
+.notes-status { color: @ad_muted; font-size: 9px; }
+.notes-path { color: alpha(@ad_muted, 0.7); font-size: 9px; }
