@@ -171,12 +171,75 @@ def run(stream, fingers_wanted=3, dry_run=False):
                 act("down" if dy > 0 else "up", dry_run)
 
 
+def doctor():
+    """Report exactly which prerequisite is missing, and the fix for it."""
+    import glob
+    import os
+    import shutil
+
+    ok = True
+
+    have_libinput = shutil.which("libinput") is not None
+    print(f"[{'ok' if have_libinput else 'MISSING'}] libinput-tools")
+    if not have_libinput:
+        print("        sudo apt install -y libinput-tools")
+        ok = False
+
+    in_group = "input" in subprocess.run(
+        ["id", "-nG"], capture_output=True, text=True).stdout.split()
+    print(f"[{'ok' if in_group else 'MISSING'}] membership of the input group")
+    if not in_group:
+        print('        sudo gpasswd -a "$USER" input')
+        ok = False
+
+    readable = [d for d in glob.glob("/dev/input/event*") if os.access(d, os.R_OK)]
+    print(f"[{'ok' if readable else 'MISSING'}] readable event devices "
+          f"({len(readable)} of {len(glob.glob('/dev/input/event*'))})")
+    if in_group and not readable:
+        print("        the group is set but this session predates it - either")
+        print("        log out and back in, or start the daemon with:")
+        print('        sg input -c "~/adaptive-desktop/scripts/adaptive-gestures.py"')
+        ok = False
+
+    touchpad = subprocess.run(["xinput", "list"], capture_output=True,
+                              text=True).stdout
+    has_pad = "ouchpad" in touchpad
+    print(f"[{'ok' if has_pad else 'MISSING'}] touchpad present to X11")
+
+    if ok and have_libinput and readable:
+        print()
+        print("Prerequisites met. Checking for gesture events for 4 seconds -")
+        print("swipe three fingers now.")
+        try:
+            proc = subprocess.run(["libinput", "debug-events"],
+                                  capture_output=True, text=True, timeout=4)
+            stream = proc.stdout
+        except subprocess.TimeoutExpired as expired:
+            stream = expired.stdout or ""
+            if isinstance(stream, bytes):
+                stream = stream.decode(errors="replace")
+
+        swipes = stream.count("GESTURE_SWIPE")
+        print(f"        gesture events seen: {swipes}")
+        if not swipes:
+            print("        none - this touchpad may not report swipes to")
+            print("        libinput. Capture and send the output of:")
+            print("        libinput debug-events > /tmp/swipe.txt")
+
+    return 0 if ok else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--doctor", action="store_true",
+                    help="check prerequisites and say what is missing")
     ap.add_argument("--fingers", type=int, default=3)
     ap.add_argument("--replay", help="parse a saved debug-events capture")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    if args.doctor:
+        return doctor()
 
     if args.replay:
         with open(args.replay, encoding="utf-8") as handle:
