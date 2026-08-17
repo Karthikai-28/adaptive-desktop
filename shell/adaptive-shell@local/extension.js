@@ -403,7 +403,7 @@ class AdaptiveShellV16 {
         // layer below is what keeps the time on screen after that.
         this._lockApplyTime();
 
-        if (this._lockActivity) {
+        if (this._lockAlive(this._lockActivity)) {
             this._lockActivity.text = this._lockActivitySummary();
             this._lockActivity.visible = !!this._lockActivity.text;
         }
@@ -421,7 +421,7 @@ class AdaptiveShellV16 {
     // settles to a dimmer level once nobody is interacting. Both are cheap:
     // one translation and one opacity, on the tick that already runs.
     _lockAmbientStep() {
-        if (!this._lockClock)
+        if (!this._lockAlive(this._lockClock))
             return;
 
         const ticks = this._lockTicks;
@@ -593,6 +593,16 @@ class AdaptiveShellV16 {
         this._aodDate = null;
     }
 
+    _lockAlive(actor) {
+        // A destroyed actor keeps its JS wrapper, so the usual truthiness test
+        // passes and the next property access asserts inside Clutter.
+        try {
+            return !!actor && actor.get_stage() !== null;
+        } catch (e) {
+            return false;
+        }
+    }
+
     _lockApplyTime() {
 
         // The 12/24-hour preference is read once and cached: this runs every
@@ -611,8 +621,10 @@ class AdaptiveShellV16 {
             }
         }
 
-        if (!this._lockClock || !this._lockClock._time)
+        if (!this._lockClock || !this._lockAlive(this._lockClock._time)) {
+            this._lockDetachDialog();
             return;
+        }
 
         const now = GLib.DateTime.new_now_local();
         this._lockClock._time.text = now.format(this._lockTimeFormat).trim();
@@ -768,7 +780,29 @@ class AdaptiveShellV16 {
                                     this._updateProjectLabel(name);
                                     this._restoreProjectWorkspace(id);
                                 } catch (e) {
-                                    logError(e, '[Adaptive Shell v1.6] GetActiveProject failed');
+                                    // At login the shell can be up before the
+                                    // project service has claimed its name.
+                                    // That is expected, not a fault, so it is
+                                    // retried quietly instead of logged as an
+                                    // error.
+                                    if (`${e}`.includes('ServiceUnknown') ||
+                                        `${e}`.includes('NameHasNoOwner')) {
+                                        if (!this._projectRetries) {
+                                            this._projectRetries = 0;
+                                        }
+
+                                        if (this._projectRetries < 5) {
+                                            this._projectRetries += 1;
+                                            GLib.timeout_add_seconds(
+                                                GLib.PRIORITY_DEFAULT, 4,
+                                                () => {
+                                                    this._connectToProjectContext();
+                                                    return GLib.SOURCE_REMOVE;
+                                                });
+                                        }
+                                    } else {
+                                        logError(e, '[Adaptive Shell] GetActiveProject failed');
+                                    }
                                 }
                             }
                         );
@@ -2100,8 +2134,15 @@ class AdaptiveShellV16 {
     // So it is only one of two signals: the workspace scan below reports a
     // fullscreen window on this monitor no matter what sits on top of it.
     _dock26MonitorInFullscreen(index) {
+        // Mutter asserts rather than returning false for an index it does not
+        // have, and this one is -1 before the first resolve and stale for a
+        // moment after a display is unplugged.
+        const monitors = this._dock26MonitorCount();
+        const valid = Number.isInteger(index) && index >= 0 && index < monitors;
+
         try {
             if (
+                valid &&
                 typeof global.display
                     .get_monitor_in_fullscreen === 'function'
             ) {
@@ -2471,7 +2512,10 @@ class AdaptiveShellV16 {
         if (children.length > 1)
             content += spacing * (children.length - 1);
 
-        return Math.ceil(content + padding);
+        const width = Math.ceil(content + padding);
+
+        // One NaN from a theme lookup would land in set_size() and assert.
+        return Number.isFinite(width) ? width : 0;
     }
 
     _dock26Layout() {
