@@ -2299,12 +2299,16 @@ class AdaptiveShellV16 {
                 () => {
                     this._dock26HideTimerId = 0;
 
-                    const edge =
-                        this._dock26EdgeForMonitor(index);
-
+                    // Any edge, not just the one being left. Dragging along
+                    // the bottom from one screen to the next fires leave for
+                    // the old edge after enter for the new one, so checking
+                    // only the old edge let this hide cancel the reveal that
+                    // had just started on the other monitor - the dock came up
+                    // on the second screen and vanished a third of a second
+                    // later.
                     if (
                         (this._rail && this._rail.hover) ||
-                        (edge && edge.hover)
+                        this._dock26PointerOnAnyEdge()
                     )
                         return GLib.SOURCE_REMOVE;
 
