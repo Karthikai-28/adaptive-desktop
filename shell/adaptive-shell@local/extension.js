@@ -1905,6 +1905,12 @@ class AdaptiveShellV16 {
     _dock26RebuildHotEdges() {
         this._dock26DestroyHotEdges();
 
+        // Indexes are renumbered when a display is plugged or unplugged, so a
+        // remembered target can now point at a different screen - or at none.
+        // Re-resolve from the pointer's own monitor instead of trusting it.
+        this._dock26EdgeRevealed = false;
+        this._dock26TargetMonitor = -1;
+
         const monitors = Main.layoutManager.monitors || [];
 
         monitors.forEach((monitor, index) => {
@@ -1958,6 +1964,18 @@ class AdaptiveShellV16 {
         this._dock26EnsureTargetMonitor();
         this._dock26SyncTargetFromFocus(false);
         this._dock26Layout();
+    }
+
+    _dock26PointerOnAnyEdge() {
+        for (const entry of this._dock26HotEdges) {
+            try {
+                if (entry.actor && entry.actor.hover)
+                    return true;
+            } catch (e) {
+            }
+        }
+
+        return false;
     }
 
     _dock26EdgeForMonitor(index) {
@@ -2130,6 +2148,17 @@ class AdaptiveShellV16 {
     _dock26SyncTargetFromFocus(forceMove = true) {
         const window = global.display.get_focus_window();
         const index = this._dock26WindowMonitor(window);
+
+        // While the pointer is holding the dock open on a monitor, focus is
+        // not allowed to move it or close it. Clicking something on a second
+        // screen changes the focus window, and this used to drag the dock back
+        // to whichever monitor that window was on and drop the reveal - so the
+        // dock either never appeared on the other screen or flashed and went.
+        // The hot edge's own leave-event is what ends a reveal.
+        if (this._dock26EdgeRevealed && this._dock26PointerOnAnyEdge()) {
+            this._dock26WatchFocusWindow();
+            return;
+        }
 
         if (
             !forceMove &&
