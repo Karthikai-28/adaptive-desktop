@@ -172,6 +172,28 @@ PY
   has_source "monitors" "${REPO}/scripts/window-cli.py"
   has_source "fullscreen" "${REPO}/scripts/window-cli.py"
   pass "Window helper includes monitor-aware tiling, snapping, and fullscreen commands"
+
+  python3 -m py_compile "${REPO}/scripts/adaptive-display-guard.py"
+  has_source "_rescueStrandedWindows" "${REPO}/shell/adaptive-shell@local/extension.js"
+  has_source "_runDisplayGuard" "${REPO}/shell/adaptive-shell@local/extension.js"
+  pass "Displays changing triggers the ghost-output guard and the window rescue"
+
+  if command -v node >/dev/null 2>&1; then
+    node "${REPO}/scripts/verify-window-rescue.js"
+  else
+    verify "node is not installed; window rescue geometry was not checked"
+  fi
+
+  # A port that says "connected" with no EDID has nothing plugged into it.
+  # Windows placed there are open, running, and impossible to reach.
+  if [[ -n "${DISPLAY:-}" ]]; then
+    if "${REPO}/scripts/adaptive-display-guard.py" --check; then
+      pass "no ghost display is enabled"
+    else
+      fail "a connected output published no EDID and is still enabled"
+    fi
+  fi
+
   verify "External monitor behavior needs a live monitor attach/detach check"
 
   echo
