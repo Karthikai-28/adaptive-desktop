@@ -1,7 +1,9 @@
 /* Adaptive Files Phase 2.1 inspector */
 
 .adaptive-preview-panel {
-    background-color: rgba(9, 18, 30, 0.985);
+    /* Fully opaque. The inspector sits as an overlay directly on top of the
+       file grid, so any transparency at all lets icons ghost through it. */
+    background-color: #09121E;
     color: #F2F6EF;
     border-left: 1px solid rgba(48, 66, 92, 0.72);
 }

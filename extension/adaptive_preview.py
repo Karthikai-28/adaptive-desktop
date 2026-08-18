@@ -899,16 +899,26 @@ class PreviewController:
             pass
 
     def _reserve_space(self):
-        if self.host_main_child is None:
-            return
+        extra = self.panel_width + 1 if self.panel_visible else 0
 
-        try:
-            extra = self.panel_width + 1 if self.panel_visible else 0
-            self.host_main_child.set_margin_end(
-                self.host_original_margin_end + extra
-            )
-        except Exception:
-            _log_exception("Unable to reserve space for inspector")
+        if self.host_main_child is not None:
+            try:
+                self.host_main_child.set_margin_end(
+                    self.host_original_margin_end + extra
+                )
+            except Exception:
+                _log_exception("Unable to reserve space for inspector")
+
+        # The location strip lives above the file view in a different
+        # container, so shrinking the view alone left the strip at full window
+        # width - and its right-aligned path label ran underneath the
+        # inspector, printing the path and the file name on top of each other.
+        strip = getattr(self, "location_strip", None)
+        if strip is not None:
+            try:
+                strip.set_margin_end(extra)
+            except Exception:
+                pass
 
     def _detach_from_old_host(self):
         if self.host_overlay is None:
@@ -2895,6 +2905,7 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
             except Exception:
                 pass
 
+            controller._reserve_space()
             strip.show_all()
 
             _log(
