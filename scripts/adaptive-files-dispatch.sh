@@ -53,6 +53,16 @@ prepare_adaptive_environment() {
     if [[ -d "$PREFIX/share/themes/AdaptiveFiles" ]]; then
         export GTK_THEME="AdaptiveFiles"
     fi
+
+    # The inspector extension finds its stylesheet through these. The retired
+    # v1.6 launcher exported them; when it was deleted nothing replaced it, so
+    # the extension logged "Preview CSS not found: None" and the panel rendered
+    # with no background at all - which is why file icons showed through it.
+    export ADAPTIVE_FILES_PREFIX="$PREFIX"
+
+    if [[ -f "$PREFIX/share/adaptive-files/preview.css" ]]; then
+        export ADAPTIVE_FILES_PREVIEW_CSS="$PREFIX/share/adaptive-files/preview.css"
+    fi
 }
 
 if in_adaptive_session && [[ -x "$FORK" ]]; then
