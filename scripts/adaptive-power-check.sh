@@ -43,9 +43,16 @@ if command -v xset >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
         pass "DPMS enabled"
     fi
 
-    standby="$(xset q | awk '/Standby:/ {print $2}')"
-    if [[ "${standby:-0}" == "0" ]]; then
-        fail "DPMS standby timeout is 0 - the panel never powers down"
+    # X's own DPMS timers are deliberately left at 0 under GNOME: gsd-power
+    # watches the idle monitor and switches DPMS modes itself, so a zero here
+    # is normal and only means something if gsd-power is not the one blanking.
+    standby="$(xset q | awk '/Standby:/ {print $2}' | head -1)"
+
+    if pgrep -x gsd-power >/dev/null 2>&1; then
+        pass "blanking owned by gsd-power (X standby: ${standby:-0}s)"
+    elif [[ "${standby:-0}" == "0" ]]; then
+        fail "gsd-power is not running and the X DPMS standby timeout is 0 -" \
+             "nothing will power the panel down"
     else
         pass "DPMS standby: ${standby}s"
     fi

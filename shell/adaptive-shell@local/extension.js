@@ -32,6 +32,9 @@ class AdaptiveShellV16 {
         // existing verification/recovery scripts remain compatible while the
         // actor itself is now a centered horizontal dock.
         this._rail = null;
+        // One dock per monitor, so which screen has a dock never depends on
+        // where the focused window happens to be.
+        this._docks = [];
         // Adaptive bottom dock stability v2.1.
         // The transparent dock chrome owns the bottom work-area strut.
         this._dockChrome = null;
@@ -105,9 +108,11 @@ class AdaptiveShellV16 {
         this._dock26MonitorsChangedId = 0;
         this._dock26WindowEnteredMonitorId = 0;
         this._dock26RevealTimerId = 0;
-        this._dock26HideTimerId = 0;
         this._dock26RelayoutId = 0;
-        this._dock26EdgeRevealed = false;
+        // Belt and braces. A settle check that never settles must not be able
+        // to re-arm this idle forever: that spins the shell's main loop until
+        // GC is starved and the session stops responding.
+        this._dock26SettlePasses = 0;
         this._dock26HideOnMaximized = true;
         this._dock26ReservedHeight = 70;
         this._dock26SurfaceHeight = 54;
@@ -225,10 +230,10 @@ class AdaptiveShellV16 {
     }
 
     _lockHideDesktopChrome(hidden) {
-        for (const actor of [
-            this._rail,
-            this._dockChrome,
-        ]) {
+        const actors = (this._docks || []).map(dock => dock.rail);
+        actors.push(this._dockChrome);
+
+        for (const actor of actors) {
             if (!actor)
                 continue;
 
@@ -924,11 +929,7 @@ class AdaptiveShellV16 {
         this._destroyDockMenus();
         this._hideTooltip();
 
-        if (this._rail) {
-            Main.layoutManager.removeChrome(this._rail);
-            this._rail.destroy();
-            this._rail = null;
-        }
+        this._destroyDocks();
 
         if (this._dockChrome) {
             Main.layoutManager.removeChrome(this._dockChrome);
@@ -1072,54 +1073,8 @@ class AdaptiveShellV16 {
             style_class: 'adaptive-dock-reservation',
         });
 
-        this._rail = new St.BoxLayout({
-            vertical: false,
-            reactive: true,
-            track_hover: true,
-            style_class: 'adaptive-rail',
-        });
-
-        this._dockMenuManager = new PopupMenu.PopupMenuManager({
-            actor: this._rail,
-        });
-
-        this._dockAppsBox = new St.BoxLayout({
-            vertical: false,
-            reactive: true,
-            style_class: 'adaptive-window-list',
-        });
-        this._rail.add_child(this._dockAppsBox);
-
-        const separator = new St.Widget({
-            style_class: 'adaptive-rail-rule',
-        });
-        this._rail.add_child(separator);
-
-        this._showAppsButton = this._utilityDockButton(
-            'apps.svg',
-            'Applications',
-            () => this._showApplications()
-        );
-        this._showAppsButton.add_style_class_name(
-            'adaptive-show-apps-button'
-        );
-        this._rail.add_child(this._showAppsButton);
-
-        this._rail.connect(
-            'enter-event',
-            () => {
-                this._dock26CancelHide();
-                return Clutter.EVENT_PROPAGATE;
-            }
-        );
-
-        this._rail.connect(
-            'leave-event',
-            () => {
-                this._dock26ScheduleHide();
-                return Clutter.EVENT_PROPAGATE;
-            }
-        );
+        this._docks = [];
+        this._buildDocks();
 
         Main.layoutManager.addChrome(
             this._dockChrome,
@@ -1129,11 +1084,142 @@ class AdaptiveShellV16 {
             }
         );
 
-        Main.layoutManager.addChrome(
-            this._rail,
-            {
-                affectsStruts: false,
-                trackFullscreen: false,
+    }
+
+    // Every monitor gets its own dock.
+    //
+    // With one dock, something has to decide which screen it belongs on, and
+    // that was the focused window - so the monitor you were not working on had
+    // no dock at all. Per-monitor docks remove the question entirely: each one
+    // reveals on its own bottom edge and knows nothing about the others.
+    _buildDocks() {
+        this._destroyDocks();
+
+        const monitors = Main.layoutManager.monitors || [];
+        monitors.forEach((_monitor, index) => {
+            this._docks.push(this._buildDockSurface(index));
+        });
+
+        log(`[Adaptive Shell] docks: ${this._docks.length} for `
+            + `${monitors.length} monitor(s)`);
+    }
+
+    _buildDockSurface(index) {
+        const rail = new St.BoxLayout({
+            vertical: false,
+            reactive: true,
+            track_hover: true,
+            style_class: 'adaptive-rail',
+        });
+
+        const appsBox = new St.BoxLayout({
+            vertical: false,
+            reactive: true,
+            style_class: 'adaptive-window-list',
+        });
+        rail.add_child(appsBox);
+
+        rail.add_child(new St.Widget({ style_class: 'adaptive-rail-rule' }));
+
+        const showApps = this._utilityDockButton(
+            'apps.svg',
+            'Applications',
+            () => this._showApplications()
+        );
+        showApps.add_style_class_name('adaptive-show-apps-button');
+        rail.add_child(showApps);
+
+        const dock = { index, rail, appsBox, showApps, revealed: false, hideId: 0 };
+
+        rail.connect('enter-event', () => {
+            this._dockCancelHide(dock);
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        rail.connect('leave-event', () => {
+            this._dockScheduleHide(dock);
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        Main.layoutManager.addChrome(rail, {
+            affectsStruts: false,
+            trackFullscreen: false,
+        });
+
+        // Existing code and the verification scripts expect a _rail.
+        if (index === 0) {
+            this._rail = rail;
+            this._dockAppsBox = appsBox;
+            this._showAppsButton = showApps;
+
+            if (!this._dockMenuManager) {
+                this._dockMenuManager =
+                    new PopupMenu.PopupMenuManager({ actor: rail });
+            }
+        }
+
+        return dock;
+    }
+
+    _destroyDocks() {
+        for (const dock of this._docks || []) {
+            this._dockCancelHide(dock);
+
+            try {
+                Main.layoutManager.removeChrome(dock.rail);
+                dock.rail.destroy();
+            } catch (e) {
+            }
+        }
+
+        this._docks = [];
+        this._rail = null;
+        this._dockAppsBox = null;
+        this._showAppsButton = null;
+
+        // These all point at actors that have just been destroyed.
+        this._destroyDockMenus();
+        this._dockMenuManager = null;
+        this._dockButtons = [];
+    }
+
+    _dockForMonitor(index) {
+        return (this._docks || []).find(d => d.index === index) || null;
+    }
+
+    _dockCancelHide(dock) {
+        if (dock && dock.hideId) {
+            GLib.Source.remove(dock.hideId);
+            dock.hideId = 0;
+        }
+    }
+
+    _dockScheduleHide(dock) {
+        if (!dock)
+            return;
+
+        this._dockCancelHide(dock);
+
+        // A dock that is not hiding for any other reason stays put.
+        if (!this._dock26MonitorNeedsHide(dock.index))
+            return;
+
+        dock.hideId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            this._dock26HideDelayMs,
+            () => {
+                dock.hideId = 0;
+
+                const edge = this._dock26EdgeForMonitor(dock.index);
+                const held = (dock.rail && dock.rail.hover)
+                    || (edge && edge.hover);
+
+                if (!held) {
+                    dock.revealed = false;
+                    this._dock26Layout();
+                }
+
+                return GLib.SOURCE_REMOVE;
             }
         );
     }
@@ -1269,7 +1355,13 @@ class AdaptiveShellV16 {
         const [, naturalWidth] = this._tooltip.get_preferred_width(-1);
         const [, naturalHeight] = this._tooltip.get_preferred_height(naturalWidth);
 
-        const monitor = Main.layoutManager.primaryMonitor;
+        // Clamp to the monitor the button is actually on. Clamping to the
+        // primary one dragged tooltips for a secondary monitor's dock back
+        // onto the primary screen.
+        const monitor =
+            Main.layoutManager.findMonitorForActor(actor) ||
+            Main.layoutManager.primaryMonitor;
+
         let targetX = Math.round(x + actor.get_width() / 2 - naturalWidth / 2);
         const targetY = Math.round(y - naturalHeight - 12);
 
@@ -1330,12 +1422,14 @@ class AdaptiveShellV16 {
     }
 
     _refreshWindowList() {
-        if (!this._dockAppsBox)
+        if (!this._docks || !this._docks.length)
             return;
 
+        // Reset once, not once per dock: doing this inside the loop tore down
+        // the menus and signal connections the previous monitor's dock had
+        // just made.
         this._disconnectWindowSignals();
         this._destroyDockMenus();
-        this._dockAppsBox.destroy_all_children();
         this._dockButtons = [];
 
         const favorites = this._favorites || AppFavorites.getAppFavorites();
@@ -1346,19 +1440,16 @@ class AdaptiveShellV16 {
             .filter(app => !favoriteIds.has(app.get_id()))
             .sort((a, b) => this._appRecentTime(b) - this._appRecentTime(a));
 
-        const apps = favoriteApps.concat(runningApps);
+        const entries = [];
 
-        for (const app of apps) {
+        for (const app of favoriteApps.concat(runningApps)) {
             const windows = this._appWindows(app);
             const favorite = favorites.isFavorite(app.get_id());
 
             if (!favorite && windows.length === 0)
                 continue;
 
-            const button = this._appDockButton(app, windows, favorite);
-            button._adaptiveDockApp = app;
-            this._dockAppsBox.add_child(button);
-            this._dockButtons.push(button);
+            entries.push({ app, windows, favorite });
 
             for (const window of windows) {
                 try {
@@ -1375,11 +1466,34 @@ class AdaptiveShellV16 {
             }
         }
 
-        if (this._showAppsButton && !this._dockButtons.includes(this._showAppsButton))
-            this._dockButtons.push(this._showAppsButton);
+        for (const dock of this._docks)
+            this._fillDock(dock, entries);
 
         this._syncDockActive();
         this._layoutRail();
+    }
+
+    // Every dock shows the same apps, but with its own button actors - an
+    // actor has one parent, so a button cannot be on two monitors at once.
+    _fillDock(dock, entries) {
+        if (!dock || !dock.appsBox)
+            return;
+
+        dock.appsBox.destroy_all_children();
+
+        for (const entry of entries) {
+            const button = this._appDockButton(
+                entry.app,
+                entry.windows,
+                entry.favorite
+            );
+            button._adaptiveDockApp = entry.app;
+            dock.appsBox.add_child(button);
+            this._dockButtons.push(button);
+        }
+
+        if (dock.showApps)
+            this._dockButtons.push(dock.showApps);
     }
 
     _appWindows(app) {
@@ -1795,7 +1909,8 @@ class AdaptiveShellV16 {
             Main.overview.visible &&
             this._appsShowing()
         );
-        this._setActorActive(this._showAppsButton, appsUp);
+        for (const dock of this._docks || [])
+            this._setActorActive(dock.showApps, appsUp);
     }
 
     _dock26MonitorCount() {
@@ -1908,7 +2023,7 @@ class AdaptiveShellV16 {
         // Indexes are renumbered when a display is plugged or unplugged, so a
         // remembered target can now point at a different screen - or at none.
         // Re-resolve from the pointer's own monitor instead of trusting it.
-        this._dock26EdgeRevealed = false;
+        this._dock26ClearReveals();
         this._dock26TargetMonitor = -1;
 
         const monitors = Main.layoutManager.monitors || [];
@@ -2113,14 +2228,15 @@ class AdaptiveShellV16 {
         return false;
     }
 
-    _dock26RaiseAboveWindows() {
-        if (!this._rail)
+    _dock26RaiseAboveWindows(dock) {
+        const rail = dock && dock.rail;
+        if (!rail)
             return;
 
         try {
-            const parent = this._rail.get_parent();
+            const parent = rail.get_parent();
             if (parent)
-                parent.set_child_above_sibling(this._rail, null);
+                parent.set_child_above_sibling(rail, null);
         } catch (e) {
         }
     }
@@ -2145,36 +2261,11 @@ class AdaptiveShellV16 {
         );
     }
 
-    _dock26SyncTargetFromFocus(forceMove = true) {
-        const window = global.display.get_focus_window();
-        const index = this._dock26WindowMonitor(window);
-
-        // While the pointer is holding the dock open on a monitor, focus is
-        // not allowed to move it or close it. Clicking something on a second
-        // screen changes the focus window, and this used to drag the dock back
-        // to whichever monitor that window was on and drop the reveal - so the
-        // dock either never appeared on the other screen or flashed and went.
-        // The hot edge's own leave-event is what ends a reveal.
-        if (this._dock26EdgeRevealed && this._dock26PointerOnAnyEdge()) {
-            this._dock26WatchFocusWindow();
-            return;
-        }
-
-        if (
-            !forceMove &&
-            this._dock26TargetMonitor >= 0
-        ) {
-            this._dock26WatchFocusWindow();
-            return;
-        }
-
-        if (
-            Number.isInteger(index) &&
-            index >= 0
-        )
-            this._dock26TargetMonitor = index;
-
-        this._dock26EdgeRevealed = false;
+    // Focus used to move the dock to the focused window's monitor, which is
+    // exactly why the other screen had none. Every monitor has its own dock
+    // now, so focus only affects whether a dock should hide behind a
+    // fullscreen or maximized window on its own monitor.
+    _dock26SyncTargetFromFocus(_forceMove = true) {
         this._dock26WatchFocusWindow();
         this._dock26SyncVisibility();
     }
@@ -2205,12 +2296,7 @@ class AdaptiveShellV16 {
 
         this._dock26FocusWindow = window;
 
-        const changed = () => {
-            this._dock26TargetMonitor =
-                this._dock26WindowMonitor(window);
-            this._dock26EdgeRevealed = false;
-            this._dock26SyncVisibility();
-        };
+        const changed = () => this._dock26SyncVisibility();
 
         for (const signal of [
             'notify::maximized-horizontally',
@@ -2236,26 +2322,37 @@ class AdaptiveShellV16 {
     }
 
     _dock26CancelHide() {
-        if (!this._dock26HideTimerId)
-            return;
+        for (const dock of this._docks || [])
+            this._dockCancelHide(dock);
+    }
 
-        GLib.Source.remove(this._dock26HideTimerId);
-        this._dock26HideTimerId = 0;
+    // Nothing is being deliberately reached for any more, on any screen.
+    _dock26ClearReveals() {
+        for (const dock of this._docks || [])
+            dock.revealed = false;
     }
 
     _dock26OnEdgeEnter(index) {
-        this._dock26CancelHide();
+        const dock = this._dockForMonitor(index);
+
+        log(`[Adaptive Shell] edge enter monitor ${index}, `
+            + `dock ${dock ? 'found' : 'MISSING'}`);
+
+        if (!dock)
+            return;
+
+        this._dockCancelHide(dock);
         this._dock26CancelReveal();
 
         this._dock26TargetMonitor = index;
 
         if (!this._dock26Locked()) {
-            this._dock26EdgeRevealed = true;
+            dock.revealed = true;
             this._dock26Layout();
             return;
         }
 
-        this._dock26EdgeRevealed = false;
+        dock.revealed = false;
         this._dock26Layout();
 
         this._dock26RevealTimerId =
@@ -2271,11 +2368,9 @@ class AdaptiveShellV16 {
                     if (!edge || !edge.hover)
                         return GLib.SOURCE_REMOVE;
 
-                    this._dock26TargetMonitor = index;
-
                     // Never over a locked screen; everywhere else the edge
                     // reveal is honoured, fullscreen included.
-                    this._dock26EdgeRevealed = !this._dock26Locked();
+                    dock.revealed = !this._dock26Locked();
 
                     this._dock26Layout();
 
@@ -2284,57 +2379,26 @@ class AdaptiveShellV16 {
             );
     }
 
-    _dock26ScheduleHide(
-        index = this._dock26TargetMonitor
-    ) {
-        this._dock26CancelHide();
-
-        if (!this._dock26MonitorNeedsHide(index))
-            return;
-
-        this._dock26HideTimerId =
-            GLib.timeout_add(
-                GLib.PRIORITY_DEFAULT,
-                this._dock26HideDelayMs,
-                () => {
-                    this._dock26HideTimerId = 0;
-
-                    // Any edge, not just the one being left. Dragging along
-                    // the bottom from one screen to the next fires leave for
-                    // the old edge after enter for the new one, so checking
-                    // only the old edge let this hide cancel the reveal that
-                    // had just started on the other monitor - the dock came up
-                    // on the second screen and vanished a third of a second
-                    // later.
-                    if (
-                        (this._rail && this._rail.hover) ||
-                        this._dock26PointerOnAnyEdge()
-                    )
-                        return GLib.SOURCE_REMOVE;
-
-                    this._dock26EdgeRevealed = false;
-                    this._dock26Layout();
-
-                    return GLib.SOURCE_REMOVE;
-                }
-            );
+    _dock26ScheduleHide(index) {
+        this._dockScheduleHide(this._dockForMonitor(index));
     }
 
-    _dock26ShowDock(animated) {
-        if (!this._rail)
+    _dock26ShowDock(dock, animated) {
+        const rail = dock && dock.rail;
+        if (!rail)
             return;
 
-        this._rail.reactive = true;
-        this._rail.show();
-        this._rail.remove_all_transitions();
+        rail.reactive = true;
+        rail.show();
+        rail.remove_all_transitions();
 
         if (!animated) {
-            this._rail.opacity = 255;
-            this._rail.translation_y = 0;
+            rail.opacity = 255;
+            rail.translation_y = 0;
             return;
         }
 
-        this._rail.ease({
+        rail.ease({
             opacity: 255,
             translation_y: 0,
             duration: this._dock26RevealDurationMs,
@@ -2342,8 +2406,9 @@ class AdaptiveShellV16 {
         });
     }
 
-    _dock26HideDock(animated) {
-        if (!this._rail)
+    _dock26HideDock(dock, animated) {
+        const rail = dock && dock.rail;
+        if (!rail)
             return;
 
         // The pointer can still be over an icon when the dock slides away, and
@@ -2351,20 +2416,20 @@ class AdaptiveShellV16 {
         // under it.
         this._hideTooltip();
 
-        this._rail.reactive = false;
-        this._rail.remove_all_transitions();
+        rail.reactive = false;
+        rail.remove_all_transitions();
 
         const offset =
             this._dock26SurfaceHeight +
             this._dock26BottomGap + 8;
 
         if (!animated) {
-            this._rail.opacity = 0;
-            this._rail.translation_y = offset;
+            rail.opacity = 0;
+            rail.translation_y = offset;
             return;
         }
 
-        this._rail.ease({
+        rail.ease({
             opacity: 0,
             translation_y: offset,
             duration: this._dock26HideDurationMs,
@@ -2373,11 +2438,11 @@ class AdaptiveShellV16 {
     }
 
     // The dock should be exactly as wide as what it shows.
-    _dock26ContentWidth() {
-        if (!this._rail)
+    _dock26ContentWidth(rail = this._rail) {
+        if (!rail)
             return 0;
 
-        const children = this._rail
+        const children = rail
             .get_children()
             .filter(child => child.visible);
 
@@ -2404,7 +2469,7 @@ class AdaptiveShellV16 {
         let padding = 0;
 
         try {
-            const node = this._rail.get_theme_node();
+            const node = rail.get_theme_node();
             spacing = node.get_length('spacing');
             padding =
                 node.get_horizontal_padding() +
@@ -2423,22 +2488,57 @@ class AdaptiveShellV16 {
     }
 
     _dock26Layout() {
-        if (!this._rail || !this._dockChrome)
+        for (const dock of this._docks || [])
+            this._dock26LayoutOne(dock);
+
+        this._dock26LayoutReservation();
+        this._dock26QueueRelayout();
+        this._dock26UpdateRegions();
+    }
+
+    // The 1px strut sits on the primary monitor. It never grows: an
+    // auto-hiding dock is an overlay, and a strut that toggled between 70px
+    // and 1px re-ran the work-area calculation and visibly resized every
+    // maximized window on the screen.
+    _dock26LayoutReservation() {
+        if (!this._dockChrome)
             return;
 
-        this._dock26EnsureTargetMonitor();
-
-        const index = this._dock26TargetMonitor;
-        const monitor = this._dock26Monitor(index);
+        const monitor = this._dock26Monitor(
+            this._dock26PrimaryMonitorIndex()
+        );
         if (!monitor)
             return;
+
+        this._dockChrome.set_position(
+            monitor.x,
+            monitor.y + monitor.height - 1
+        );
+        this._dockChrome.set_size(monitor.width, 1);
+    }
+
+    _dock26LayoutOne(dock) {
+        if (!dock || !dock.rail)
+            return;
+
+        const index = dock.index;
+
+        // Deliberately not _dock26Monitor(), which falls back to the primary
+        // monitor for an unknown index. Between a display being unplugged and
+        // the docks being rebuilt that would stack two docks on one screen.
+        const monitor = (Main.layoutManager.monitors || [])[index];
+        if (!monitor) {
+            dock.rail.hide();
+            return;
+        }
 
         // Width is summed from the children rather than taken from
         // get_preferred_width(). Some child over-claimed, so the rail was
         // allocated ~540px wider than its icons; the box was centred correctly
         // but the icons packed against its right edge, which reads as a dock
         // sitting well right of centre.
-        const naturalWidth = this._dock26ContentWidth();
+        const naturalWidth = this._dock26ContentWidth(dock.rail);
+        dock.contentWidth = naturalWidth;
 
         const width = Math.max(
             100,
@@ -2468,75 +2568,93 @@ class AdaptiveShellV16 {
             this._dock26SurfaceHeight -
             this._dock26BottomGap;
 
-        this._rail.set_position(x, y);
-        this._rail.set_size(
+        // A 1024px-wide monitor cannot fit the whole dock. Clip only in that
+        // case, so the overflow stops at the screen edge instead of painting
+        // across onto the neighbouring monitor - and so the dock's shadow is
+        // left intact everywhere it does fit.
+        dock.rail.clip_to_allocation = naturalWidth > width;
+
+        dock.rail.set_position(x, y);
+        dock.rail.set_size(
             width,
             this._dock26SurfaceHeight
         );
 
+        // Logged on change only, so a misplaced dock can be diagnosed from the
+        // journal without a running Looking Glass.
+        const placement = `${width}x${this._dock26SurfaceHeight}+${x}+${y}`;
+        if (dock.placement !== placement) {
+            dock.placement = placement;
+            log(`[Adaptive Shell] dock monitor ${index}: ${placement} `
+                + `(monitor ${monitor.width}x${monitor.height}`
+                + `+${monitor.x}+${monitor.y})`);
+        }
+
         const hidden =
             this._dock26MonitorNeedsHide(index);
-
-        // The reserved strip never changes size.
-        //
-        // It used to grow to the dock's height when the dock showed and shrink
-        // to 1px when it hid, which re-ran the work-area calculation and
-        // resized every maximized window on the monitor. Opening a menu or a
-        // terminal therefore made the window visibly jump, snap shorter, and
-        // snap back - the flicker in the screencast. An auto-hiding dock is an
-        // overlay: it reserves nothing and windows keep the full screen.
-        this._dockChrome.set_position(
-            monitor.x,
-            monitor.y + monitor.height - 1
-        );
-        this._dockChrome.set_size(
-            monitor.width,
-            1
-        );
 
         if (hidden && this._dock26Locked()) {
             // Locked is the only absolute: nothing of the desktop goes on top
             // of the lock screen, hot edge included.
-            this._dock26EdgeRevealed = false;
-            this._dock26HideDock(true);
+            dock.revealed = false;
+            this._dock26HideDock(dock, true);
         } else if (hidden) {
             // Fullscreen suppresses the dock appearing *by itself*, which was
             // the original complaint, but reaching for the bottom edge is a
             // deliberate request and still works.
-            if (this._dock26EdgeRevealed) {
-                this._dock26ShowDock(true);
-                this._dock26RaiseAboveWindows();
+            if (dock.revealed) {
+                this._dock26ShowDock(dock, true);
+                this._dock26RaiseAboveWindows(dock);
             } else {
-                this._dock26HideDock(true);
+                this._dock26HideDock(dock, true);
             }
         } else {
-            this._dock26EdgeRevealed = false;
-            this._dock26ShowDock(false);
+            dock.revealed = false;
+            this._dock26ShowDock(dock, false);
         }
+    }
 
-        // Icons can finish allocating after this ran, leaving the dock centred
-        // on a stale width. Re-check once on idle and correct if it moved.
+    // Icons can finish allocating after the layout ran, leaving a dock centred
+    // on a stale width. Re-check once on idle and correct if it moved.
+    _dock26QueueRelayout() {
         if (!this._dock26RelayoutId) {
             this._dock26RelayoutId = GLib.idle_add(
                 GLib.PRIORITY_DEFAULT_IDLE,
                 () => {
                     this._dock26RelayoutId = 0;
 
-                    if (!this._rail)
-                        return GLib.SOURCE_REMOVE;
+                    // Compare against the width the layout was computed
+                    // from, not against the dock's allocated width. The
+                    // allocated width is clamped to the monitor and to a
+                    // minimum, so on a narrow screen it legitimately differs
+                    // from the content width forever - and comparing those two
+                    // made this idle re-run the layout, re-arm itself, and spin
+                    // the shell's main loop until GC was starved out.
+                    const stale = (this._docks || []).some(dock => {
+                        if (!dock.rail)
+                            return false;
 
-                    const [, settled] = this._rail.get_preferred_width(
-                        this._dock26SurfaceHeight
-                    );
+                        const settled =
+                            this._dock26ContentWidth(dock.rail);
 
-                    if (Math.abs(Math.ceil(settled) - this._rail.width) > 1)
+                        return settled > 0 &&
+                            Math.abs(settled - (dock.contentWidth || 0)) > 1;
+                    });
+
+                    if (stale && this._dock26SettlePasses < 4) {
+                        this._dock26SettlePasses += 1;
                         this._dock26Layout();
+                    } else {
+                        this._dock26SettlePasses = 0;
+                    }
 
                     return GLib.SOURCE_REMOVE;
                 }
             );
         }
+    }
 
+    _dock26UpdateRegions() {
         try {
             if (
                 typeof Main.layoutManager
@@ -2565,7 +2683,7 @@ class AdaptiveShellV16 {
                     global.display.connect(
                         'in-fullscreen-changed',
                         () => {
-                            this._dock26EdgeRevealed = false;
+                            this._dock26ClearReveals();
                             this._dock26SyncVisibility();
                         }
                     );
@@ -2598,7 +2716,6 @@ class AdaptiveShellV16 {
                             ) {
                                 this._dock26TargetMonitor =
                                     monitorIndex;
-                                this._dock26EdgeRevealed = false;
                                 this._dock26SyncVisibility();
                             }
                         }
@@ -2611,7 +2728,14 @@ class AdaptiveShellV16 {
             this._dock26MonitorsChangedId =
                 Main.layoutManager.connect(
                     'monitors-changed',
-                    () => this._dock26RebuildHotEdges()
+                    () => {
+                        // A new display needs its own dock, and a removed one
+                        // leaves a dock pointing at a monitor index that no
+                        // longer exists.
+                        this._buildDocks();
+                        this._refreshWindowList();
+                        this._dock26RebuildHotEdges();
+                    }
                 );
         }
 

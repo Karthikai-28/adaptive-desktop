@@ -133,20 +133,26 @@ PY
   fi
 
   echo
-  echo "== System Center =="
+  echo "== System controls =="
+
+  # These used to be a bespoke System Center on the rail. It is deliberately
+  # gone: GNOME's own top-right menu owns network, bluetooth, audio and power,
+  # because reimplementing them meant maintaining a worse copy of working code.
+  # Assert the reimplementation has not crept back rather than asserting on it.
   for pattern in \
     "PopupSubMenuMenuItem\\('Audio Output'\\)" \
-    "activateRestart" \
-    "activatePowerOff" \
-    "activateSuspend" \
     "_refreshNetworkStatus" \
     "_refreshBluetoothStatus" \
-    "_refreshPowerStatus" \
-    "_refreshPerformanceStatus"
+    "_refreshPowerStatus"
   do
-    has_source "$pattern" "${REPO}/shell/adaptive-shell@local/extension.js"
+    if rg -q "$pattern" "${REPO}/shell/adaptive-shell@local/extension.js"; then
+      fail "the shell reimplements a system control GNOME already owns: ${pattern}"
+    fi
   done
-  pass "System Center source includes audio output, native power actions, and status refreshers"
+  pass "System controls are GNOME's own; the shell does not reimplement them"
+
+  has_source "_restoreGNOMEClock" "${REPO}/shell/adaptive-shell@local/extension.js"
+  pass "GNOME clock and calendar are restored into the panel"
   verify "Audio output switching needs a live multi-device check"
   verify "Restart and shut down confirmations need a live click-through check"
 

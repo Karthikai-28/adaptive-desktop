@@ -69,6 +69,12 @@ deliberately, on mains.
 Reports anything that would keep the machine awake, and fails if a rule above
 is broken.
 
+One thing it deliberately does not require: a non-zero X DPMS timeout. GNOME
+leaves `xset`'s own standby/suspend/off timers at 0 and blanks from `gsd-power`
+watching the idle monitor, so a zero there is normal. What matters is that DPMS
+is *enabled* and that something owns the blanking - the check fails only if
+neither is true.
+
 ## What went wrong, for the record
 
 `adaptive-aod.sh on` set `idle-delay` to 0, both `sleep-inactive-*-type` to
