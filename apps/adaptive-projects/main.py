@@ -1131,8 +1131,10 @@ class Projects(Gtk.ApplicationWindow):
                 commits.append((int(parts[0]), parts[1], parts[2]))
 
         files = [f for f in git(path, "ls-files").splitlines() if f]
-        branches = [b for b in git(path, "branch", "--format=%(refname:short)")
-                    .splitlines() if b]
+        local_branches = [b for b in git(path, "branch", "--format=%(refname:short)").splitlines() if b]
+        remote_branches = [b for b in git(path, "branch", "-r", "--format=%(refname:short)").splitlines() 
+                           if b and not b.endswith("/HEAD")]
+        current_branch = git(path, "branch", "--show-current").strip()
         status = [s for s in git(path, "status", "--porcelain").splitlines() if s]
 
         exts = {}
@@ -1188,7 +1190,10 @@ class Projects(Gtk.ApplicationWindow):
         return {
             "commits": commits,
             "files": files,
-            "branches": branches,
+            "local_branches": local_branches,
+            "remote_branches": remote_branches,
+            "current_branch": current_branch,
+            "branches": local_branches + remote_branches,
             "status": status,
             "exts": sorted(exts.items(), key=lambda kv: -kv[1]),
             "authors": sorted(authors.items(), key=lambda kv: -kv[1]),
@@ -1200,6 +1205,55 @@ class Projects(Gtk.ApplicationWindow):
             "behind": behind,
             "size": size,
         }
+    def _branches_list(self, project, branches, current_branch, is_remote):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+
+        if not branches:
+            empty = Gtk.Label(label="No branches found", xalign=0)
+            empty.add_css_class("commit-when")
+            box.append(empty)
+            return box
+
+        for branch in branches:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+            name = Gtk.Label(label=branch, xalign=0)
+            name.add_css_class("commit-subject")
+            name.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            name.set_hexpand(True)
+            row.append(name)
+
+            if not is_remote and branch == current_branch:
+                active = Gtk.Label(label="ACTIVE")
+                active.add_css_class("chip-active")
+                row.append(active)
+            else:
+                button = Gtk.Button(label="Switch")
+                button.add_css_class("action")
+                button.connect("clicked", lambda _b, b=branch, r=is_remote: self._switch_branch(project, b, r))
+                row.append(button)
+
+            box.append(row)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(100)
+        scroll.set_max_content_height(250)
+        scroll.set_child(box)
+
+        return scroll
+
+    def _switch_branch(self, project, branch, is_remote):
+        path = project["path"]
+        if is_remote and "/" in branch:
+            local_name = branch.split('/', 1)[1]
+            git(path, "checkout", local_name)
+            if git(path, "branch", "--show-current").strip() != local_name:
+                git(path, "checkout", branch)
+        else:
+            git(path, "checkout", branch)
+            
+        self._show_detail(project)
 
     def _show_detail(self, project):
         child = self.detail_holder.get_first_child()
@@ -1284,6 +1338,12 @@ class Projects(Gtk.ApplicationWindow):
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         body.add_css_class("detail-body")
+
+        body.append(self._section("BRANCHES"))
+        body.append(self._columns(
+            self._panel("LOCAL BRANCHES", self._branches_list(project, data["local_branches"], data["current_branch"], is_remote=False)),
+            self._panel("REMOTE BRANCHES", self._branches_list(project, data["remote_branches"], data["current_branch"], is_remote=True)),
+        ))
 
         # Time series get the full width - they are read left to right across
         # 26 weeks or 24 hours. Everything else pairs up into two columns.
