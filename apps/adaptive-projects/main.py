@@ -282,11 +282,10 @@ class Projects(Gtk.ApplicationWindow):
         name.set_hexpand(True)
         top.append(name)
 
-        fav_btn = Gtk.Button(label="★" if project["favorite"] else "✩")
-        fav_btn.add_css_class("flat")
-        # Prevent the click from activating the card if possible, though Gtk4 handles nested buttons reasonably well
-        fav_btn.connect("clicked", lambda b, p=project: self._toggle_favorite(p, b))
-        top.append(fav_btn)
+        if project["favorite"]:
+            star = Gtk.Label(label="★")
+            star.add_css_class("chip-active") # Using active styling for the star
+            top.append(star)
 
         if project["active"]:
             here = Gtk.Label(label="ACTIVE")
@@ -345,7 +344,7 @@ class Projects(Gtk.ApplicationWindow):
         except Exception:
             pass
         
-        button.set_label("★" if is_fav else "✩")
+        button.set_label("★ Unstar" if is_fav else "✩ Star")
         
         # Resort and re-render
         self.projects.sort(key=lambda p: (not p["favorite"], -p["at"]))
@@ -1386,6 +1385,13 @@ class Projects(Gtk.ApplicationWindow):
             btn.add_css_class("action")
             btn.connect("clicked", handler)
             return btn
+
+        # Favorite Toggle Button
+        fav_label = "★ Unstar" if project["favorite"] else "✩ Star"
+        fav_toggle = Gtk.Button(label=fav_label)
+        fav_toggle.add_css_class("action")
+        fav_toggle.connect("clicked", lambda b, p=project: self._toggle_favorite(p, b))
+        bar.append(fav_toggle)
 
         bar.append(make_head_btn("antigravity", "Open in Antigravity", lambda *_: self._open_antigravity(project)))
         bar.append(make_head_btn("/snap/code/current/meta/gui/vscode.png", "Open in VS Code", lambda *_: self._open_vscode(project), True))
