@@ -2,18 +2,18 @@
 
 <defs>
   <linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#F26522"/>
-    <stop offset="1" stop-color="#FF9147"/>
+    <stop offset="0" stop-color="#78A9FF"/>
+    <stop offset="1" stop-color="#66E0FF"/>
   </linearGradient>
   <linearGradient id="g2" x1="10" y1="54" x2="54" y2="10" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#212121"/>
-    <stop offset="1" stop-color="#404040"/>
+    <stop offset="0" stop-color="#162233"/>
+    <stop offset="1" stop-color="#263D5B"/>
   </linearGradient>
 </defs>
 
 
 <path d="M10 31.5 32 12l22 19.5" fill="none" stroke="url(#g)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M16 28.5V52h32V28.5" fill="url(#g2)" stroke="#F26522" stroke-width="1.6"/>
-<rect x="27" y="36" width="10" height="16" rx="2" fill="#F26522" opacity=".5"/>
+<path d="M16 28.5V52h32V28.5" fill="url(#g2)" stroke="#78A9FF" stroke-width="1.6"/>
+<rect x="27" y="36" width="10" height="16" rx="2" fill="#78A9FF" opacity=".5"/>
 
 </svg>

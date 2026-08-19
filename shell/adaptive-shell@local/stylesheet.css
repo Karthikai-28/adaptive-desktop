@@ -1,8 +1,8 @@
 /* Adaptive Desktop Shell v1.6 — GNOME Shell 42 */
 
 #panel {
-    background-color: rgba(8, 8, 8, 0.98);
-    border-bottom: 1px solid rgba(242, 101, 34, 0.10);
+    background-color: rgba(7, 16, 26, 0.98);
+    border-bottom: 1px solid rgba(120, 169, 255, 0.10);
     box-shadow: none;
 }
 
@@ -13,15 +13,15 @@
     margin: 1px 3px;
     padding: 0 11px;
     border-radius: 7px;
-    border: 1px solid rgba(242, 101, 34, 0.09);
-    background-color: rgba(23, 23, 23, 0.64);
-    color: #F5F5F5;
+    border: 1px solid rgba(120, 169, 255, 0.09);
+    background-color: rgba(17, 26, 40, 0.64);
+    color: #F2F6EF;
 }
 
 .adaptive-stock-clock:hover,
 .adaptive-stock-clock:focus {
-    border-color: rgba(242, 101, 34, 0.19);
-    background-color: rgba(50, 50, 50, 0.82);
+    border-color: rgba(120, 169, 255, 0.19);
+    background-color: rgba(30, 47, 70, 0.82);
 }
 
 /* ---------- interactive bottom dock ---------- */
@@ -41,22 +41,22 @@
     border-radius: 14px;
     border: 1px solid transparent;
     background-color: transparent;
-    color: #BEBEBE;
+    color: #A9BBD3;
 }
 
 .adaptive-dock-button:hover {
-    border-color: rgba(242, 101, 34, 0.16);
-    background-color: rgba(44, 44, 44, 0.86);
+    border-color: rgba(120, 169, 255, 0.16);
+    background-color: rgba(27, 42, 61, 0.86);
 }
 
 .adaptive-dock-button:focus {
-    border-color: rgba(255, 145, 71, 0.34);
-    background-color: rgba(44, 44, 44, 0.90);
+    border-color: rgba(102, 224, 255, 0.34);
+    background-color: rgba(27, 42, 61, 0.90);
 }
 
 .adaptive-dock-button.active {
-    border-color: rgba(255, 145, 71, 0.22);
-    background-color: rgba(242, 101, 34, 0.10);
+    border-color: rgba(102, 224, 255, 0.22);
+    background-color: rgba(120, 169, 255, 0.10);
 }
 
 .adaptive-app-dock-content {
@@ -77,16 +77,16 @@
     width: 4px;
     height: 4px;
     border-radius: 2px;
-    background-color: rgba(142, 142, 142, 0.76);
+    background-color: rgba(150, 164, 184, 0.76);
 }
 
 .adaptive-running-dot.active {
-    background-color: #FF9147;
+    background-color: #66E0FF;
 }
 
 .adaptive-running-count {
     margin-left: 1px;
-    color: #8E8E8E;
+    color: #96A4B8;
     font-size: 8px;
     font-weight: 700;
 }
@@ -96,7 +96,7 @@
     width: 1px;
     height: 38px;
     margin: 9px 2px 7px 3px;
-    background-color: rgba(58, 58, 58, 0.58);
+    background-color: rgba(48, 66, 92, 0.58);
 }
 
 .adaptive-utility-dock-button {
@@ -106,9 +106,9 @@
 .adaptive-tooltip {
     padding: 6px 10px;
     border-radius: 8px;
-    border: 1px solid rgba(58, 58, 58, 0.58);
-    background-color: rgba(23, 23, 23, 0.98);
-    color: #F5F5F5;
+    border: 1px solid rgba(48, 66, 92, 0.58);
+    background-color: rgba(17, 26, 40, 0.98);
+    color: #F2F6EF;
     font-size: 11px;
     font-weight: 600;
     box-shadow: 0 7px 20px rgba(0, 0, 0, 0.38);
@@ -116,25 +116,25 @@
 
 .adaptive-dock-popup .popup-menu-content {
     border-radius: 12px;
-    border: 1px solid rgba(242, 101, 34, 0.14);
-    background-color: rgba(20, 20, 20, 0.98);
+    border: 1px solid rgba(120, 169, 255, 0.14);
+    background-color: rgba(9, 19, 31, 0.98);
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
 }
 
 .adaptive-dock-popup .popup-menu-item {
     min-height: 30px;
     border-radius: 8px;
-    color: #F0F0F0;
+    color: #E8EEF7;
 }
 
 .adaptive-dock-popup .popup-menu-item:focus,
 .adaptive-dock-popup .popup-menu-item:hover {
-    background-color: rgba(242, 101, 34, 0.12);
+    background-color: rgba(120, 169, 255, 0.12);
 }
 
 .adaptive-system-status-value {
     max-width: 150px;
-    color: #8E8E8E;
+    color: #96A4B8;
     font-size: 10px;
 }
 
@@ -159,7 +159,7 @@
 
 /* Calm Adaptive overview background. */
 #overviewGroup {
-    background-color: #0D0D0D;
+    background-color: #08111B;
 }
 
 .overview-controls {
@@ -172,26 +172,26 @@
     min-height: 38px;
     padding: 3px 13px;
     border-radius: 12px;
-    border: 1px solid rgba(242, 101, 34, 0.15);
-    background-color: rgba(29, 29, 29, 0.88);
-    color: #F5F5F5;
+    border: 1px solid rgba(120, 169, 255, 0.15);
+    background-color: rgba(15, 27, 43, 0.88);
+    color: #F2F6EF;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
 }
 
 .search-entry:hover,
 .search-entry:focus {
-    border-color: rgba(255, 145, 71, 0.28);
-    background-color: rgba(38, 38, 38, 0.94);
+    border-color: rgba(102, 224, 255, 0.28);
+    background-color: rgba(21, 36, 55, 0.94);
 }
 
 /* Workspace preview frames */
 .workspace-thumbnail {
     border-radius: 14px;
-    background-color: rgba(23, 23, 23, 0.76);
+    background-color: rgba(17, 26, 40, 0.76);
 }
 
 .workspace-thumbnail-indicator {
-    border: 2px solid rgba(242, 101, 34, 0.92);
+    border: 2px solid rgba(120, 169, 255, 0.92);
     border-radius: 14px;
 }
 
@@ -207,7 +207,7 @@
 
 .app-well-app:hover .overview-icon,
 .grid-search-result:hover .overview-icon {
-    background-color: rgba(242, 101, 34, 0.10);
+    background-color: rgba(120, 169, 255, 0.10);
 }
 
 /* ===== Adaptive Calendar Center v1.6.2 =====
@@ -223,15 +223,15 @@
 .calendar-menu .popup-menu-content {
     padding: 0;
     border-radius: 16px;
-    border: 1px solid rgba(242, 101, 34, 0.14);
-    background-color: rgba(8, 8, 8, 0.985);
+    border: 1px solid rgba(120, 169, 255, 0.14);
+    background-color: rgba(7, 16, 26, 0.985);
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
 }
 
 #calendarArea {
     padding: 10px;
     spacing: 10px;
-    color: #F5F5F5;
+    color: #F2F6EF;
 }
 
 /* ---------------------------------------------------------------
@@ -241,7 +241,7 @@
 .message-list {
     width: 350px;
     padding: 4px 10px 8px 4px;
-    color: #F5F5F5;
+    color: #F2F6EF;
 }
 
 .message-list-sections {
@@ -254,7 +254,7 @@
 
 .message-list-section-title {
     margin: 2px 4px 4px 4px;
-    color: #8E8E8E;
+    color: #96A4B8;
     font-size: 10px;
     font-weight: 700;
 }
@@ -265,16 +265,16 @@
 
 /* Empty state */
 .message-list-placeholder {
-    color: #898989;
+    color: #73869F;
 }
 
 .message-list-placeholder > StIcon {
-    color: #797979;
+    color: #5F7693;
     icon-size: 54px;
 }
 
 .message-list-placeholder > StLabel {
-    color: #9C9C9C;
+    color: #8799B0;
     font-size: 15px;
 }
 
@@ -284,21 +284,21 @@
     margin: 0 2px;
     padding: 10px 12px;
     border-radius: 11px;
-    border: 1px solid rgba(242, 101, 34, 0.09);
-    background-color: rgba(23, 23, 23, 0.88);
+    border: 1px solid rgba(120, 169, 255, 0.09);
+    background-color: rgba(17, 26, 40, 0.88);
     box-shadow: none;
 }
 
 .message:hover,
 .notification-banner:hover {
-    border-color: rgba(242, 101, 34, 0.20);
-    background-color: rgba(41, 41, 41, 0.94);
+    border-color: rgba(120, 169, 255, 0.20);
+    background-color: rgba(24, 38, 58, 0.94);
 }
 
 .message:focus,
 .notification-banner:focus {
-    border-color: rgba(255, 145, 71, 0.28);
-    background-color: rgba(41, 41, 41, 0.96);
+    border-color: rgba(102, 224, 255, 0.28);
+    background-color: rgba(24, 38, 58, 0.96);
 }
 
 .message-content {
@@ -306,18 +306,18 @@
 }
 
 .message-title {
-    color: #F6F6F6;
+    color: #EFF5FC;
     font-size: 12px;
     font-weight: 700;
 }
 
 .message-body {
-    color: #B6B6B6;
+    color: #A5B4C8;
     font-size: 10px;
 }
 
 .message-secondary-bin {
-    color: #949494;
+    color: #7F91A9;
 }
 
 /* Do Not Disturb */
@@ -325,22 +325,22 @@
     margin: 7px 3px 1px 3px;
     padding: 7px 8px;
     border-radius: 10px;
-    border: 1px solid rgba(242, 101, 34, 0.08);
-    background-color: rgba(26, 26, 26, 0.70);
-    color: #E2E2E2;
+    border: 1px solid rgba(120, 169, 255, 0.08);
+    background-color: rgba(13, 25, 40, 0.70);
+    color: #D6E0ED;
 }
 
 .dnd-button:hover {
-    background-color: rgba(41, 41, 41, 0.90);
-    border-color: rgba(242, 101, 34, 0.17);
+    background-color: rgba(24, 38, 58, 0.90);
+    border-color: rgba(120, 169, 255, 0.17);
 }
 
 #calendarArea .toggle-switch {
-    background-color: rgba(58, 58, 58, 0.82);
+    background-color: rgba(48, 66, 92, 0.82);
 }
 
 #calendarArea .toggle-switch:checked {
-    background-color: #F26522;
+    background-color: #78A9FF;
 }
 
 /* ---------------------------------------------------------------
@@ -351,8 +351,8 @@
     width: 294px;
     padding: 5px 3px 4px 13px;
     spacing: 8px;
-    border-left: 1px solid rgba(58, 58, 58, 0.36);
-    color: #E4E4E4;
+    border-left: 1px solid rgba(48, 66, 92, 0.36);
+    color: #D9E3EF;
 }
 
 .datemenu-displays-box {
@@ -364,26 +364,26 @@
     min-height: 68px;
     padding: 10px 11px;
     border-radius: 11px;
-    border: 1px solid rgba(242, 101, 34, 0.10);
-    background-color: rgba(32, 32, 32, 0.80);
-    color: #F5F5F5;
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(16, 29, 47, 0.80);
+    color: #F2F6EF;
     box-shadow: none;
 }
 
 .datemenu-today-button:hover,
 .datemenu-today-button:focus {
-    border-color: rgba(242, 101, 34, 0.22);
-    background-color: rgba(40, 40, 40, 0.92);
+    border-color: rgba(120, 169, 255, 0.22);
+    background-color: rgba(22, 38, 59, 0.92);
 }
 
 .datemenu-today-button .day-label {
-    color: #A5A5A5;
+    color: #8FA2BB;
     font-size: 11px;
     font-weight: 600;
 }
 
 .datemenu-today-button .date-label {
-    color: #E9E9E9;
+    color: #DCE8F5;
     font-size: 16px;
     font-weight: 700;
 }
@@ -392,7 +392,7 @@
 .calendar {
     padding: 4px 2px 2px 2px;
     background-color: transparent;
-    color: #E0E0E0;
+    color: #D5DFEB;
 }
 
 .calendar-month-label {
@@ -400,7 +400,7 @@
     margin: 1px 2px 4px 2px;
     padding: 3px 10px;
     border-radius: 8px;
-    color: #F4F4F4;
+    color: #EEF4FB;
     font-size: 11px;
     font-weight: 700;
 }
@@ -410,18 +410,18 @@
     height: 28px;
     margin: 1px;
     border-radius: 8px;
-    color: #A7A7A7;
+    color: #91A4BD;
     background-color: transparent;
 }
 
 .pager-button:hover,
 .pager-button:focus {
-    color: #F4F4F4;
-    background-color: rgba(242, 101, 34, 0.10);
+    color: #EAF4FF;
+    background-color: rgba(120, 169, 255, 0.10);
 }
 
 .pager-button:active {
-    background-color: rgba(242, 101, 34, 0.17);
+    background-color: rgba(120, 169, 255, 0.17);
 }
 
 /* Calendar grid */
@@ -431,61 +431,61 @@
     margin: 1px;
     padding: 1px;
     border-radius: 8px;
-    color: #D3D3D3;
+    color: #C6D2E0;
     font-size: 9px;
     text-align: center;
 }
 
 .calendar-day-base:hover,
 .calendar-day-base:focus {
-    background-color: rgba(242, 101, 34, 0.10);
-    color: #F5F5F5;
+    background-color: rgba(120, 169, 255, 0.10);
+    color: #F2F6EF;
 }
 
 .calendar-day-heading {
-    color: #888888;
+    color: #71859F;
     font-size: 8px;
     font-weight: 700;
     background-color: transparent;
 }
 
 .calendar-work-day {
-    color: #D8D8D8;
+    color: #CCD7E4;
 }
 
 .calendar-nonwork-day {
-    color: #B8B8B8;
+    color: #A8B7C9;
 }
 
 .calendar-other-month-day {
-    color: #6D6D6D;
+    color: #556A84;
     opacity: 0.55;
 }
 
 /* Replace Ubuntu orange today marker with Adaptive blue/cyan */
 .calendar-today {
-    color: #080808;
+    color: #07101A;
     font-weight: 800;
-    background-color: #F26522;
-    border: 1px solid rgba(255, 145, 71, 0.55);
-    box-shadow: 0 0 0 2px rgba(242, 101, 34, 0.09);
+    background-color: #78A9FF;
+    border: 1px solid rgba(102, 224, 255, 0.55);
+    box-shadow: 0 0 0 2px rgba(120, 169, 255, 0.09);
 }
 
 .calendar-today:hover,
 .calendar-today:focus,
 .calendar-today:selected {
-    color: #080808;
-    background-color: #FF8340;
-    border-color: rgba(255, 145, 71, 0.75);
+    color: #07101A;
+    background-color: #8CB7FF;
+    border-color: rgba(102, 224, 255, 0.75);
 }
 
 .calendar-day-with-events {
-    color: #F0F0F0;
+    color: #E8EFF8;
 }
 
 .calendar-week-number {
-    color: #858585;
-    background-color: rgba(23, 23, 23, 0.68);
+    color: #6E829C;
+    background-color: rgba(17, 26, 40, 0.68);
 }
 
 /* ---------------------------------------------------------------
@@ -498,9 +498,9 @@
     margin-top: 2px;
     padding: 9px 10px;
     border-radius: 10px;
-    border: 1px solid rgba(242, 101, 34, 0.09);
-    background-color: rgba(23, 23, 23, 0.82);
-    color: #E7E7E7;
+    border: 1px solid rgba(120, 169, 255, 0.09);
+    background-color: rgba(17, 26, 40, 0.82);
+    color: #DCE6F2;
     box-shadow: none;
 }
 
@@ -510,15 +510,15 @@
 .world-clocks-button:focus,
 .weather-button:hover,
 .weather-button:focus {
-    border-color: rgba(242, 101, 34, 0.19);
-    background-color: rgba(41, 41, 41, 0.92);
+    border-color: rgba(120, 169, 255, 0.19);
+    background-color: rgba(24, 38, 58, 0.92);
 }
 
 .events-section-title,
 .events-title,
 .world-clocks-header,
 .weather-header {
-    color: #989898;
+    color: #8295AE;
     font-size: 9px;
     font-weight: 700;
 }
@@ -528,14 +528,14 @@
 }
 
 .event-time {
-    color: #F26522;
+    color: #78A9FF;
     font-size: 9px;
 }
 
 .events-button StLabel,
 .world-clocks-button StLabel,
 .weather-button StLabel {
-    color: #E3E3E3;
+    color: #D8E3EF;
 }
 
 /* ---------------------------------------------------------------
@@ -547,21 +547,21 @@
     min-width: 28px;
     min-height: 28px;
     border-radius: 8px;
-    color: #A4A4A4;
+    color: #8FA2BA;
     background-color: transparent;
 }
 
 .message-list-clear-button:hover,
 .message-list-section-close:hover {
-    color: #F5F5F5;
-    background-color: rgba(242, 101, 34, 0.10);
+    color: #F2F6EF;
+    background-color: rgba(120, 169, 255, 0.10);
 }
 
 /* Keep the top clock pill visually connected to the popup */
 .adaptive-stock-clock {
-    border-color: rgba(242, 101, 34, 0.15);
-    background-color: rgba(29, 29, 29, 0.90);
-    color: #F5F5F5;
+    border-color: rgba(120, 169, 255, 0.15);
+    background-color: rgba(14, 27, 44, 0.90);
+    color: #F2F6EF;
     font-weight: 650;
 }
 
@@ -735,7 +735,7 @@
     padding: 4px 13px 3px 13px;
     spacing: 4px;
     border-radius: 17px;
-    background-color: rgba(19, 19, 19, 0.18);
+    background-color: rgba(18, 18, 20, 0.18);
     border: 1px solid rgba(255, 255, 255, 0.15);
     box-shadow:
         0 10px 30px rgba(0, 0, 0, 0.22),

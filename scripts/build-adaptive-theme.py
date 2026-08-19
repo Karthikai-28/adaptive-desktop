@@ -41,17 +41,16 @@ COLOR_NAMES = {
     "text.primary": "ad_text",
     "text.muted": "ad_muted",
     "accent.primary": "ad_accent",
-    "accent.bright": "ad_bright",
-    "accent.steel": "ad_steel",
+    "accent.cyan": "ad_cyan",
+    "accent.violet": "ad_violet",
     "state.warning": "ad_warning",
     "state.danger": "ad_danger",
     "state.success": "ad_success",
 }
 
 # Selection uses a desaturated accent so selected rows stay readable behind
-# text rather than glowing. Burnt orange at roughly the lightness the old blue
-# had, so selected text keeps the contrast it was tuned for.
-SELECTION_BG = "#7A3A14"
+# text rather than glowing.
+SELECTION_BG = "#244E7A"
 
 
 def load_tokens():

@@ -3,9 +3,9 @@
 .adaptive-preview-panel {
     /* Fully opaque. The inspector sits as an overlay directly on top of the
        file grid, so any transparency at all lets icons ghost through it. */
-    background-color: #141414;
-    color: #F5F5F5;
-    border-left: 1px solid rgba(58, 58, 58, 0.72);
+    background-color: #09121E;
+    color: #F2F6EF;
+    border-left: 1px solid rgba(48, 66, 92, 0.72);
 }
 
 .adaptive-preview-header {
@@ -16,40 +16,40 @@
     min-width: 30px;
     min-height: 30px;
     border-radius: 9px;
-    background-color: rgba(242, 101, 34, 0.12);
-    color: #FF9147;
+    background-color: rgba(120, 169, 255, 0.12);
+    color: #66E0FF;
     font-size: 18px;
     font-weight: 700;
 }
 
 .adaptive-preview-title {
-    color: #F5F5F5;
+    color: #F2F6EF;
     font-size: 14px;
     font-weight: 700;
 }
 
 .adaptive-preview-subtitle {
-    color: #8E8E8E;
+    color: #96A4B8;
     font-size: 10px;
 }
 
 .adaptive-inspector-switcher {
     border-radius: 9px;
-    background-color: rgba(23, 23, 23, 0.78);
+    background-color: rgba(17, 26, 40, 0.78);
 }
 
 .adaptive-inspector-switcher button {
     min-height: 29px;
     padding: 2px 7px;
-    color: #8E8E8E;
+    color: #96A4B8;
     font-size: 10px;
     border-radius: 7px;
 }
 
 .adaptive-inspector-switcher button:checked {
-    color: #F5F5F5;
-    background-color: rgba(242, 101, 34, 0.15);
-    border-color: rgba(242, 101, 34, 0.24);
+    color: #F2F6EF;
+    background-color: rgba(120, 169, 255, 0.15);
+    border-color: rgba(120, 169, 255, 0.24);
 }
 
 .adaptive-card,
@@ -59,47 +59,47 @@
 .adaptive-storage-overview {
     padding: 10px;
     border-radius: 11px;
-    border: 1px solid rgba(58, 58, 58, 0.34);
-    background-color: rgba(23, 23, 23, 0.72);
+    border: 1px solid rgba(48, 66, 92, 0.34);
+    background-color: rgba(17, 26, 40, 0.72);
 }
 
 .adaptive-preview-hero {
-    background-color: rgba(29, 29, 29, 0.82);
+    background-color: rgba(15, 27, 43, 0.82);
 }
 
 .adaptive-section-label {
     margin-top: 5px;
-    color: #A7A7A7;
+    color: #91A4BD;
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.8px;
 }
 
 .adaptive-empty-glyph {
-    color: #F26522;
+    color: #78A9FF;
     font-size: 35px;
 }
 
 .adaptive-empty-title {
-    color: #F0F0F0;
+    color: #E8EEF8;
     font-size: 13px;
     font-weight: 700;
 }
 
 .adaptive-empty-copy,
 .adaptive-muted {
-    color: #8E8E8E;
+    color: #96A4B8;
     font-size: 10.5px;
 }
 
 .adaptive-selection-count {
-    color: #F5F5F5;
+    color: #F2F6EF;
     font-size: 28px;
     font-weight: 800;
 }
 
 .adaptive-hero-name {
-    color: #F2F2F2;
+    color: #EAF1FA;
     font-size: 12px;
     font-weight: 700;
 }
@@ -108,11 +108,11 @@
     min-height: 29px;
     padding: 2px 4px;
     border-radius: 6px;
-    color: #E3E3E3;
+    color: #D9E2EE;
 }
 
 .adaptive-content-row:hover {
-    background-color: rgba(242, 101, 34, 0.07);
+    background-color: rgba(120, 169, 255, 0.07);
 }
 
 .adaptive-content-row label {
@@ -120,7 +120,7 @@
 }
 
 .adaptive-row-size {
-    color: #8E8E8E;
+    color: #788BA5;
     font-size: 9px;
 }
 
@@ -129,32 +129,32 @@
 }
 
 .adaptive-text-frame {
-    border: 1px solid rgba(58, 58, 58, 0.34);
+    border: 1px solid rgba(48, 66, 92, 0.34);
     border-radius: 9px;
-    background-color: #161616;
+    background-color: #0B1522;
 }
 
 .adaptive-text-preview {
     padding: 9px;
-    background-color: #161616;
-    color: #E7E7E7;
+    background-color: #0B1522;
+    color: #DCE6F2;
     font-family: monospace;
     font-size: 10px;
 }
 
 .adaptive-meta-key {
-    color: #989898;
+    color: #8194AE;
     font-size: 10.5px;
 }
 
 .adaptive-meta-value {
-    color: #E3E3E3;
+    color: #D8E2EE;
     font-size: 10.5px;
     font-weight: 600;
 }
 
 .adaptive-path-value {
-    color: #D6D6D6;
+    color: #C9D5E4;
     font-family: monospace;
     font-size: 9.5px;
 }
@@ -163,16 +163,16 @@
     min-height: 31px;
     padding: 2px 9px;
     border-radius: 8px;
-    border: 1px solid rgba(58, 58, 58, 0.34);
-    background-color: rgba(33, 33, 33, 0.76);
-    color: #E7E7E7;
+    border: 1px solid rgba(48, 66, 92, 0.34);
+    background-color: rgba(22, 34, 51, 0.76);
+    color: #DCE6F2;
     font-size: 10.5px;
 }
 
 .adaptive-inspector-button:hover {
-    background-color: rgba(64, 64, 64, 0.86);
-    border-color: rgba(242, 101, 34, 0.22);
-    color: #F5F5F5;
+    background-color: rgba(41, 61, 88, 0.86);
+    border-color: rgba(120, 169, 255, 0.22);
+    color: #F2F6EF;
 }
 
 /* Storage */
@@ -181,64 +181,64 @@
     background-image:
         linear-gradient(
             135deg,
-            rgba(52, 52, 52, 0.88),
-            rgba(26, 26, 26, 0.90)
+            rgba(30, 48, 74, 0.88),
+            rgba(13, 24, 39, 0.90)
         );
-    border-color: rgba(242, 101, 34, 0.16);
+    border-color: rgba(120, 169, 255, 0.16);
 }
 
 .adaptive-storage-percent {
-    color: #F5F5F5;
+    color: #F2F6EF;
     font-size: 24px;
     font-weight: 800;
 }
 
 .adaptive-storage-used-caption {
-    color: #9A9A9A;
+    color: #8497B0;
     font-size: 9px;
     font-weight: 700;
 }
 
 .adaptive-storage-free {
-    color: #F5F5F5;
+    color: #F2F6EF;
     font-size: 19px;
     font-weight: 800;
 }
 
 .adaptive-storage-used-value {
-    color: #E3E3E3;
+    color: #D7E2EF;
     font-size: 13px;
     font-weight: 700;
 }
 
 .adaptive-storage-label,
 .adaptive-capacity-label {
-    color: #A4A4A4;
+    color: #8FA1B9;
     font-size: 10px;
 }
 
 .adaptive-storage-bar trough {
     min-height: 6px;
     border-radius: 99px;
-    background-color: rgba(58, 58, 58, 0.58);
+    background-color: rgba(48, 66, 92, 0.58);
 }
 
 .adaptive-storage-bar progress {
     min-height: 6px;
     border-radius: 99px;
-    background-image: linear-gradient(to right, #F26522, #FF9147);
+    background-image: linear-gradient(to right, #78A9FF, #66E0FF);
 }
 
 /* Network */
 
 .adaptive-network-title {
-    color: #F3F3F3;
+    color: #EDF3FA;
     font-size: 13px;
     font-weight: 700;
 }
 
 .adaptive-network-copy {
-    color: #A5A5A5;
+    color: #91A3BA;
     font-size: 10.5px;
 }
 
@@ -253,10 +253,10 @@
     background-image:
         linear-gradient(
             180deg,
-            rgba(22, 22, 22, 0.965),
-            rgba(8, 8, 8, 0.935)
+            rgba(10, 20, 33, 0.965),
+            rgba(7, 16, 26, 0.935)
         );
-    border-left: 1px solid rgba(242, 101, 34, 0.16);
+    border-left: 1px solid rgba(120, 169, 255, 0.16);
 }
 
 
@@ -268,16 +268,16 @@
 .adaptive-preview-hero,
 .adaptive-contents-card,
 .adaptive-metadata-card {
-    background-color: rgba(23, 23, 23, 0.69);
-    border-color: rgba(242, 101, 34, 0.10);
+    background-color: rgba(17, 26, 40, 0.69);
+    border-color: rgba(120, 169, 255, 0.10);
 }
 
 .adaptive-storage-overview {
     background-image:
         linear-gradient(
             135deg,
-            rgba(52, 52, 52, 0.78),
-            rgba(26, 26, 26, 0.76)
+            rgba(30, 48, 74, 0.78),
+            rgba(13, 24, 39, 0.76)
         );
 }
 
@@ -289,10 +289,10 @@
     background-image:
         radial-gradient(
             circle at 35% 25%,
-            rgba(255, 145, 71, 0.11),
-            rgba(242, 101, 34, 0.035)
+            rgba(102, 224, 255, 0.11),
+            rgba(120, 169, 255, 0.035)
         );
-    border: 1px solid rgba(242, 101, 34, 0.12);
+    border: 1px solid rgba(120, 169, 255, 0.12);
 }
 
 
@@ -303,25 +303,25 @@
     background-image:
         radial-gradient(
             circle at 68% 0%,
-            rgba(255, 145, 71, 0.075),
+            rgba(102, 224, 255, 0.075),
             transparent 34%
         ),
         linear-gradient(
             180deg,
-            rgba(26, 26, 26, 0.975),
-            rgba(17, 17, 17, 0.955)
+            rgba(12, 24, 39, 0.975),
+            rgba(7, 16, 27, 0.955)
         );
 }
 
 .adaptive-preview-header {
-    background-color: rgba(242, 101, 34, 0.035);
-    border-bottom: 1px solid rgba(242, 101, 34, 0.08);
+    background-color: rgba(120, 169, 255, 0.035);
+    border-bottom: 1px solid rgba(120, 169, 255, 0.08);
 }
 
 .adaptive-inspector-switcher {
     padding: 3px;
-    border: 1px solid rgba(242, 101, 34, 0.08);
-    background-color: rgba(34, 34, 34, 0.72);
+    border: 1px solid rgba(120, 169, 255, 0.08);
+    background-color: rgba(18, 31, 49, 0.72);
 }
 
 
@@ -342,7 +342,7 @@
 }
 
 .adaptive-path-value {
-    color: #CACACA;
+    color: #B9C9DB;
 }
 
 .adaptive-preview-hero image {
@@ -356,8 +356,8 @@
     min-height: 34px;
     padding: 6px 7px;
     border-radius: 9px;
-    border: 1px solid rgba(242, 101, 34, 0.10);
-    background-color: rgba(23, 23, 23, 0.62);
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(10, 22, 36, 0.62);
 }
 
 .adaptive-file-type-icon {
@@ -366,18 +366,18 @@
 }
 
 .adaptive-file-type-title {
-    color: #F4F4F4;
+    color: #EDF4FC;
     font-size: 11.5px;
     font-weight: 700;
 }
 
 .adaptive-file-type-subtitle {
-    color: #969696;
+    color: #7F93AD;
     font-size: 8.8px;
 }
 
 .adaptive-native-preview-caption {
-    color: #868686;
+    color: #6F849E;
     font-size: 8.5px;
 }
 
@@ -389,8 +389,8 @@
 
 .adaptive-text-frame {
     min-height: 244px;
-    border-color: rgba(242, 101, 34, 0.10);
-    background-color: rgba(12, 12, 12, 0.86);
+    border-color: rgba(120, 169, 255, 0.10);
+    background-color: rgba(5, 12, 20, 0.86);
 }
 
 .adaptive-code-preview text {
@@ -400,14 +400,14 @@
 /* v1.5 — Project Context */
 .adaptive-project-card {
     border-radius: 9px;
-    border: 1px solid rgba(242, 101, 34, 0.10);
-    background-color: rgba(23, 23, 23, 0.62);
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(10, 22, 36, 0.62);
     padding: 10px;
 }
 
 .adaptive-project-list-row {
     background-color: transparent;
-    color: #8E8E8E;
+    color: #96A4B8;
     border: 1px solid transparent;
     border-radius: 6px;
     padding: 6px;
@@ -415,11 +415,11 @@
 }
 
 .adaptive-project-list-row:hover {
-    background-color: rgba(242, 101, 34, 0.12);
-    color: #F4F4F4;
+    background-color: rgba(120, 169, 255, 0.12);
+    color: #EDF4FC;
 }
 
 .adaptive-project-active-badge {
-    color: #FF9147;
+    color: #66E0FF;
     font-weight: 700;
 }

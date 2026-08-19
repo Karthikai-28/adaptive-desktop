@@ -6,28 +6,28 @@
  * It intentionally does not modify the user's global GTK theme.
  */
 
-@define-color af_bg             #0D0D0D;
-@define-color af_bg_deep        #080808;
-@define-color af_surface        #171717;
-@define-color af_surface_2      #212121;
-@define-color af_surface_hover  #2C2C2C;
-@define-color af_divider        #3A3A3A;
-@define-color af_text           #F5F5F5;
-@define-color af_text_2         #D4D4D4;
-@define-color af_muted          #8E8E8E;
-@define-color af_muted_2        #838383;
-@define-color af_accent         #F26522;
-@define-color af_cyan           #FF9147;
-@define-color af_violet         #A3A3A3;
-@define-color af_warning        #FFC947;
-@define-color af_danger         #E0524C;
-@define-color af_success        #52B788;
+@define-color af_bg             #08111B;
+@define-color af_bg_deep        #07101A;
+@define-color af_surface        #111A28;
+@define-color af_surface_2      #162233;
+@define-color af_surface_hover  #1B2A3D;
+@define-color af_divider        #30425C;
+@define-color af_text           #F2F6EF;
+@define-color af_text_2         #C8D2E0;
+@define-color af_muted          #96A4B8;
+@define-color af_muted_2        #6F8097;
+@define-color af_accent         #78A9FF;
+@define-color af_cyan           #66E0FF;
+@define-color af_violet         #9A8BFF;
+@define-color af_warning        #F3C96B;
+@define-color af_danger         #FF7A90;
+@define-color af_success        #65D9B5;
 
 @define-color theme_bg_color             @af_bg;
 @define-color theme_fg_color             @af_text;
 @define-color theme_base_color           @af_bg_deep;
 @define-color theme_text_color           @af_text;
-@define-color theme_selected_bg_color    #4F4F4F;
+@define-color theme_selected_bg_color    #244E7A;
 @define-color theme_selected_fg_color    @af_text;
 @define-color insensitive_bg_color       @af_surface;
 @define-color insensitive_fg_color       @af_muted_2;
@@ -696,7 +696,7 @@ flowbox {
 .view:selected,
 iconview:selected,
 flowboxchild:selected {
-    background-color: rgba(242, 101, 34, 0.16);
+    background-color: rgba(120, 169, 255, 0.16);
 }
 
 .view:selected image,
