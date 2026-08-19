@@ -124,9 +124,10 @@ class Projects(Gtk.ApplicationWindow):
                 "at": git.get("last_commit_at", 0),
                 "remote": git.get("remote", ""),
                 "active": entry.get("id") == data.get("active_id"),
+                "favorite": entry.get("metadata", {}).get("favorite", False),
             })
 
-        items.sort(key=lambda p: -p["at"])
+        items.sort(key=lambda p: (not p["favorite"], -p["at"]))
         return items
 
     def _visible(self):
@@ -281,6 +282,12 @@ class Projects(Gtk.ApplicationWindow):
         name.set_hexpand(True)
         top.append(name)
 
+        fav_btn = Gtk.Button(label="★" if project["favorite"] else "✩")
+        fav_btn.add_css_class("flat")
+        # Prevent the click from activating the card if possible, though Gtk4 handles nested buttons reasonably well
+        fav_btn.connect("clicked", lambda b, p=project: self._toggle_favorite(p, b))
+        top.append(fav_btn)
+
         if project["active"]:
             here = Gtk.Label(label="ACTIVE")
             here.add_css_class("chip-active")
@@ -322,6 +329,27 @@ class Projects(Gtk.ApplicationWindow):
         box.append(meta)
         card.set_child(box)
         return card
+
+    def _toggle_favorite(self, project, button):
+        is_fav = not project.get("favorite", False)
+        project["favorite"] = is_fav
+        patch = json.dumps({"metadata": {"favorite": is_fav}})
+        try:
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "org.adaptive.ProjectContext",
+                "--object-path", "/org/adaptive/ProjectContext",
+                "--method", "org.adaptive.ProjectContext.UpdateProject",
+                project["id"], patch
+            ], timeout=2)
+        except Exception:
+            pass
+        
+        button.set_label("★" if is_fav else "✩")
+        
+        # Resort and re-render
+        self.projects.sort(key=lambda p: (not p["favorite"], -p["at"]))
+        self._render()
 
     # --------------------------------------------------------------- analysis
 
@@ -1255,6 +1283,60 @@ class Projects(Gtk.ApplicationWindow):
             
         self._show_detail(project)
 
+    def _working_tree(self, project, status_lines):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+
+        if not status_lines:
+            empty = Gtk.Label(label="Clean working tree", xalign=0)
+            empty.add_css_class("commit-when")
+            box.append(empty)
+            return box
+
+        for line in status_lines:
+            if len(line) <= 3:
+                continue
+            state = line[:2]
+            filepath = line[3:].strip('"')
+
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+            badge = Gtk.Label(label=state)
+            badge.add_css_class("chip-dirty")
+            row.append(badge)
+
+            name = Gtk.Label(label=filepath, xalign=0)
+            name.add_css_class("commit-subject")
+            name.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            name.set_hexpand(True)
+            row.append(name)
+
+            abs_path = str(Path(project["path"]) / filepath)
+
+            btn_ag = Gtk.Button(label="Antigravity")
+            btn_ag.add_css_class("action")
+            btn_ag.connect("clicked", lambda _b, p=abs_path: subprocess.Popen(["antigravity", p]))
+            row.append(btn_ag)
+
+            btn_code = Gtk.Button(label="VS Code")
+            btn_code.add_css_class("action")
+            btn_code.connect("clicked", lambda _b, p=abs_path: subprocess.Popen(["code", p]))
+            row.append(btn_code)
+
+            btn_file = Gtk.Button(label="Explorer")
+            btn_file.add_css_class("action")
+            btn_file.connect("clicked", lambda _b, p=abs_path: subprocess.Popen(["nautilus", "--select", p]))
+            row.append(btn_file)
+
+            box.append(row)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(100)
+        scroll.set_max_content_height(350)
+        scroll.set_child(box)
+
+        return scroll
+
     def _show_detail(self, project):
         child = self.detail_holder.get_first_child()
         while child is not None:
@@ -1338,6 +1420,9 @@ class Projects(Gtk.ApplicationWindow):
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         body.add_css_class("detail-body")
+
+        body.append(self._section("WORKING TREE"))
+        body.append(self._panel("UNCOMMITTED CHANGES", self._working_tree(project, data["status"])))
 
         body.append(self._section("BRANCHES"))
         body.append(self._columns(
