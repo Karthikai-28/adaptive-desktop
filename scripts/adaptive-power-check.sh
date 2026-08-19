@@ -13,22 +13,38 @@ POWER=org.gnome.settings-daemon.plugins.power
 SESSION=org.gnome.desktop.session
 
 fails=0
+lid_is_only_guard=0
+
+CONF="${HOME}/.config/adaptive-desktop"
 
 pass() { printf '  ok    %s\n' "$*"; }
 fail() { printf '  FAIL  %s\n' "$*"; fails=$((fails + 1)); }
+note() { printf '  note  %s\n' "$*"; }
 
 echo "Sleep paths"
 
 battery_type="$(gsettings get $POWER sleep-inactive-battery-type)"
 if [[ "$battery_type" == "'nothing'" ]]; then
-    fail "battery suspend is disabled - the machine cannot sleep on battery"
+    if [[ -f "$CONF/allow-no-auto-suspend" ]]; then
+        # Opted into deliberately. Say plainly what is carrying the risk now
+        # rather than printing "ok" and moving on.
+        note "idle suspend is off by choice - the lid is now the only thing"
+        note "that puts this machine to sleep"
+        lid_is_only_guard=1
+    else
+        fail "battery suspend is disabled - the machine cannot sleep on battery"
+    fi
 else
     pass "battery suspend: $battery_type"
 fi
 
 idle_delay="$(gsettings get $SESSION idle-delay | awk '{print $NF}')"
 if [[ "$idle_delay" == "0" ]]; then
-    fail "idle-delay is 0 - the session never goes idle, so it never blanks"
+    if [[ -f "$CONF/allow-never-blank" ]]; then
+        note "the display never blanks on idle, by choice"
+    else
+        fail "idle-delay is 0 - the session never goes idle, so it never blanks"
+    fi
 else
     pass "idle delay: ${idle_delay}s"
 fi
@@ -63,6 +79,9 @@ echo "Lid"
 
 if pgrep -u "$UID" -f adaptive-lid-watch.sh >/dev/null 2>&1; then
     pass "lid watcher running"
+elif (( lid_is_only_guard )); then
+    fail "lid watcher not running AND idle suspend is off - nothing at all"
+    fail "can put this machine to sleep. This is the bag scenario exactly."
 else
     fail "lid watcher not running - closing the lid will not suspend"
 fi
@@ -91,4 +110,8 @@ if (( fails )); then
     exit 1
 fi
 
-echo "The machine can sleep."
+if (( lid_is_only_guard )); then
+    echo "The machine can sleep, but only when the lid is closed."
+else
+    echo "The machine can sleep."
+fi

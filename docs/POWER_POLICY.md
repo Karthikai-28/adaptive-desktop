@@ -27,11 +27,27 @@ touch ~/.config/adaptive-desktop/clamshell
 and it only applies while an external display is actually connected. Unplug the
 display and the lid suspends again.
 
-**3. Nothing may disable suspend on battery.**
+**3. No feature may disable suspend on battery. The user may.**
 `sleep-inactive-battery-type` is not `nothing` under any feature, ever. This is
 the single setting that caused the incident. An always-on display is a
 mains-power feature; `adaptive-aod.sh` refuses to run on battery and no longer
 touches the battery keys at all.
+
+A person deciding this for their own machine is a different thing from a
+feature deciding it for them, and it is opted into explicitly:
+
+```sh
+touch ~/.config/adaptive-desktop/allow-no-auto-suspend
+```
+
+With that set, **the lid is the only thing left that puts the machine to
+sleep.** The check says so rather than printing "ok", and a missing lid watcher
+stops being a warning and becomes the bag scenario exactly - it is reported as
+two failures, not one.
+
+The same applies to never blanking the display
+(`~/.config/adaptive-desktop/allow-never-blank`), which is a preference rather
+than a safety property, and does not affect suspend either way.
 
 **4. Anything that changes power settings saves the old values and can restore
 them.**
@@ -56,8 +72,9 @@ deliberately, on mains.
 | Lid closed | Lock, then suspend |
 | Lid closed, clamshell opted in, external display attached | Lock only |
 | Idle 5 min | Screen dims, then blanks |
-| Idle on battery, 20 min | Suspend |
-| Idle on mains, 60 min | Suspend |
+| Idle on battery, 20 min | Suspend, unless opted out |
+| Idle on mains, 60 min | Suspend, unless opted out |
+| Idle with `allow-no-auto-suspend` set | Stays awake; only the lid sleeps it |
 | Always-on display on | Mains only; battery suspend still active |
 
 ## Checking
