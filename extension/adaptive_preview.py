@@ -149,6 +149,11 @@ MIME_RULES = {
 }
 
 _CONTROLLERS = {}
+
+# Nautilus instantiates this extension once per provider interface it
+# implements, so every instance is asked to contribute context-menu items and
+# the same entry appeared three times. One instance owns the menu.
+_MENU_OWNER = None
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
@@ -409,10 +414,7 @@ class PreviewController:
         self._window = window
         self.panel = None
         # One reusable location strip per window; see get_widget().
-        self.location_strip = None
         self.host_split = None
-        self.location_path = None
-        self.location_inspector = None
         self.stack = None
 
         self.preview_body = None
@@ -992,25 +994,6 @@ class PreviewController:
                     f"base_type={_type_name(self.host_main_child)}"
                 )
 
-            # The location strip lives in its own container above the view, so
-            # it can run under the inspector even when the view does not.
-            strip = getattr(self, "location_strip", None)
-            if strip is not None:
-                strip_alloc = strip.get_allocation()
-                strip_xy = strip.translate_coordinates(top, 0, 0)
-
-                if strip_xy is not None and strip_alloc.width > 1:
-                    strip_overlap = (
-                        strip_xy[0] + strip_alloc.width
-                    ) - panel.x
-
-                    if strip_overlap > 1:
-                        _log(
-                            f"GEOMETRY strip overlaps inspector by "
-                            f"{strip_overlap}px "
-                            f"(strip x{strip_xy[0]}+w{strip_alloc.width}, "
-                            f"panel x{panel.x})"
-                        )
         except Exception:
             _log_exception("Geometry check failed")
 
@@ -2942,12 +2925,18 @@ class PreviewController:
 class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.LocationWidgetProvider):
     """
     Nautilus 42's MenuProvider callback includes the window and the selected
-    files. We use the selection callback only as a notification source; the
-    extension returns no extra context-menu items.
+    files. The selection callback is used as a notification source; the only
+    context-menu item is the inspector toggle.
     """
 
     def __init__(self):
+        global _MENU_OWNER
+
         super().__init__()
+
+        if _MENU_OWNER is None:
+            _MENU_OWNER = self
+
         _log("Adaptive Preview extension initialized.")
 
     def _window_from_args(self, args):
@@ -3001,86 +2990,28 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
             controller.ensure_attached()
             GLib.idle_add(controller.ensure_attached)
 
-            # Nautilus calls this on every location and view change. It does
-            # not drop the widget handed over last time, so building a fresh
-            # strip per call stacked duplicate "ADAPTIVE FILES" bars on top of
-            # the file view. One strip per window is built once and reused.
-            strip = getattr(controller, "location_strip", None)
-
-            if strip is None:
-                strip = self._build_location_strip(controller)
-                controller.location_strip = strip
-
-            parent = strip.get_parent()
-            if parent is not None:
-                parent.remove(strip)
-
-            try:
-                controller.location_path.set_text(uri or "")
-                controller.location_inspector.set_active(
-                    controller.panel_visible
-                )
-            except Exception:
-                pass
-
+            # No widget. This provider stays because it is the one callback
+            # Nautilus makes on every location change, which is what gives the
+            # inspector a deterministic hook to attach to - but it contributes
+            # no UI of its own.
+            #
+            # It used to return an "ADAPTIVE FILES" strip carrying an Inspector
+            # toggle and Storage/Network/Project buttons. The inspector already
+            # has those as tabs and shows the path in its Location section, so
+            # the strip was a second copy of the panel's own controls taking a
+            # row off the top of every folder.
             controller._reserve_space()
-            strip.show_all()
 
             _log(
-                f"LocationWidgetProvider active for uri={uri}; "
+                f"Location hook for uri={uri}; "
                 f"window={_type_name(window)}"
             )
 
-            return strip
+            return None
 
         except Exception:
             _log_exception("get_widget failed")
             return None
-
-    def _build_location_strip(self, controller):
-        strip = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=5,
-        )
-        _css(strip, "adaptive-location-strip")
-
-        brand = Gtk.Label(label="ADAPTIVE FILES")
-        brand.set_margin_start(3)
-        brand.set_margin_end(5)
-        _css(brand, "adaptive-location-brand")
-        strip.pack_start(brand, False, False, 0)
-
-        inspector = Gtk.ToggleButton(label="Inspector")
-        inspector.set_active(controller.panel_visible)
-        _css(inspector, "adaptive-location-button")
-        inspector.connect(
-            "toggled",
-            lambda button: controller.set_panel_visible(button.get_active()),
-        )
-        strip.pack_start(inspector, False, False, 0)
-        controller.location_inspector = inspector
-
-        for label, tab in (
-            ("Storage", "storage"),
-            ("Network", "network"),
-            ("Project", "project"),
-        ):
-            button = Gtk.Button(label=label)
-            _css(button, "adaptive-location-button")
-            button.connect(
-                "clicked",
-                lambda _b, t=tab: controller.show_tab(t),
-            )
-            strip.pack_start(button, False, False, 0)
-
-        path = Gtk.Label(label="", xalign=1)
-        path.set_hexpand(True)
-        path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        _css(path, "adaptive-muted")
-        strip.pack_end(path, True, True, 6)
-        controller.location_path = path
-
-        return strip
 
     def get_file_items(self, *args):
         try:
@@ -3110,8 +3041,32 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
             window = self._window_from_args(args)
             controller = self._controller(window)
 
-            if controller is not None:
-                GLib.idle_add(controller.ensure_attached)
+            if controller is None:
+                return []
+
+            GLib.idle_add(controller.ensure_attached)
+
+            if self is not _MENU_OWNER:
+                return []
+
+            # The only way to put the inspector away. It used to be a toggle on
+            # the location strip; the strip is gone, and a right-click item
+            # costs no screen space to offer.
+            item = Nautilus.MenuItem(
+                name="AdaptivePreview::toggle_inspector",
+                label=(
+                    "Hide Inspector"
+                    if controller.panel_visible
+                    else "Show Inspector"
+                ),
+                tip="Show or hide the Adaptive inspector panel",
+            )
+            item.connect(
+                "activate",
+                lambda _item: controller.toggle_panel(),
+            )
+
+            return [item]
 
         except Exception:
             _log_exception("get_background_items failed")
