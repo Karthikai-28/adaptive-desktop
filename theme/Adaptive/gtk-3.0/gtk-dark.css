@@ -12,19 +12,19 @@
  */
 /* Design tokens - generated from tokens/adaptive.tokens.json */
 
-@define-color ad_bg            #08111B;
-@define-color ad_bg_deep       #07101A;
-@define-color ad_surface       #111A28;
-@define-color ad_surface_2     #162233;
-@define-color ad_divider       #30425C;
-@define-color ad_text          #F2F6EF;
-@define-color ad_muted         #96A4B8;
-@define-color ad_accent        #78A9FF;
-@define-color ad_cyan          #66E0FF;
-@define-color ad_violet        #9A8BFF;
-@define-color ad_warning       #F3C96B;
-@define-color ad_danger        #FF7A90;
-@define-color ad_success       #65D9B5;
+@define-color ad_bg            #0D0D0D;
+@define-color ad_bg_deep       #080808;
+@define-color ad_surface       #171717;
+@define-color ad_surface_2     #212121;
+@define-color ad_divider       #3A3A3A;
+@define-color ad_text          #F5F5F5;
+@define-color ad_muted         #8E8E8E;
+@define-color ad_accent        #F26522;
+@define-color ad_bright        #FF9147;
+@define-color ad_steel         #A3A3A3;
+@define-color ad_warning       #FFC947;
+@define-color ad_danger        #E0524C;
+@define-color ad_success       #52B788;
 
 /* GTK's own named colors, so unstyled widgets follow the palette */
 
@@ -32,7 +32,7 @@
 @define-color theme_fg_color          @ad_text;
 @define-color theme_base_color        @ad_bg_deep;
 @define-color theme_text_color        @ad_text;
-@define-color theme_selected_bg_color #244E7A;
+@define-color theme_selected_bg_color #7A3A14;
 @define-color theme_selected_fg_color @ad_text;
 @define-color insensitive_bg_color    @ad_surface;
 @define-color insensitive_fg_color    alpha(@ad_muted, 0.72);

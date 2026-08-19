@@ -61,8 +61,8 @@ SYSTEM_TREES = (
 # Section order, and the accent each one carries on its left edge.
 GROUPS = [
     ("Applications", "accent"),
-    ("Files & Folders", "cyan"),
-    ("Projects", "violet"),
+    ("Files & Folders", "bright"),
+    ("Projects", "steel"),
     ("Settings", "muted"),
     ("Actions", "accent"),
 ]

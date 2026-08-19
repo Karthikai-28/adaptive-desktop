@@ -2,18 +2,18 @@
 
 <defs>
   <linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#78A9FF"/>
-    <stop offset="1" stop-color="#66E0FF"/>
+    <stop offset="0" stop-color="#F26522"/>
+    <stop offset="1" stop-color="#FF9147"/>
   </linearGradient>
   <linearGradient id="g2" x1="10" y1="54" x2="54" y2="10" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#162233"/>
-    <stop offset="1" stop-color="#263D5B"/>
+    <stop offset="0" stop-color="#212121"/>
+    <stop offset="1" stop-color="#404040"/>
   </linearGradient>
 </defs>
 
 
-<path d="M32 7 53 19v26L32 57 11 45V19z" fill="#0D1928" stroke="url(#g)" stroke-width="2.2"/>
-<path d="m20 34 9-9 7 7 9-9M20 43h24" fill="none" stroke="#66E0FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-<circle cx="20" cy="24" r="2.5" fill="#9A8BFF"/>
+<path d="M32 7 53 19v26L32 57 11 45V19z" fill="#1A1A1A" stroke="url(#g)" stroke-width="2.2"/>
+<path d="m20 34 9-9 7 7 9-9M20 43h24" fill="none" stroke="#FF9147" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="20" cy="24" r="2.5" fill="#A3A3A3"/>
 
 </svg>
