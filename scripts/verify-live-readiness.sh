@@ -117,6 +117,8 @@ PY
   echo
   echo "== Power =="
   "${REPO}/scripts/adaptive-power-check.sh"
+  "${REPO}/scripts/adaptive-screen-blank-check.sh" --check \
+    || fail "the display is being forced off with no timer asking for it"
 
   echo
   echo "== Project context =="

@@ -75,6 +75,40 @@ watching the idle monitor, so a zero there is normal. What matters is that DPMS
 is *enabled* and that something owns the blanking - the check fails only if
 neither is true.
 
+## The screen that blanked every 30 seconds
+
+A second incident, different cause, same shape: a display behaviour that no
+setting could reach.
+
+The panel powered down about 30 seconds after the last keypress, over and over.
+Every setting said it should not: `idle-delay` was 0 (Never), auto-suspend was
+off, dimming was off, X's own screen-saver timeout was 0 and its DPMS
+standby/suspend/off timeouts were all 0. Changing them made no difference,
+because none of them was what was doing it.
+
+`gsd-power` arms a 30-second blank timer, but only while it believes the screen
+saver is active. Something told it the saver came on and never told it the saver
+went off, so that timer stayed armed for the rest of the session. Measured: the
+display switched off at 30.3s, 30.6s and 30.7s of idle, with
+`org.gnome.ScreenSaver.GetActive` returning false the whole time.
+
+Restarting `gsd-power` cleared it - idle then reached 122 seconds with the
+screen still on.
+
+**7. A display that turns off while nothing asked it to is a bug, not a
+setting.**
+If the panel powers down while the screen saver is inactive and every X DPMS
+timeout is zero, no timer expired - something forced it. Do not go looking for
+the setting that stops it; there is none.
+
+```sh
+./scripts/adaptive-screen-blank-check.sh --check   # report
+./scripts/adaptive-screen-blank-check.sh           # repair
+```
+
+The check can only see the fault while the screen is actually off, so run it
+over SSH or within a few seconds of the screen going black.
+
 ## What went wrong, for the record
 
 `adaptive-aod.sh on` set `idle-delay` to 0, both `sleep-inactive-*-type` to
