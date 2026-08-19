@@ -294,18 +294,18 @@ class Projects(Gtk.ApplicationWindow):
             here.add_css_class("chip-active")
             top.append(here)
 
-        box.append(top)
+        card.append(top)
 
         path = Gtk.Label(label=project["path"].replace(str(Path.home()), "~"),
                          xalign=0)
         path.add_css_class("card-path")
         path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        box.append(path)
+        card.append(path)
 
         subject = Gtk.Label(label=project["subject"] or "—", xalign=0)
         subject.add_css_class("card-subject")
         subject.set_ellipsize(Pango.EllipsizeMode.END)
-        box.append(subject)
+        card.append(subject)
 
         meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
@@ -327,8 +327,7 @@ class Projects(Gtk.ApplicationWindow):
         when.add_css_class("card-when")
         meta.append(when)
 
-        box.append(meta)
-        card.append(box)
+        card.append(meta)
         return card
 
     def _toggle_favorite(self, project, button):
