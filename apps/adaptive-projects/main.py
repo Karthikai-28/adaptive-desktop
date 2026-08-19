@@ -265,14 +265,15 @@ class Projects(Gtk.ApplicationWindow):
         )
 
     def _card(self, project):
-        card = Gtk.Button()
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("card")
         card.add_css_class(f"band-{band(project['at'])}")
         if project["active"]:
             card.add_css_class("active")
-        card.connect("clicked", lambda _b, p=project: self._activate(p))
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        
+        click = Gtk.GestureClick.new()
+        click.connect("released", lambda g, n, x, y, p=project: self._activate(p))
+        card.add_controller(click)
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
@@ -282,10 +283,11 @@ class Projects(Gtk.ApplicationWindow):
         name.set_hexpand(True)
         top.append(name)
 
-        if project["favorite"]:
-            star = Gtk.Label(label="★")
-            star.add_css_class("chip-active") # Using active styling for the star
-            top.append(star)
+        fav_btn = Gtk.Button(label="★" if project["favorite"] else "✩")
+        fav_btn.add_css_class("flat") # Use transparent style if available, or just a small button
+        # To avoid the button looking weird, we could use an icon or remove border.
+        fav_btn.connect("clicked", lambda b, p=project: self._toggle_favorite_from_grid(p, b))
+        top.append(fav_btn)
 
         if project["active"]:
             here = Gtk.Label(label="ACTIVE")
@@ -326,7 +328,7 @@ class Projects(Gtk.ApplicationWindow):
         meta.append(when)
 
         box.append(meta)
-        card.set_child(box)
+        card.append(box)
         return card
 
     def _toggle_favorite(self, project, button):
@@ -346,7 +348,29 @@ class Projects(Gtk.ApplicationWindow):
         
         button.set_label("★ Unstar" if is_fav else "✩ Star")
         
-        # Resort and re-render
+        # Resort and re-render the grid
+        self.projects.sort(key=lambda p: (not p["favorite"], -p["at"]))
+        self._render()
+
+    def _toggle_favorite_from_grid(self, project, button):
+        is_fav = not project.get("favorite", False)
+        project["favorite"] = is_fav
+        patch = json.dumps({"metadata": {"favorite": is_fav}})
+        try:
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "org.adaptive.ProjectContext",
+                "--object-path", "/org/adaptive/ProjectContext",
+                "--method", "org.adaptive.ProjectContext.UpdateProject",
+                project["id"], patch
+            ], timeout=2)
+        except Exception:
+            pass
+        
+        # We don't strictly need to set_label since _render recreates the grid,
+        # but doing it anyway for completeness
+        button.set_label("★" if is_fav else "✩")
+        
         self.projects.sort(key=lambda p: (not p["favorite"], -p["at"]))
         self._render()
 
