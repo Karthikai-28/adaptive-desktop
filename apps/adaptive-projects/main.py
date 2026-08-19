@@ -1312,18 +1312,24 @@ class Projects(Gtk.ApplicationWindow):
 
             abs_path = str(Path(project["path"]) / filepath)
 
-            btn_ag = Gtk.Button(label="Antigravity")
-            btn_ag.add_css_class("action")
+            def make_icon_btn(icon_source, tooltip, is_path=False):
+                btn = Gtk.Button()
+                icon = Gtk.Image.new_from_file(icon_source) if is_path else Gtk.Image.new_from_icon_name(icon_source)
+                icon.set_pixel_size(16)
+                btn.set_child(icon)
+                btn.set_tooltip_text(tooltip)
+                btn.add_css_class("action")
+                return btn
+
+            btn_ag = make_icon_btn("antigravity", "Open in Antigravity")
             btn_ag.connect("clicked", lambda _b, p=abs_path: subprocess.Popen(["antigravity", p]))
             row.append(btn_ag)
 
-            btn_code = Gtk.Button(label="VS Code")
-            btn_code.add_css_class("action")
+            btn_code = make_icon_btn("/snap/code/current/meta/gui/vscode.png", "Open in VS Code", True)
             btn_code.connect("clicked", lambda _b, p=abs_path: subprocess.Popen(["code", p]))
             row.append(btn_code)
 
-            btn_file = Gtk.Button(label="Explorer")
-            btn_file.add_css_class("action")
+            btn_file = make_icon_btn("system-file-manager-symbolic", "Show in Explorer")
             btn_file.connect("clicked", lambda _b, p=abs_path: subprocess.Popen(["nautilus", "--select", p]))
             row.append(btn_file)
 
@@ -1365,13 +1371,26 @@ class Projects(Gtk.ApplicationWindow):
             ("Analyze", lambda *_: self._show_analysis(project)),
             ("Learn", lambda *_: self._show_learn(project)),
             ("Set active", lambda *_: self._set_active(project)),
-            ("Open in Files", lambda *_: self._open_files(project)),
-            ("Terminal here", lambda *_: self._open_terminal(project)),
         ):
             button = Gtk.Button(label=label)
             button.add_css_class("action")
             button.connect("clicked", handler)
             bar.append(button)
+
+        def make_head_btn(icon_source, tooltip, handler, is_path=False):
+            btn = Gtk.Button()
+            icon = Gtk.Image.new_from_file(icon_source) if is_path else Gtk.Image.new_from_icon_name(icon_source)
+            icon.set_pixel_size(16)
+            btn.set_child(icon)
+            btn.set_tooltip_text(tooltip)
+            btn.add_css_class("action")
+            btn.connect("clicked", handler)
+            return btn
+
+        bar.append(make_head_btn("antigravity", "Open in Antigravity", lambda *_: self._open_antigravity(project)))
+        bar.append(make_head_btn("/snap/code/current/meta/gui/vscode.png", "Open in VS Code", lambda *_: self._open_vscode(project), True))
+        bar.append(make_head_btn("system-file-manager-symbolic", "Open in Files", lambda *_: self._open_files(project)))
+        bar.append(make_head_btn("utilities-terminal-symbolic", "Terminal here", lambda *_: self._open_terminal(project)))
 
         head.append(bar)
 
@@ -1787,6 +1806,18 @@ class Projects(Gtk.ApplicationWindow):
         try:
             Gio.AppInfo.launch_default_for_uri(
                 Path(project["path"]).as_uri(), None)
+        except Exception:
+            pass
+
+    def _open_antigravity(self, project):
+        try:
+            subprocess.Popen(["antigravity", project["path"]], start_new_session=True)
+        except Exception:
+            pass
+
+    def _open_vscode(self, project):
+        try:
+            subprocess.Popen(["code", project["path"]], start_new_session=True)
         except Exception:
             pass
 
