@@ -410,6 +410,7 @@ class PreviewController:
         self.panel = None
         # One reusable location strip per window; see get_widget().
         self.location_strip = None
+        self.host_split = None
         self.location_path = None
         self.location_inspector = None
         self.stack = None
@@ -722,20 +723,54 @@ class PreviewController:
                     self.host_main_child.get_margin_end()
                 )
 
-                host.add_overlay(self.panel)
+                # The inspector used to be an overlay child with a margin on
+                # the file view sized to match it. That is two independent
+                # numbers that have to agree, and they stop agreeing the moment
+                # the window is too narrow for the view to give the margin back
+                # - the view then keeps its minimum width and slides under the
+                # panel. It also meant the location strip, which lives inside
+                # the view, inherited a margin it did not need and stopped
+                # short of the window edge.
+                #
+                # Packing both into a box makes GTK responsible for the
+                # geometry instead. They cannot overlap, because a box does not
+                # put its children on top of each other.
+                view = self.host_main_child
 
-                try:
-                    host.set_overlay_pass_through(self.panel, False)
-                except Exception:
-                    pass
+                self.host_split = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL,
+                    spacing=0,
+                )
 
-                self._reserve_space()
-                self.panel.show_all()
+                host.remove(view)
+
+                # Whatever the old margin mechanism last set, drop it. The box
+                # decides the widths now, and a leftover margin here shows up
+                # as a strip of dead space between the view and the inspector.
+                view.set_margin_end(0)
+                self.host_original_margin_end = 0
+
+                # Set expansion on the widgets, not only as box packing
+                # flags. GtkBox's expand flag alone left 424px of slack sitting
+                # between the view and the inspector - the view kept its
+                # natural width and the spare space went nowhere useful.
+                view.set_hexpand(True)
+                view.set_halign(Gtk.Align.FILL)
+
+                self.panel.set_hexpand(False)
+                self.panel.set_halign(Gtk.Align.FILL)
+
+                self.host_split.pack_start(view, True, True, 0)
+                self.host_split.pack_start(self.panel, False, False, 0)
+
+                host.add(self.host_split)
+                self.host_split.show_all()
+
                 self.panel.set_visible(self.panel_visible)
 
                 _log(
-                    "Inspector attached to overlay "
-                    f"{_type_name(host)}; base={_type_name(self.host_main_child)}"
+                    f"Inspector packed beside {_type_name(view)} "
+                    f"inside {_type_name(host)}"
                 )
 
             elif host is None and self.host_box is None:
@@ -899,30 +934,113 @@ class PreviewController:
             pass
 
     def _reserve_space(self):
-        extra = self.panel_width + 1 if self.panel_visible else 0
+        """Kept as the single place that re-checks the layout.
 
-        if self.host_main_child is not None:
-            try:
-                self.host_main_child.set_margin_end(
-                    self.host_original_margin_end + extra
+        There is no space to reserve any more: the inspector is a sibling of
+        the file view, so hiding it hands its width back automatically and the
+        location strip inside the view resizes with it. The name stays because
+        several call sites mean "the layout may have changed, look at it".
+        """
+        # Deliberately empty of layout arithmetic. Before the split existed
+        # this set a margin on the file view wide enough to clear the floating
+        # inspector, and keeping both numbers in agreement is what kept
+        # breaking. Nothing here may set a margin again.
+
+        # Reserving space is not the same as it having worked. Check the
+        # allocations once the layout settles and say so if the inspector is
+        # sitting on top of the file view rather than beside it - that is the
+        # bug this whole mechanism exists to prevent, and it is invisible from
+        # the code alone.
+        GLib.idle_add(self._check_geometry)
+
+    def _check_geometry(self):
+        try:
+            if not self.panel_visible:
+                return GLib.SOURCE_REMOVE
+
+            if self.panel is None or self.host_main_child is None:
+                return GLib.SOURCE_REMOVE
+
+            panel = self.panel.get_allocation()
+            base = self.host_main_child.get_allocation()
+
+            if panel.width <= 1 or base.width <= 1:
+                return GLib.SOURCE_REMOVE
+
+            # get_allocation() is relative to each widget's own GdkWindow, so
+            # two widgets in different windows both report x=0 and comparing
+            # them directly says nothing. Translate both into the toplevel.
+            top = self.panel.get_toplevel()
+
+            panel_xy = self.panel.translate_coordinates(top, 0, 0)
+            base_xy = self.host_main_child.translate_coordinates(top, 0, 0)
+
+            if panel_xy is None or base_xy is None:
+                return GLib.SOURCE_REMOVE
+
+            panel.x = panel_xy[0]
+            base.x = base_xy[0]
+
+            overlap = (base.x + base.width) - panel.x
+
+            if overlap > 1:
+                _log(
+                    f"GEOMETRY overlap={overlap}px "
+                    f"panel=x{panel.x}+w{panel.width} "
+                    f"base=x{base.x}+w{base.width} "
+                    f"reserved={self.panel_width} "
+                    f"base_type={_type_name(self.host_main_child)}"
                 )
-            except Exception:
-                _log_exception("Unable to reserve space for inspector")
 
-        # The location strip lives above the file view in a different
-        # container, so shrinking the view alone left the strip at full window
-        # width - and its right-aligned path label ran underneath the
-        # inspector, printing the path and the file name on top of each other.
-        strip = getattr(self, "location_strip", None)
-        if strip is not None:
-            try:
-                strip.set_margin_end(extra)
-            except Exception:
-                pass
+            # The location strip lives in its own container above the view, so
+            # it can run under the inspector even when the view does not.
+            strip = getattr(self, "location_strip", None)
+            if strip is not None:
+                strip_alloc = strip.get_allocation()
+                strip_xy = strip.translate_coordinates(top, 0, 0)
+
+                if strip_xy is not None and strip_alloc.width > 1:
+                    strip_overlap = (
+                        strip_xy[0] + strip_alloc.width
+                    ) - panel.x
+
+                    if strip_overlap > 1:
+                        _log(
+                            f"GEOMETRY strip overlaps inspector by "
+                            f"{strip_overlap}px "
+                            f"(strip x{strip_xy[0]}+w{strip_alloc.width}, "
+                            f"panel x{panel.x})"
+                        )
+        except Exception:
+            _log_exception("Geometry check failed")
+
+        return GLib.SOURCE_REMOVE
 
     def _detach_from_old_host(self):
         if self.host_overlay is None:
             return
+
+        # Give Nautilus its view back the way we found it, still parented to
+        # the overlay and without our box in between.
+        if self.host_split is not None:
+            try:
+                view = self.host_main_child
+
+                if self.panel.get_parent() is self.host_split:
+                    self.host_split.remove(self.panel)
+
+                if view is not None and view.get_parent() is self.host_split:
+                    self.host_split.remove(view)
+
+                if self.host_split.get_parent() is self.host_overlay:
+                    self.host_overlay.remove(self.host_split)
+
+                if view is not None:
+                    self.host_overlay.add(view)
+            except Exception:
+                _log_exception("Unable to unpick the inspector split")
+
+            self.host_split = None
 
         try:
             parent = self.panel.get_parent()
