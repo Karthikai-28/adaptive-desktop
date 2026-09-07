@@ -214,6 +214,10 @@
  *
  * Scoped to GNOME Shell's date/time menu classes and #calendarArea.
  * Functional behavior remains GNOME-native.
+ *
+ * v1.7: the message list is reparented into the Adaptive Shade column, so it
+ * no longer sets its own width - the shade does. Everything else here still
+ * styles GNOME's own actors, unchanged.
  */
 
 /* ---------------------------------------------------------------
@@ -239,8 +243,7 @@
  * --------------------------------------------------------------- */
 
 .message-list {
-    width: 350px;
-    padding: 4px 10px 8px 4px;
+    padding: 0;
     color: #F2F6EF;
 }
 
@@ -255,7 +258,7 @@
 .message-list-section-title {
     margin: 2px 4px 4px 4px;
     color: #96A4B8;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
 }
 
@@ -264,28 +267,36 @@
 }
 
 /* Empty state */
+/* The empty state sits in the band left over after the system block, which is
+ * far shorter than the column stock GNOME centres it in. A 54px bell dominated
+ * that space; this is scaled to the room it actually gets. It is also moved out
+ * of GNOME's BinLayout overlay in _unstackPlaceholder() so it can no longer land
+ * on top of the Do Not Disturb row. */
 .message-list-placeholder {
+    padding: 14px 0;
+    spacing: 6px;
     color: #73869F;
 }
 
 .message-list-placeholder > StIcon {
     color: #5F7693;
-    icon-size: 54px;
+    icon-size: 36px;
+    margin-bottom: 4px;
 }
 
 .message-list-placeholder > StLabel {
     color: #8799B0;
-    font-size: 15px;
+    font-size: 13px;
 }
 
 /* Individual notifications */
 .message,
 .notification-banner {
-    margin: 0 2px;
+    margin: 0;
     padding: 10px 12px;
-    border-radius: 11px;
-    border: 1px solid rgba(120, 169, 255, 0.09);
-    background-color: rgba(17, 26, 40, 0.88);
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background-color: transparent;
     box-shadow: none;
 }
 
@@ -307,22 +318,29 @@
 
 .message-title {
     color: #EFF5FC;
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 14px;
+    font-weight: 600;
 }
 
 .message-body {
     color: #A5B4C8;
-    font-size: 10px;
+    font-size: 13px;
 }
 
 .message-secondary-bin {
     color: #7F91A9;
+    font-size: 11px;
+}
+
+.message-list-controls {
+    padding: 9px 4px 4px 4px;
+    spacing: 8px;
+    border-top: 1px solid rgba(48, 66, 92, 0.36);
 }
 
 /* Do Not Disturb */
 .dnd-button {
-    margin: 7px 3px 1px 3px;
+    margin: 0;
     padding: 7px 8px;
     border-radius: 10px;
     border: 1px solid rgba(120, 169, 255, 0.08);
@@ -378,7 +396,7 @@
 
 .datemenu-today-button .day-label {
     color: #8FA2BB;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
 }
 
@@ -426,13 +444,13 @@
 
 /* Calendar grid */
 .calendar-day-base {
-    width: 28px;
-    height: 28px;
+    width: 34px;
+    height: 30px;
     margin: 1px;
     padding: 1px;
     border-radius: 8px;
     color: #C6D2E0;
-    font-size: 9px;
+    font-size: 11px;
     text-align: center;
 }
 
@@ -443,8 +461,8 @@
 }
 
 .calendar-day-heading {
-    color: #71859F;
-    font-size: 8px;
+    color: #8195AE;
+    font-size: 10px;
     font-weight: 700;
     background-color: transparent;
 }
@@ -529,7 +547,7 @@
 
 .event-time {
     color: #78A9FF;
-    font-size: 9px;
+    font-size: 11px;
 }
 
 .events-button StLabel,
@@ -934,4 +952,330 @@
     font-size: 17px;
     font-weight: 400;
     letter-spacing: 0.5px;
+}
+
+
+/* ===== Adaptive Shade v2 — information center =====
+ *
+ * The date menu as somewhere to LOOK at things: clock, notifications grouped
+ * per application, full system telemetry, and a month/agenda/week calendar.
+ * No controls — GNOME's aggregate menu in the top-right owns all of those.
+ *
+ * TYPE. v1.7 put fifteen of its sizes at 8–9px on a 96 DPI screen with no
+ * scaling, which is the whole of the clarity complaint. Nothing here is below
+ * 11px. Inter is installed to ~/.local/share/fonts and carries the UI; the
+ * fallbacks matter because a missing font would otherwise silently drop to
+ * whatever St picks. The session font is deliberately NOT changed — that would
+ * restyle every GTK app on the machine.
+ *
+ * One block, appended once. Do not add override rules further down the file —
+ * the dock rules above are already spread across four generations and only the
+ * last one wins, which is exactly the problem this section avoids repeating.
+ *
+ * Palette is the Adaptive ladder from tokens/adaptive.tokens.json:
+ *   canvas #08111B · surface #111A28 · elevated #162233 · divider #30425C
+ *   accent #78A9FF · cyan #66E0FF · violet #9A8BFF
+ *   warning #F3C96B · danger #FF7A90 · success #65D9B5
+ * No blur anywhere: GNOME 42 St has none and the project does not fake it.
+ */
+
+.adaptive-shade {
+    width: 430px;
+    padding: 16px 16px 10px 16px;
+    spacing: 14px;
+    color: #F2F6EF;
+    font-family: "Inter", "Cantarell", sans-serif;
+}
+
+/* ---------------------------------------------------------------
+ * Header — clock, date, uptime
+ * --------------------------------------------------------------- */
+
+.adaptive-shade-header {
+    spacing: 10px;
+}
+
+.adaptive-shade-time {
+    color: #F2F6EF;
+    font-size: 32px;
+    font-weight: 300;
+}
+
+.adaptive-shade-date {
+    margin-top: 2px;
+    color: #9DB0C6;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.adaptive-shade-uptime {
+    color: #8295AE;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* GNOME's calendar column is left completely stock apart from this: the popup
+ * would otherwise carry two typefaces side by side. */
+.calendar-menu {
+    font-family: "Inter", "Cantarell", sans-serif;
+}
+
+/* ---------------------------------------------------------------
+ * Notifications — grouped per application
+ * --------------------------------------------------------------- */
+
+.adaptive-notif-section {
+    spacing: 10px;
+}
+
+.adaptive-notif-group {
+    border-radius: 14px;
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(17, 26, 40, 0.86);
+}
+
+.adaptive-notif-group-header {
+    padding: 9px 12px 7px 12px;
+    border-radius: 14px;
+    color: #DCE6F2;
+}
+
+.adaptive-notif-group-header:hover,
+.adaptive-notif-group-header:focus {
+    background-color: rgba(120, 169, 255, 0.08);
+}
+
+.adaptive-notif-group-icon {
+    padding-right: 9px;
+}
+
+.adaptive-notif-group-title {
+    color: #E8EFF8;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* The count badge is the Android tell that a group is holding more. */
+.adaptive-notif-group-count {
+    min-width: 18px;
+    margin: 0 6px;
+    padding: 1px 6px;
+    border-radius: 9px;
+    background-color: rgba(120, 169, 255, 0.22);
+    color: #CFE0FA;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.adaptive-notif-group-chevron {
+    icon-size: 14px;
+    color: #8295AE;
+}
+
+.adaptive-notif-group-list {
+    padding: 0 6px 4px 6px;
+    spacing: 2px;
+}
+
+.adaptive-notif-more {
+    margin: 0 8px 8px 8px;
+    padding: 5px;
+    border-radius: 8px;
+    color: #8FA6C4;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-notif-more:hover,
+.adaptive-notif-more:focus {
+    background-color: rgba(120, 169, 255, 0.10);
+    color: #EAF2FF;
+}
+
+/* ---------------------------------------------------------------
+ * System telemetry
+ * --------------------------------------------------------------- */
+
+/* The system block scrolls when it outgrows the screen. Its height is set from
+ * the monitor in _fitToMonitor() rather than in CSS - St's stylesheet subset
+ * does not honour max-height. `vfade` is GNOME's own fade-at-the-edges class. */
+
+.adaptive-shade-system {
+    padding: 12px 13px;
+    spacing: 9px;
+    border-radius: 14px;
+    border: 1px solid rgba(120, 169, 255, 0.09);
+    background-color: rgba(13, 25, 40, 0.72);
+}
+
+.adaptive-shade-section-title {
+    margin-top: 3px;
+    color: #8295AE;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.adaptive-shade-load,
+.adaptive-shade-subline {
+    color: #8FA2BA;
+    font-size: 11px;
+}
+
+/* A metric row: name and figure, history strip, then the hardware detail. */
+.adaptive-metric {
+    spacing: 11px;
+    padding: 3px 0;
+}
+
+.adaptive-metric-left {
+    width: 66px;
+}
+
+.adaptive-metric-name {
+    color: #8295AE;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.adaptive-metric-value {
+    color: #EFF5FC;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.adaptive-metric-meta {
+    width: 92px;
+    color: #9DB0C6;
+    font-size: 11px;
+    text-align: right;
+}
+
+.adaptive-shade-sparkline {
+    height: 30px;
+    min-width: 110px;
+}
+
+/* Meters: memory, swap, filesystems. */
+.adaptive-meter-row {
+    spacing: 9px;
+    padding: 2px 0;
+}
+
+.adaptive-meter-name {
+    width: 66px;
+    color: #8295AE;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.adaptive-meter {
+    height: 7px;
+    border-radius: 4px;
+    background-color: rgba(48, 66, 92, 0.55);
+}
+
+.adaptive-meter-fill {
+    height: 7px;
+    border-radius: 4px;
+    background-color: #78A9FF;
+}
+
+.adaptive-meter-value {
+    width: 132px;
+    color: #A5B4C8;
+    font-size: 11px;
+    text-align: right;
+}
+
+/* Per-core load. Sixteen bars read as a shape; sixteen numbers do not. */
+.adaptive-shade-cores {
+    height: 26px;
+    spacing: 2px;
+}
+
+.adaptive-core {
+    background-color: rgba(48, 66, 92, 0.42);
+    border-radius: 2px;
+}
+
+.adaptive-core-fill {
+    border-radius: 2px;
+    background-color: #78A9FF;
+}
+
+/* Network, one row per interface that has actually carried traffic. */
+.adaptive-net-row {
+    padding: 1px 0;
+}
+
+.adaptive-net-name {
+    color: #A5B4C8;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-net-rate {
+    color: #9DB0C6;
+    font-size: 11px;
+}
+
+/* Temperature chips, coloured by band rather than by sensor. */
+.adaptive-shade-chips {
+    padding: 2px 0;
+}
+
+.adaptive-chip {
+    padding: 6px 7px;
+    spacing: 2px;
+    border-radius: 9px;
+    background-color: rgba(17, 26, 40, 0.82);
+    border: 1px solid rgba(120, 169, 255, 0.07);
+}
+
+.adaptive-chip-name {
+    color: #8195AE;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-chip-value {
+    color: #65D9B5;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* Top processes. */
+.adaptive-proc-row {
+    padding: 2px 0;
+    spacing: 8px;
+}
+
+.adaptive-proc-name {
+    color: #D8E3EF;
+    font-size: 12px;
+}
+
+.adaptive-proc-cpu {
+    width: 52px;
+    color: #A5B4C8;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.adaptive-proc-mem {
+    width: 72px;
+    color: #8FA2BA;
+    font-size: 11px;
+    text-align: right;
+}
+
+.adaptive-shade-footer-item {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(48, 66, 92, 0.36);
+    color: #9DB0C6;
+    font-size: 11px;
+    font-weight: 600;
 }

@@ -164,8 +164,112 @@ PY
   "${REPO}/scripts/focus-cli.py" status || true
   rg -q "Adaptive Calendar Center" "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
     || fail "Adaptive calendar/notification styling missing"
+  rg -q "Adaptive Shade v2" "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
+    || fail "Adaptive Shade styling missing"
   pass "Focus controls and Adaptive calendar/notification styling are present"
+
+  # The shade modules load at gnome-shell start, so a syntax error is a broken
+  # desktop rather than a failed test. Parse them here instead of finding out
+  # at the next login.
+  for module in shade telemetry notifications sparkline; do
+    node --check "${REPO}/shell/adaptive-shell@local/${module}.js" \
+      || fail "shade module does not parse: ${module}.js"
+  done
+  pass "Adaptive Shade modules parse"
+
+  # The shade rearranges actors gnome-shell owns. These two assertions are what
+  # stands between "reparented" and "reimplemented": the message list has to be
+  # GNOME's own instance, moved and handed back, never rebuilt.
+  has_source "_messageList" "${REPO}/shell/adaptive-shell@local/shade.js"
+  has_source "_origParent" "${REPO}/shell/adaptive-shell@local/shade.js"
+  has_source "insert_child_at_index" "${REPO}/shell/adaptive-shell@local/shade.js"
+  if rg -q "new Calendar\.CalendarMessageList|new MessageList" \
+      "${REPO}/shell/adaptive-shell@local/shade.js"; then
+    fail "the shade builds its own message list instead of reparenting GNOME's"
+  fi
+  pass "The shade reparents GNOME's message list and records how to put it back"
+
+  # v2 is an information center. GNOME's aggregate menu owns every control, so
+  # the shade must contain none - not even delegating ones. This is a stronger
+  # and simpler property than v1.7's "delegate, don't reimplement".
+  test ! -f "${REPO}/shell/adaptive-shell@local/tiles.js" \
+    || fail "tiles.js is back; the shade is meant to hold no controls"
+  for control in \
+    "getRfkillManager" \
+    "getMixerControl" \
+    "Slider.Slider" \
+    "wireless_enabled" \
+    "set_boolean"
+  do
+    if rg -q "$control" "${REPO}/shell/adaptive-shell@local/"*.js; then
+      fail "the shade grew a control GNOME's aggregate menu already owns: ${control}"
+    fi
+  done
+  pass "The shade holds no controls; GNOME's aggregate menu keeps them"
+
+  # Notification grouping must stay a change of arrangement. The moment the
+  # shade builds its own notification objects instead of GNOME's, delivery and
+  # urgency stop being GNOME's problem and start being ours.
+  has_source "Calendar.NotificationMessage" \
+    "${REPO}/shell/adaptive-shell@local/notifications.js"
+  has_source "Main.messageTray" \
+    "${REPO}/shell/adaptive-shell@local/notifications.js"
+  has_source "notificationGrouping" "${REPO}/shell/adaptive-shell@local/shade.js"
+  has_source "_restoreStockNotifications" "${REPO}/shell/adaptive-shell@local/shade.js"
+  pass "Notifications are regrouped, not rebuilt, and fall back to GNOME's list"
+
+  # An Adaptive month/agenda/week calendar was built and then removed: the
+  # stock GNOME calendar is what was wanted. Assert it stays stock. Touching
+  # the event source at all is the tell that it is creeping back, and
+  # requestRange in particular would fight GNOME's own month grid for the
+  # shared calendar server's time range.
+  test ! -f "${REPO}/shell/adaptive-shell@local/calendar-view.js" \
+    || fail "calendar-view.js is back; the calendar column is meant to be stock"
+  for symbol in "requestRange" "getEvents" "_eventSource" "dateMenu._calendar"; do
+    if rg -q "$symbol" "${REPO}/shell/adaptive-shell@local/"*.js; then
+      fail "the shade is reaching into GNOME's calendar again: ${symbol}"
+    fi
+  done
+  pass "The calendar column is left stock"
+
+  # GNOME stacks the empty-state placeholder over the message list with a
+  # BinLayout, so in the shade's compressed list it landed on top of the Do Not
+  # Disturb row. It is moved into normal flow, and must be put back on detach
+  # like every other GNOME actor the shade rearranges.
+  has_source "_unstackPlaceholder" "${REPO}/shell/adaptive-shell@local/shade.js"
+  has_source "_restackPlaceholder" "${REPO}/shell/adaptive-shell@local/shade.js"
+  pass "The empty-state placeholder is unstacked from the controls and restored on detach"
+
+  # The system block has no natural bound - sixteen cores, eleven sensors and
+  # five processes ran past the bottom of the screen before it could scroll.
+  has_source "St.ScrollView" "${REPO}/shell/adaptive-shell@local/shade.js"
+  has_source "_fitToMonitor" "${REPO}/shell/adaptive-shell@local/shade.js"
+  pass "The shade sizes itself against the monitor and scrolls rather than overflowing"
+
+  # The clarity fix was a type scale, and it regresses the moment one 9px rule
+  # gets pasted back in.
+  if awk '/Adaptive Shade v2/,0' \
+      "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
+      | rg -q "font-size: ([0-9]|10)px"; then
+    fail "the shade has font sizes below 11px again"
+  fi
+  pass "No shade text is smaller than 11px"
+
+  # Sensors are found by reading what each device says it is. Hardcoded indices
+  # survive exactly until the next boot reorders probing.
+  # Strip comment lines first: the module's own header names `thermal_zone10`
+  # and `card1` precisely to say it must not depend on them, and that sentence
+  # should not fail the check it describes.
+  if grep -vE '^[[:space:]]*(//|\*|/\*)' \
+      "${REPO}/shell/adaptive-shell@local/telemetry.js" \
+      | rg -q "thermal_zone[0-9]|/sys/class/drm/card[0-9]"; then
+    fail "telemetry hardcodes a thermal zone or DRM card index"
+  fi
+  pass "Telemetry discovers sensors at runtime rather than hardcoding indices"
+
   verify "Notification history and quiet/fullscreen policy need a live notification check"
+  verify "Open the shade and confirm telemetry and grouped notifications read correctly"
+  verify "Disable the extension and confirm the stock GNOME date menu comes back intact"
 
   echo
   echo "== Window and monitor behavior =="

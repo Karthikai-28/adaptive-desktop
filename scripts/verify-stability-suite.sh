@@ -27,17 +27,28 @@ find "${REPO}/backups" -maxdepth 1 -mindepth 1 -type d | sort | tail -10
 echo
 echo "== Update compatibility =="
 gnome-shell --version
-python3 - <<'PY'
+REPO="$REPO" python3 - <<'PYCHECK'
+import os
 from pathlib import Path
-for path in [
+
+# Resolved against REPO, not the caller's cwd: this suite has to give the same
+# answer wherever it is run from.
+repo = Path(os.environ["REPO"])
+for name in [
     "services/project-context/main.py",
     "scripts/project-cli.py",
     "scripts/focus-cli.py",
 ]:
-    compile(Path(path).read_text(), path, "exec")
-    print(f"OK {path}")
-PY
-node --check "${REPO}/shell/adaptive-shell@local/extension.js"
+    path = repo / name
+    compile(path.read_text(), str(path), "exec")
+    print(f"OK {name}")
+PYCHECK
+
+# Every shell module, not just extension.js: they all load at gnome-shell start,
+# so a syntax error in any one of them is a broken desktop.
+for module in extension shade telemetry notifications sparkline; do
+    node --check "${REPO}/shell/adaptive-shell@local/${module}.js"
+done
 python3 "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
 
 echo

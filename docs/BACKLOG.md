@@ -227,6 +227,41 @@ so the marks are restated against what is actually true.
 - ✅ Project focus profile.
 - ✅ Focus timer.
 - ✅ Quiet/fullscreen behavior.
+- ✅ Adaptive Shade. The notification center is now an Adaptive surface rather
+  than restyled GNOME chrome: header, brightness/volume sliders, an eight-tile
+  quick-toggle grid, and live system telemetry, stacked above GNOME's own
+  message list. This is the `Notification Service` and `System Center` layers in
+  `config/architecture.md` finally landing - and unlike the System Center that
+  was removed at Milestone 6, it reimplements nothing: every tile and slider is
+  a view onto a backend GNOME already owns. See `docs/NOTIFICATION_FOCUS_POLICY.md`.
+- ✅ System telemetry. CPU load/frequency/package temperature, Intel GPU busy and
+  clock, memory and swap, filesystem usage, every thermal sensor, battery and
+  network throughput. Sourced from procfs and sysfs directly; polling runs only
+  while the shade is open.
+- ✅ Shade v2 — information center. Every control was removed: the tile grid,
+  both sliders and the header's session buttons are gone and `tiles.js` is
+  deleted. GNOME's aggregate menu already owned network, bluetooth, audio,
+  brightness and power, and a second place to change them was a second thing to
+  keep in sync. `verify-live-readiness.sh` now fails if a control reappears.
+- ✅ Notifications grouped per application, Android-style, with a count badge and
+  collapse past three. Cards are still `Calendar.NotificationMessage` over
+  `MessageTray.Notification`, so only arrangement changed. Two fallbacks to
+  GNOME's flat list: `~/.config/adaptive-desktop/shade.json`
+  `{"notificationGrouping": false}`, and an automatic catch if the grouped
+  section fails to build.
+- ⬜ Calendar: an Adaptive month/agenda/week view was built over the date menu's
+  existing event source and then **removed** — the stock GNOME calendar is what
+  was wanted. `verify-live-readiness.sh` now fails if anything in the shell
+  reaches into the event source, so this stays deliberate rather than drifting
+  back. The constraint if it is ever revisited is recorded in the gotchas below.
+- ✅ The shade scrolls instead of overflowing. The system block is sized against
+  the monitor when the popup opens; only that block scrolls, because GNOME's
+  message list already scrolls itself and nesting the two sizes neither.
+- ✅ Typography. Inter installed to `~/.local/share/fonts`, and nothing in the
+  shade is below 11px — v1.7 had fifteen rules at 8–9px on a 96 DPI screen with
+  no scaling, which was the whole of the clarity problem.
+- ✅ More metrics: top processes aggregated by command name, load average,
+  uptime, disk read/write throughput, and per-interface network.
 
 ## Milestone 10 — Window management
 
@@ -332,6 +367,76 @@ the handoff: do not mark the Figma-skin items complete without the exports.
   and `ReloadExtension` is deprecated, so disable/enable re-runs the old code.
   Changed rail source needs `reload-adaptive-shell.sh --restart-shell` (X11)
   or a fresh login.
+- `CalendarMessageList` stacks the "No Notifications" placeholder over the whole
+  list with a `Clutter.BinLayout`, sharing that space with the box that holds the
+  scroll view *and* the Do Not Disturb row. Stock GNOME only gets away with it
+  because the list is tall enough that the centred placeholder clears the
+  controls; compress the list and they overlap. The shade moves the placeholder
+  into that vertical box so it is in normal flow and cannot overlap at any
+  height — and puts it back on detach, like every other GNOME actor it moves.
+- `/proc/loadavg`'s fourth field counts **tasks**, kernel threads included —
+  ~3100 against ~500 real processes on this machine. Labelling it "processes"
+  is wrong by a factor of six; the process count comes from the `/proc` walk.
+- `verify-stability-suite.sh` resolved three paths against the caller's cwd
+  instead of `${REPO}`, so it only passed when run from the repo root. Fixed,
+  and it now syntax-checks every shell module rather than just extension.js.
+- `Calendar.DBusEventSource.requestRange()` REPLACES the calendar server's time
+  range rather than widening it, and `Calendar.Calendar._rebuildCalendar()`
+  already calls it for the displayed month grid. A second caller makes the two
+  fight, each forcing a reload on a shared server. The shade's calendar reads
+  with `getEvents()` and never requests a range.
+- GNOME's `CalendarEvent` keeps only `{id, date, end, summary}` — it discards the
+  DBus `a{sv}` extras — and the Google source's local `.source` file has an empty
+  `Color=`. There is no upstream per-calendar colour to honour, so the shade
+  hashes the source uid out of the event id prefix onto the Adaptive palette.
+- `MessageList.MessageListSection` defines `_messages` as "every child of `_list`,
+  unwrapped", so inserting group headers into that list corrupts its own
+  `empty`/`can-clear`/`clear()` logic. Group by implementing the contract
+  `CalendarMessageList` consumes, not by subclassing the section.
+- **Reading a temperature is not always cheap.** An NVMe hwmon `temp1_input`
+  issues a SMART admin command to the drive and costs ~27 ms on this machine;
+  every other sensor here is 0.01-0.14 ms. v1.7 read them all synchronously
+  every second, blocking the compositor's main loop for 27 ms a second the whole
+  time the shade was open. v2 times every sensor once at discovery, reads
+  anything over 2 ms asynchronously via `load_contents_async`, and only every
+  ten seconds. Measured, not guessed by device name, because which sensors are
+  slow is a property of the hardware and driver.
+  Result: median tick 1.37 ms, max 12.6 ms, 3.44 ms/s amortised, and zero ticks
+  over a 16.7 ms frame budget - from 11.0 ms/s with a 48 ms worst case.
+- Never let two expensive samplers run on the same tick. The `/proc` walk and a
+  slow sensor together were ~38 ms, two dropped frames; each is scheduled on its
+  own next-due counter and yields if the other already ran.
+- A `Clutter.FixedLayout` child is positioned in absolute coordinates, so
+  anything laid out inside one must be placed against the width the container is
+  actually allocated, via `notify::width` - not against the constant it was
+  built with. An `x_expand` column is never the width you asked for.
+- Events from `DBusEventSource` are shared cache objects and the same event can
+  appear in several day columns. Never write layout state onto them; keep it in
+  a Map beside them.
+- A full `/proc` walk costs ~5 ms across ~500 processes. That is far too much to
+  spend every second on the compositor's main loop, so the process table samples
+  every third tick. Per-process CPU also has to skip processes that appeared
+  since the last scan, or their whole lifetime's CPU is reported as if it were
+  spent in the last interval.
+- `notify-send --app-name` is not enough to prove grouping across applications:
+  the notification daemon may fold several senders into one source. Check the
+  group count in the popup, not just that the notifications arrived.
+- Intel `gt_act_freq_mhz` reads 0 whenever the render engine is in RC6, which is
+  correct but looks like a dead sensor. GPU busy comes from RC6 residency deltas
+  instead (`100 - Δrc6_ms/Δwall_ms`), which needs no perf access and no
+  `intel_gpu_top`; measured 17% idle against 100% under `glxgears`. The shade
+  shows "Idle" rather than "0 MHz" when the clock is genuinely down.
+- Thermal zone indices and DRM card numbers are assigned in probe order, not
+  fixed, so `telemetry.js` resolves sensors by reading each zone's `type` and
+  each card's attributes. `thermal_zone10` is the package sensor on this machine
+  today and need not be tomorrow. `INT3400` is an ACPI policy device, not a
+  sensor: it reports a constant 20°C and is filtered out.
+- `intel-rapl` `energy_uj` is root-only, so package wattage is not available to
+  the shell, and this machine exposes no fan tachometer. Both are deliberately
+  absent from the shade rather than faked.
+- Assigning `actor.style` forces St to reparse the rule. Per-tick colour writes
+  across sixteen core bars and a dozen temperature chips are real work, so the
+  shade only writes a style when the value's colour band actually changes.
 - `adaptive-project-context.desktop` must keep `NoDisplay=false`. GNOME's
   `loadRemoteSearchProviders` drops any provider whose `DesktopId` fails
   `should_show()`, so hiding the service from the app grid also removes

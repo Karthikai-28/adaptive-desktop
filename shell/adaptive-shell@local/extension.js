@@ -14,6 +14,7 @@ const Gvc = imports.gi.Gvc;
 const Pango = imports.gi.Pango;
 
 const Me = ExtensionUtils.getCurrentExtension();
+const Shade = Me.imports.shade;
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
 // OLED; the ambient level is what it settles to once nobody is looking.
@@ -57,6 +58,8 @@ class AdaptiveShellV16 {
         this._hiddenActors = [];
         this._clockActor = null;
         this._clockDisplay = null;
+        // Adaptive Shade: the notification center built inside GNOME's date menu.
+        this._shade = null;
         this._projectProxy = null;
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
@@ -154,6 +157,7 @@ class AdaptiveShellV16 {
 
         this._hideLegacyPanelItems();
         this._restoreGNOMEClock();
+        this._installShade();
         this._installRail();
 
         this._monitorChangedId = Main.layoutManager.connect(
@@ -876,6 +880,13 @@ class AdaptiveShellV16 {
         this._lockScreenStop();
         this._lockActive = false;
 
+        // Before anything else: the shade holds GNOME's own message list and
+        // has to hand it back intact whatever else happens during teardown.
+        if (this._shade) {
+            this._shade.detach();
+            this._shade = null;
+        }
+
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
@@ -1084,6 +1095,23 @@ class AdaptiveShellV16 {
                 e,
                 '[Adaptive Shell v1.6] restoring GNOME clock'
             );
+        }
+    }
+
+    // The Adaptive Shade rebuilds the interior of the date menu popup as an
+    // information center: clock, notifications grouped per application, full
+    // system telemetry. It holds no controls - GNOME's aggregate menu owns
+    // those - and leaves the calendar column stock. The message list is
+    // reparented,
+    // never replaced, so notification delivery, storage, urgency and history
+    // stay GNOME's.
+    _installShade() {
+        try {
+            this._shade = new Shade.Shade();
+            this._shade.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the Adaptive Shade');
+            this._shade = null;
         }
     }
 

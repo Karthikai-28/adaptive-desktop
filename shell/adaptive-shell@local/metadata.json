@@ -1,11 +1,11 @@
 {
   "uuid": "adaptive-shell@local",
   "name": "Adaptive Desktop Shell",
-  "description": "Adaptive Desktop shell: bottom dock, project context, command palette, Adaptive lock screen, and restored GNOME clock/calendar.",
+  "description": "Adaptive Desktop shell: bottom dock, Adaptive Shade information center (grouped notifications, system telemetry, calendar), project context, command palette, and Adaptive lock screen.",
   "shell-version": [
     "42"
   ],
-  "version": 16,
+  "version": 18,
   "session-modes": [
     "user",
     "unlock-dialog"

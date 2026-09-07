@@ -33,6 +33,44 @@ UI_FONT="Cantarell 11"
 DOC_FONT="Cantarell 11"
 MONO_FONT="JetBrainsMono Nerd Font 12"
 
+# Inter carries the shade's UI text. It is genuinely clearer than Cantarell at
+# the 11-14px the notification and agenda rows use, which is where the shade
+# lives. Installed per-user from Ubuntu's own package rather than with apt, so
+# this script still needs no root; `rm -rf ~/.local/share/fonts/inter` undoes it.
+#
+# Note this does NOT touch org.gnome.desktop.interface font-name below - the
+# session font stays Cantarell. Only the shade's own CSS asks for Inter, because
+# switching the session font would restyle every GTK app on the machine.
+install_inter() {
+    local dst="${HOME}/.local/share/fonts/inter"
+
+    if fc-list : family | tr ',' '\n' | grep -qx "Inter"; then
+        echo "  Inter already installed"
+        return 0
+    fi
+
+    local tmp
+    tmp="$(mktemp -d)"
+    if (cd "$tmp" && apt-get download fonts-inter >/dev/null 2>&1); then
+        dpkg-deb -x "$tmp"/fonts-inter_*.deb "$tmp/x" 2>/dev/null || true
+        if compgen -G "$tmp/x/usr/share/fonts/**/*.otf" >/dev/null 2>&1 ||
+           find "$tmp/x" -name '*.otf' -print -quit | grep -q .; then
+            mkdir -p "$dst"
+            find "$tmp/x" -name '*.otf' -exec cp {} "$dst/" \;
+            fc-cache -f "${HOME}/.local/share/fonts" >/dev/null 2>&1
+            echo "  $dst ($(find "$dst" -name '*.otf' | wc -l) faces)"
+        fi
+    else
+        # Not fatal: the shade's font stack falls back to Cantarell, so the
+        # only loss is a little crispness at small sizes.
+        echo "  Inter unavailable (offline?); the shade falls back to Cantarell"
+    fi
+    rm -rf "$tmp"
+}
+
+echo "Installing Inter for the Adaptive Shade..."
+install_inter
+
 echo "Building theme from tokens..."
 "${REPO}/scripts/build-adaptive-theme.py"
 
