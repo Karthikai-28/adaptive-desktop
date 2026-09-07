@@ -54,7 +54,7 @@ set_binding() {
 }
 
 set_binding "adaptive-command" "Adaptive Command" "${REPO}/scripts/adaptive-command-launch.sh" "<Alt>space"
-set_binding "adaptive-projects" "Adaptive Projects" "${REPO}/scripts/adaptive-projects-launch.sh" "<Super>p"
+set_binding "adaptive-projects" "Adaptive Projects" "${REPO}/scripts/adaptive-projects-launch.sh" "<Alt>p"
 set_binding "adaptive-window-smart" "Adaptive Smart Tile" "${REPO}/scripts/window-cli.py tile smart" "<Super><Alt>space"
 set_binding "adaptive-window-left" "Adaptive Tile Left" "${REPO}/scripts/window-cli.py tile left" "<Super><Alt>Left"
 set_binding "adaptive-window-right" "Adaptive Tile Right" "${REPO}/scripts/window-cli.py tile right" "<Super><Alt>Right"
@@ -108,13 +108,44 @@ print(f"  released {unwanted} from {key} -> {kept}")
 PY
 }
 
+claim_accelerator() {
+    local schema="$1"
+    local key="$2"
+    local wanted="$3"
+
+    python3 - "$schema" "$key" "$wanted" <<'PY'
+import ast
+import subprocess
+import sys
+
+schema, key, wanted = sys.argv[1], sys.argv[2], sys.argv[3]
+
+raw = subprocess.check_output(["gsettings", "get", schema, key], text=True).strip()
+if raw.startswith("@as "):
+    raw = raw[4:]
+
+try:
+    values = list(ast.literal_eval(raw))
+except Exception:
+    values = []
+
+if wanted in values:
+    sys.exit(0)
+
+values.append(wanted)
+subprocess.run(["gsettings", "set", schema, key, repr(values)], check=True)
+print(f"  claimed {wanted} for {key} -> {values}")
+PY
+}
+
 echo "Resolving accelerator conflicts:"
 release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-left '<Super><Alt>Left'
 release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-right '<Super><Alt>Right'
 
-# Super+P opens project mode. Mutter's switch-monitor also lists it but
-# keeps XF86Display, so releasing this one leaves that function reachable.
-release_accelerator org.gnome.mutter.keybindings switch-monitor '<Super>p'
+# Project mode moved to Alt+P so Super+P stays with Mutter's switch-monitor -
+# the display projection switcher (mirror / extend / single). Earlier versions
+# of this script released it, so claim it back explicitly.
+claim_accelerator org.gnome.mutter.keybindings switch-monitor '<Super>p'
 
 #
 # Alt+Space opens the Command palette. GNOME's activate-window-menu holds it by
@@ -131,7 +162,8 @@ echo
 cat <<'EOF'
 Installed Adaptive Desktop shortcuts:
   Alt+Space          Command palette
-  Super+P            Project mode
+  Alt+P              Project mode
+  Super+P            Switch display mode (mirror / extend)
   Super+Alt+Space    Smart tile active window
   Super+Alt+Left     Tile active window left
   Super+Alt+Right    Tile active window right

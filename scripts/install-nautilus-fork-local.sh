@@ -18,6 +18,11 @@ fi
 
 ninja -C "$BUILD" install
 
+# Re-link the system extensions the fork cannot see on its own (Open in
+# Terminal lives there). ninja install does not remove them, but a fresh
+# prefix would have none, so run it every time.
+"$(dirname "$0")/install-nautilus-fork-extensions.sh"
+
 echo
 echo "Installed only into:"
 echo "  ${REPO}/.local/adaptive-nautilus"

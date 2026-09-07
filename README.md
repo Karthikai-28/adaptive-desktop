@@ -68,6 +68,14 @@ else:
 ./scripts/install-files-session-integration.sh
 ```
 
+The fork only scans its own prefix for extensions, so apt-installed ones (the
+gnome-terminal extension behind "Open in Terminal") have to be linked in. This
+runs as part of `install-nautilus-fork-local.sh`, or on its own:
+
+```sh
+./scripts/install-nautilus-fork-extensions.sh
+```
+
 ## Verification
 
 ```sh
