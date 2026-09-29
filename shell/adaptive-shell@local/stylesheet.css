@@ -210,371 +210,6 @@
     background-color: rgba(120, 169, 255, 0.10);
 }
 
-/* ===== Adaptive Calendar Center v1.6.2 =====
- *
- * Scoped to GNOME Shell's date/time menu classes and #calendarArea.
- * Functional behavior remains GNOME-native.
- *
- * v1.7: the message list is reparented into the Adaptive Shade column, so it
- * no longer sets its own width - the shade does. Everything else here still
- * styles GNOME's own actors, unchanged.
- */
-
-/* ---------------------------------------------------------------
- * Overall popup
- * --------------------------------------------------------------- */
-
-.calendar-menu .popup-menu-content {
-    padding: 0;
-    border-radius: 16px;
-    border: 1px solid rgba(120, 169, 255, 0.14);
-    background-color: rgba(7, 16, 26, 0.985);
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
-}
-
-#calendarArea {
-    padding: 10px;
-    spacing: 10px;
-    color: #F2F6EF;
-}
-
-/* ---------------------------------------------------------------
- * Left notification column
- * --------------------------------------------------------------- */
-
-.message-list {
-    padding: 0;
-    color: #F2F6EF;
-}
-
-.message-list-sections {
-    spacing: 9px;
-}
-
-.message-list-section {
-    spacing: 7px;
-}
-
-.message-list-section-title {
-    margin: 2px 4px 4px 4px;
-    color: #96A4B8;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.message-list-section-list {
-    spacing: 7px;
-}
-
-/* Empty state */
-/* The empty state sits in the band left over after the system block, which is
- * far shorter than the column stock GNOME centres it in. A 54px bell dominated
- * that space; this is scaled to the room it actually gets. It is also moved out
- * of GNOME's BinLayout overlay in _unstackPlaceholder() so it can no longer land
- * on top of the Do Not Disturb row. */
-.message-list-placeholder {
-    padding: 14px 0;
-    spacing: 6px;
-    color: #73869F;
-}
-
-.message-list-placeholder > StIcon {
-    color: #5F7693;
-    icon-size: 36px;
-    margin-bottom: 4px;
-}
-
-.message-list-placeholder > StLabel {
-    color: #8799B0;
-    font-size: 13px;
-}
-
-/* Individual notifications */
-.message,
-.notification-banner {
-    margin: 0;
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid transparent;
-    background-color: transparent;
-    box-shadow: none;
-}
-
-.message:hover,
-.notification-banner:hover {
-    border-color: rgba(120, 169, 255, 0.20);
-    background-color: rgba(24, 38, 58, 0.94);
-}
-
-.message:focus,
-.notification-banner:focus {
-    border-color: rgba(102, 224, 255, 0.28);
-    background-color: rgba(24, 38, 58, 0.96);
-}
-
-.message-content {
-    spacing: 6px;
-}
-
-.message-title {
-    color: #EFF5FC;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.message-body {
-    color: #A5B4C8;
-    font-size: 13px;
-}
-
-.message-secondary-bin {
-    color: #7F91A9;
-    font-size: 11px;
-}
-
-.message-list-controls {
-    padding: 9px 4px 4px 4px;
-    spacing: 8px;
-    border-top: 1px solid rgba(48, 66, 92, 0.36);
-}
-
-/* Do Not Disturb */
-.dnd-button {
-    margin: 0;
-    padding: 7px 8px;
-    border-radius: 10px;
-    border: 1px solid rgba(120, 169, 255, 0.08);
-    background-color: rgba(13, 25, 40, 0.70);
-    color: #D6E0ED;
-}
-
-.dnd-button:hover {
-    background-color: rgba(24, 38, 58, 0.90);
-    border-color: rgba(120, 169, 255, 0.17);
-}
-
-#calendarArea .toggle-switch {
-    background-color: rgba(48, 66, 92, 0.82);
-}
-
-#calendarArea .toggle-switch:checked {
-    background-color: #78A9FF;
-}
-
-/* ---------------------------------------------------------------
- * Divider / calendar column
- * --------------------------------------------------------------- */
-
-.datemenu-calendar-column {
-    width: 294px;
-    padding: 5px 3px 4px 13px;
-    spacing: 8px;
-    border-left: 1px solid rgba(48, 66, 92, 0.36);
-    color: #D9E3EF;
-}
-
-.datemenu-displays-box {
-    spacing: 8px;
-}
-
-/* Today/date header */
-.datemenu-today-button {
-    min-height: 68px;
-    padding: 10px 11px;
-    border-radius: 11px;
-    border: 1px solid rgba(120, 169, 255, 0.10);
-    background-color: rgba(16, 29, 47, 0.80);
-    color: #F2F6EF;
-    box-shadow: none;
-}
-
-.datemenu-today-button:hover,
-.datemenu-today-button:focus {
-    border-color: rgba(120, 169, 255, 0.22);
-    background-color: rgba(22, 38, 59, 0.92);
-}
-
-.datemenu-today-button .day-label {
-    color: #8FA2BB;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.datemenu-today-button .date-label {
-    color: #DCE8F5;
-    font-size: 16px;
-    font-weight: 700;
-}
-
-/* Month navigation */
-.calendar {
-    padding: 4px 2px 2px 2px;
-    background-color: transparent;
-    color: #D5DFEB;
-}
-
-.calendar-month-label {
-    min-height: 27px;
-    margin: 1px 2px 4px 2px;
-    padding: 3px 10px;
-    border-radius: 8px;
-    color: #EEF4FB;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.pager-button {
-    width: 28px;
-    height: 28px;
-    margin: 1px;
-    border-radius: 8px;
-    color: #91A4BD;
-    background-color: transparent;
-}
-
-.pager-button:hover,
-.pager-button:focus {
-    color: #EAF4FF;
-    background-color: rgba(120, 169, 255, 0.10);
-}
-
-.pager-button:active {
-    background-color: rgba(120, 169, 255, 0.17);
-}
-
-/* Calendar grid */
-.calendar-day-base {
-    width: 34px;
-    height: 30px;
-    margin: 1px;
-    padding: 1px;
-    border-radius: 8px;
-    color: #C6D2E0;
-    font-size: 11px;
-    text-align: center;
-}
-
-.calendar-day-base:hover,
-.calendar-day-base:focus {
-    background-color: rgba(120, 169, 255, 0.10);
-    color: #F2F6EF;
-}
-
-.calendar-day-heading {
-    color: #8195AE;
-    font-size: 10px;
-    font-weight: 700;
-    background-color: transparent;
-}
-
-.calendar-work-day {
-    color: #CCD7E4;
-}
-
-.calendar-nonwork-day {
-    color: #A8B7C9;
-}
-
-.calendar-other-month-day {
-    color: #556A84;
-    opacity: 0.55;
-}
-
-/* Replace Ubuntu orange today marker with Adaptive blue/cyan */
-.calendar-today {
-    color: #07101A;
-    font-weight: 800;
-    background-color: #78A9FF;
-    border: 1px solid rgba(102, 224, 255, 0.55);
-    box-shadow: 0 0 0 2px rgba(120, 169, 255, 0.09);
-}
-
-.calendar-today:hover,
-.calendar-today:focus,
-.calendar-today:selected {
-    color: #07101A;
-    background-color: #8CB7FF;
-    border-color: rgba(102, 224, 255, 0.75);
-}
-
-.calendar-day-with-events {
-    color: #E8EFF8;
-}
-
-.calendar-week-number {
-    color: #6E829C;
-    background-color: rgba(17, 26, 40, 0.68);
-}
-
-/* ---------------------------------------------------------------
- * Events / world clocks / weather cards
- * --------------------------------------------------------------- */
-
-.events-button,
-.world-clocks-button,
-.weather-button {
-    margin-top: 2px;
-    padding: 9px 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(120, 169, 255, 0.09);
-    background-color: rgba(17, 26, 40, 0.82);
-    color: #DCE6F2;
-    box-shadow: none;
-}
-
-.events-button:hover,
-.events-button:focus,
-.world-clocks-button:hover,
-.world-clocks-button:focus,
-.weather-button:hover,
-.weather-button:focus {
-    border-color: rgba(120, 169, 255, 0.19);
-    background-color: rgba(24, 38, 58, 0.92);
-}
-
-.events-section-title,
-.events-title,
-.world-clocks-header,
-.weather-header {
-    color: #8295AE;
-    font-size: 9px;
-    font-weight: 700;
-}
-
-.events-list {
-    spacing: 6px;
-}
-
-.event-time {
-    color: #78A9FF;
-    font-size: 11px;
-}
-
-.events-button StLabel,
-.world-clocks-button StLabel,
-.weather-button StLabel {
-    color: #D8E3EF;
-}
-
-/* ---------------------------------------------------------------
- * Compact notification control buttons
- * --------------------------------------------------------------- */
-
-.message-list-clear-button,
-.message-list-section-close {
-    min-width: 28px;
-    min-height: 28px;
-    border-radius: 8px;
-    color: #8FA2BA;
-    background-color: transparent;
-}
-
-.message-list-clear-button:hover,
-.message-list-section-close:hover {
-    color: #F2F6EF;
-    background-color: rgba(120, 169, 255, 0.10);
-}
-
 /* Keep the top clock pill visually connected to the popup */
 .adaptive-stock-clock {
     border-color: rgba(120, 169, 255, 0.15);
@@ -955,142 +590,494 @@
 }
 
 
-/* ===== Adaptive Shade v2 — information center =====
+/* ===== Adaptive Shade v3 — information center =====
  *
  * The date menu as somewhere to LOOK at things: clock, notifications grouped
- * per application, full system telemetry, and a month/agenda/week calendar.
- * No controls — GNOME's aggregate menu in the top-right owns all of those.
+ * per application, full system telemetry, and GNOME's own calendar. No
+ * controls beyond Do Not Disturb and Clear - the aggregate menu owns the rest.
  *
- * TYPE. v1.7 put fifteen of its sizes at 8–9px on a 96 DPI screen with no
- * scaling, which is the whole of the clarity complaint. Nothing here is below
- * 11px. Inter is installed to ~/.local/share/fonts and carries the UI; the
- * fallbacks matter because a missing font would otherwise silently drop to
- * whatever St picks. The session font is deliberately NOT changed — that would
- * restyle every GTK app on the machine.
+ * LOOK. A HUD on deep-space navy: one gradient panel with a cyan hairline,
+ * three glass cards inside it (system, notifications, calendar), readouts set
+ * in JetBrains Mono with tracked capitals for labels, and a cyan-to-violet
+ * accent reserved for the few things that are "now" - today, the live dot, the
+ * count badge, an enabled switch.
  *
- * One block, appended once. Do not add override rules further down the file —
- * the dock rules above are already spread across four generations and only the
- * last one wins, which is exactly the problem this section avoids repeating.
+ * SCOPE. Everything hangs off `.adaptive-shade-menu` (added to the popup by
+ * shade.js - GNOME 42 gives the date menu no class of its own, which is why
+ * the v2 `.calendar-menu` rules silently never applied and Yaru's grey showed)
+ * or `#calendarArea`, GNOME's id for the popup's contents. The id is also what
+ * lifts these rules over Yaru's, several of which carry !important.
  *
- * Palette is the Adaptive ladder from tokens/adaptive.tokens.json:
- *   canvas #08111B · surface #111A28 · elevated #162233 · divider #30425C
- *   accent #78A9FF · cyan #66E0FF · violet #9A8BFF
- *   warning #F3C96B · danger #FF7A90 · success #65D9B5
- * No blur anywhere: GNOME 42 St has none and the project does not fake it.
+ * TYPE. Nothing below 10px, and 10px only for tracked capitals. Inter carries
+ * the UI, JetBrains Mono the numbers; both are in ~/.local/share/fonts.
+ *
+ * Palette, extending tokens/adaptive.tokens.json:
+ *   void #05090F · panel #0B1424 · glass rgba(20,34,56,.78)
+ *   text #EAF2FF · secondary #9FB3CC · muted #6D829E
+ *   cyan #66E0FF · accent #78A9FF · violet #9A8BFF
+ *   success #65D9B5 · warning #F3C96B · danger #FF7A90
+ * No blur: GNOME 42 St has none and the project does not fake it.
+ *
+ * One block. Do not add override rules further down the file.
  */
 
-.adaptive-shade {
-    width: 430px;
-    padding: 16px 16px 10px 16px;
-    spacing: 14px;
-    color: #F2F6EF;
+/* ---------------------------------------------------------------
+ * Popup
+ * --------------------------------------------------------------- */
+
+.popup-menu-content.adaptive-shade-menu {
+    padding: 0;
+    border-radius: 22px;
+    border: 1px solid rgba(102, 224, 255, 0.18);
+    background-gradient-direction: vertical;
+    background-gradient-start: #0C1628;
+    background-gradient-end: #05090F;
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.62);
     font-family: Inter;
 }
 
+#calendarArea {
+    padding: 14px;
+    spacing: 14px;
+    color: #EAF2FF;
+}
+
+/* The shared card: a faint gradient glass with a top highlight. */
+.adaptive-shade-system,
+#calendarArea .adaptive-shade .message-list,
+#calendarArea .datemenu-calendar-column {
+    border-radius: 18px;
+    border: 1px solid rgba(102, 224, 255, 0.12);
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(22, 37, 61, 0.80);
+    background-gradient-end: rgba(11, 19, 33, 0.80);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* HUD labels: tracked monospace capitals. St leaves letter-spacing out of a
+ * label's preferred width, so tracking only goes on labels that are given more
+ * room than they ask for; anything sized to its text ellipsizes. */
+.adaptive-shade-date,
+.adaptive-shade-uptime,
+.adaptive-shade-section-title,
+.adaptive-metric-name,
+.adaptive-meter-name,
+.adaptive-notif-heading-label,
+.adaptive-notif-more {
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+}
+
+/* Something is live: the uptime chip, the system card. */
+.adaptive-shade-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #65D9B5;
+    box-shadow: 0 0 8px rgba(101, 217, 181, 0.85);
+}
+
 /* ---------------------------------------------------------------
- * Header — clock, date, uptime
+ * Shade column and header
  * --------------------------------------------------------------- */
 
+.adaptive-shade {
+    width: 440px;
+    spacing: 12px;
+    color: #EAF2FF;
+    font-family: Inter;
+}
+
 .adaptive-shade-header {
-    spacing: 10px;
+    padding: 2px 6px 0 8px;
+    spacing: 12px;
+}
+
+.adaptive-shade-clock {
+    spacing: 3px;
 }
 
 .adaptive-shade-time {
-    color: #F2F6EF;
-    font-size: 32px;
+    color: #F4F8FF;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 46px;
+    font-weight: 200;
+    text-shadow: 0 0 18px rgba(102, 224, 255, 0.35);
+}
+
+.adaptive-shade-seconds {
+    padding-bottom: 8px;
+    color: #66E0FF;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 18px;
     font-weight: 300;
 }
 
 .adaptive-shade-date {
     margin-top: 2px;
-    color: #9DB0C6;
+    color: #7F95B2;
+}
+
+.adaptive-shade-uptime {
+    margin-top: 10px;
+    padding: 5px 11px 5px 9px;
+    spacing: 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(101, 217, 181, 0.30);
+    background-color: rgba(101, 217, 181, 0.08);
+    color: #A8EFD9;
+}
+
+/* ---------------------------------------------------------------
+ * Notifications — header row, empty state, grouped cards
+ * --------------------------------------------------------------- */
+
+/* Yaru draws a right-hand border on the list - the stray vertical line - and
+ * pads it for a scrollbar the overlay scrollbars never need. */
+#calendarArea .adaptive-shade .message-list,
+#calendarArea .adaptive-shade .message-list:ltr {
+    margin: 0;
+    padding: 12px 10px 10px 12px;
+    border-width: 1px;
+}
+
+#calendarArea .message-list-sections,
+#calendarArea .message-list-sections:ltr {
+    margin: 0;
+    padding: 0;
+    spacing: 10px;
+}
+
+#calendarArea .message-list-section,
+#calendarArea .message-list-section-list {
+    spacing: 8px;
+}
+
+/* GNOME's controls row, moved to the top by shade.js. */
+#calendarArea .message-list-controls.adaptive-notif-header {
+    padding: 0 0 10px 4px;
+    spacing: 10px;
+    border-width: 0;
+}
+
+.adaptive-notif-heading {
+    spacing: 8px;
+}
+
+.adaptive-notif-heading-label {
+    min-width: 112px;
+    color: #7FC4E0;
+}
+
+.adaptive-notif-heading-count {
+    min-width: 12px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background-gradient-direction: horizontal;
+    background-gradient-start: #66E0FF;
+    background-gradient-end: #9A8BFF;
+    color: #04101A;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    font-weight: 800;
+    text-align: center;
+}
+
+/* "Do Not Disturb" */
+#calendarArea .message-list-controls > StLabel {
+    color: #8FA3BD;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+#calendarArea .message-list-controls .dnd-button {
+    padding: 0;
+    border-width: 0;
+    border-radius: 999px;
+    background-color: transparent;
+}
+
+#calendarArea .message-list-controls .dnd-button:focus {
+    box-shadow: 0 0 0 2px rgba(102, 224, 255, 0.45);
+}
+
+#calendarArea .toggle-switch {
+    width: 44px;
+    height: 24px;
+    background-size: contain;
+    background-image: url("assets/shade/toggle-off.svg");
+}
+
+#calendarArea .toggle-switch:checked {
+    background-image: url("assets/shade/toggle-on.svg");
+}
+
+#calendarArea .message-list-clear-button {
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(102, 224, 255, 0.22);
+    background-color: rgba(102, 224, 255, 0.06);
+    color: #9FDFF5;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+#calendarArea .message-list-clear-button:hover,
+#calendarArea .message-list-clear-button:focus {
+    border-color: rgba(255, 122, 144, 0.45);
+    background-color: rgba(255, 122, 144, 0.12);
+    color: #FFB3C1;
+}
+
+#calendarArea .message-list-clear-button:insensitive {
+    color: #4D5F77;
+    border-color: rgba(102, 224, 255, 0.08);
+    background-color: transparent;
+}
+
+/* Empty state: a glowing ring rather than a grey bell. */
+#calendarArea .message-list .message-list-placeholder {
+    padding: 16px 0 14px 0;
+    spacing: 12px;
+}
+
+#calendarArea .message-list .message-list-placeholder > StIcon {
+    icon-size: 22px;
+    padding: 17px;
+    border-radius: 999px;
+    border: 1px solid rgba(102, 224, 255, 0.34);
+    background-gradient-direction: radial;
+    background-gradient-start: rgba(102, 224, 255, 0.24);
+    background-gradient-end: rgba(102, 224, 255, 0.0);
+    box-shadow: 0 0 24px rgba(102, 224, 255, 0.16);
+    color: #8FE9FF;
+}
+
+#calendarArea .message-list .message-list-placeholder > StLabel {
+    color: #9FB3CC;
     font-size: 13px;
     font-weight: 500;
 }
 
-.adaptive-shade-uptime {
-    color: #8295AE;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-/* GNOME's calendar column is left completely stock apart from this: the popup
- * would otherwise carry two typefaces side by side. */
-.calendar-menu {
-    font-family: Inter;
-}
-
-/* ---------------------------------------------------------------
- * Notifications — grouped per application
- * --------------------------------------------------------------- */
-
+/* One card per application. */
 .adaptive-notif-section {
     spacing: 10px;
 }
 
 .adaptive-notif-group {
-    border-radius: 14px;
-    border: 1px solid rgba(120, 169, 255, 0.10);
-    background-color: rgba(17, 26, 40, 0.86);
+    border-radius: 16px;
+    border: 1px solid rgba(102, 224, 255, 0.10);
+    background-color: rgba(102, 224, 255, 0.035);
+}
+
+.adaptive-notif-group:hover {
+    border-color: rgba(102, 224, 255, 0.20);
 }
 
 .adaptive-notif-group-header {
-    padding: 9px 12px 7px 12px;
-    border-radius: 14px;
+    padding: 10px 12px 6px 10px;
+    border-radius: 16px;
     color: #DCE6F2;
 }
 
 .adaptive-notif-group-header:hover,
 .adaptive-notif-group-header:focus {
-    background-color: rgba(120, 169, 255, 0.08);
+    background-color: rgba(102, 224, 255, 0.06);
 }
 
 .adaptive-notif-group-icon {
-    padding-right: 9px;
+    margin-right: 10px;
+    padding: 5px;
+    border-radius: 9px;
+    border: 1px solid rgba(102, 224, 255, 0.16);
+    background-color: rgba(102, 224, 255, 0.08);
 }
 
 .adaptive-notif-group-title {
-    color: #E8EFF8;
+    color: #CFE3F7;
     font-size: 12px;
     font-weight: 600;
 }
 
-/* The count badge is the Android tell that a group is holding more. */
 .adaptive-notif-group-count {
-    min-width: 18px;
-    margin: 0 6px;
-    padding: 1px 6px;
-    border-radius: 9px;
-    background-color: rgba(120, 169, 255, 0.22);
-    color: #CFE0FA;
-    font-size: 11px;
-    font-weight: 700;
+    min-width: 12px;
+    margin: 0 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background-color: rgba(102, 224, 255, 0.16);
+    color: #A9F0FF;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    font-weight: 800;
     text-align: center;
 }
 
 .adaptive-notif-group-chevron {
     icon-size: 14px;
-    color: #8295AE;
+    color: #66E0FF;
 }
 
 .adaptive-notif-group-list {
-    padding: 0 6px 4px 6px;
-    spacing: 2px;
+    padding: 0 6px 6px 6px;
+    spacing: 4px;
 }
 
 .adaptive-notif-more {
-    margin: 0 8px 8px 8px;
-    padding: 5px;
-    border-radius: 8px;
-    color: #8FA6C4;
-    font-size: 11px;
-    font-weight: 600;
+    margin: 0 10px 10px 10px;
+    padding: 6px;
+    border-radius: 10px;
+    border: 1px solid rgba(102, 224, 255, 0.14);
+    color: #66E0FF;
 }
 
 .adaptive-notif-more:hover,
 .adaptive-notif-more:focus {
-    background-color: rgba(120, 169, 255, 0.10);
+    border-color: rgba(102, 224, 255, 0.34);
+    background-color: rgba(102, 224, 255, 0.08);
+    color: #DDF8FF;
+}
+
+/* A single notification inside a group. */
+#calendarArea .message {
+    margin: 0;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background-color: transparent;
+    box-shadow: none;
     color: #EAF2FF;
+}
+
+#calendarArea .message:hover {
+    border-color: rgba(102, 224, 255, 0.14);
+    background-color: rgba(102, 224, 255, 0.05);
+}
+
+#calendarArea .message:focus,
+#calendarArea .message:focus:active {
+    border-color: rgba(102, 224, 255, 0.42);
+    background-color: rgba(102, 224, 255, 0.06);
+    box-shadow: none;
+}
+
+#calendarArea .message:active {
+    background-color: rgba(102, 224, 255, 0.09);
+}
+
+#calendarArea .message .message-icon-bin,
+#calendarArea .message .message-icon-bin:ltr {
+    padding: 12px 4px 12px 10px;
+}
+
+#calendarArea .message .message-icon-bin > StIcon {
+    icon-size: 28px;
+    -st-icon-style: requested;
+}
+
+#calendarArea .message .message-content {
+    margin-bottom: 0;
+    padding: 10px 10px 10px 6px;
+    spacing: 3px;
+}
+
+#calendarArea .message .message-title {
+    padding-top: 0;
+    color: #F2F7FF;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#calendarArea .message .message-body {
+    color: #9FB3CC;
+    font-size: 12px;
+}
+
+#calendarArea .message .message-secondary-bin > .event-time {
+    color: #5FB9D6;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+}
+
+#calendarArea .message .message-close-button {
+    padding: 4px;
+    border-radius: 999px;
+    background-color: rgba(102, 224, 255, 0.08);
+    color: #9FB3CC;
+}
+
+#calendarArea .message .message-close-button:hover {
+    background-color: rgba(255, 122, 144, 0.22);
+    color: #FFB3C1;
+}
+
+/* Media player card */
+#calendarArea .message-media-control {
+    border-radius: 999px;
+    color: #CFE3F7;
+}
+
+#calendarArea .message-media-control:hover {
+    background-color: rgba(102, 224, 255, 0.10);
+    color: #FFFFFF;
+}
+
+/* ---------------------------------------------------------------
+ * Banners - the pop-ups at the top of the screen, in the same skin
+ * --------------------------------------------------------------- */
+
+#notification-container .notification-banner,
+#notification-container .notification-banner:hover,
+#notification-container .notification-banner:focus,
+#notification-container .notification-banner:active {
+    margin: 10px;
+    border-radius: 18px;
+    border: 1px solid rgba(102, 224, 255, 0.22);
+    background-gradient-direction: vertical;
+    background-gradient-start: #0F1B2E;
+    background-gradient-end: #070C15;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+    color: #EAF2FF;
+    font-family: Inter;
+}
+
+#notification-container .notification-banner:hover {
+    border-color: rgba(102, 224, 255, 0.38);
+}
+
+#notification-container .notification-banner .message-icon-bin > StIcon {
+    -st-icon-style: requested;
+}
+
+#notification-container .notification-banner .message-title {
+    color: #F2F7FF;
+    font-weight: 600;
+}
+
+#notification-container .notification-banner .message-body {
+    color: #9FB3CC;
+}
+
+#notification-container .notification-banner .message-secondary-bin > .event-time {
+    color: #5FB9D6;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+}
+
+#notification-container .notification-banner .notification-button {
+    margin: 0 6px 8px 6px;
+    padding: 7px;
+    border-radius: 10px;
+    border-width: 0;
+    background-color: rgba(102, 224, 255, 0.10);
+    color: #CFEFFF;
+    font-weight: 600;
+}
+
+#notification-container .notification-banner .notification-button:hover,
+#notification-container .notification-banner .notification-button:focus {
+    background-color: rgba(102, 224, 255, 0.20);
+    color: #FFFFFF;
 }
 
 /* ---------------------------------------------------------------
@@ -1102,123 +1089,117 @@
  * does not honour max-height. `vfade` is GNOME's own fade-at-the-edges class. */
 
 .adaptive-shade-system {
-    padding: 12px 13px;
-    spacing: 9px;
-    border-radius: 14px;
-    border: 1px solid rgba(120, 169, 255, 0.09);
-    background-color: rgba(13, 25, 40, 0.72);
+    padding: 14px 16px;
+    spacing: 10px;
 }
 
-/* The SYSTEM heading doubles as the Show more/less row. */
 .adaptive-shade-section-head {
-    spacing: 6px;
+    spacing: 8px;
 }
 
 .adaptive-shade-expander {
-    padding: 3px 9px;
-    border-radius: 8px;
-    border: 1px solid rgba(120, 169, 255, 0.10);
-    background-color: rgba(17, 26, 40, 0.82);
-    color: #9DB0C6;
+    padding: 3px 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(102, 224, 255, 0.22);
+    background-color: rgba(102, 224, 255, 0.05);
+    color: #9FDFF5;
     font-size: 11px;
     font-weight: 600;
 }
 
 .adaptive-shade-expander:hover,
 .adaptive-shade-expander:focus {
-    border-color: rgba(120, 169, 255, 0.26);
-    background-color: rgba(24, 38, 58, 0.94);
-    color: #F2F6EF;
+    border-color: rgba(102, 224, 255, 0.42);
+    background-color: rgba(102, 224, 255, 0.12);
+    color: #FFFFFF;
 }
 
 .adaptive-shade-section-title {
-    margin-top: 3px;
-    color: #8295AE;
-    font-size: 11px;
-    font-weight: 700;
+    margin-top: 4px;
+    color: #7FC4E0;
 }
 
 .adaptive-shade-load,
 .adaptive-shade-subline {
-    color: #8FA2BA;
-    font-size: 11px;
+    color: #7F95B2;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
 }
 
 /* A metric row: name and figure, history strip, then the hardware detail. */
 .adaptive-metric {
-    spacing: 11px;
+    spacing: 12px;
     padding: 3px 0;
 }
 
 .adaptive-metric-left {
-    width: 66px;
+    width: 70px;
 }
 
 .adaptive-metric-name {
-    color: #8295AE;
-    font-size: 11px;
-    font-weight: 700;
+    color: #6D829E;
 }
 
 .adaptive-metric-value {
-    color: #EFF5FC;
-    font-size: 20px;
-    font-weight: 600;
+    color: #F4F8FF;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 22px;
+    font-weight: 300;
 }
 
 .adaptive-metric-meta {
     width: 92px;
-    color: #9DB0C6;
-    font-size: 11px;
+    color: #9FB3CC;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
     text-align: right;
 }
 
 .adaptive-shade-sparkline {
-    height: 30px;
+    height: 34px;
     min-width: 110px;
 }
 
 /* Meters: memory, swap, filesystems. */
 .adaptive-meter-row {
-    spacing: 9px;
+    spacing: 10px;
     padding: 2px 0;
 }
 
 .adaptive-meter-name {
-    width: 66px;
-    color: #8295AE;
-    font-size: 11px;
-    font-weight: 700;
+    width: 70px;
+    color: #6D829E;
 }
 
 .adaptive-meter {
-    height: 7px;
-    border-radius: 4px;
-    background-color: rgba(48, 66, 92, 0.55);
+    height: 6px;
+    border-radius: 3px;
+    background-color: rgba(102, 224, 255, 0.07);
 }
 
 .adaptive-meter-fill {
-    height: 7px;
-    border-radius: 4px;
+    height: 6px;
+    border-radius: 3px;
     background-color: #78A9FF;
 }
 
 .adaptive-meter-value {
     width: 132px;
-    color: #A5B4C8;
-    font-size: 11px;
+    color: #9FB3CC;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
     text-align: right;
 }
 
 /* Per-core load. Sixteen bars read as a shape; sixteen numbers do not. */
 .adaptive-shade-cores {
-    height: 26px;
-    spacing: 2px;
+    height: 28px;
+    spacing: 3px;
 }
 
 .adaptive-core {
-    background-color: rgba(48, 66, 92, 0.42);
     border-radius: 2px;
+    background-color: rgba(102, 224, 255, 0.06);
 }
 
 .adaptive-core-fill {
@@ -1232,14 +1213,15 @@
 }
 
 .adaptive-net-name {
-    color: #A5B4C8;
+    color: #9FB3CC;
     font-size: 11px;
     font-weight: 600;
 }
 
 .adaptive-net-rate {
-    color: #9DB0C6;
-    font-size: 11px;
+    color: #9FB3CC;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
 }
 
 /* Temperature chips, coloured by band rather than by sensor. */
@@ -1248,23 +1230,24 @@
 }
 
 .adaptive-chip {
-    padding: 6px 7px;
+    padding: 7px 8px;
     spacing: 2px;
-    border-radius: 9px;
-    background-color: rgba(17, 26, 40, 0.82);
-    border: 1px solid rgba(120, 169, 255, 0.07);
+    border-radius: 10px;
+    border: 1px solid rgba(102, 224, 255, 0.08);
+    background-color: rgba(102, 224, 255, 0.04);
 }
 
 .adaptive-chip-name {
-    color: #8195AE;
-    font-size: 11px;
+    color: #7F95B2;
+    font-size: 10px;
     font-weight: 600;
 }
 
 .adaptive-chip-value {
     color: #65D9B5;
+    font-family: "JetBrainsMono Nerd Font", monospace;
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 /* Top processes. */
@@ -1280,24 +1263,221 @@
 
 .adaptive-proc-cpu {
     width: 52px;
-    color: #A5B4C8;
-    font-size: 12px;
+    color: #9FB3CC;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
     font-weight: 600;
     text-align: right;
 }
 
 .adaptive-proc-mem {
     width: 72px;
-    color: #8FA2BA;
-    font-size: 11px;
+    color: #7F95B2;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
     text-align: right;
 }
 
 .adaptive-shade-footer-item {
     margin-top: 4px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(48, 66, 92, 0.36);
-    color: #9DB0C6;
-    font-size: 11px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(102, 224, 255, 0.10);
+    color: #9FB3CC;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
     font-weight: 600;
+}
+
+/* ---------------------------------------------------------------
+ * Calendar column - GNOME's actors, restyled
+ * --------------------------------------------------------------- */
+
+#calendarArea .datemenu-calendar-column,
+#calendarArea .datemenu-calendar-column:ltr {
+    width: 300px;
+    padding: 12px;
+    spacing: 10px;
+    color: #D5DFEB;
+}
+
+#calendarArea .datemenu-displays-box {
+    spacing: 8px;
+}
+
+/* Today: the one gradient card in the column. */
+#calendarArea .datemenu-today-button {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(102, 224, 255, 0.24);
+    background-gradient-direction: horizontal;
+    background-gradient-start: rgba(102, 224, 255, 0.16);
+    background-gradient-end: rgba(154, 139, 255, 0.10);
+    color: #F4F8FF;
+}
+
+#calendarArea .datemenu-today-button:hover,
+#calendarArea .datemenu-today-button:focus {
+    border-color: rgba(102, 224, 255, 0.44);
+}
+
+#calendarArea .datemenu-today-button .day-label {
+    color: #66E0FF;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+#calendarArea .datemenu-today-button .date-label {
+    color: #F4F8FF;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+#calendarArea .calendar {
+    margin: 0;
+    padding: 0;
+    border-width: 0;
+    background-color: transparent;
+    color: #D5DFEB;
+}
+
+#calendarArea .calendar .calendar-month-label {
+    color: #EAF2FF;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+#calendarArea .calendar .calendar-month-header .pager-button {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    color: #7FC4E0;
+    background-color: transparent;
+}
+
+#calendarArea .calendar .calendar-month-header .pager-button:hover,
+#calendarArea .calendar .calendar-month-header .pager-button:focus {
+    color: #FFFFFF;
+    background-color: rgba(102, 224, 255, 0.12);
+}
+
+/* Yaru sizes days with !important, so these have to as well. */
+#calendarArea .calendar .calendar-day-base {
+    width: 34px !important;
+    height: 34px !important;
+    margin: 2px;
+    padding: 0 !important;
+    border-radius: 999px;
+    color: #C6D2E0;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    text-align: center;
+}
+
+#calendarArea .calendar .calendar-day-base:hover {
+    background-color: rgba(102, 224, 255, 0.10);
+    color: #FFFFFF;
+}
+
+#calendarArea .calendar .calendar-day-base:focus,
+#calendarArea .calendar .calendar-day-base:selected,
+#calendarArea .calendar .calendar-day-base:active,
+#calendarArea .calendar .calendar-day-base:selected:focus {
+    background-color: rgba(102, 224, 255, 0.10);
+    box-shadow: inset 0 0 0 1px rgba(102, 224, 255, 0.55);
+    color: #FFFFFF;
+}
+
+#calendarArea .calendar .calendar-day-base.calendar-day-heading {
+    height: 18px !important;
+    padding-top: 2px !important;
+    background-color: transparent;
+    box-shadow: none;
+    color: #5E7390;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+#calendarArea .calendar .calendar-nonwork-day {
+    color: #7F95B2;
+}
+
+#calendarArea .calendar .calendar-other-month-day,
+#calendarArea .calendar .calendar-other-month-day.calendar-nonwork-day {
+    color: rgba(127, 149, 178, 0.38);
+}
+
+#calendarArea .calendar .calendar-day-with-events {
+    color: #EAF2FF;
+    background-image: url("assets/shade/event-dot.svg");
+    background-size: contain;
+}
+
+#calendarArea .calendar .calendar-today,
+#calendarArea .calendar .calendar-today:hover,
+#calendarArea .calendar .calendar-today:focus,
+#calendarArea .calendar .calendar-today:selected,
+#calendarArea .calendar .calendar-today:active {
+    background-gradient-direction: horizontal;
+    background-gradient-start: #66E0FF;
+    background-gradient-end: #9A8BFF;
+    box-shadow: 0 0 14px rgba(102, 224, 255, 0.40);
+    color: #04101A !important;
+    font-weight: 800;
+}
+
+#calendarArea .calendar .calendar-week-number {
+    color: #5E7390;
+    background-color: rgba(102, 224, 255, 0.05);
+}
+
+/* Events, world clocks, weather */
+#calendarArea .events-button,
+#calendarArea .world-clocks-button,
+#calendarArea .weather-button {
+    margin: 0;
+    padding: 11px 13px;
+    border-radius: 14px;
+    border: 1px solid rgba(102, 224, 255, 0.10);
+    background-color: rgba(102, 224, 255, 0.04);
+    box-shadow: none;
+    color: #DCE6F2;
+}
+
+#calendarArea .events-button:hover,
+#calendarArea .events-button:focus,
+#calendarArea .world-clocks-button:hover,
+#calendarArea .world-clocks-button:focus,
+#calendarArea .weather-button:hover,
+#calendarArea .weather-button:focus {
+    border-color: rgba(102, 224, 255, 0.26);
+    background-color: rgba(102, 224, 255, 0.08);
+}
+
+#calendarArea .events-title,
+#calendarArea .world-clocks-header,
+#calendarArea .weather-header {
+    color: #7FC4E0;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+}
+
+#calendarArea .events-list {
+    spacing: 6px;
+}
+
+#calendarArea .event-placeholder {
+    color: #9FB3CC;
+    font-size: 13px;
+}
+
+#calendarArea .events-button .event-time,
+#calendarArea .world-clocks-button .world-clocks-time {
+    color: #66E0FF;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
 }

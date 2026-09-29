@@ -87,6 +87,19 @@ function degrees(value) {
     return Number.isFinite(value) ? `${Math.round(value)}°C` : '--';
 }
 
+// Fills are drawn as a gradient that brightens towards the reading, so a bar
+// reads as energy rather than a flat block. The colour still comes from the
+// value (accent, warning, danger), which is why this is inline style and not a
+// stylesheet rule: a CSS gradient would override the per-value colour.
+function gradientStyle(hex, direction = 'horizontal') {
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+    const faint = `rgba(${r}, ${g}, ${b}, 0.30)`;
+    const [start, end] = direction === 'vertical' ? [hex, faint] : [faint, hex];
+    return `background-gradient-direction: ${direction}; ` +
+        `background-gradient-start: ${start}; ` +
+        `background-gradient-end: ${end};`;
+}
+
 // A percentage bar. St has no progress widget, so the fill is a plain actor
 // whose width is recomputed whenever the track's own width changes - which
 // covers both value updates and the popup being resized.
@@ -123,7 +136,7 @@ class Meter extends St.Widget {
         if (this._color === hex)
             return;
         this._color = hex;
-        this._fill.style = `background-color: ${hex};`;
+        this._fill.style = gradientStyle(hex);
     }
 
     _apply() {
@@ -325,6 +338,11 @@ var Shade = class Shade {
         this._messageList = messageList;
 
         try {
+            // GNOME 42 gives the date menu's popup no class of its own, so the
+            // old `.calendar-menu` rules never matched and Yaru's grey won.
+            // This is the hook every popup-level rule hangs off.
+            dateMenu.menu.box.add_style_class_name('adaptive-shade-menu');
+
             this._telemetry = new Telemetry.Telemetry();
 
             this._container = new St.BoxLayout({
@@ -344,6 +362,7 @@ var Shade = class Shade {
 
             this._installGroupedNotifications();
             this._unstackPlaceholder();
+            this._installNotificationHeader();
 
             this._telemetry.connect(snapshot => this._update(snapshot));
 
@@ -460,6 +479,18 @@ var Shade = class Shade {
             // edge while the icon stayed centred.
             this._placeholderXAlign = placeholder.x_align;
             placeholder.x_align = Clutter.ActorAlign.CENTER;
+
+            if (placeholder._label) {
+                this._placeholderText = placeholder._label.text;
+                placeholder._label.text = 'You\u2019re all caught up';
+            }
+
+            // The icon is drawn as a ring, which only stays round if it keeps
+            // its own width instead of filling the column's.
+            if (placeholder._icon) {
+                this._placeholderIconAlign = placeholder._icon.x_align;
+                placeholder._icon.x_align = Clutter.ActorAlign.CENTER;
+            }
         } catch (e) {
             logError(e, '[Adaptive Shade] moving the empty-state placeholder');
             this._placeholder = null;
@@ -481,6 +512,11 @@ var Shade = class Shade {
             this._placeholder.y_expand = this._placeholderExpand;
             this._placeholder.y_align = this._placeholderAlign;
             this._placeholder.x_align = this._placeholderXAlign;
+            if (this._placeholder._label && this._placeholderText)
+                this._placeholder._label.text = this._placeholderText;
+            if (this._placeholder._icon &&
+                this._placeholderIconAlign !== undefined)
+                this._placeholder._icon.x_align = this._placeholderIconAlign;
             this._placeholderParent.add_child(this._placeholder);
         } catch (e) {
             logError(e, '[Adaptive Shade] restoring the empty-state placeholder');
@@ -488,6 +524,115 @@ var Shade = class Shade {
 
         this._placeholder = null;
         this._placeholderParent = null;
+    }
+
+    // GNOME puts Do Not Disturb and Clear in a row under the list, where they
+    // read as an afterthought and, with the list empty, float in the middle of
+    // nothing. The same row - GNOME's actors, GNOME's bindings - moves to the
+    // top of the column and gains a title and a count, so it becomes the
+    // section's header. Only its position and one label change.
+    _installNotificationHeader() {
+        const list = this._messageList;
+        const scrollView = list._scrollView;
+        const box = scrollView ? scrollView.get_parent() : null;
+        const controls = box && box.get_children().find(
+            child => child.has_style_class_name &&
+                child.has_style_class_name('message-list-controls'));
+
+        if (!controls)
+            return;
+
+        try {
+            this._controls = controls;
+            this._controlsIndex = box.get_children().indexOf(controls);
+            box.set_child_at_index(controls, 0);
+            controls.add_style_class_name('adaptive-notif-header');
+
+            const heading = new St.BoxLayout({
+                style_class: 'adaptive-notif-heading',
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            heading.add_child(new St.Label({
+                text: 'NOTIFICATIONS',
+                style_class: 'adaptive-notif-heading-label',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            this._notifCount = new St.Label({
+                style_class: 'adaptive-notif-heading-count',
+                y_align: Clutter.ActorAlign.CENTER,
+                visible: false,
+            });
+            heading.add_child(this._notifCount);
+            controls.insert_child_at_index(heading, 0);
+            this._notifHeading = heading;
+
+            // Clear expanded to push itself to the far end of the old row. The
+            // heading does that now, and Clear sits beside Do Not Disturb.
+            const clear = list._clearButton;
+            if (clear) {
+                this._clearXExpand = clear.x_expand;
+                this._clearLabel = clear.label;
+                clear.x_expand = false;
+                clear.label = 'Clear all';
+
+                // GNOME binds Clear's visibility to the placeholder's without
+                // SYNC_CREATE, so until the first notification arrives both
+                // start out visible: a Clear button over "no notifications".
+                if (list._placeholder)
+                    clear.visible = !list._placeholder.visible;
+            }
+
+            if (this._grouped) {
+                this._grouped.connectObject(
+                    'notify::count', () => this._syncNotifCount(), this);
+                this._syncNotifCount();
+            }
+        } catch (e) {
+            logError(e, '[Adaptive Shade] building the notification header');
+        }
+    }
+
+    _syncNotifCount() {
+        if (!this._notifCount || !this._grouped)
+            return;
+
+        const count = this._grouped.count;
+        this._notifCount.text = `${count}`;
+        this._notifCount.visible = count > 0;
+    }
+
+    _removeNotificationHeader() {
+        if (this._grouped)
+            this._grouped.disconnectObject(this);
+
+        if (this._notifHeading) {
+            this._notifHeading.destroy();
+            this._notifHeading = null;
+            this._notifCount = null;
+        }
+
+        const clear = this._messageList && this._messageList._clearButton;
+        if (clear && this._clearLabel !== undefined) {
+            clear.x_expand = this._clearXExpand;
+            clear.label = this._clearLabel;
+        }
+        this._clearLabel = undefined;
+
+        if (this._controls) {
+            try {
+                this._controls.remove_style_class_name('adaptive-notif-header');
+                const box = this._controls.get_parent();
+                if (box) {
+                    const index = Math.max(0, Math.min(
+                        this._controlsIndex, box.get_n_children() - 1));
+                    box.set_child_at_index(this._controls, index);
+                }
+            } catch (e) {
+                logError(e, '[Adaptive Shade] restoring the notification controls');
+            }
+        }
+        this._controls = null;
     }
 
     // --------------------------------------------------------------- detach
@@ -498,8 +643,18 @@ var Shade = class Shade {
             this._telemetry = null;
         }
 
+        this._removeNotificationHeader();
         this._restoreStockNotifications();
         this._restackPlaceholder();
+
+        if (this._dateMenu) {
+            try {
+                this._dateMenu.menu.box.remove_style_class_name(
+                    'adaptive-shade-menu');
+            } catch (e) {
+                logError(e, '[Adaptive Shade] untagging the popup');
+            }
+        }
 
         if (this._openStateId && this._dateMenu) {
             try {
@@ -569,11 +724,24 @@ var Shade = class Shade {
         });
         header.add_child(text);
 
+        // Seconds run beside the minutes in the accent colour. The telemetry
+        // tick is already once a second while the shade is open, so they cost
+        // nothing extra.
+        const clock = new St.BoxLayout({ style_class: 'adaptive-shade-clock' });
+        text.add_child(clock);
+
         this._timeLabel = new St.Label({
             text: '',
             style_class: 'adaptive-shade-time',
         });
-        text.add_child(this._timeLabel);
+        clock.add_child(this._timeLabel);
+
+        this._secondsLabel = new St.Label({
+            text: '',
+            style_class: 'adaptive-shade-seconds',
+            y_align: Clutter.ActorAlign.END,
+        });
+        clock.add_child(this._secondsLabel);
 
         this._dateLabel = new St.Label({
             text: '',
@@ -583,12 +751,21 @@ var Shade = class Shade {
 
         // Uptime belongs with the clock: both answer "how long has this been
         // going", and it keeps the system block to pure measurements.
+        this._uptimeChip = new St.BoxLayout({
+            style_class: 'adaptive-shade-uptime',
+            y_align: Clutter.ActorAlign.START,
+            visible: false,
+        });
+        this._uptimeChip.add_child(new St.Widget({
+            style_class: 'adaptive-shade-live-dot',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
         this._uptimeLabel = new St.Label({
             text: '',
-            style_class: 'adaptive-shade-uptime',
-            y_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.CENTER,
         });
-        header.add_child(this._uptimeLabel);
+        this._uptimeChip.add_child(this._uptimeLabel);
+        header.add_child(this._uptimeChip);
 
         this._updateClock();
     }
@@ -596,7 +773,8 @@ var Shade = class Shade {
     _updateClock() {
         const now = GLib.DateTime.new_now_local();
         this._timeLabel.text = now.format('%H:%M');
-        this._dateLabel.text = now.format('%A, %e %B');
+        this._secondsLabel.text = now.format(':%S');
+        this._dateLabel.text = now.format('%A · %-d %B %Y').toUpperCase();
     }
 
     // --------------------------------------------------------------- system
@@ -646,6 +824,11 @@ var Shade = class Shade {
             x_expand: true,
         });
         section.add_child(head);
+
+        head.add_child(new St.Widget({
+            style_class: 'adaptive-shade-live-dot',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
 
         head.add_child(new St.Label({
             text: 'SYSTEM',
@@ -844,8 +1027,9 @@ var Shade = class Shade {
         // section's natural height is not final when the popup opens.
         this._fitToMonitor();
         this._uptimeLabel.text = snapshot.uptimeSeconds
-            ? `up ${Telemetry.formatDuration(snapshot.uptimeSeconds)}`
+            ? `UP ${Telemetry.formatDuration(snapshot.uptimeSeconds)}`.toUpperCase()
             : '';
+        this._uptimeChip.visible = !!snapshot.uptimeSeconds;
 
         this._updateCpu(snapshot);
         this._updateGpu(snapshot);
@@ -936,7 +1120,7 @@ var Shade = class Shade {
                 : ACCENT_CPU;
         if (bar.color !== color) {
             bar.color = color;
-            bar.fill.style = `background-color: ${color};`;
+            bar.fill.style = gradientStyle(color, 'vertical');
         }
     }
 

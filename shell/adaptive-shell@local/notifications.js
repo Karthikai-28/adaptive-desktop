@@ -41,7 +41,7 @@ var NotificationGroup = GObject.registerClass({
             x_expand: true,
         });
 
-        this.source = source;
+        this.source = null;
         this._messages = [];
         this._expanded = false;
 
@@ -60,10 +60,8 @@ var NotificationGroup = GObject.registerClass({
             y_align: Clutter.ActorAlign.CENTER,
         });
         headerBox.add_child(this._iconBin);
-        this._updateIcon();
 
         this._titleLabel = new St.Label({
-            text: source.title || '',
             style_class: 'adaptive-notif-group-title',
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
@@ -102,12 +100,24 @@ var NotificationGroup = GObject.registerClass({
         this._moreButton.connect('clicked', () => this._toggle());
         this.add_child(this._moreButton);
 
+        this.setSource(source);
+        this._sync();
+    }
+
+    // The source whose name and icon head the card. A group can outlive the
+    // source it was created for (see GroupedNotificationSection._groupKey), so
+    // the section hands it another one when that happens.
+    setSource(source) {
+        this.source?.disconnectObject(this);
+        this.source = source;
+
+        this._titleLabel.text = source.title || '';
+        this._updateIcon();
+
         source.connectObject(
             'notify::title', () => (this._titleLabel.text = source.title || ''),
             'icon-updated', () => this._updateIcon(),
             this);
-
-        this._sync();
     }
 
     _updateIcon() {
@@ -225,6 +235,10 @@ var GroupedNotificationSection = GObject.registerClass({
         'empty': GObject.ParamSpec.boolean(
             'empty', 'empty', 'empty',
             GObject.ParamFlags.READABLE, true),
+        // Total notifications across every group, for the shade's header badge.
+        'count': GObject.ParamSpec.int(
+            'count', 'count', 'count',
+            GObject.ParamFlags.READABLE, 0, 0x7fffffff, 0),
     },
     Signals: {
         'can-clear-changed': {},
@@ -239,9 +253,12 @@ var GroupedNotificationSection = GObject.registerClass({
             x_expand: true,
         });
 
+        // Groups are keyed by application, not by source: see _groupKey().
         this._groups = new Map();
+        this._sourceKeys = new Map();
         this._empty = true;
         this._canClear = false;
+        this._count = 0;
 
         Main.messageTray.connectObject(
             'source-added', (_tray, source) => this._addSource(source),
@@ -271,18 +288,47 @@ var GroupedNotificationSection = GObject.registerClass({
         return this._canClear;
     }
 
+    get count() {
+        return this._count;
+    }
+
+    // One card per application. Most apps keep a single source for their
+    // lifetime, but some - notify-send, scripts, several Electron builds - open
+    // a fresh source for every notification, and grouping by source gave each
+    // of those its own one-item card. Sources are merged on the application
+    // when GNOME knows it, and on the name the source shows otherwise.
+    _groupKey(source) {
+        try {
+            const id = source.app && source.app.get_id();
+            if (id)
+                return `app:${id}`;
+        } catch (e) {
+            // No usable app; fall through to the title.
+        }
+        return `title:${source.title || ''}`;
+    }
+
+    _groupFor(source) {
+        return this._groups.get(this._sourceKeys.get(source)) || null;
+    }
+
     _addSource(source) {
-        if (this._groups.has(source))
+        if (this._sourceKeys.has(source))
             return;
 
-        const group = new NotificationGroup(source);
-        group.connectObject(
-            'group-changed', () => this._sync(),
-            'message-focused', (_g, actor) => this.emit('message-focused', actor),
-            this);
+        const key = this._groupKey(source);
+        this._sourceKeys.set(source, key);
 
-        this._groups.set(source, group);
-        this.add_child(group);
+        if (!this._groups.has(key)) {
+            const group = new NotificationGroup(source);
+            group.connectObject(
+                'group-changed', () => this._sync(),
+                'message-focused', (_g, actor) => this.emit('message-focused', actor),
+                this);
+
+            this._groups.set(key, group);
+            this.add_child(group);
+        }
 
         source.connectObject(
             'notification-added',
@@ -298,18 +344,32 @@ var GroupedNotificationSection = GObject.registerClass({
     }
 
     _removeSource(source) {
-        const group = this._groups.get(source);
-        if (!group)
+        const key = this._sourceKeys.get(source);
+        if (key === undefined)
             return;
 
         source.disconnectObject(this);
-        this._groups.delete(source);
-        group.destroy();
+        this._sourceKeys.delete(source);
+
+        const group = this._groups.get(key);
+        if (group) {
+            // The card stays while any source of the same application is
+            // still around; it only needs a live source to take its name from.
+            const heir = [...this._sourceKeys].find(([, k]) => k === key);
+            if (heir) {
+                if (group.source === source)
+                    group.setSource(heir[0]);
+            } else {
+                this._groups.delete(key);
+                group.destroy();
+            }
+        }
+
         this._sync();
     }
 
     _addNotification(source, notification) {
-        const group = this._groups.get(source);
+        const group = this._groupFor(source);
         if (!group)
             return;
 
@@ -383,14 +443,21 @@ var GroupedNotificationSection = GObject.registerClass({
             this.notify('can-clear');
         }
 
+        const count = groups.reduce((n, g) => n + g.messages.length, 0);
+        if (this._count !== count) {
+            this._count = count;
+            this.notify('count');
+        }
+
         this.visible = this.allowed && !empty;
     }
 
     destroy() {
         Main.messageTray.disconnectObject(this);
         Main.sessionMode.disconnectObject(this);
-        for (const source of this._groups.keys())
+        for (const source of this._sourceKeys.keys())
             source.disconnectObject(this);
+        this._sourceKeys.clear();
         this._groups.clear();
         super.destroy();
     }

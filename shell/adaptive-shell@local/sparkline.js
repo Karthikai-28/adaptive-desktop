@@ -87,10 +87,19 @@ var Sparkline = class Sparkline {
 
         const [r, g, b] = this._accent;
 
-        // A flat baseline so an idle chart still reads as a chart rather than
-        // as a rendering failure.
+        // Quarter gridlines, faint enough to read as a scale rather than as
+        // data. A flat baseline under them so an idle chart still reads as a
+        // chart rather than as a rendering failure.
         cr.setLineWidth(1);
-        cr.setSourceRGBA(r, g, b, 0.14);
+        cr.setSourceRGBA(r, g, b, 0.06);
+        for (const fraction of [0.25, 0.5, 0.75]) {
+            const y = Math.round(height * fraction) + 0.5;
+            cr.moveTo(0, y);
+            cr.lineTo(width, y);
+        }
+        cr.stroke();
+
+        cr.setSourceRGBA(r, g, b, 0.18);
         cr.moveTo(0, height - 0.5);
         cr.lineTo(width, height - 0.5);
         cr.stroke();
@@ -99,11 +108,11 @@ var Sparkline = class Sparkline {
             ? this._scale
             : Math.max(this._peak, 1);
 
-        // Leave a pixel of headroom top and bottom so a pegged series does not
-        // get its stroke clipped in half by the edge of the surface.
-        const inset = 1.5;
+        // Headroom top and bottom so a pegged series keeps its whole stroke,
+        // and room on the right for the dot marking the latest sample.
+        const inset = 3;
         const usable = Math.max(1, height - inset * 2);
-        const step = width / (SAMPLES - 1);
+        const step = (width - inset) / (SAMPLES - 1);
 
         const points = [];
         for (let i = 0; i < SAMPLES; i++) {
@@ -124,22 +133,46 @@ var Sparkline = class Sparkline {
             return;
         }
 
-        // Fill under the trace first, then stroke over it.
+        const trace = () => {
+            cr.moveTo(points[0].x, points[0].y);
+            for (const point of points.slice(1))
+                cr.lineTo(point.x, point.y);
+        };
+
+        // Area under the trace, fading out towards the baseline.
+        const fill = new Cairo.LinearGradient(0, 0, 0, height);
+        fill.addColorStopRGBA(0, r, g, b, 0.34);
+        fill.addColorStopRGBA(1, r, g, b, 0);
         cr.moveTo(points[0].x, height);
         for (const point of points)
             cr.lineTo(point.x, point.y);
         cr.lineTo(points[points.length - 1].x, height);
         cr.closePath();
-        cr.setSourceRGBA(r, g, b, 0.16);
+        cr.setSource(fill);
         cr.fill();
 
-        cr.setLineWidth(1.5);
         cr.setLineJoin(Cairo.LineJoin.ROUND);
-        cr.setSourceRGBA(r, g, b, 0.9);
-        cr.moveTo(points[0].x, points[0].y);
-        for (const point of points.slice(1))
-            cr.lineTo(point.x, point.y);
+        cr.setLineCap(Cairo.LineCap.ROUND);
+
+        // A wide faint stroke under the real one is the glow.
+        cr.setLineWidth(4);
+        cr.setSourceRGBA(r, g, b, 0.16);
+        trace();
         cr.stroke();
+
+        cr.setLineWidth(1.6);
+        cr.setSourceRGBA(r, g, b, 0.95);
+        trace();
+        cr.stroke();
+
+        // The newest sample: a halo and a bright core.
+        const head = points[points.length - 1];
+        cr.setSourceRGBA(r, g, b, 0.25);
+        cr.arc(head.x, head.y, 3.5, 0, 2 * Math.PI);
+        cr.fill();
+        cr.setSourceRGBA(1, 1, 1, 0.95);
+        cr.arc(head.x, head.y, 1.6, 0, 2 * Math.PI);
+        cr.fill();
 
         cr.$dispose();
     }
