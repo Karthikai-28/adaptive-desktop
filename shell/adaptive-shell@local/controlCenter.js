@@ -47,6 +47,14 @@ const WIFI_SCAN_INTERVAL_S = 15;
 const MAX_NETWORKS = 24;
 
 const CAMERA_POLL_S = 3;
+
+// Bluetooth. A scan runs for a window rather than for as long as the dropdown
+// is open; connecting retries what a device just out of its case typically
+// answers with, then waits a moment in case it connects itself.
+const BT_SCAN_S = 30;
+const BT_CONNECT_ATTEMPTS = 3;
+const BT_RETRY_MS = 1500;
+const BT_SETTLE_MS = 5000;
 // imports.ui.screenshot keeps its UIMode private; SCREENCAST is 1.
 const UI_MODE_SCREENCAST = 1;
 
@@ -232,6 +240,19 @@ const AGENT_XML = `<node>
     <method name="Cancel"/>
   </interface>
 </node>`;
+
+// What a failed connect means, in words a person can act on.
+function btFailureText(message, connect) {
+    if (!connect)
+        return "Couldn't disconnect";
+    if (/page-timeout|Host is down|timeout/i.test(message))
+        return 'No answer. Take it out of the case or switch it on, then tap again.';
+    if (/busy|InProgress/i.test(message))
+        return 'Busy with another device. Try again in a moment.';
+    if (/profile-unavailable|NotAvailable|NotSupported/i.test(message))
+        return "It can't connect to this computer";
+    return "Couldn't connect";
+}
 
 // What a failed BlueZ Pair() means, in words a person can act on.
 function pairingError(error) {
@@ -550,6 +571,8 @@ var ControlCenter = class ControlCenter {
         this._camTimer = 0;
         this._dotIds = [];
         this._ts = null;
+        this._btScan = { timer: 0, active: false };
+        this._btTimers = new Set();
         this._attached = false;
     }
 
@@ -650,6 +673,10 @@ var ControlCenter = class ControlCenter {
         this._removePanelDot();
         this._stopMpris();
         this._stopCameraPolling();
+        this._stopBtScan();
+        for (const id of this._btTimers)
+            GLib.Source.remove(id);
+        this._btTimers.clear();
         if (this._agentExport) {
             try {
                 this._agentExport.unexport();
@@ -1121,7 +1148,12 @@ var ControlCenter = class ControlCenter {
             this._wifiJoin = null;
         if (this._open !== 'bluetooth')
             this._cancelPairing();
-        this._setBtDiscovery(this._open === 'bluetooth');
+        if (this._open === 'bluetooth') {
+            this._btScan.ran = false;
+            this._startBtScan();
+        } else {
+            this._stopBtScan();
+        }
 
         if (this._open === 'session')
             this._systemActions.forceUpdate();
@@ -1176,7 +1208,7 @@ var ControlCenter = class ControlCenter {
     _onClose() {
         this._dropLive();
         this._stopScanning();
-        this._setBtDiscovery(false);
+        this._stopBtScan();
         this._stopMpris();
         this._stopCameraPolling();
         this._wifiShare = null;
@@ -2190,6 +2222,40 @@ var ControlCenter = class ControlCenter {
         }
     }
 
+    // Scanning and calling a device share the radio: on Intel controllers
+    // (this machine's included) a connection attempt made during a scan
+    // commonly fails with br-connection-page-timeout, and a long scan can make
+    // Bluetooth audio stutter. So a scan is a 30-second window, it stops the
+    // moment anything connects or pairs, and "Scan Again" starts another.
+    _startBtScan() {
+        this._stopBtScan();
+        const client = this._btClient();
+        if (!client || !client.default_adapter || !client.default_adapter_powered)
+            return;
+        this._setBtDiscovery(true);
+        this._btScan.active = true;
+        this._btScan.ran = true;
+        this._btScan.timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, BT_SCAN_S, () => {
+            this._btScan.timer = 0;
+            this._stopBtScan();
+            this._btSignature = null;
+            this._queueSync();
+            return GLib.SOURCE_REMOVE;
+        });
+        this._btSignature = null;
+    }
+
+    _stopBtScan() {
+        if (this._btScan.timer) {
+            GLib.Source.remove(this._btScan.timer);
+            this._btScan.timer = 0;
+        }
+        if (this._btScan.active) {
+            this._btScan.active = false;
+            this._setBtDiscovery(false);
+        }
+    }
+
     // Everything the adapter knows about that has a real name - paired ones
     // and ones found by scanning. Unnamed devices are only an address and
     // nobody can tell them apart, so they are left out.
@@ -2225,10 +2291,10 @@ var ControlCenter = class ControlCenter {
             return;
         }
 
-        // Scanning follows the dropdown; start it if Bluetooth was only just
-        // turned on while the dropdown was open.
-        if (this._open === 'bluetooth')
-            this._setBtDiscovery(true);
+        // Bluetooth turned on while the dropdown was open: scan now.
+        if (this._open === 'bluetooth' && !this._btScan.active && !this._btScan.ran &&
+            !this._btPair && this._btPending.size === 0)
+            this._startBtScan();
 
         // Don't rebuild under someone typing a PIN.
         const pair = this._btPair;
@@ -2250,7 +2316,8 @@ var ControlCenter = class ControlCenter {
             d.get_object_path(), d.alias || d.name, d.connected, d.paired || d.trusted, d.icon,
         ].join('|')).join('\n') +
             `|${pair ? `${pair.path}:${pair.stage}` : ''}` +
-            `|${[...this._btPending].join(',')}|${[...this._btErrors].join(',')}`;
+            `|${[...this._btPending].join(',')}|${[...this._btErrors].join(',')}` +
+            `|${this._btScan.active}`;
         if (!force && signature === this._btSignature && page.list.get_n_children() > 0)
             return;
         this._btSignature = signature;
@@ -2274,13 +2341,22 @@ var ControlCenter = class ControlCenter {
         }
 
         rows.push(makeHeading('Other Devices'));
-        if (others.length) {
-            others.forEach(add);
-        } else {
+        others.forEach(add);
+        if (this._btScan.active) {
             rows.push(makeRow({
                 icon: 'bluetooth-active-symbolic',
                 title: 'Looking for devices…',
                 subtitle: 'Put the device in pairing mode',
+            }));
+        } else {
+            rows.push(makeRow({
+                icon: 'view-refresh-symbolic',
+                title: others.length ? 'Scan Again' : 'Scan for Devices',
+                subtitle: 'Put the device in pairing mode first',
+                onActivate: this._btPair || this._btPending.size ? null : () => {
+                    this._startBtScan();
+                    this._syncBluetoothPage(true);
+                },
             }));
         }
 
@@ -2338,26 +2414,133 @@ var ControlCenter = class ControlCenter {
         if (!client || this._btPending.has(path))
             return;
 
+        const connect = !device.connected;
         this._btErrors.delete(path);
         this._btPending.add(path);
+        if (connect)
+            this._stopBtScan();
+        this._btSignature = null;
         this._queueSync();
 
+        this._btConnect(device, connect, error => {
+            this._btPending.delete(path);
+            if (error)
+                this._btErrors.set(path, error);
+            this._btSignature = null;
+            this._queueSync();
+        });
+    }
+
+    // Connect (or disconnect) a known device, the way GNOME Settings does it
+    // - gnome-bluetooth's connect_service - but patient: earbuds just out of
+    // the case, or still holding a link to a phone, answer the first page with
+    // a timeout or "busy" and connect a second later. done(null) on success,
+    // done(message) on failure.
+    _btConnect(device, connect, done, attempt = 1) {
+        const client = this._btClient();
+        const path = device.get_object_path();
+        if (!client) {
+            done(null);
+            return;
+        }
+
         try {
-            client.connect_service(path, !device.connected, null, (c, res) => {
+            client.connect_service(path, connect, null, (c, res) => {
+                let error = null;
                 try {
                     c.connect_service_finish(res);
                 } catch (e) {
-                    this._btErrors.set(path, device.connected
-                        ? "Couldn't disconnect" : "Couldn't connect. Is it on and nearby?");
-                    log(`[Adaptive Control Center] Bluetooth ${device.alias}: ${e.message}`);
+                    error = e;
                 }
-                this._btPending.delete(path);
-                this._queueSync();
+
+                if (!error || device.connected === connect) {
+                    done(null);
+                    return;
+                }
+
+                const message = error.message || '';
+                log(`[Adaptive Control Center] Bluetooth ${device.alias} ` +
+                    `(attempt ${attempt}): ${message}`);
+
+                if (connect && /AlreadyConnected/.test(message)) {
+                    done(null);
+                    return;
+                }
+
+                const transient = /page-timeout|Host is down|busy|InProgress|NotReady|timeout|abort/i
+                    .test(message);
+                if (connect && transient && attempt < BT_CONNECT_ATTEMPTS) {
+                    this._btLater(BT_RETRY_MS * attempt, () => {
+                        if (device.connected)
+                            done(null);
+                        else
+                            this._btConnect(device, connect, done, attempt + 1);
+                    });
+                    return;
+                }
+
+                // Often it connects anyway, on its own: wait for that before
+                // calling it a failure.
+                this._btAwaitState(device, connect, BT_SETTLE_MS, ok =>
+                    done(ok ? null : btFailureText(message, connect)));
             });
         } catch (e) {
-            this._btPending.delete(path);
             logError(e, '[Adaptive Control Center] Bluetooth connect');
+            done(connect ? "Couldn't connect" : "Couldn't disconnect");
         }
+    }
+
+    _btAwaitState(device, wanted, ms, callback) {
+        if (device.connected === wanted) {
+            callback(true);
+            return;
+        }
+        let id = 0;
+        let timer = 0;
+        const finish = ok => {
+            if (id)
+                device.disconnect(id);
+            id = 0;
+            if (timer) {
+                GLib.Source.remove(timer);
+                this._btTimers.delete(timer);
+            }
+            timer = 0;
+            callback(ok);
+        };
+        id = device.connect('notify::connected', () => {
+            if (device.connected === wanted)
+                finish(true);
+        });
+        timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+            this._btTimers.delete(timer);
+            timer = 0;
+            finish(device.connected === wanted);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._btTimers.add(timer);
+    }
+
+    _btLater(ms, fn) {
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+            this._btTimers.delete(id);
+            fn();
+            return GLib.SOURCE_REMOVE;
+        });
+        this._btTimers.add(id);
+    }
+
+    _btDeviceByPath(path) {
+        const client = this._btClient();
+        if (!client)
+            return null;
+        const store = client.get_devices();
+        for (let i = 0; i < store.get_n_items(); i++) {
+            const device = store.get_item(i);
+            if (device.get_object_path() === path)
+                return device;
+        }
+        return null;
     }
 
     // --- Bluetooth pairing
@@ -2374,6 +2557,8 @@ var ControlCenter = class ControlCenter {
 
         const path = device.get_object_path();
         this._btErrors.delete(path);
+        // Pairing pages the device too; the scan has found it already.
+        this._stopBtScan();
         this._btPair = {
             path,
             name: device.alias || device.name || 'the device',
@@ -2416,20 +2601,13 @@ var ControlCenter = class ControlCenter {
                     this._unregisterAgent();
                     this._syncBluetoothPage(true);
 
-                    const client = this._btClient();
-                    if (!client) {
+                    const paired = this._btDeviceByPath(path);
+                    if (!paired) {
                         this._finishPairing(path, null);
                         return;
                     }
-                    client.connect_service(path, true, null, (c, r) => {
-                        let message = null;
-                        try {
-                            c.connect_service_finish(r);
-                        } catch (e) {
-                            message = "Paired, but couldn't connect";
-                        }
-                        this._finishPairing(path, message);
-                    });
+                    this._btConnect(paired, true, error =>
+                        this._finishPairing(path, error ? `Paired. ${error}` : null));
                 });
         });
     }
