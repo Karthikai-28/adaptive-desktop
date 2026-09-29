@@ -22,6 +22,7 @@ const ControlCenter = Me.imports.controlCenter;
 const UsbDevices = Me.imports.usbDevices;
 const ShellActions = Me.imports.shellActions;
 const TaskManager = Me.imports.taskManager;
+const NetworkPanel = Me.imports.networkPanel;
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
 // OLED; the ambient level is what it settles to once nobody is looking.
@@ -75,6 +76,7 @@ class AdaptiveShellV16 {
         this._usbPanel = null;
         this._shellActions = null;
         this._taskPanel = null;
+        this._networkPanel = null;
         this._projectProxy = null;
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
@@ -211,6 +213,7 @@ class AdaptiveShellV16 {
         this._installControlCenter();
         this._installUsbPanel();
         this._installTaskPanel();
+        this._installNetworkPanel();
         this._installShellActions();
         this._installRail();
 
@@ -973,6 +976,11 @@ class AdaptiveShellV16 {
             this._taskPanel = null;
         }
 
+        if (this._networkPanel) {
+            this._networkPanel.detach();
+            this._networkPanel = null;
+        }
+
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
@@ -1227,6 +1235,18 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the Tasks panel');
             this._taskPanel = null;
+        }
+    }
+
+    // This computer's addresses and every device on the local network; next
+    // to Tasks. See networkPanel.js and tools/network_info.py.
+    _installNetworkPanel() {
+        try {
+            this._networkPanel = new NetworkPanel.NetworkPanel();
+            this._networkPanel.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the Network panel');
+            this._networkPanel = null;
         }
     }
 

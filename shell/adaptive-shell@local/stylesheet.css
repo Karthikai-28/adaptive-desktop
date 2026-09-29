@@ -2484,3 +2484,44 @@
 .adaptive-tasks-footer {
     padding: 2px 4px 0 4px;
 }
+
+/* ===== Network panel =====
+ *
+ * Same popup, rows and headings as the USB and Tasks panels; adds the facts
+ * grid, whose values copy themselves when clicked.
+ */
+
+.adaptive-network {
+    width: 460px;
+    spacing: 8px;
+}
+
+.adaptive-network-facts {
+    padding: 8px 12px;
+}
+
+.adaptive-network-value {
+    padding: 3px 6px;
+    border-radius: 6px;
+    color: #F5F5F7;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-network-value:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.adaptive-network-good { color: #30D158; }
+.adaptive-network-warn { color: #FF9F0A; }
+.adaptive-network-bad { color: #FF453A; }
+
+.adaptive-network-show {
+    margin: 2px 0;
+}
+
+.adaptive-network-note {
+    padding: 6px 8px 2px 8px;
+    color: #8E8E93;
+    font-size: 11px;
+}
