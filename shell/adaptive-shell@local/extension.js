@@ -2624,6 +2624,7 @@ class AdaptiveShellV16 {
             translation_y: 0,
             duration: this._dock26RevealDurationMs,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => this._dock26UpdateRegions(),
         });
     }
 
@@ -2655,6 +2656,7 @@ class AdaptiveShellV16 {
             translation_y: offset,
             duration: this._dock26HideDurationMs,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => this._dock26UpdateRegions(),
         });
     }
 
@@ -2876,6 +2878,14 @@ class AdaptiveShellV16 {
         }
     }
 
+    // The X input region is built from each chrome actor's transformed
+    // position, translation included, but the layout manager only rebuilds it
+    // when an actor's allocation or visibility changes - never for an ease of
+    // translation_y. Queued at the start of a slide, it captured the dock where
+    // it was, not where it was going: a revealed dock was drawn but its clicks
+    // fell through to the window underneath, and a hidden one left an
+    // invisible patch at the bottom of the screen that swallowed them. So the
+    // show and hide eases queue it again when they land.
     _dock26UpdateRegions() {
         try {
             if (
