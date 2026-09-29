@@ -8,7 +8,9 @@
 //
 // Everything comes from udev (GUdev), which is also what makes it live: plug
 // or unplug something and the list follows, and a serial port that appears
-// says so in a notification. Nothing here opens or touches a device.
+// says so in a notification. Every device shows its /dev nodes - serial
+// ports, video, disks and partitions, input and hidraw - and drives can be
+// ejected (unmounted and powered off) through GIO, the way Files does it.
 
 /* exported UsbPanel */
 
@@ -16,12 +18,18 @@ const { Clutter, Gio, GLib, GUdev, St } = imports.gi;
 const Main = imports.ui.main;
 const MessageTray = imports.ui.messageTray;
 const PanelMenu = imports.ui.panelMenu;
+const Util = imports.misc.util;
+const ShellMountOperation = imports.ui.shellMountOperation;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const CC = Me.imports.controlCenter;
 
 const REFRESH_DEBOUNCE_MS = 300;
+
+// Kernel subsystems whose device files are worth showing against a USB device.
+const NODE_SUBSYSTEMS = ['tty', 'video4linux', 'block', 'hidraw', 'input'];
 const COPIED_FEEDBACK_MS = 1200;
+const LIST_MAX_HEIGHT = 600;
 
 // USB class codes (bDeviceClass / bInterfaceClass).
 const CLASS = {
@@ -44,6 +52,57 @@ function formatSpeed(mbps) {
     if (value <= 10000)
         return '10 Gbps (USB 3.x SuperSpeed+)';
     return `${value / 1000} Gbps (USB 3.2 / USB4)`;
+}
+
+// One /dev node, with what it is.
+function describeNode(subsystem, dev, file) {
+    const node = { file, subsystem, devtype: dev.get_devtype(), primary: true, label: '' };
+    switch (subsystem) {
+    case 'tty':
+        node.label = 'serial port';
+        break;
+    case 'video4linux': {
+        // UVC cameras expose a capture node and a metadata node each.
+        const caps = dev.get_property('ID_V4L_CAPABILITIES') || '';
+        node.primary = caps.includes(':capture:');
+        node.label = node.primary ? 'video capture' : 'video metadata';
+        break;
+    }
+    case 'block': {
+        if (node.devtype === 'partition') {
+            node.primary = false;
+            const label = dev.get_property('ID_FS_LABEL');
+            const type = dev.get_property('ID_FS_TYPE');
+            node.label = [label ? `“${label}”` : 'partition', type].filter(Boolean).join(', ');
+        } else {
+            node.label = 'disk';
+        }
+        break;
+    }
+    case 'hidraw':
+        node.primary = false;
+        node.label = 'raw HID';
+        break;
+    case 'input':
+        node.label = dev.get_property('ID_INPUT_KEYBOARD') === '1' ? 'keyboard input'
+            : dev.get_property('ID_INPUT_MOUSE') === '1' ? 'mouse input' : 'input events';
+        break;
+    }
+    return node;
+}
+
+// The GIO drive for a USB device's disk, if it has one.
+function driveFor(device) {
+    const disks = device.nodes.filter(n => n.subsystem === 'block' && n.devtype === 'disk')
+        .map(n => n.file);
+    if (!disks.length)
+        return null;
+    return Gio.VolumeMonitor.get().get_connected_drives()
+        .find(d => disks.includes(d.get_identifier('unix-device'))) || null;
+}
+
+function mountsOf(drive) {
+    return drive.get_volumes().map(v => v.get_mount()).filter(Boolean);
 }
 
 function slug(text) {
@@ -85,6 +144,9 @@ var UsbPanel = class UsbPanel {
         this._devices = [];
         this._knownPorts = null;
         this._source = null;
+        this._ejecting = new Set();
+        this._ejectErrors = new Map();
+        this._volumeIds = [];
     }
 
     attach() {
@@ -170,6 +232,11 @@ var UsbPanel = class UsbPanel {
         });
         this._sessionId = Main.sessionMode.connect('updated', () => this._syncSession());
 
+        // Mounts come and go without a USB event (mounting, ejecting).
+        this._volumeMonitor = Gio.VolumeMonitor.get();
+        this._volumeIds = ['mount-added', 'mount-removed', 'drive-connected', 'drive-disconnected']
+            .map(signal => this._volumeMonitor.connect(signal, () => this._onUevent('change', null)));
+
         this._refresh(true);
         this._syncSession();
         log('[Adaptive USB] panel indicator installed');
@@ -188,6 +255,9 @@ var UsbPanel = class UsbPanel {
             Main.sessionMode.disconnect(this._sessionId);
             this._sessionId = 0;
         }
+        for (const id of this._volumeIds)
+            this._volumeMonitor.disconnect(id);
+        this._volumeIds = [];
         if (this._source) {
             this._source.destroy();
             this._source = null;
@@ -245,6 +315,27 @@ var UsbPanel = class UsbPanel {
             });
         }
 
+        // Device files, by the USB device they belong to.
+        const nodes = new Map();
+        for (const subsystem of NODE_SUBSYSTEMS) {
+            for (const dev of this._client.query_by_subsystem(subsystem)) {
+                const file = dev.get_device_file();
+                const usb = file && dev.get_parent_with_subsystem('usb', 'usb_device');
+                if (!usb)
+                    continue;
+                // Input: the event node is the one programs open; mouseN and
+                // the legacy nodes are noise.
+                if (subsystem === 'input' && !/^event\d+$/.test(dev.get_name()))
+                    continue;
+                const key = usb.get_sysfs_path();
+                if (!nodes.has(key))
+                    nodes.set(key, []);
+                nodes.get(key).push(describeNode(subsystem, dev, file));
+            }
+        }
+        for (const list of nodes.values())
+            list.sort((a, b) => a.file.localeCompare(b.file, undefined, { numeric: true }));
+
         const devices = [];
         for (const dev of all) {
             if (dev.get_devtype() !== 'usb_device')
@@ -289,6 +380,7 @@ var UsbPanel = class UsbPanel {
                 port: dev.get_name(),
                 drivers: [...new Set(ifaces.map(i => i.driver).filter(Boolean))],
                 ports: devPorts,
+                nodes: nodes.get(key) || [],
                 kind,
             });
         }
@@ -299,11 +391,13 @@ var UsbPanel = class UsbPanel {
     // ------------------------------------------------------------- events
 
     _onUevent(action, device) {
-        const subsystem = device.get_subsystem();
-        const relevant = subsystem === 'tty' ||
-            (subsystem === 'usb' && device.get_devtype() === 'usb_device');
-        if (!relevant || (action !== 'add' && action !== 'remove'))
-            return;
+        if (device) {
+            const subsystem = device.get_subsystem();
+            const relevant = subsystem === 'tty' ||
+                (subsystem === 'usb' && device.get_devtype() === 'usb_device');
+            if (!relevant || (action !== 'add' && action !== 'remove'))
+                return;
+        }
 
         // A plug is a burst of events (device, interfaces, tty); settle first.
         if (this._refreshId)
@@ -389,6 +483,7 @@ var UsbPanel = class UsbPanel {
     _render() {
         const devices = this._devices;
         this._list.destroy_all_children();
+        this._detailsActor = null;
 
         const serial = [];
         for (const d of devices) {
@@ -432,7 +527,17 @@ var UsbPanel = class UsbPanel {
         }
 
         const [, natural] = this._list.get_preferred_height(-1);
-        this._scroll.set_height(Math.min(natural, 460));
+        this._scroll.set_height(Math.min(natural, LIST_MAX_HEIGHT));
+
+        // An expanded card can end below the fold; bring all of it into view.
+        if (this._detailsActor) {
+            const card = this._detailsActor;
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                if (card.get_stage())
+                    Util.ensureActorVisibleInScrollView(this._scroll, card);
+                return GLib.SOURCE_REMOVE;
+            });
+        }
     }
 
     _addDevice(device, port) {
@@ -440,24 +545,43 @@ var UsbPanel = class UsbPanel {
         const open = this._expanded === id;
         const vidpid = `${device.vid}:${device.pid}`;
 
-        const subtitle = port
+        const primary = device.nodes.filter(n => n.primary).map(n => n.file).slice(0, 2);
+        const drive = port ? null : driveFor(device);
+        const ejecting = this._ejecting.has(device.key);
+        const ejectError = this._ejectErrors.get(device.key);
+
+        let subtitle = port
             ? `${port.node} · ${vidpid}${port.driver ? ` · ${port.driver}` : ''}`
-            : `${vidpid} · ${device.vendor} · ${device.kind.label}`;
+            : [primary.join(', '), vidpid, device.vendor].filter(Boolean).join(' · ');
+        if (ejecting)
+            subtitle = 'Ejecting…';
+        else if (ejectError)
+            subtitle = ejectError;
+        else if (!port && device.kind.label === 'Storage' && !drive)
+            subtitle = `Safe to unplug · ${vidpid}`;
 
         this._list.add_child(CC.makeRow({
             icon: device.kind.icon,
             title: device.product,
             subtitle,
+            alert: !!ejectError && !ejecting,
             active: open,
             trailing: [open ? 'pan-up-symbolic' : 'pan-down-symbolic'],
+            actions: drive && !ejecting ? [{
+                label: 'Eject',
+                quiet: true,
+                onClick: () => this._eject(device, drive),
+            }] : null,
             onActivate: () => {
                 this._expanded = open ? null : id;
                 this._render();
             },
         }));
 
-        if (open)
-            this._list.add_child(this._details(device, port));
+        if (open) {
+            this._detailsActor = this._details(device, port);
+            this._list.add_child(this._detailsActor);
+        }
     }
 
     _details(device, port) {
@@ -488,8 +612,11 @@ var UsbPanel = class UsbPanel {
                 style_class: 'adaptive-usb-value',
                 x_expand: true,
             });
+            // Several values span lines (device files, mount points); an
+            // ellipsizing label would show only the first.
             v.clutter_text.line_wrap = true;
             v.clutter_text.line_wrap_mode = imports.gi.Pango.WrapMode.WORD_CHAR;
+            v.clutter_text.ellipsize = imports.gi.Pango.EllipsizeMode.NONE;
             grid.layout_manager.attach(v, 1, row, 1, 1);
         };
 
@@ -513,6 +640,14 @@ var UsbPanel = class UsbPanel {
             access = this._access(port.node);
             line('Access', access.text);
         }
+
+        if (device.nodes.length)
+            line('Device files', device.nodes.map(n => `${n.file}  (${n.label})`).join('\n'));
+
+        const drive = port ? null : driveFor(device);
+        const mounts = drive ? mountsOf(drive) : [];
+        if (mounts.length)
+            line('Mounted at', mounts.map(m => m.get_root().get_path()).join('\n'));
 
         const buttons = new St.BoxLayout({
             style_class: 'adaptive-cc-form-buttons adaptive-usb-actions',
@@ -549,8 +684,44 @@ var UsbPanel = class UsbPanel {
                 `SUBSYSTEM=="tty", ATTRS{idVendor}=="${device.vid}", ATTRS{idProduct}=="${device.pid}"` +
                 `${serialMatch}, SYMLINK+="${slug(device.product)}", MODE="0660", GROUP="dialout"`);
         } else {
+            const primaryNode = device.nodes.find(n => n.primary);
+            if (primaryNode)
+                action('Copy path', primaryNode.file);
             action('Copy VID:PID', `${device.vid}:${device.pid}`);
             action('Copy details', lines.join('\n'));
+        }
+
+        if (drive) {
+            // Drive actions get their own row, ending in the primary button.
+            const driveButtons = new St.BoxLayout({
+                style_class: 'adaptive-cc-form-buttons adaptive-usb-actions',
+                x_align: Clutter.ActorAlign.END,
+            });
+            box.add_child(driveButtons);
+            if (mounts.length) {
+                const openButton = new St.Button({
+                    style_class: 'adaptive-cc-form-button',
+                    label: 'Open',
+                    can_focus: true,
+                });
+                openButton.connect('clicked', () => {
+                    this._button.menu.close();
+                    try {
+                        Gio.AppInfo.launch_default_for_uri(mounts[0].get_root().get_uri(), null);
+                    } catch (e) {
+                        logError(e, '[Adaptive USB] opening a drive');
+                    }
+                });
+                driveButtons.add_child(openButton);
+            }
+            const eject = new St.Button({
+                style_class: 'adaptive-cc-form-button adaptive-cc-form-primary',
+                label: this._ejecting.has(device.key) ? 'Ejecting…' : 'Eject',
+                can_focus: true,
+                reactive: !this._ejecting.has(device.key),
+            });
+            eject.connect('clicked', () => this._eject(device, drive));
+            driveButtons.add_child(eject);
         }
 
         if (access && !access.ok) {
@@ -564,6 +735,82 @@ var UsbPanel = class UsbPanel {
         }
 
         return box;
+    }
+
+    // "Safely remove": unmount everything on the drive and power it down
+    // (stop) when the drive supports that - an SSD like the T7 does - else
+    // eject it, else just unmount. GNOME's mount operation handles the
+    // "device is busy" case, listing what holds files open on it.
+    _eject(device, drive) {
+        if (this._ejecting.has(device.key))
+            return;
+        this._ejecting.add(device.key);
+        this._ejectErrors.delete(device.key);
+        this._render();
+
+        const name = device.product;
+        const mountOperation = new ShellMountOperation.ShellMountOperation(drive);
+        const operation = mountOperation.mountOp;
+        const done = error => {
+            try {
+                mountOperation.close();
+            } catch (e) {
+            }
+            this._ejecting.delete(device.key);
+            if (error) {
+                const busy = /busy|in use|target is busy/i.test(error.message);
+                this._ejectErrors.set(device.key, busy
+                    ? 'In use. Close files and apps using it, then eject.'
+                    : "Couldn't eject");
+                log(`[Adaptive USB] eject ${name}: ${error.message}`);
+            } else {
+                this._notify(`${name} can be unplugged`, 'It has been safely ejected.');
+            }
+            this._refresh(true);
+        };
+
+        try {
+            if (drive.can_stop()) {
+                drive.stop(Gio.MountUnmountFlags.NONE, operation, null, (d, res) => {
+                    try {
+                        d.stop_finish(res);
+                        done(null);
+                    } catch (e) {
+                        done(e);
+                    }
+                });
+            } else if (drive.can_eject()) {
+                drive.eject_with_operation(Gio.MountUnmountFlags.NONE, operation, null, (d, res) => {
+                    try {
+                        d.eject_with_operation_finish(res);
+                        done(null);
+                    } catch (e) {
+                        done(e);
+                    }
+                });
+            } else {
+                const mounts = mountsOf(drive);
+                let pending = mounts.length;
+                let failure = null;
+                if (!pending) {
+                    done(null);
+                    return;
+                }
+                for (const mount of mounts) {
+                    mount.unmount_with_operation(Gio.MountUnmountFlags.NONE, operation, null, (m, res) => {
+                        try {
+                            m.unmount_with_operation_finish(res);
+                        } catch (e) {
+                            failure = failure || e;
+                        }
+                        if (--pending === 0)
+                            done(failure);
+                    });
+                }
+            }
+        } catch (e) {
+            done(e);
+        }
     }
 
     _access(node) {

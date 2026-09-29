@@ -407,15 +407,6 @@ function makeRow({
         }));
     }
 
-    for (const name of trailing) {
-        box.add_child(new St.Icon({
-            icon_name: name,
-            style_class: name === 'object-select-symbolic'
-                ? 'adaptive-cc-row-check' : 'adaptive-cc-row-trailing',
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-    }
-
     for (const item of actions || (action ? [action] : [])) {
         const pill = new St.Button({
             style_class: item.quiet
@@ -426,6 +417,15 @@ function makeRow({
         });
         pill.connect('clicked', item.onClick);
         box.add_child(pill);
+    }
+
+    for (const name of trailing) {
+        box.add_child(new St.Icon({
+            icon_name: name,
+            style_class: name === 'object-select-symbolic'
+                ? 'adaptive-cc-row-check' : 'adaptive-cc-row-trailing',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
     }
 
     if (onActivate)
@@ -2419,15 +2419,15 @@ var ControlCenter = class ControlCenter {
         this._btPending.add(path);
         if (connect)
             this._stopBtScan();
-        this._btSignature = null;
-        this._queueSync();
+        // Forced: the pointer is on the row that was just tapped, and the
+        // hold-still rule must not hide that row's own "Connecting…".
+        this._btRefresh();
 
         this._btConnect(device, connect, error => {
             this._btPending.delete(path);
             if (error)
                 this._btErrors.set(path, error);
-            this._btSignature = null;
-            this._queueSync();
+            this._btRefresh();
         });
     }
 
@@ -2528,6 +2528,14 @@ var ControlCenter = class ControlCenter {
             return GLib.SOURCE_REMOVE;
         });
         this._btTimers.add(id);
+    }
+
+    // Show the outcome of something the user did right away - list and tile.
+    _btRefresh() {
+        this._btSignature = null;
+        if (this._menu && this._menu.isOpen && this._open === 'bluetooth')
+            this._syncBluetoothPage(true);
+        this._queueSync();
     }
 
     _btDeviceByPath(path) {
