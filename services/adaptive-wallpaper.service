@@ -1,0 +1,8 @@
+[Unit]
+Description=Rotate the Adaptive astrophotography wallpaper
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/adaptive-desktop/scripts/adaptive-wallpaper.sh

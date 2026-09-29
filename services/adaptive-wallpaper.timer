@@ -1,0 +1,10 @@
+[Unit]
+Description=Change the Adaptive wallpaper every hour
+
+[Timer]
+OnStartupSec=30s
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
