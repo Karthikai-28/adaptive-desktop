@@ -2,9 +2,10 @@
 //
 // GNOME 42's system menu - the "aggregate menu" at the right of the top bar -
 // rebuilt as an Android/iOS-style control center: tiles for the things people
-// switch, sliders for the things they set, and drill-down pages for Wi-Fi
-// networks, Bluetooth devices, power mode, sound output and the session, so
-// none of the everyday changes needs a trip into Settings.
+// switch, sliders for the things they set, and dropdowns that open in place
+// under their control - Wi-Fi networks, Bluetooth devices, power mode, sound
+// output and the session - so none of the everyday changes needs a trip into
+// Settings, or even away from the panel.
 //
 // Like the Shade, this rearranges rather than reimplements. Every indicator
 // GNOME builds for this menu keeps running: its NetworkManager client, its
@@ -35,8 +36,9 @@ try {
     NM = null;
 }
 
-// Tallest a drill-down list grows before it scrolls.
-const LIST_MAX_HEIGHT = 320;
+// Tallest a dropdown list grows before it scrolls.
+const LIST_MAX_HEIGHT = 264;
+const DROPDOWN_FADE_MS = 140;
 const WIFI_SCAN_INTERVAL_S = 15;
 const MAX_NETWORKS = 24;
 
@@ -70,6 +72,50 @@ function profileIcon(name) {
 
 function iconProps(icon) {
     return typeof icon === 'string' ? { icon_name: icon } : { gicon: icon };
+}
+
+// The Bluetooth pairing agent this panel registers while it pairs a device.
+const AGENT_PATH = '/org/adaptive/shell/BluetoothAgent';
+const AGENT_XML = `<node>
+  <interface name="org.bluez.Agent1">
+    <method name="Release"/>
+    <method name="RequestPinCode">
+      <arg type="o" direction="in"/><arg type="s" direction="out"/>
+    </method>
+    <method name="DisplayPinCode">
+      <arg type="o" direction="in"/><arg type="s" direction="in"/>
+    </method>
+    <method name="RequestPasskey">
+      <arg type="o" direction="in"/><arg type="u" direction="out"/>
+    </method>
+    <method name="DisplayPasskey">
+      <arg type="o" direction="in"/><arg type="u" direction="in"/><arg type="q" direction="in"/>
+    </method>
+    <method name="RequestConfirmation">
+      <arg type="o" direction="in"/><arg type="u" direction="in"/>
+    </method>
+    <method name="RequestAuthorization">
+      <arg type="o" direction="in"/>
+    </method>
+    <method name="AuthorizeService">
+      <arg type="o" direction="in"/><arg type="s" direction="in"/>
+    </method>
+    <method name="Cancel"/>
+  </interface>
+</node>`;
+
+// What a failed BlueZ Pair() means, in words a person can act on.
+function pairingError(error) {
+    const message = error && error.message ? error.message : '';
+    if (/AuthenticationFailed/.test(message))
+        return 'Pairing failed. Check the code and try again.';
+    if (/AuthenticationCanceled|AuthenticationRejected|Canceled|Rejected/.test(message))
+        return 'Pairing was cancelled';
+    if (/ConnectionAttemptFailed|AuthenticationTimeout|Timeout|timed out|NoReply/i.test(message))
+        return "No response. Is it in pairing mode?";
+    if (/InProgress/.test(message))
+        return 'Already pairing';
+    return "Couldn't pair";
 }
 
 // UPower.DeviceState
@@ -152,25 +198,9 @@ function describeSink(control, sink) {
 
 // ------------------------------------------------------------------ widgets
 
-// A GNOME toggle-switch drawn by the Adaptive SVGs, in a focusable button.
-function makeSwitch() {
-    const knob = new St.Bin({
-        style_class: 'toggle-switch',
-        y_align: Clutter.ActorAlign.CENTER,
-    });
-    const button = new St.Button({
-        style_class: 'adaptive-cc-switch-button',
-        child: knob,
-        can_focus: true,
-        y_align: Clutter.ActorAlign.CENTER,
-    });
-    button.setChecked = on => {
-        if (on)
-            knob.add_style_pseudo_class('checked');
-        else
-            knob.remove_style_pseudo_class('checked');
-    };
-    return button;
+// A section label inside a dropdown list ("Known Networks", "My Devices").
+function makeHeading(text) {
+    return new St.Label({ text, style_class: 'adaptive-cc-list-heading', x_expand: true });
 }
 
 function makeRoundButton(iconName, accessibleName, onClick, extraClass = '') {
@@ -185,11 +215,11 @@ function makeRoundButton(iconName, accessibleName, onClick, extraClass = '') {
     return button;
 }
 
-// One line in a drill-down list: icon, title and subtitle, trailing icons,
+// One line in a dropdown list: icon, title and subtitle, trailing icons,
 // and optionally a trailing action button.
 function makeRow({
     icon = null, title, subtitle = '', trailing = [], action = null,
-    active = false, danger = false, onActivate = null,
+    active = false, danger = false, alert = false, onActivate = null,
 }) {
     const button = new St.Button({
         style_class: danger ? 'adaptive-cc-row adaptive-cc-row-danger' : 'adaptive-cc-row',
@@ -221,7 +251,9 @@ function makeRow({
     if (subtitle) {
         text.add_child(new St.Label({
             text: subtitle,
-            style_class: 'adaptive-cc-row-subtitle',
+            style_class: alert
+                ? 'adaptive-cc-row-subtitle adaptive-cc-row-alert'
+                : 'adaptive-cc-row-subtitle',
         }));
     }
 
@@ -252,8 +284,8 @@ function makeRow({
 }
 
 // A quick-settings tile. Tapping the body toggles when the tile has a toggle
-// and opens its page otherwise; a tile with both gets a separate arrow for the
-// page, the way Android splits the two.
+// and opens its dropdown otherwise; a tile with both gets a separate arrow for
+// the dropdown, the way Android splits the two.
 var Tile = class Tile {
     constructor({ icon, title, onToggle = null, onOpen = null }) {
         this.actor = new St.BoxLayout({
@@ -293,12 +325,14 @@ var Tile = class Tile {
         this._main.connect('clicked', () => (onToggle || onOpen)?.());
 
         this._arrow = null;
+        this._chevron = null;
         if (onOpen) {
             const chevron = new St.Icon({
-                icon_name: 'go-next-symbolic',
+                icon_name: 'pan-down-symbolic',
                 style_class: 'adaptive-cc-tile-chevron',
                 y_align: Clutter.ActorAlign.CENTER,
             });
+            this._chevron = chevron;
 
             if (onToggle) {
                 this._arrow = new St.Button({
@@ -314,6 +348,18 @@ var Tile = class Tile {
                 box.add_child(chevron);
             }
         }
+    }
+
+    // The chevron points up while this tile's dropdown is open.
+    setExpanded(open) {
+        if (!this._chevron)
+            return;
+        this._chevron.icon_name = open ? 'pan-up-symbolic' : 'pan-down-symbolic';
+        const holder = this._arrow || this._main;
+        if (open)
+            holder.add_style_pseudo_class('expanded');
+        else
+            holder.remove_style_pseudo_class('expanded');
     }
 
     update({ active = false, subtitle = '', icon = null, sensitive = true }) {
@@ -353,12 +399,19 @@ var ControlCenter = class ControlCenter {
         this._streamLive = [];
         this._syncId = 0;
         this._scanId = 0;
-        this._page = 'main';
+        this._open = null;
         this._pages = {};
         this._syncingSliders = false;
         this._inhibitCookie = 0;
         this._inhibitPending = false;
         this._btPending = new Set();
+        this._btErrors = new Map();
+        this._btPair = null;
+        this._wifiJoin = null;
+        this._wifiErrors = new Map();
+        this._joinWatch = null;
+        this._agentExport = null;
+        this._agentRegistered = false;
         this._attached = false;
     }
 
@@ -389,6 +442,7 @@ var ControlCenter = class ControlCenter {
             });
 
             this._build();
+            this._buildAgent();
 
             // GNOME's sections stay in the popup, hidden. Their own code
             // toggles their visibility for its own reasons, so the wanted
@@ -450,6 +504,17 @@ var ControlCenter = class ControlCenter {
 
         // Keep Awake belongs to this panel; it must not outlive it.
         this._releaseInhibitor();
+
+        this._cancelPairing();
+        this._unregisterAgent();
+        this._stopWatchingJoin();
+        if (this._agentExport) {
+            try {
+                this._agentExport.unexport();
+            } catch (e) {
+            }
+            this._agentExport = null;
+        }
 
         this._showingOurs = false;
         for (const record of this._stock) {
@@ -525,29 +590,26 @@ var ControlCenter = class ControlCenter {
             x_expand: true,
         });
 
-        this._stack = new St.Widget({
-            layout_manager: new Clutter.BinLayout(),
-            x_expand: true,
-        });
-        this._root.add_child(this._stack);
-
         this._buildMainPage();
 
-        this._buildPage('wifi', 'Wi-Fi', {
-            onToggle: () => this._toggleWifi(),
-            settings: ['wifi', 'Network settings'],
-        });
-        this._buildPage('bluetooth', 'Bluetooth', {
-            onToggle: () => this._toggleBluetooth(),
-            settings: ['bluetooth', 'Bluetooth settings'],
-        });
-        this._buildPage('power', 'Power Mode', {
-            settings: ['power', 'Power settings'],
-        });
-        this._buildPage('sound', 'Sound Output', {
-            settings: ['sound', 'Sound settings'],
-        });
-        this._buildPage('session', 'Power', {});
+        // Each dropdown opens directly under the control that opens it.
+        this._mainPage.insert_child_above(
+            this._buildDropdown('session', {}), this._header);
+
+        const grid = this._grid.layout_manager;
+        grid.attach(this._buildDropdown('wifi', {
+            settings: ['wifi', 'Network Settings'],
+        }), 0, 1, 2, 1);
+        grid.attach(this._buildDropdown('bluetooth', {
+            settings: ['bluetooth', 'Bluetooth Settings'],
+        }), 0, 1, 2, 1);
+        grid.attach(this._buildDropdown('power', {
+            settings: ['power', 'Power Settings'],
+        }), 0, 3, 2, 1);
+
+        this._slidersBox.insert_child_above(this._buildDropdown('sound', {
+            settings: ['sound', 'Sound Settings'],
+        }), this._volume.row);
     }
 
     _buildMainPage() {
@@ -556,12 +618,13 @@ var ControlCenter = class ControlCenter {
             vertical: true,
             x_expand: true,
         });
-        this._stack.add_child(page);
-        this._pages.main = { actor: page };
+        this._root.add_child(page);
+        this._mainPage = page;
 
         // Header: battery on the left, session actions on the right.
         const header = new St.BoxLayout({ style_class: 'adaptive-cc-header', x_expand: true });
         page.add_child(header);
+        this._header = header;
 
         this._battery = new St.BoxLayout({
             style_class: 'adaptive-cc-battery',
@@ -586,10 +649,12 @@ var ControlCenter = class ControlCenter {
                 this._systemActions.activateLockScreen();
             });
         header.add_child(this._lockButton);
-        header.add_child(makeRoundButton('system-shutdown-symbolic', 'Power Off / Log Out',
-            () => this._showPage('session'), 'adaptive-cc-power-button'));
+        this._powerButton = makeRoundButton('system-shutdown-symbolic', 'Power Off / Log Out',
+            () => this._toggleDropdown('session'), 'adaptive-cc-power-button');
+        header.add_child(this._powerButton);
 
-        // Tiles, two to a row.
+        // Tiles, two to a row. Grid rows alternate: tiles on even rows, and the
+        // odd row under each pair is where that pair's dropdown opens.
         const grid = new St.Widget({
             style_class: 'adaptive-cc-tiles',
             layout_manager: new Clutter.GridLayout({
@@ -600,24 +665,25 @@ var ControlCenter = class ControlCenter {
             x_expand: true,
         });
         page.add_child(grid);
+        this._grid = grid;
 
         this._tiles = {
             wifi: new Tile({
                 icon: 'network-wireless-symbolic',
                 title: 'Wi-Fi',
                 onToggle: () => this._toggleWifi(),
-                onOpen: () => this._showPage('wifi'),
+                onOpen: () => this._toggleDropdown('wifi'),
             }),
             bluetooth: new Tile({
                 icon: 'bluetooth-active-symbolic',
                 title: 'Bluetooth',
                 onToggle: () => this._toggleBluetooth(),
-                onOpen: () => this._showPage('bluetooth'),
+                onOpen: () => this._toggleDropdown('bluetooth'),
             }),
             power: new Tile({
                 icon: 'power-profile-balanced-symbolic',
                 title: 'Power Mode',
-                onOpen: () => this._showPage('power'),
+                onOpen: () => this._toggleDropdown('power'),
             }),
             nightLight: new Tile({
                 icon: 'night-light-symbolic',
@@ -655,7 +721,7 @@ var ControlCenter = class ControlCenter {
         };
 
         Object.values(this._tiles).forEach((tile, i) => {
-            grid.layout_manager.attach(tile.actor, i % 2, Math.floor(i / 2), 1, 1);
+            grid.layout_manager.attach(tile.actor, i % 2, 2 * Math.floor(i / 2), 1, 1);
         });
 
         // Sliders.
@@ -665,6 +731,7 @@ var ControlCenter = class ControlCenter {
             x_expand: true,
         });
         page.add_child(sliders);
+        this._slidersBox = sliders;
 
         this._volume = this._makeSliderRow('audio-volume-high-symbolic', {
             name: 'Volume',
@@ -673,7 +740,7 @@ var ControlCenter = class ControlCenter {
                 if (sink)
                     sink.change_is_muted(!sink.is_muted);
             },
-            onArrow: () => this._showPage('sound'),
+            onArrow: () => this._toggleDropdown('sound'),
             onChange: value => this._setVolume(value),
         });
         sliders.add_child(this._volume.row);
@@ -732,14 +799,15 @@ var ControlCenter = class ControlCenter {
                 style_class: 'adaptive-cc-slider-arrow',
                 can_focus: true,
                 accessible_name: `${name} output`,
-                child: new St.Icon({ icon_name: 'go-next-symbolic' }),
+                child: new St.Icon({ icon_name: 'pan-down-symbolic' }),
                 y_align: Clutter.ActorAlign.CENTER,
             });
             arrow.connect('clicked', onArrow);
             row.add_child(arrow);
+            return { row, icon, slider, arrow };
         }
 
-        return { row, icon, slider };
+        return { row, icon, slider, arrow: null };
     }
 
     _setSlider(slider, value) {
@@ -751,37 +819,28 @@ var ControlCenter = class ControlCenter {
         }
     }
 
-    _buildPage(name, title, { onToggle = null, settings = null }) {
+    _buildDropdown(name, { settings = null }) {
         const actor = new St.BoxLayout({
-            style_class: 'adaptive-cc-page',
+            style_class: 'adaptive-cc-dropdown',
             vertical: true,
             x_expand: true,
             visible: false,
+            reactive: true,
+            track_hover: true,
         });
-        this._stack.add_child(actor);
 
-        const header = new St.BoxLayout({ style_class: 'adaptive-cc-page-header', x_expand: true });
-        actor.add_child(header);
-
-        header.add_child(makeRoundButton('go-previous-symbolic', 'Back',
-            () => this._showPage('main')));
-        header.add_child(new St.Label({
-            text: title,
-            style_class: 'adaptive-cc-page-title',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-
-        let toggle = null;
-        if (onToggle) {
-            toggle = makeSwitch();
-            toggle.accessible_name = title;
-            toggle.connect('clicked', onToggle);
-            header.add_child(toggle);
-        }
+        // Lists never reorder under the pointer (see _holdForPointer); what
+        // arrived while it was over the list is applied once it leaves.
+        actor.connect('notify::hover', () => {
+            const page = this._pages[name];
+            if (!actor.hover && page && page.stale) {
+                page.stale = false;
+                this._queueSync();
+            }
+        });
 
         const status = new St.Label({
-            style_class: 'adaptive-cc-page-status',
+            style_class: 'adaptive-cc-dropdown-status',
             x_expand: true,
             visible: false,
         });
@@ -805,20 +864,34 @@ var ControlCenter = class ControlCenter {
 
         if (settings) {
             const [panel, label] = settings;
-            const footer = new St.Button({
-                style_class: 'adaptive-cc-footer',
+            const link = new St.Button({
+                style_class: 'adaptive-cc-dropdown-link',
                 can_focus: true,
-                x_expand: true,
-                label,
+                x_align: Clutter.ActorAlign.START,
+                label: `${label}…`,
             });
-            footer.connect('clicked', () => this._openSettings(panel));
-            actor.add_child(footer);
+            link.connect('clicked', () => this._openSettings(panel));
+            actor.add_child(link);
         }
 
-        this._pages[name] = { actor, list, scroll, toggle, status };
+        this._pages[name] = { actor, list, scroll, status };
+        return actor;
     }
 
-    // Replace a page's rows, then size its scroll view to them.
+    // Scan results arrive every few seconds and re-sort the list. Applying
+    // them while the pointer is over it moves rows under the cursor - a tap
+    // meant for one network lands on another, and a saved one connects on
+    // the spot. So, as on macOS, a list holds still while it is being
+    // pointed at, and catches up when the pointer leaves.
+    _holdForPointer(page) {
+        if (page.actor.hover && page.list.get_n_children() > 0) {
+            page.stale = true;
+            return true;
+        }
+        return false;
+    }
+
+    // Replace a dropdown's rows, then size its scroll view to them.
     _fillPage(page, rows, statusText = '') {
         page.list.destroy_all_children();
         for (const row of rows)
@@ -832,29 +905,71 @@ var ControlCenter = class ControlCenter {
         page.scroll.set_height(Math.min(Math.max(natural, 0), LIST_MAX_HEIGHT));
     }
 
-    _showPage(name) {
-        if (!this._pages[name])
-            return;
+    _toggleDropdown(name) {
+        this._openDropdown(this._open === name ? null : name);
+    }
 
-        this._page = name;
-        for (const [key, page] of Object.entries(this._pages))
-            page.actor.visible = key === name;
+    // One dropdown at a time, the way an accordion works: opening one closes
+    // whichever was open. null closes them all.
+    _openDropdown(name) {
+        this._open = name && this._pages[name] ? name : null;
+
+        for (const [key, page] of Object.entries(this._pages)) {
+            const open = key === this._open;
+            if (page.actor.visible !== open) {
+                page.actor.remove_all_transitions();
+                page.actor.visible = open;
+                if (open) {
+                    page.actor.opacity = 0;
+                    page.actor.ease({
+                        opacity: 255,
+                        duration: DROPDOWN_FADE_MS,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                    });
+                }
+            }
+            this._setExpander(key, open);
+        }
 
         this._wifiSignature = null;
-        if (name === 'wifi')
+        this._btSignature = null;
+        if (this._open === 'wifi')
             this._startScanning();
         else
             this._stopScanning();
 
-        if (name === 'session')
+        // Forms belong to the dropdown they were opened in.
+        if (this._wifiJoin && this._wifiJoin.stage === 'form')
+            this._wifiJoin = null;
+        if (this._open !== 'bluetooth')
+            this._cancelPairing();
+        this._setBtDiscovery(this._open === 'bluetooth');
+
+        if (this._open === 'session')
             this._systemActions.forceUpdate();
 
         this._syncPage();
+    }
 
-        // Keyboard users land on the page, not on the now-hidden tile.
-        const target = this._pages[name].actor;
-        if (this._menu && this._menu.isOpen)
-            target.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
+    // Whatever opened a dropdown shows that it is open.
+    _setExpander(name, open) {
+        if (this._tiles[name]) {
+            this._tiles[name].setExpanded(open);
+            return;
+        }
+
+        const button = name === 'session' ? this._powerButton
+            : name === 'sound' ? this._volume.arrow : null;
+        if (!button)
+            return;
+
+        if (open)
+            button.add_style_pseudo_class('expanded');
+        else
+            button.remove_style_pseudo_class('expanded');
+
+        if (name === 'sound')
+            button.child.icon_name = open ? 'pan-up-symbolic' : 'pan-down-symbolic';
     }
 
     // ---------------------------------------------------------- lifecycle
@@ -864,13 +979,21 @@ var ControlCenter = class ControlCenter {
             return;
 
         this._connectLive();
-        this._showPage('main');
+        this._openDropdown(null);
         this._syncAll();
     }
 
     _onClose() {
         this._dropLive();
         this._stopScanning();
+        this._setBtDiscovery(false);
+
+        // Nobody can answer a pairing prompt in a closed panel.
+        this._cancelPairing();
+        if (this._wifiJoin && this._wifiJoin.stage === 'form')
+            this._wifiJoin = null;
+        this._wifiErrors.clear();
+        this._btErrors.clear();
 
         if (this._syncId) {
             GLib.Source.remove(this._syncId);
@@ -1249,7 +1372,7 @@ var ControlCenter = class ControlCenter {
     // -------------------------------------------------------------- pages
 
     _syncPage() {
-        switch (this._page) {
+        switch (this._open) {
         case 'wifi':
             this._syncWifiPage();
             break;
@@ -1353,26 +1476,25 @@ var ControlCenter = class ControlCenter {
             .slice(0, MAX_NETWORKS);
     }
 
-    _syncWifiPage() {
+    _syncWifiPage(force = false) {
         const page = this._pages.wifi;
         const client = this._nmClient();
         const device = this._wifiDevice();
 
         if (!client || !device) {
-            page.toggle.visible = false;
             this._fillPage(page, [], 'No Wi-Fi adapter was found.');
             return;
         }
 
         const enabled = client.wireless_enabled && !this._rfkill.airplaneMode;
-        page.toggle.visible = true;
-        page.toggle.setChecked(enabled);
 
         if (this._rfkill.airplaneMode) {
-            this._fillPage(page, [], 'Airplane mode is on. Turn Wi-Fi on to leave it.');
+            this._wifiJoin = null;
+            this._fillPage(page, [], 'Airplane mode is on. Tap Wi-Fi to turn it back on.');
             return;
         }
         if (!enabled) {
+            this._wifiJoin = null;
             this._fillPage(page, [], 'Wi-Fi is off.');
             return;
         }
@@ -1381,6 +1503,14 @@ var ControlCenter = class ControlCenter {
         const connecting = state > NM.DeviceState.DISCONNECTED &&
             state < NM.DeviceState.ACTIVATED;
         const networks = this._wifiNetworks(client, device);
+        const join = this._wifiJoin;
+
+        // A password being typed must survive the scan that lands halfway
+        // through it, so an open form freezes the list until it closes.
+        if (!force && join && join.stage === 'form' && page.list.get_n_children() > 0)
+            return;
+        if (!force && this._holdForPointer(page))
+            return;
 
         // A scan fires a burst of access-point signals that mostly change
         // nothing on screen. Rebuilding the rows anyway reset hover and
@@ -1389,42 +1519,91 @@ var ControlCenter = class ControlCenter {
         const signature = networks.map(n => [
             n.name, n.active, n.connections.length > 0,
             signalLevel(n.ap.strength), apSecured(n.ap),
-        ].join('|')).join('\n') + `|${connecting}`;
-        if (signature === this._wifiSignature && page.list.get_n_children() > 0)
+        ].join('|')).join('\n') +
+            `|${connecting}|${join ? `${join.name}:${join.stage}` : ''}` +
+            `|${[...this._wifiErrors].join(',')}`;
+        if (!force && signature === this._wifiSignature && page.list.get_n_children() > 0)
             return;
         this._wifiSignature = signature;
 
-        const rows = networks.map(network => {
-            const secured = apSecured(network.ap);
-            let subtitle = '';
-            if (network.active)
-                subtitle = connecting ? 'Connecting…' : 'Connected';
-            else if (network.connections.length > 0)
-                subtitle = 'Saved';
-            else if (apEnterprise(network.ap))
-                subtitle = 'Enterprise · opens Settings';
+        const rows = [];
+        let form = null;
+        const add = network => {
+            rows.push(this._wifiRow(network, device, connecting));
+            if (join && join.stage === 'form' && join.name === network.name) {
+                form = this._wifiJoinForm(network);
+                rows.push(form);
+            }
+        };
 
-            const trailing = [];
-            if (secured)
-                trailing.push('network-wireless-encrypted-symbolic');
-            if (network.active && !connecting)
-                trailing.push('object-select-symbolic');
+        networks.filter(n => n.active).forEach(add);
 
-            return makeRow({
-                icon: `network-wireless-signal-${signalLevel(network.ap.strength)}-symbolic`,
-                title: network.name,
-                subtitle,
-                trailing,
-                active: network.active,
-                action: network.active ? {
-                    label: 'Disconnect',
-                    onClick: () => this._disconnectWifi(device),
-                } : null,
-                onActivate: network.active ? null : () => this._connectWifi(network),
-            });
-        });
+        const known = networks.filter(n => !n.active && n.connections.length > 0);
+        if (known.length) {
+            rows.push(makeHeading('Known Networks'));
+            known.forEach(add);
+        }
+
+        const other = networks.filter(n => !n.active && n.connections.length === 0);
+        if (other.length) {
+            rows.push(makeHeading('Other Networks'));
+            other.forEach(add);
+        }
 
         this._fillPage(page, rows, rows.length ? '' : 'Searching for networks…');
+        if (form)
+            this._focusForm(page, form);
+    }
+
+    _wifiRow(network, device, connecting) {
+        const join = this._wifiJoin;
+        const joining = join && join.stage === 'connecting' && join.name === network.name;
+        const error = this._wifiErrors.get(network.name);
+        const secured = apSecured(network.ap);
+
+        let subtitle = '';
+        if (network.active)
+            subtitle = connecting ? 'Connecting…' : 'Connected';
+        else if (joining)
+            subtitle = 'Connecting…';
+        else if (error)
+            subtitle = error;
+        else if (apEnterprise(network.ap))
+            subtitle = 'Enterprise · opens Settings';
+        else if (!secured)
+            subtitle = 'Open network';
+
+        const trailing = [];
+        if (secured)
+            trailing.push('network-wireless-encrypted-symbolic');
+        if (network.active && !connecting)
+            trailing.push('object-select-symbolic');
+
+        return makeRow({
+            icon: `network-wireless-signal-${signalLevel(network.ap.strength)}-symbolic`,
+            title: network.name,
+            subtitle,
+            alert: !!error && !network.active && !joining,
+            trailing,
+            active: network.active,
+            action: network.active ? {
+                label: 'Disconnect',
+                onClick: () => this._disconnectWifi(device),
+            } : null,
+            onActivate: network.active || joining ? null : () => this._connectWifi(network),
+        });
+    }
+
+    // WPA/WPA2 personal and WPA3 personal are the passwords a form can carry.
+    // Anything else (WEP) goes to GNOME's own secrets dialog.
+    _wifiKeyMgmt(ap) {
+        const F = NM['80211ApSecurityFlags'];
+        const flags = ap.rsn_flags | ap.wpa_flags;
+        if (flags & F.KEY_MGMT_PSK)
+            return 'wpa-psk';
+        if (F.KEY_MGMT_SAE && (flags & F.KEY_MGMT_SAE))
+            return 'sae';
+        return null;
     }
 
     _connectWifi(network) {
@@ -1433,10 +1612,21 @@ var ControlCenter = class ControlCenter {
         if (!client || !device)
             return;
 
+        this._wifiErrors.delete(network.name);
+
         try {
+            // Known: NetworkManager already has the password.
             if (network.connections.length > 0) {
+                this._wifiJoin = { name: network.name, stage: 'connecting' };
                 client.activate_connection_async(network.connections[0], device,
-                    null, null, null);
+                    null, null, (c, res) => {
+                        try {
+                            this._watchJoin(network.name, c.activate_connection_finish(res), false);
+                        } catch (e) {
+                            this._joinFailed(network.name, null, "Couldn't connect");
+                        }
+                    });
+                this._syncWifiPage(true);
                 return;
             }
 
@@ -1448,17 +1638,117 @@ var ControlCenter = class ControlCenter {
                 return;
             }
 
-            // A new secured network needs its password, which GNOME's network
-            // agent asks for in a dialog of its own. The menu is closed first
-            // so the dialog is not fighting it for the pointer.
-            if (apSecured(network.ap))
-                this._closeMenu();
+            if (!apSecured(network.ap)) {
+                this._addAndActivate(network, new NM.SimpleConnection());
+                return;
+            }
 
-            client.add_and_activate_connection_async(new NM.SimpleConnection(),
-                device, network.ap.get_path(), null, null);
+            const keyMgmt = this._wifiKeyMgmt(network.ap);
+            if (!keyMgmt) {
+                // WEP: GNOME's network agent asks for the key in its own
+                // dialog, which needs the pointer the menu is holding.
+                this._closeMenu();
+                client.add_and_activate_connection_async(new NM.SimpleConnection(),
+                    device, network.ap.get_path(), null, null);
+                return;
+            }
+
+            // A new secured network: open (or close) the password form under it.
+            const open = this._wifiJoin && this._wifiJoin.stage === 'form' &&
+                this._wifiJoin.name === network.name;
+            this._wifiJoin = open ? null : { name: network.name, stage: 'form', keyMgmt };
+            this._syncWifiPage(true);
         } catch (e) {
             logError(e, `[Adaptive Control Center] connecting to ${network.name}`);
         }
+    }
+
+    _wifiJoinForm(network) {
+        return this._makeSecretForm({
+            prompt: `Enter the password for “${network.name}”`,
+            hint: 'Password',
+            submitLabel: 'Join',
+            // WPA passphrases are 8 to 63 characters.
+            minLength: 8,
+            onSubmit: password => {
+                const connection = new NM.SimpleConnection();
+                connection.add_setting(new NM.SettingWirelessSecurity({
+                    key_mgmt: this._wifiJoin ? this._wifiJoin.keyMgmt : 'wpa-psk',
+                    psk: password,
+                }));
+                this._addAndActivate(network, connection);
+            },
+            onCancel: () => {
+                this._wifiJoin = null;
+                this._syncWifiPage(true);
+            },
+        });
+    }
+
+    _addAndActivate(network, connection) {
+        const client = this._nmClient();
+        const device = this._wifiDevice();
+        if (!client || !device)
+            return;
+
+        this._wifiJoin = { name: network.name, stage: 'connecting' };
+        this._syncWifiPage(true);
+
+        client.add_and_activate_connection_async(connection, device,
+            network.ap.get_path(), null, (c, res) => {
+                try {
+                    this._watchJoin(network.name, c.add_and_activate_connection_finish(res), true);
+                } catch (e) {
+                    this._joinFailed(network.name, null, "Couldn't connect");
+                }
+            });
+    }
+
+    // Follow one activation to the end. A new profile that never came up -
+    // wrong password, out of range - is deleted again, so a bad password is
+    // never left saved to fail the next time.
+    _watchJoin(name, active, isNew) {
+        this._stopWatchingJoin();
+
+        const remote = isNew ? active.get_connection() : null;
+        const id = active.connect('state-changed', (_active, state, reason) => {
+            if (state === NM.ActiveConnectionState.ACTIVATED) {
+                this._stopWatchingJoin();
+                this._wifiJoin = null;
+                this._wifiErrors.delete(name);
+                this._queueSync();
+            } else if (state === NM.ActiveConnectionState.DEACTIVATED) {
+                const R = NM.ActiveConnectionStateReason;
+                const badSecret = reason === R.NO_SECRETS || reason === R.LOGIN_FAILED;
+                this._joinFailed(name, remote, badSecret ? 'Wrong password' : "Couldn't connect");
+            }
+        });
+        this._joinWatch = [active, id];
+    }
+
+    _stopWatchingJoin() {
+        if (this._joinWatch) {
+            const [active, id] = this._joinWatch;
+            try {
+                active.disconnect(id);
+            } catch (e) {
+            }
+            this._joinWatch = null;
+        }
+    }
+
+    _joinFailed(name, remote, message) {
+        this._stopWatchingJoin();
+        if (remote) {
+            try {
+                remote.delete_async(null, null);
+            } catch (e) {
+                logError(e, '[Adaptive Control Center] removing a failed Wi-Fi profile');
+            }
+        }
+        this._wifiErrors.set(name, message);
+        this._wifiJoin = null;
+        this._queueSync();
     }
 
     _disconnectWifi(device) {
@@ -1467,6 +1757,168 @@ var ControlCenter = class ControlCenter {
         } catch (e) {
             logError(e, '[Adaptive Control Center] disconnecting Wi-Fi');
         }
+    }
+
+    // --- Forms
+
+    // An inline form for a secret: a Wi-Fi password, a Bluetooth PIN or
+    // passkey. It lives in the dropdown, under the row it belongs to.
+    _makeSecretForm({
+        prompt, hint, submitLabel, minLength = 1, secret = true,
+        numeric = false, onSubmit, onCancel,
+    }) {
+        const box = new St.BoxLayout({
+            style_class: 'adaptive-cc-form',
+            vertical: true,
+            x_expand: true,
+        });
+
+        const label = new St.Label({ text: prompt, style_class: 'adaptive-cc-form-prompt' });
+        label.clutter_text.line_wrap = true;
+        box.add_child(label);
+
+        const field = new St.BoxLayout({ style_class: 'adaptive-cc-form-field', x_expand: true });
+        box.add_child(field);
+
+        const entry = new St.Entry({
+            style_class: 'adaptive-cc-entry',
+            hint_text: hint,
+            can_focus: true,
+            x_expand: true,
+        });
+        if (secret) {
+            entry.clutter_text.set_password_char('●');
+            entry.input_purpose = Clutter.InputContentPurpose.PASSWORD;
+        } else if (numeric) {
+            entry.input_purpose = Clutter.InputContentPurpose.DIGITS;
+        }
+        field.add_child(entry);
+
+        if (secret) {
+            const eye = new St.Button({
+                style_class: 'adaptive-cc-form-eye',
+                can_focus: true,
+                accessible_name: 'Show password',
+                child: new St.Icon({ icon_name: 'view-reveal-symbolic' }),
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            eye.connect('clicked', () => {
+                const hidden = entry.clutter_text.get_password_char() !== 0;
+                entry.clutter_text.set_password_char(hidden ? '' : '●');
+                eye.child.icon_name = hidden ? 'view-conceal-symbolic' : 'view-reveal-symbolic';
+            });
+            field.add_child(eye);
+        }
+
+        const buttons = new St.BoxLayout({
+            style_class: 'adaptive-cc-form-buttons',
+            x_align: Clutter.ActorAlign.END,
+        });
+        box.add_child(buttons);
+
+        const cancel = new St.Button({
+            style_class: 'adaptive-cc-form-button',
+            label: 'Cancel',
+            can_focus: true,
+        });
+        cancel.connect('clicked', () => onCancel());
+        buttons.add_child(cancel);
+
+        const submit = new St.Button({
+            style_class: 'adaptive-cc-form-button adaptive-cc-form-primary',
+            label: submitLabel,
+            can_focus: true,
+        });
+        buttons.add_child(submit);
+
+        const valid = () => {
+            const text = entry.get_text();
+            return text.length >= minLength && (!numeric || /^\d+$/.test(text));
+        };
+        const syncSubmit = () => {
+            const ok = valid();
+            submit.reactive = ok;
+            if (ok)
+                submit.remove_style_pseudo_class('insensitive');
+            else
+                submit.add_style_pseudo_class('insensitive');
+        };
+        entry.clutter_text.connect('text-changed', syncSubmit);
+        syncSubmit();
+
+        const go = () => {
+            if (valid())
+                onSubmit(entry.get_text());
+        };
+        entry.clutter_text.connect('activate', go);
+        submit.connect('clicked', go);
+
+        box._entry = entry;
+        return box;
+    }
+
+    // A question with no typing: a code to compare, or a yes/no.
+    _makeConfirmForm({ prompt, code = null, confirmLabel, cancelLabel = 'Cancel', onConfirm = null, onCancel }) {
+        const box = new St.BoxLayout({
+            style_class: 'adaptive-cc-form',
+            vertical: true,
+            x_expand: true,
+        });
+
+        const label = new St.Label({ text: prompt, style_class: 'adaptive-cc-form-prompt' });
+        label.clutter_text.line_wrap = true;
+        box.add_child(label);
+
+        if (code) {
+            box.add_child(new St.Label({
+                text: code,
+                style_class: 'adaptive-cc-form-code',
+                x_align: Clutter.ActorAlign.CENTER,
+            }));
+        }
+
+        const buttons = new St.BoxLayout({
+            style_class: 'adaptive-cc-form-buttons',
+            x_align: Clutter.ActorAlign.END,
+        });
+        box.add_child(buttons);
+
+        const cancel = new St.Button({
+            style_class: 'adaptive-cc-form-button',
+            label: cancelLabel,
+            can_focus: true,
+        });
+        cancel.connect('clicked', () => onCancel());
+        buttons.add_child(cancel);
+
+        if (onConfirm) {
+            const confirm = new St.Button({
+                style_class: 'adaptive-cc-form-button adaptive-cc-form-primary',
+                label: confirmLabel,
+                can_focus: true,
+            });
+            confirm.connect('clicked', () => onConfirm());
+            buttons.add_child(confirm);
+            box._entry = confirm;
+        } else {
+            box._entry = cancel;
+        }
+
+        return box;
+    }
+
+    // Put the keyboard in the form and scroll it into view, once it is laid out.
+    _focusForm(page, form) {
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            if (form.get_stage() && form._entry) {
+                form._entry.grab_key_focus();
+                try {
+                    Util.ensureActorVisibleInScrollView(page.scroll, form);
+                } catch (e) {
+                }
+            }
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     // --- Bluetooth
@@ -1489,57 +1941,161 @@ var ControlCenter = class ControlCenter {
         }
     }
 
-    _syncBluetoothPage() {
+    // Scanning makes the adapter discoverable and costs power, so it runs only
+    // while the Bluetooth dropdown is open.
+    _setBtDiscovery(on) {
+        const client = this._btClient();
+        if (!client || !client.default_adapter)
+            return;
+        on = on && client.default_adapter_powered;
+        try {
+            if (client.default_adapter_setup_mode !== on)
+                client.default_adapter_setup_mode = on;
+        } catch (e) {
+            logError(e, '[Adaptive Control Center] Bluetooth discovery');
+        }
+    }
+
+    // Everything the adapter knows about that has a real name - paired ones
+    // and ones found by scanning. Unnamed devices are only an address and
+    // nobody can tell them apart, so they are left out.
+    _btAllDevices() {
+        const client = this._btClient();
+        if (!client)
+            return [];
+        const store = client.get_devices();
+        const devices = [];
+        for (let i = 0; i < store.get_n_items(); i++) {
+            const device = store.get_item(i);
+            const known = device.paired || device.trusted;
+            const name = device.name || '';
+            if (!known && (!name || /^([0-9A-F]{2}[:-]){5}[0-9A-F]{2}$/i.test(name)))
+                continue;
+            devices.push(device);
+        }
+        return devices;
+    }
+
+    _syncBluetoothPage(force = false) {
         const page = this._pages.bluetooth;
         const client = this._btClient();
 
         if (!client || !client.default_adapter) {
-            page.toggle.visible = false;
             this._fillPage(page, [], 'No Bluetooth adapter was found.');
             return;
         }
 
         const powered = client.default_adapter_powered;
-        page.toggle.visible = true;
-        page.toggle.setChecked(powered);
-
         if (!powered) {
             this._fillPage(page, [], 'Bluetooth is off.');
             return;
         }
 
-        const devices = this._btDevices()
-            .sort((a, b) => (b.connected - a.connected) ||
-                GLib.utf8_collate(a.alias || '', b.alias || ''));
+        // Scanning follows the dropdown; start it if Bluetooth was only just
+        // turned on while the dropdown was open.
+        if (this._open === 'bluetooth')
+            this._setBtDiscovery(true);
 
-        const rows = devices.map(device => {
-            const path = device.get_object_path();
-            const pending = this._btPending.has(path);
-            let subtitle = device.connected ? 'Connected' : 'Not connected';
-            if (pending)
-                subtitle = device.connected ? 'Disconnecting…' : 'Connecting…';
+        // Don't rebuild under someone typing a PIN.
+        const pair = this._btPair;
+        if (!force && pair && pair.stage !== 'pairing' && pair.stage !== 'connecting' &&
+            page.list.get_n_children() > 0)
+            return;
+        if (!force && this._holdForPointer(page))
+            return;
 
+        const byName = (a, b) => GLib.utf8_collate(a.alias || a.name || '', b.alias || b.name || '');
+        const devices = this._btAllDevices();
+        const mine = devices.filter(d => d.paired || d.trusted)
+            .sort((a, b) => (b.connected - a.connected) || byName(a, b));
+        const others = devices.filter(d => !d.paired && !d.trusted).sort(byName).slice(0, 20);
+
+        // Scanning reports devices one at a time; rebuilding the list on each
+        // could swallow a tap that lands mid-rebuild. Rebuild on real change.
+        const signature = [...mine, ...others].map(d => [
+            d.get_object_path(), d.alias || d.name, d.connected, d.paired || d.trusted, d.icon,
+        ].join('|')).join('\n') +
+            `|${pair ? `${pair.path}:${pair.stage}` : ''}` +
+            `|${[...this._btPending].join(',')}|${[...this._btErrors].join(',')}`;
+        if (!force && signature === this._btSignature && page.list.get_n_children() > 0)
+            return;
+        this._btSignature = signature;
+
+        const rows = [];
+        let form = null;
+        const add = device => {
+            rows.push(this._btRow(device));
+            if (pair && pair.path === device.get_object_path()) {
+                const f = this._btPairForm(pair);
+                if (f) {
+                    form = f;
+                    rows.push(f);
+                }
+            }
+        };
+
+        if (mine.length) {
+            rows.push(makeHeading('My Devices'));
+            mine.forEach(add);
+        }
+
+        rows.push(makeHeading('Other Devices'));
+        if (others.length) {
+            others.forEach(add);
+        } else {
+            rows.push(makeRow({
+                icon: 'bluetooth-active-symbolic',
+                title: 'Looking for devices…',
+                subtitle: 'Put the device in pairing mode',
+            }));
+        }
+
+        this._fillPage(page, rows);
+        if (form)
+            this._focusForm(page, form);
+    }
+
+    _btRow(device) {
+        const path = device.get_object_path();
+        const known = device.paired || device.trusted;
+        const pair = this._btPair && this._btPair.path === path ? this._btPair : null;
+        const pending = this._btPending.has(path);
+        const error = this._btErrors.get(path);
+
+        let subtitle;
+        if (pair)
+            subtitle = pair.stage === 'connecting' ? 'Connecting…' : 'Pairing…';
+        else if (pending)
+            subtitle = device.connected ? 'Disconnecting…' : 'Connecting…';
+        else if (error)
+            subtitle = error;
+        else if (!known)
+            subtitle = 'Tap to pair';
+        else
+            subtitle = device.connected ? 'Connected' : 'Not connected';
+
+        if (!pair && !pending && !error && device.connected) {
             let battery = -1;
             try {
                 battery = device.battery_percentage;
             } catch (e) {
                 // Older gnome-bluetooth has no battery property.
             }
-            if (device.connected && Number.isFinite(battery) && battery > 0)
+            if (Number.isFinite(battery) && battery > 0)
                 subtitle += ` · ${Math.round(battery)}%`;
+        }
 
-            return makeRow({
-                icon: device.icon ? `${device.icon}-symbolic` : 'bluetooth-active-symbolic',
-                title: device.alias || device.name || 'Unknown device',
-                subtitle,
-                trailing: device.connected ? ['object-select-symbolic'] : [],
-                active: device.connected,
-                onActivate: pending ? null : () => this._toggleBtDevice(device),
-            });
+        return makeRow({
+            icon: device.icon ? `${device.icon}-symbolic` : 'bluetooth-active-symbolic',
+            title: device.alias || device.name || 'Unknown device',
+            subtitle,
+            alert: !!error && !pair && !pending,
+            trailing: device.connected ? ['object-select-symbolic'] : [],
+            active: device.connected,
+            onActivate: pair || pending || (this._btPair && !pair) ? null
+                : known ? () => this._toggleBtDevice(device)
+                    : () => this._pairBtDevice(device),
         });
-
-        this._fillPage(page, rows,
-            rows.length ? '' : 'No paired devices. Pair new ones in Bluetooth settings.');
     }
 
     _toggleBtDevice(device) {
@@ -1548,6 +2104,7 @@ var ControlCenter = class ControlCenter {
         if (!client || this._btPending.has(path))
             return;
 
+        this._btErrors.delete(path);
         this._btPending.add(path);
         this._queueSync();
 
@@ -1556,6 +2113,8 @@ var ControlCenter = class ControlCenter {
                 try {
                     c.connect_service_finish(res);
                 } catch (e) {
+                    this._btErrors.set(path, device.connected
+                        ? "Couldn't disconnect" : "Couldn't connect. Is it on and nearby?");
                     log(`[Adaptive Control Center] Bluetooth ${device.alias}: ${e.message}`);
                 }
                 this._btPending.delete(path);
@@ -1564,6 +2123,259 @@ var ControlCenter = class ControlCenter {
         } catch (e) {
             this._btPending.delete(path);
             logError(e, '[Adaptive Control Center] Bluetooth connect');
+        }
+    }
+
+    // --- Bluetooth pairing
+    //
+    // GNOME 42's Bluetooth library has no pairing call, so this talks to BlueZ
+    // directly: Device1.Pair, then Trusted, then connect. BlueZ asks the agent
+    // registered on the *calling* connection for any PIN or code, so the shell
+    // registers its agent just for the length of a pairing and never becomes
+    // the system's default agent - Settings keeps that role when it is open.
+
+    _pairBtDevice(device) {
+        if (this._btPair)
+            return;
+
+        const path = device.get_object_path();
+        this._btErrors.delete(path);
+        this._btPair = {
+            path,
+            name: device.alias || device.name || 'the device',
+            stage: 'pairing',
+            invocation: null,
+            code: null,
+        };
+        this._syncBluetoothPage(true);
+
+        this._registerAgent(() => {
+            if (!this._btPair || this._btPair.path !== path)
+                return;
+
+            Gio.DBus.system.call('org.bluez', path, 'org.bluez.Device1', 'Pair',
+                null, null, Gio.DBusCallFlags.NONE, 90000, null, (conn, res) => {
+                    let error = null;
+                    try {
+                        conn.call_finish(res);
+                    } catch (e) {
+                        error = e;
+                    }
+
+                    if (!this._btPair || this._btPair.path !== path)
+                        return;
+
+                    if (error && !/AlreadyExists/.test(error.message)) {
+                        this._finishPairing(path, pairingError(error));
+                        return;
+                    }
+
+                    // Trusted is what lets it reconnect on its own later.
+                    Gio.DBus.system.call('org.bluez', path,
+                        'org.freedesktop.DBus.Properties', 'Set',
+                        new GLib.Variant('(ssv)', ['org.bluez.Device1', 'Trusted',
+                            new GLib.Variant('b', true)]),
+                        null, Gio.DBusCallFlags.NONE, -1, null, null);
+
+                    this._btPair.stage = 'connecting';
+                    this._btPair.invocation = null;
+                    this._unregisterAgent();
+                    this._syncBluetoothPage(true);
+
+                    const client = this._btClient();
+                    if (!client) {
+                        this._finishPairing(path, null);
+                        return;
+                    }
+                    client.connect_service(path, true, null, (c, r) => {
+                        let message = null;
+                        try {
+                            c.connect_service_finish(r);
+                        } catch (e) {
+                            message = "Paired, but couldn't connect";
+                        }
+                        this._finishPairing(path, message);
+                    });
+                });
+        });
+    }
+
+    // The prompt for whatever BlueZ asked the agent, if it asked anything.
+    _btPairForm(pair) {
+        const reply = fn => {
+            const invocation = pair.invocation;
+            pair.invocation = null;
+            pair.stage = 'pairing';
+            if (invocation)
+                fn(invocation);
+            this._syncBluetoothPage(true);
+        };
+        const reject = () => reply(inv =>
+            inv.return_dbus_error('org.bluez.Error.Rejected', 'Cancelled by the user'));
+
+        switch (pair.stage) {
+        case 'pin':
+            return this._makeSecretForm({
+                prompt: `Enter the PIN for “${pair.name}”. Try 0000 or 1234 if the device has no screen.`,
+                hint: 'PIN',
+                submitLabel: 'Pair',
+                secret: false,
+                onSubmit: pin => reply(inv => inv.return_value(new GLib.Variant('(s)', [pin]))),
+                onCancel: () => this._cancelPairing(),
+            });
+        case 'passkey':
+            return this._makeSecretForm({
+                prompt: `Enter the passkey shown on “${pair.name}”.`,
+                hint: 'Passkey',
+                submitLabel: 'Pair',
+                secret: false,
+                numeric: true,
+                onSubmit: key => reply(inv =>
+                    inv.return_value(new GLib.Variant('(u)', [parseInt(key, 10)]))),
+                onCancel: () => this._cancelPairing(),
+            });
+        case 'confirm':
+            return this._makeConfirmForm({
+                prompt: `Confirm that “${pair.name}” shows this code:`,
+                code: pair.code,
+                confirmLabel: 'Pair',
+                onConfirm: () => reply(inv => inv.return_value(null)),
+                onCancel: () => {
+                    reject();
+                    this._cancelPairing();
+                },
+            });
+        case 'authorize':
+            return this._makeConfirmForm({
+                prompt: `Allow “${pair.name}” to pair with this computer?`,
+                confirmLabel: 'Allow',
+                onConfirm: () => reply(inv => inv.return_value(null)),
+                onCancel: () => {
+                    reject();
+                    this._cancelPairing();
+                },
+            });
+        case 'display':
+            return this._makeConfirmForm({
+                prompt: `Type this code on “${pair.name}”, then press Enter on it:`,
+                code: pair.code,
+                onCancel: () => this._cancelPairing(),
+            });
+        }
+        return null;
+    }
+
+    _registerAgent(then) {
+        if (this._agentRegistered || !this._agentExport) {
+            then();
+            return;
+        }
+        Gio.DBus.system.call('org.bluez', '/org/bluez', 'org.bluez.AgentManager1',
+            'RegisterAgent', new GLib.Variant('(os)', [AGENT_PATH, 'KeyboardDisplay']),
+            null, Gio.DBusCallFlags.NONE, -1, null, (conn, res) => {
+                try {
+                    conn.call_finish(res);
+                    this._agentRegistered = true;
+                } catch (e) {
+                    if (!/AlreadyExists/.test(e.message))
+                        log(`[Adaptive Control Center] Bluetooth agent: ${e.message}`);
+                    else
+                        this._agentRegistered = true;
+                }
+                then();
+            });
+    }
+
+    _unregisterAgent() {
+        if (!this._agentRegistered)
+            return;
+        this._agentRegistered = false;
+        Gio.DBus.system.call('org.bluez', '/org/bluez', 'org.bluez.AgentManager1',
+            'UnregisterAgent', new GLib.Variant('(o)', [AGENT_PATH]),
+            null, Gio.DBusCallFlags.NONE, -1, null, null);
+    }
+
+    _finishPairing(path, errorText) {
+        const pair = this._btPair;
+        if (pair && pair.invocation) {
+            pair.invocation.return_dbus_error('org.bluez.Error.Canceled', 'Pairing ended');
+            pair.invocation = null;
+        }
+        this._btPair = null;
+        if (errorText)
+            this._btErrors.set(path, errorText);
+        this._unregisterAgent();
+        if (this._pages.bluetooth)
+            this._syncBluetoothPage(true);
+    }
+
+    _cancelPairing() {
+        const pair = this._btPair;
+        if (!pair)
+            return;
+
+        if (pair.stage !== 'connecting') {
+            Gio.DBus.system.call('org.bluez', pair.path, 'org.bluez.Device1',
+                'CancelPairing', null, null, Gio.DBusCallFlags.NONE, -1, null, null);
+        }
+        this._finishPairing(pair.path, null);
+    }
+
+    // BlueZ calling the agent. Each ask parks the D-Bus invocation on the
+    // pairing and shows the matching form; the form's buttons answer it.
+    _buildAgent() {
+        const ask = stage => (params, invocation) => {
+            const [device, passkey] = params;
+            const pair = this._btPair;
+            if (!pair || pair.path !== device || !this._attached) {
+                invocation.return_dbus_error('org.bluez.Error.Rejected', 'Not pairing this device');
+                return;
+            }
+            pair.stage = stage;
+            pair.invocation = invocation;
+            pair.code = passkey === undefined ? null : String(passkey).padStart(6, '0');
+            this._syncBluetoothPage(true);
+        };
+        const show = (device, code) => {
+            const pair = this._btPair;
+            if (!pair || pair.path !== device)
+                return;
+            pair.stage = 'display';
+            pair.code = String(code);
+            this._syncBluetoothPage(true);
+        };
+
+        const impl = {
+            Release: () => {
+                this._agentRegistered = false;
+            },
+            RequestPinCodeAsync: ask('pin'),
+            DisplayPinCode: (device, pin) => show(device, pin),
+            RequestPasskeyAsync: ask('passkey'),
+            DisplayPasskey: (device, passkey) => show(device, String(passkey).padStart(6, '0')),
+            RequestConfirmationAsync: ask('confirm'),
+            RequestAuthorizationAsync: ask('authorize'),
+            AuthorizeServiceAsync: ([device], invocation) => {
+                if (this._btPair && this._btPair.path === device)
+                    invocation.return_value(null);
+                else
+                    invocation.return_dbus_error('org.bluez.Error.Rejected', 'Not pairing this device');
+            },
+            Cancel: () => {
+                if (this._btPair) {
+                    this._btPair.invocation = null;
+                    this._btPair.stage = 'pairing';
+                    this._syncBluetoothPage(true);
+                }
+            },
+        };
+
+        try {
+            this._agentExport = Gio.DBusExportedObject.wrapJSObject(AGENT_XML, impl);
+            this._agentExport.export(Gio.DBus.system, AGENT_PATH);
+        } catch (e) {
+            this._agentExport = null;
+            logError(e, '[Adaptive Control Center] exporting the Bluetooth agent');
         }
     }
 

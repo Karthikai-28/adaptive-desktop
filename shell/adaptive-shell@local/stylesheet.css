@@ -1450,8 +1450,10 @@
 /* ===== Adaptive Control Center v1 — quick settings =====
  *
  * GNOME's system menu (top-right) as Android/iOS quick settings: a header of
- * round actions, a two-column grid of tiles, a sliders card, and drill-down
- * pages for Wi-Fi, Bluetooth, power mode, sound output and the session.
+ * round actions, a two-column grid of tiles, a sliders card, and dropdowns
+ * that open in place under their control - Wi-Fi and Bluetooth under their
+ * tiles, power mode under its row, sound output under the volume slider, and
+ * the session actions under the header. One is open at a time.
  *
  * Same skin as the Shade block above, and macOS Control Center's rule for
  * state: a tile never changes colour; its icon circle turns system blue, with
@@ -1475,8 +1477,7 @@
     color: #F5F5F7;
 }
 
-.adaptive-cc-main,
-.adaptive-cc-page {
+.adaptive-cc-main {
     spacing: 14px;
 }
 
@@ -1680,24 +1681,166 @@
 }
 
 /* ---------------------------------------------------------------
- * Drill-down pages
+ * Dropdowns
  * --------------------------------------------------------------- */
 
-.adaptive-cc-page-header {
-    spacing: 12px;
+/* A recessed well under the control that opened it. */
+.adaptive-cc-dropdown {
+    padding: 6px;
+    spacing: 2px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(0, 0, 0, 0.22);
 }
 
-.adaptive-cc-page-title {
-    color: #F5F5F7;
-    font-size: 16px;
-    font-weight: 600;
-}
-
-.adaptive-cc-page-status {
-    padding: 22px 12px;
+.adaptive-cc-dropdown-status {
+    padding: 14px 10px;
     color: #98989D;
     font-size: 13px;
     text-align: center;
+}
+
+.adaptive-cc-dropdown-link {
+    margin: 2px 4px 2px 4px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    color: #0A84FF;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.adaptive-cc-dropdown-link:hover,
+.adaptive-cc-dropdown-link:focus {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Whatever opened the dropdown reads as pressed while it is open. */
+.adaptive-cc-tile-arrow:expanded,
+.adaptive-cc-tile-main:expanded,
+.adaptive-cc-slider-arrow:expanded {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+
+.adaptive-cc-round-button:expanded {
+    border-color: rgba(255, 255, 255, 0.24);
+    background-color: rgba(255, 255, 255, 0.16);
+    color: #FFFFFF;
+}
+
+.adaptive-cc-power-button:expanded {
+    border-color: rgba(255, 69, 58, 0.50);
+    background-color: rgba(255, 69, 58, 0.14);
+    color: #FF453A;
+}
+
+/* "Known Networks", "My Devices": Apple's grouped-list section label. */
+.adaptive-cc-list-heading {
+    margin: 8px 10px 2px 10px;
+    color: #98989D;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.adaptive-cc-row-alert {
+    color: #FF453A;
+}
+
+/* Inline forms: a Wi-Fi password, a Bluetooth PIN, passkey or code. */
+.adaptive-cc-form {
+    margin: 2px 4px 6px 4px;
+    padding: 12px;
+    spacing: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.adaptive-cc-form-prompt {
+    color: #F5F5F7;
+    font-size: 12px;
+}
+
+.adaptive-cc-form-field {
+    spacing: 6px;
+}
+
+.adaptive-cc-entry {
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background-color: rgba(0, 0, 0, 0.30);
+    color: #F5F5F7;
+    caret-color: #0A84FF;
+    selection-background-color: rgba(10, 132, 255, 0.55);
+    selected-color: #FFFFFF;
+    font-size: 13px;
+}
+
+.adaptive-cc-entry:focus {
+    border-color: #0A84FF;
+}
+
+.adaptive-cc-entry StLabel.hint-text {
+    color: #636366;
+}
+
+.adaptive-cc-form-eye {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    color: #98989D;
+}
+
+.adaptive-cc-form-eye StIcon {
+    icon-size: 16px;
+}
+
+.adaptive-cc-form-eye:hover,
+.adaptive-cc-form-eye:focus {
+    background-color: rgba(255, 255, 255, 0.10);
+    color: #F5F5F7;
+}
+
+.adaptive-cc-form-code {
+    padding: 4px 0;
+    color: #F5F5F7;
+    font-size: 26px;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-cc-form-buttons {
+    spacing: 8px;
+}
+
+.adaptive-cc-form-button {
+    min-width: 64px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #F5F5F7;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.adaptive-cc-form-button:hover,
+.adaptive-cc-form-button:focus {
+    background-color: rgba(255, 255, 255, 0.20);
+}
+
+.adaptive-cc-form-primary {
+    background-color: #0A84FF;
+    color: #FFFFFF;
+}
+
+.adaptive-cc-form-primary:hover,
+.adaptive-cc-form-primary:focus {
+    background-color: #409CFF;
+}
+
+.adaptive-cc-form-primary:insensitive {
+    background-color: rgba(10, 132, 255, 0.35);
+    color: rgba(255, 255, 255, 0.55);
 }
 
 .adaptive-cc-list {
@@ -1782,41 +1925,6 @@
     color: #FFFFFF;
 }
 
-.adaptive-cc-footer {
-    padding: 10px 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background-color: rgba(255, 255, 255, 0.04);
-    color: #0A84FF;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.adaptive-cc-footer:hover,
-.adaptive-cc-footer:focus {
-    border-color: rgba(10, 132, 255, 0.32);
-    background-color: rgba(255, 255, 255, 0.10);
-    color: #FFFFFF;
-}
-
-.adaptive-cc .toggle-switch {
-    width: 44px;
-    height: 24px;
-    background-size: contain;
-    background-image: url("assets/shade/toggle-off.svg");
-}
-
-.adaptive-cc .toggle-switch:checked {
-    background-image: url("assets/shade/toggle-on.svg");
-}
-
-.adaptive-cc-switch-button {
-    border-radius: 999px;
-}
-
-.adaptive-cc-switch-button:focus {
-    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.45);
-}
 
 /* ===== Adaptive palette — Apple dark appearance =====
  *
@@ -1829,6 +1937,7 @@
  *               fill rgba(255,255,255,.06-.12) · hairline rgba(255,255,255,.08-.10)
  *   Labels      primary #F5F5F7 · secondary #98989D · tertiary #8E8E93 · quaternary #636366
  *   Accent      system blue #0A84FF - selected, on, focused, today, links. The only one.
+ *               Its hover shade #409CFF is for the primary button only.
  *   Status      green #30D158 · orange #FF9F0A · red #FF453A - never decoration.
  *   Data only   indigo #5E5CE6 · cyan #64D2FF - to tell chart series apart.
  *
