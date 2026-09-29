@@ -6,6 +6,9 @@ DISPATCH="$REPO/scripts/adaptive-files-dispatch.sh"
 
 APP_DIR="$HOME/.local/share/applications"
 DESKTOP="$APP_DIR/org.gnome.Nautilus.desktop"
+# The dock shows Ubuntu's original Files icon (Yaru, orange tab) by path.
+# By name it would resolve through the session icon theme, which inherits
+# Yaru-blue and gives the blue-tabbed variant.
 LEGACY_DESKTOP="$APP_DIR/com.karthi.AdaptiveFiles.desktop"
 
 SERVICE_DIR="$HOME/.local/share/dbus-1/services"
@@ -43,7 +46,7 @@ GenericName=File Manager
 Comment=Browse and manage files
 Keywords=folder;manager;explore;disk;filesystem;nautilus;
 Exec=${DISPATCH} --new-window %U
-Icon=org.gnome.Nautilus
+Icon=/usr/share/icons/Yaru/256x256@2x/apps/org.gnome.Nautilus.png
 Terminal=false
 Type=Application
 DBusActivatable=true
