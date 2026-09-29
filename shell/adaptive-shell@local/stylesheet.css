@@ -1741,7 +1741,8 @@
     font-weight: 600;
 }
 
-.adaptive-cc-row-alert {
+/* Two classes, so it wins over the plain subtitle colour defined below. */
+.adaptive-cc-row-subtitle.adaptive-cc-row-alert {
     color: #FF453A;
 }
 

@@ -43,6 +43,8 @@ try {
 // Tallest a dropdown list grows before it scrolls.
 const LIST_MAX_HEIGHT = 264;
 const DROPDOWN_FADE_MS = 140;
+// The Wi-Fi share card (QR code, password, buttons) needs more room than a list.
+const SHARE_MAX_HEIGHT = 500;
 const WIFI_SCAN_INTERVAL_S = 15;
 const MAX_NETWORKS = 24;
 
@@ -125,7 +127,7 @@ function appNameForPid(pid) {
     for (let depth = 0; depth < 6 && current > 1; depth++) {
         const app = tracker.get_app_from_pid(current);
         if (app)
-            return app.get_name();
+            return { name: app.get_name(), isApp: true };
         try {
             const [, bytes] = GLib.file_get_contents(`/proc/${current}/stat`);
             const stat = new TextDecoder().decode(bytes);
@@ -136,7 +138,7 @@ function appNameForPid(pid) {
     }
     try {
         const [, bytes] = GLib.file_get_contents(`/proc/${pid}/comm`);
-        return new TextDecoder().decode(bytes).trim();
+        return { name: new TextDecoder().decode(bytes).trim(), isApp: false };
     } catch (e) {
         return null;
     }
@@ -159,11 +161,19 @@ function friendlyAppName(appId, streamName) {
     if (!word)
         return streamName || 'An app';
 
+    // Only accept a search hit that is plainly the same app: its name or id
+    // contains the word. A looser match turned "bash" into an unrelated app.
+    const needle = word.toLowerCase();
     try {
+        const heuristic = typeof system.lookup_heuristic_basename === 'function'
+            ? system.lookup_heuristic_basename(needle) : null;
+        if (heuristic)
+            return heuristic.get_name();
         for (const group of Shell.AppSystem.search(word) || []) {
             for (const id of group) {
                 const app = system.lookup_app(id);
-                if (app)
+                if (app && (app.get_name().toLowerCase().includes(needle) ||
+                    id.toLowerCase().includes(needle)))
                     return app.get_name();
             }
         }
@@ -177,6 +187,17 @@ function friendlyAppName(appId, streamName) {
 function extensionIcon(name) {
     const file = Me.dir.get_child('assets').get_child('panel').get_child(`${name}.svg`);
     return new Gio.FileIcon({ file });
+}
+
+// Callback for D-Bus calls whose reply nobody needs. It has to be a real
+// function: GNOME promisifies DBusConnection.call, and a null callback makes
+// the wrapper add its own (an 11th argument, logged as a warning each time).
+function ignoreReply(connection, result) {
+    try {
+        connection.call_finish(result);
+    } catch (e) {
+        // Fire-and-forget; failure here changes nothing.
+    }
 }
 
 // org.gnome.SessionManager.Inhibit flags: suspend | idle.
@@ -246,9 +267,9 @@ function btFailureText(message, connect) {
     if (!connect)
         return "Couldn't disconnect";
     if (/page-timeout|Host is down|timeout/i.test(message))
-        return 'No answer. Take it out of the case or switch it on, then tap again.';
+        return 'No answer. Is it on and out of its case?';
     if (/busy|InProgress/i.test(message))
-        return 'Busy with another device. Try again in a moment.';
+        return 'Busy with another device. Try again.';
     if (/profile-unavailable|NotAvailable|NotSupported/i.test(message))
         return "It can't connect to this computer";
     return "Couldn't connect";
@@ -1096,8 +1117,19 @@ var ControlCenter = class ControlCenter {
         return false;
     }
 
+    // Background events (a volume tick, a network change) re-run every sync.
+    // Rebuilding a list that shows the same thing destroys the button under a
+    // click in progress and the tap is lost, so a list is rebuilt only when
+    // what it shows has changed - or when forced, after the user's own action.
+    _unchanged(page, signature, force) {
+        if (!force && page.signature === signature && page.list.get_n_children() > 0)
+            return true;
+        page.signature = signature;
+        return false;
+    }
+
     // Replace a dropdown's rows, then size its scroll view to them.
-    _fillPage(page, rows, statusText = '') {
+    _fillPage(page, rows, statusText = '', maxHeight = LIST_MAX_HEIGHT) {
         page.list.destroy_all_children();
         for (const row of rows)
             page.list.add_child(row);
@@ -1107,7 +1139,7 @@ var ControlCenter = class ControlCenter {
 
         const [, natural] = page.list.get_preferred_height(-1);
         page.scroll.visible = rows.length > 0;
-        page.scroll.set_height(Math.min(Math.max(natural, 0), LIST_MAX_HEIGHT));
+        page.scroll.set_height(Math.min(Math.max(natural, 0), maxHeight));
     }
 
     _toggleDropdown(name) {
@@ -1138,6 +1170,8 @@ var ControlCenter = class ControlCenter {
 
         this._wifiSignature = null;
         this._btSignature = null;
+        for (const page of Object.values(this._pages))
+            page.signature = null;
         if (this._open === 'wifi')
             this._startScanning();
         else
@@ -1794,9 +1828,12 @@ var ControlCenter = class ControlCenter {
                 form = this._wifiJoinForm(network);
                 rows.push(form);
             }
-            if (network.active && this._wifiShare && this._wifiShare.name === network.name)
-                rows.push(this._shareForm(network, device));
+            if (network.active && this._wifiShare && this._wifiShare.name === network.name) {
+                shareCard = this._shareForm(network, device);
+                rows.push(shareCard);
+            }
         };
+        let shareCard = null;
 
         networks.filter(n => n.active).forEach(add);
 
@@ -1812,9 +1849,12 @@ var ControlCenter = class ControlCenter {
             other.forEach(add);
         }
 
-        this._fillPage(page, rows, rows.length ? '' : 'Searching for networks…');
+        this._fillPage(page, rows, rows.length ? '' : 'Searching for networks…',
+            shareCard ? SHARE_MAX_HEIGHT : LIST_MAX_HEIGHT);
         if (form)
             this._focusForm(page, form);
+        else if (shareCard)
+            this._focusForm(page, shareCard);
     }
 
     _wifiRow(network, device, connecting) {
@@ -2602,7 +2642,7 @@ var ControlCenter = class ControlCenter {
                         'org.freedesktop.DBus.Properties', 'Set',
                         new GLib.Variant('(ssv)', ['org.bluez.Device1', 'Trusted',
                             new GLib.Variant('b', true)]),
-                        null, Gio.DBusCallFlags.NONE, -1, null, null);
+                        null, Gio.DBusCallFlags.NONE, -1, null, ignoreReply);
 
                     this._btPair.stage = 'connecting';
                     this._btPair.invocation = null;
@@ -2712,7 +2752,7 @@ var ControlCenter = class ControlCenter {
         this._agentRegistered = false;
         Gio.DBus.system.call('org.bluez', '/org/bluez', 'org.bluez.AgentManager1',
             'UnregisterAgent', new GLib.Variant('(o)', [AGENT_PATH]),
-            null, Gio.DBusCallFlags.NONE, -1, null, null);
+            null, Gio.DBusCallFlags.NONE, -1, null, ignoreReply);
     }
 
     _finishPairing(path, errorText) {
@@ -2736,7 +2776,7 @@ var ControlCenter = class ControlCenter {
 
         if (pair.stage !== 'connecting') {
             Gio.DBus.system.call('org.bluez', pair.path, 'org.bluez.Device1',
-                'CancelPairing', null, null, Gio.DBusCallFlags.NONE, -1, null, null);
+                'CancelPairing', null, null, Gio.DBusCallFlags.NONE, -1, null, ignoreReply);
         }
         this._finishPairing(pair.path, null);
     }
@@ -2813,6 +2853,8 @@ var ControlCenter = class ControlCenter {
         const available = (proxy.Profiles || [])
             .map(p => p.Profile.unpack())
             .filter(p => PROFILES[p]);
+        if (this._unchanged(page, `${available.join(',')}|${proxy.ActiveProfile}`, false))
+            return;
         const order = ['performance', 'balanced', 'power-saver'];
         available.sort((a, b) => order.indexOf(a) - order.indexOf(b));
 
@@ -2880,12 +2922,14 @@ var ControlCenter = class ControlCenter {
     _saveTiles(order) {
         writeConfig({ tiles: order.map(({ id, visible }) => ({ id, visible })) });
         this._layoutTiles();
-        this._syncEditPage();
+        this._syncEditPage(true);
     }
 
-    _syncEditPage() {
+    _syncEditPage(force = false) {
         const page = this._pages.edit;
         const order = this._tileOrder();
+        if (this._unchanged(page, JSON.stringify([order, readConfig().showMedia]), force))
+            return;
         const rows = [makeHeading('Controls')];
 
         order.forEach((entry, i) => {
@@ -2959,7 +3003,7 @@ var ControlCenter = class ControlCenter {
             onActivate: () => {
                 writeConfig({ showMedia: !showMedia });
                 this._syncMedia();
-                this._syncEditPage();
+                this._syncEditPage(true);
             },
         }));
         rows.push(makeRow({
@@ -2968,7 +3012,7 @@ var ControlCenter = class ControlCenter {
             onActivate: () => {
                 writeConfig({ tiles: null, showMedia: true });
                 this._layoutTiles();
-                this._syncEditPage();
+                this._syncEditPage(true);
             },
         }));
 
@@ -3086,8 +3130,12 @@ var ControlCenter = class ControlCenter {
             return;
         try {
             const player = new Mpris.MprisPlayer(name);
+            // 'changed' fires before the player updates whether it can play;
+            // 'show' and 'hide' follow that update.
             const ids = [
                 player.connect('changed', () => this._syncMedia()),
+                player.connect('show', () => this._syncMedia()),
+                player.connect('hide', () => this._syncMedia()),
                 player.connect('closed', () => {
                     for (const id of ids)
                         player.disconnect(id);
@@ -3105,7 +3153,10 @@ var ControlCenter = class ControlCenter {
     _currentPlayer() {
         const players = [...this._players.values()].filter(p => {
             try {
-                return p._playerProxy && p.trackTitle && p._visible !== false;
+                // Like GNOME's own media widget: only a player that says it
+                // can play. One with no Player interface at all otherwise
+                // shows up as "Unknown title".
+                return p._playerProxy && p._visible === true && p.trackTitle;
             } catch (e) {
                 return false;
             }
@@ -3254,9 +3305,10 @@ var ControlCenter = class ControlCenter {
             const pids = [...new Set(out.match(/\d+/g) || [])].map(p => parseInt(p, 10));
             const names = new Set();
             for (const pid of pids) {
-                const name = appNameForPid(pid);
-                if (name && !/^(pipewire|wireplumber)$/.test(name))
-                    names.add(friendlyAppName(null, name));
+                const found = appNameForPid(pid);
+                if (!found || /^(pipewire|wireplumber)$/.test(found.name))
+                    continue;
+                names.add(found.isApp ? found.name : friendlyAppName(null, found.name));
             }
             this._cameraApps = [...names];
             this._syncPrivacy();
@@ -3447,6 +3499,10 @@ var ControlCenter = class ControlCenter {
             this._fillPage(page, [], 'Tailscale is not installed.');
             return;
         }
+        if (this._unchanged(page, JSON.stringify([ts.state, ts.ips, ts.self.HostName,
+            (ts.peers || []).map(p => [p.HostName, p.Online, p.TailscaleIPs]),
+            this._tsError, this._copiedValue]), false))
+            return;
 
         const rows = [];
 
@@ -3540,6 +3596,14 @@ var ControlCenter = class ControlCenter {
         const page = this._pages.display;
         const monitors = Main.layoutManager.monitors || [];
         const primary = Main.layoutManager.primaryIndex;
+        let current = -1;
+        try {
+            current = Meta.MonitorManager.get().get_switch_config();
+        } catch (e) {
+        }
+        if (this._unchanged(page, JSON.stringify([monitors.map(m => [m.x, m.y, m.width, m.height]),
+            primary, current]), false))
+            return;
         const rows = [makeHeading('Displays')];
 
         monitors.forEach((m, i) => {
@@ -3556,13 +3620,14 @@ var ControlCenter = class ControlCenter {
         } catch (e) {
         }
 
-        if (!manager || !manager.can_switch_config()) {
+        // Mutter can report switching as possible with one screen (a ghost or
+        // disconnected output); arranging needs two real ones.
+        if (!manager || !manager.can_switch_config() || monitors.length < 2) {
             this._fillPage(page, rows, monitors.length < 2
                 ? 'Connect another display to extend or mirror your screen.' : '');
             return;
         }
 
-        const current = manager.get_switch_config();
         const T = Meta.MonitorSwitchConfigType;
         rows.push(makeHeading('Arrangement'));
         for (const [type, title, icon] of [
@@ -3888,6 +3953,9 @@ var ControlCenter = class ControlCenter {
     _syncSessionPage() {
         const page = this._pages.session;
         const actions = this._systemActions;
+        if (this._unchanged(page, ['suspend', 'restart', 'power_off', 'logout', 'switch_user']
+            .map(a => actions[`can_${a}`]).join(','), false))
+            return;
         const run = fn => () => {
             this._closeMenu();
             fn();
@@ -3993,7 +4061,6 @@ var ControlCenter = class ControlCenter {
             null,
             Gio.DBusCallFlags.NONE,
             -1,
-            null,
-            null);
+            null, ignoreReply);
     }
 };
