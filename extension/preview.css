@@ -326,6 +326,10 @@ rubberband,
  * 2. Inspector
  * ========================================================= */
 
+.adaptive-preview-panel viewport {
+    background: none;
+}
+
 .adaptive-preview-panel {
     /* Opaque: the panel overlays the file grid, and any transparency lets
      * icons ghost through. This is the card material flattened over the
@@ -336,44 +340,15 @@ rubberband,
     color: @ad_text;
 }
 
-/* Segmented control */
-.adaptive-inspector-switcher {
-    padding: 2px;
-    border-radius: 9px;
-    background-color: @ad_fill;
-}
-
-.adaptive-inspector-switcher button {
-    min-height: 24px;
-    padding: 0 4px;
-    border: none;
-    border-radius: 7px;
-    background: none;
-    box-shadow: none;
-    color: @ad_text;
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.adaptive-inspector-switcher button:hover {
-    background-color: @ad_tile;
-}
-
-.adaptive-inspector-switcher button:checked {
-    background-color: alpha(#FFFFFF, 0.20);
-    box-shadow: 0 1px 2px alpha(#000000, 0.30);
-    font-weight: 600;
-}
-
 /* Hero: icon or preview, name, kind */
 .adaptive-hero {
-    margin-top: 14px;
+    margin-top: 16px;
     margin-bottom: 2px;
 }
 
 .adaptive-hero-title {
     color: @ad_text;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
 }
 
@@ -409,6 +384,17 @@ rubberband,
     color: @ad_tertiary;
     font-size: 11px;
     font-feature-settings: "tnum";
+}
+
+/* Status words are the only place orange and red appear in the panel. */
+.adaptive-section-trailing.warning {
+    color: @ad_warning;
+    font-weight: 600;
+}
+
+.adaptive-section-trailing.critical {
+    color: @ad_danger;
+    font-weight: 600;
 }
 
 /* Grouped rows on a tile, hairline between */
@@ -486,7 +472,7 @@ rubberband,
 
 .adaptive-stat-value {
     color: @ad_text;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     font-feature-settings: "tnum";
 }
@@ -581,155 +567,9 @@ rubberband,
     color: @ad_quaternary;
 }
 
-/* Storage */
-.adaptive-storage-hero {
-    margin-top: 10px;
-    padding: 14px;
-    border-radius: 12px;
-    border: 1px solid @ad_hairline;
-    background-color: @ad_tile;
-}
-
-.adaptive-ring-value {
-    color: @ad_text;
-    font-size: 16px;
-    font-weight: 700;
-    font-feature-settings: "tnum";
-}
-
-.adaptive-storage-name {
-    color: @ad_muted;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.adaptive-storage-free {
-    color: @ad_text;
-    font-size: 18px;
-    font-weight: 700;
-    font-feature-settings: "tnum";
-}
-
-.adaptive-storage-caption {
-    color: @ad_muted;
-    font-size: 12px;
-    font-feature-settings: "tnum";
-}
-
-.adaptive-status {
-    padding: 1px 8px;
-    border-radius: 99px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.adaptive-status.good {
-    background-color: alpha(@ad_success, 0.16);
-    color: @ad_success;
-}
-
-.adaptive-status.warning {
-    background-color: alpha(@ad_warning, 0.16);
-    color: @ad_warning;
-}
-
-.adaptive-status.critical {
-    background-color: alpha(@ad_danger, 0.16);
-    color: @ad_danger;
-}
-
 /* Buttons, chips, rows */
 .adaptive-accent-icon {
     color: @ad_accent;
-}
-
-.adaptive-pill-button {
-    min-height: 22px;
-    padding: 0 12px;
-    border: none;
-    border-radius: 99px;
-    background-color: @ad_fill;
-    color: @ad_accent;
-    font-size: 11.5px;
-    font-weight: 600;
-}
-
-.adaptive-pill-button:hover {
-    background-color: @ad_fill_strong;
-}
-
-.adaptive-icon-button {
-    min-height: 22px;
-    min-width: 22px;
-    padding: 0;
-    border: none;
-    border-radius: 99px;
-    background: none;
-    color: @ad_tertiary;
-}
-
-.adaptive-icon-button:hover {
-    background-color: @ad_fill_strong;
-    color: @ad_text;
-}
-
-.adaptive-chip {
-    min-height: 24px;
-    padding: 0;
-    border: none;
-    border-radius: 99px;
-    background-color: @ad_fill;
-    color: @ad_text;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.adaptive-chip:hover {
-    background-color: @ad_fill_strong;
-}
-
-.adaptive-network-entry,
-.adaptive-search {
-    min-height: 28px;
-    margin-top: 8px;
-    margin-bottom: 8px;
-}
-
-.adaptive-search {
-    border-radius: 99px;
-    margin-bottom: 8px;
-}
-
-.adaptive-primary-button {
-    min-height: 28px;
-    margin-bottom: 6px;
-    border: none;
-    border-radius: 8px;
-    background-color: @ad_accent;
-    color: #FFFFFF;
-    font-weight: 600;
-}
-
-.adaptive-primary-button:hover {
-    background-color: @ad_accent_hover;
-}
-
-.adaptive-link-row {
-    min-height: 34px;
-    margin: 1px -6px;
-    padding: 5px 6px;
-    border: none;
-    border-radius: 7px;
-    background: none;
-    box-shadow: none;
-}
-
-.adaptive-link-row:hover {
-    background-color: @ad_fill;
-}
-
-.adaptive-link-row.active {
-    background-color: alpha(@ad_accent, 0.16);
 }
 
 .adaptive-project-chip {

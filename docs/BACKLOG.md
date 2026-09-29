@@ -203,9 +203,9 @@ contains a Command icon. Search lives in the app process, never in the shell.
 - ✅ Project registry format is understood by Adaptive Files.
 - 🔬 Nautilus preview has a Project tab backed by Project Context Service.
 - ✅ Files redesigned on the shared skin: Finder-style sidebar, path bar and
-  selection; the inspector is Info / Storage / Network / Projects with data
-  views - kind breakdown, largest items and 14-day activity per folder, disk
-  ring with Home composition and free-up suggestions, git state per project.
+  selection; the inspector is one 260px column - preview and details for a
+  selection, and for the current folder a kind breakdown, largest items,
+  14-day activity, its project and a one-line disk bar.
 - ⬜ Files window skinned to the Figma frames.
 
 ## Milestone 8 — Settings
