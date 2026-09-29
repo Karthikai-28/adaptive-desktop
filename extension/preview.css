@@ -718,3 +718,47 @@ rubberband,
 .adaptive-path-link:hover {
     background-color: @ad_fill;
 }
+
+/* Share popover: LocalSend and Slack as tiles, then one row per way out */
+popover.adaptive-share {
+    padding: 0;
+    border-radius: 12px;
+}
+
+.adaptive-share-tile {
+    min-height: 72px;
+    padding: 8px 6px;
+    border: 1px solid @ad_hairline;
+    border-radius: 10px;
+    background-color: @ad_tile;
+    color: @ad_text;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.adaptive-share-tile:hover {
+    background-color: @ad_fill_strong;
+}
+
+.adaptive-share-row {
+    min-height: 30px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 7px;
+    background: none;
+    color: @ad_text;
+    font-size: 12.5px;
+}
+
+.adaptive-share-row:hover {
+    background-color: @ad_accent;
+    color: #FFFFFF;
+}
+
+.adaptive-share-row image {
+    color: @ad_accent;
+}
+
+.adaptive-share-row:hover image {
+    color: #FFFFFF;
+}

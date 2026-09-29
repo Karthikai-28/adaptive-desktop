@@ -88,6 +88,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from adaptive_files import archives, cleanup, gitinfo, media, models  # noqa: E402
+from adaptive_files import share  # noqa: E402
 from adaptive_files import tags as filetags  # noqa: E402
 
 # Finder's preview pane width. The panel is one inspector column, not a
@@ -864,6 +865,17 @@ def _scan_folder(path):
         1 for child in children if not os.path.basename(child).startswith(".")
     )
     return result
+
+
+def _notify(title, body):
+    """A desktop notification from Files, e.g. "Copied for Slack"."""
+    try:
+        app = Gtk.Application.get_default()
+        note = Gio.Notification.new(title)
+        note.set_body(body)
+        app.send_notification("adaptive-share", note)
+    except Exception:
+        _log_exception("Notification failed")
 
 
 class TagDot(Gtk.Button):
@@ -1929,7 +1941,7 @@ class PreviewController:
         self._append_actions(
             [
                 ("document-open-symbolic", "Open", lambda *_: self._view_action("open-with-default-application")),
-                ("edit-copy-symbolic", "Copy Path", lambda *_: self._copy_text(path)),
+                ("emblem-shared-symbolic", "Share", lambda button: self._share_popover(button, [path])),
                 ("utilities-terminal-symbolic", "Terminal", lambda *_: self._open_terminal(path)),
             ]
             if selected
@@ -2453,7 +2465,7 @@ class PreviewController:
 
         self._append_actions(
             [
-                ("edit-copy-symbolic", "Copy Paths", lambda *_: self._copy_text("\n".join(paths))),
+                ("emblem-shared-symbolic", "Share", lambda button: self._share_popover(button, paths)),
                 ("package-x-generic-symbolic", "Compress", lambda *_: self._view_action("compress")),
             ]
         )
@@ -2570,7 +2582,7 @@ class PreviewController:
             [
                 ("document-open-symbolic", "Open", lambda *_: self._view_action("open-with-default-application")),
                 ("view-more-symbolic", "Open With", lambda *_: self._view_action("open-with-other-application")),
-                ("edit-copy-symbolic", "Copy Path", lambda *_: self._copy_text(local_path or uri)),
+                ("emblem-shared-symbolic", "Share", lambda button: self._share_popover(button, [local_path]) if local_path else self._copy_text(uri)),
             ]
         )
         body.show_all()
@@ -3680,6 +3692,77 @@ class PreviewController:
         refresh()
         return row
 
+    def _share_popover(self, button, paths):
+        """LocalSend and Slack as two large buttons on top - the everyday
+        pair - then every other way to send, one row each."""
+        paths = [p for p in paths if p]
+        if not paths:
+            return
+        targets = share.available()
+        popover = Gtk.Popover.new(button)
+        popover.set_position(Gtk.PositionType.TOP)
+        _css(popover, "adaptive-share")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+
+        def icon_for(target, size):
+            source = share.ICONS[target]
+            if source.startswith("/") and os.path.exists(source):
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(source, size, size)
+                return Gtk.Image.new_from_pixbuf(pixbuf)
+            image = Gtk.Image.new_from_icon_name(
+                source if not source.startswith("/") else "emblem-shared-symbolic", Gtk.IconSize.BUTTON)
+            image.set_pixel_size(size if size <= 20 else 24)
+            return image
+
+        def choose(_widget, target):
+            popover.popdown()
+            self._share(target, paths)
+
+        top = [t for t in ("localsend", "slack") if t in targets]
+        if top:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row.set_homogeneous(True)
+            for target in top:
+                tile = Gtk.Button()
+                _css(tile, "adaptive-share-tile")
+                inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                inner.pack_start(icon_for(target, 32), False, False, 0)
+                text = Gtk.Label(label=share.label(target))
+                inner.pack_start(text, False, False, 0)
+                tile.add(inner)
+                tile.connect("clicked", choose, target)
+                row.pack_start(tile, True, True, 0)
+            box.pack_start(row, False, False, 0)
+
+        for target in targets:
+            if target in top:
+                continue
+            item = Gtk.Button()
+            item.set_relief(Gtk.ReliefStyle.NONE)
+            _css(item, "adaptive-share-row")
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            line.pack_start(icon_for(target, 16), False, False, 0)
+            text = Gtk.Label(label=share.label(target), xalign=0)
+            line.pack_start(text, True, True, 0)
+            item.add(line)
+            item.connect("clicked", choose, target)
+            box.pack_start(item, False, False, 0)
+
+        popover.add(box)
+        box.show_all()
+        popover.popup()
+
+    def _share(self, target, paths):
+        try:
+            share.run(target, paths, _notify)
+        except Exception as error:
+            _log_exception(f"Share via {target} failed")
+            self._show_error("Couldn't share", str(error))
+
     def _append_actions(self, actions):
         """Quick actions as a row of glyph-over-label buttons, as in Finder's
         preview pane."""
@@ -4040,7 +4123,7 @@ class PreviewController:
         grid.set_column_spacing(8)
         grid.set_row_spacing(5)
         _css(grid, "adaptive-legend")
-        for index, (color, label, value, share) in enumerate(rows):
+        for index, (color, label, value, portion) in enumerate(rows):
             grid.attach(Swatch(color), 0, index, 1, 1)
             name = Gtk.Label(label=label, xalign=0)
             name.set_hexpand(True)
@@ -4050,7 +4133,7 @@ class PreviewController:
             size = Gtk.Label(label=value, xalign=1)
             _css(size, "adaptive-legend-value")
             grid.attach(size, 2, index, 1, 1)
-            extra = Gtk.Label(label=share, xalign=1)
+            extra = Gtk.Label(label=portion, xalign=1)
             extra.set_width_chars(4)
             _css(extra, "adaptive-legend-share")
             grid.attach(extra, 3, index, 1, 1)
@@ -4232,12 +4315,28 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
             if self is _MENU_OWNER and files:
                 local = [info for info in files if info.get_uri_scheme() == "file"]
                 if local:
-                    return [self._tags_menu(controller, local)]
+                    return [self._share_menu(controller, local), self._tags_menu(controller, local)]
 
         except Exception:
             _log_exception("get_file_items failed")
 
         return []
+
+    def _share_menu(self, controller, files):
+        """Share ▸ LocalSend and Slack first, then the other ways out."""
+        paths = [info.get_location().get_path() for info in files]
+        top = Nautilus.MenuItem(name="AdaptiveShare::menu", label="Share", tip="Send these files")
+        submenu = Nautilus.Menu()
+        top.set_submenu(submenu)
+
+        def send(_item, target):
+            controller._share(target, paths)
+
+        for target in share.available():
+            item = Nautilus.MenuItem(name=f"AdaptiveShare::{target}", label=share.label(target))
+            item.connect("activate", send, target)
+            submenu.append_item(item)
+        return top
 
     def _tags_menu(self, controller, files):
         """Tags ▸ one item per colour. A colour every selected item already
