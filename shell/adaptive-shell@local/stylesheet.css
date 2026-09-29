@@ -984,7 +984,7 @@
     padding: 16px 16px 10px 16px;
     spacing: 14px;
     color: #F2F6EF;
-    font-family: "Inter", "Cantarell", sans-serif;
+    font-family: Inter;
 }
 
 /* ---------------------------------------------------------------
@@ -1017,7 +1017,7 @@
 /* GNOME's calendar column is left completely stock apart from this: the popup
  * would otherwise carry two typefaces side by side. */
 .calendar-menu {
-    font-family: "Inter", "Cantarell", sans-serif;
+    font-family: Inter;
 }
 
 /* ---------------------------------------------------------------
@@ -1107,6 +1107,28 @@
     border-radius: 14px;
     border: 1px solid rgba(120, 169, 255, 0.09);
     background-color: rgba(13, 25, 40, 0.72);
+}
+
+/* The SYSTEM heading doubles as the Show more/less row. */
+.adaptive-shade-section-head {
+    spacing: 6px;
+}
+
+.adaptive-shade-expander {
+    padding: 3px 9px;
+    border-radius: 8px;
+    border: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(17, 26, 40, 0.82);
+    color: #9DB0C6;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-shade-expander:hover,
+.adaptive-shade-expander:focus {
+    border-color: rgba(120, 169, 255, 0.26);
+    background-color: rgba(24, 38, 58, 0.94);
+    color: #F2F6EF;
 }
 
 .adaptive-shade-section-title {

@@ -5,6 +5,7 @@
 
 const { St, Gio, GLib, Clutter, Shell, Meta } = imports.gi;
 const Main = imports.ui.main;
+const Layout = imports.ui.layout;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
 const AppFavorites = imports.ui.appFavorites;
@@ -128,8 +129,19 @@ class AdaptiveShellV16 {
         this._dock26ReservedHeight = 70;
         this._dock26SurfaceHeight = 54;
         this._dock26BottomGap = 6;
-        this._dock26HotEdgeHeight = 5;
-        this._dock26RevealDelayMs = 110;
+        // Reveal works like the macOS auto-hidden Dock: brushing the bottom
+        // edge on the way to a sheet tab, a scrollbar or a chat box does
+        // nothing; pushing on past the edge does. The push is a pressure
+        // barrier (the same mechanism as the Activities hot corner), so there
+        // is no reactive strip over the bottom of the window eating clicks.
+        this._dock26Pressure = null;
+        this._dock26Barriers = [];
+        this._dock26PressureThreshold = 100;
+        this._dock26PressureTimeoutMs = 1000;
+        // Without extended barriers, a 1px edge the pointer has to rest on.
+        this._dock26HotEdgeHeight = 1;
+        this._dock26RevealDelayMs = 450;
+        this._dock26PointerPollMs = 100;
         this._dock26HideDelayMs = 320;
         this._dock26RevealDurationMs = 145;
         this._dock26HideDurationMs = 145;
@@ -1212,6 +1224,7 @@ class AdaptiveShellV16 {
     _destroyDocks() {
         for (const dock of this._docks || []) {
             this._dockCancelHide(dock);
+            this._dock26StopWatchingPointer(dock);
 
             try {
                 Main.layoutManager.removeChrome(dock.rail);
@@ -1258,11 +1271,7 @@ class AdaptiveShellV16 {
             () => {
                 dock.hideId = 0;
 
-                const edge = this._dock26EdgeForMonitor(dock.index);
-                const held = (dock.rail && dock.rail.hover)
-                    || (edge && edge.hover);
-
-                if (!held) {
+                if (!this._dock26PointerHoldsDock(dock)) {
                     dock.revealed = false;
                     this._dock26Layout();
                 }
@@ -2063,6 +2072,44 @@ class AdaptiveShellV16 {
         }
 
         this._dock26HotEdges = [];
+
+        if (this._dock26Pressure) {
+            this._dock26Pressure.destroy();
+            this._dock26Pressure = null;
+        }
+
+        for (const barrier of this._dock26Barriers) {
+            try {
+                barrier.destroy();
+            } catch (e) {
+            }
+        }
+
+        this._dock26Barriers = [];
+    }
+
+    _dock26SupportsBarriers() {
+        try {
+            return global.display.supports_extended_barriers();
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // A mouse button held down means a drag - selecting cells or text,
+    // resizing a row - that happens to run into the bottom of the screen.
+    // macOS does not bring the Dock up for that, and neither does this.
+    _dock26PointerButtonHeld() {
+        try {
+            const [, , mods] = global.get_pointer();
+            return !!(mods & (
+                Clutter.ModifierType.BUTTON1_MASK |
+                Clutter.ModifierType.BUTTON2_MASK |
+                Clutter.ModifierType.BUTTON3_MASK
+            ));
+        } catch (e) {
+            return false;
+        }
     }
 
     _dock26RebuildHotEdges() {
@@ -2074,6 +2121,81 @@ class AdaptiveShellV16 {
         this._dock26ClearReveals();
         this._dock26TargetMonitor = -1;
 
+        if (this._dock26SupportsBarriers())
+            this._dock26BuildBarriers();
+        else
+            this._dock26BuildFallbackEdges();
+
+        this._dock26EnsureTargetMonitor();
+        this._dock26SyncTargetFromFocus(false);
+        this._dock26Layout();
+    }
+
+    _dock26BuildBarriers() {
+        const monitors = Main.layoutManager.monitors || [];
+
+        this._dock26Pressure = new Layout.PressureBarrier(
+            this._dock26PressureThreshold,
+            this._dock26PressureTimeoutMs,
+            Shell.ActionMode.NORMAL
+        );
+
+        // Barriers never fire their hit while a button is down, so a drag
+        // selection running into the bottom edge builds up no pressure.
+        this._dock26Pressure.setEventFilter(
+            () => this._dock26PointerButtonHeld()
+        );
+
+        // The trigger signal says nothing about which barrier was pushed, and
+        // the barrier needs the event back to let the pointer through to a
+        // monitor stacked underneath. Each barrier's own hit handler runs
+        // before the pressure barrier's (it is connected first) and records it.
+        let lastHit = null;
+
+        this._dock26Pressure.connect('trigger', () => {
+            const hit = lastHit;
+            lastHit = null;
+            if (!hit)
+                return;
+
+            this._dock26RequestReveal(hit.barrier._adaptiveMonitor);
+
+            try {
+                hit.barrier.release(hit.event);
+            } catch (e) {
+            }
+        });
+
+        monitors.forEach((monitor, index) => {
+            const y = monitor.y + monitor.height;
+
+            try {
+                const barrier = new Meta.Barrier({
+                    display: global.display,
+                    x1: monitor.x,
+                    x2: monitor.x + monitor.width,
+                    y1: y,
+                    y2: y,
+                    directions: Meta.BarrierDirection.NEGATIVE_Y,
+                });
+
+                barrier._adaptiveMonitor = index;
+                barrier.connect('hit', (b, event) => {
+                    lastHit = { barrier: b, event };
+                });
+
+                this._dock26Pressure.addBarrier(barrier);
+                this._dock26Barriers.push(barrier);
+            } catch (e) {
+                logError(e, `[Adaptive Shell] dock barrier monitor ${index}`);
+            }
+        });
+
+        log(`[Adaptive Shell] dock reveal: pressure barriers on `
+            + `${this._dock26Barriers.length} monitor(s)`);
+    }
+
+    _dock26BuildFallbackEdges() {
         const monitors = Main.layoutManager.monitors || [];
 
         monitors.forEach((monitor, index) => {
@@ -2105,7 +2227,6 @@ class AdaptiveShellV16 {
                 'leave-event',
                 () => {
                     this._dock26CancelReveal();
-                    this._dock26ScheduleHide(index);
                     return Clutter.EVENT_PROPAGATE;
                 }
             );
@@ -2124,21 +2245,8 @@ class AdaptiveShellV16 {
             });
         });
 
-        this._dock26EnsureTargetMonitor();
-        this._dock26SyncTargetFromFocus(false);
-        this._dock26Layout();
-    }
-
-    _dock26PointerOnAnyEdge() {
-        for (const entry of this._dock26HotEdges) {
-            try {
-                if (entry.actor && entry.actor.hover)
-                    return true;
-            } catch (e) {
-            }
-        }
-
-        return false;
+        log(`[Adaptive Shell] dock reveal: no extended barriers, `
+            + `${this._dock26HotEdges.length} dwell edge(s)`);
     }
 
     _dock26EdgeForMonitor(index) {
@@ -2380,28 +2488,10 @@ class AdaptiveShellV16 {
             dock.revealed = false;
     }
 
+    // Fallback only (no extended barriers): the pointer has to rest on the
+    // 1px edge, so passing over it on the way to something does nothing.
     _dock26OnEdgeEnter(index) {
-        const dock = this._dockForMonitor(index);
-
-        log(`[Adaptive Shell] edge enter monitor ${index}, `
-            + `dock ${dock ? 'found' : 'MISSING'}`);
-
-        if (!dock)
-            return;
-
-        this._dockCancelHide(dock);
         this._dock26CancelReveal();
-
-        this._dock26TargetMonitor = index;
-
-        if (!this._dock26Locked()) {
-            dock.revealed = true;
-            this._dock26Layout();
-            return;
-        }
-
-        dock.revealed = false;
-        this._dock26Layout();
 
         this._dock26RevealTimerId =
             GLib.timeout_add(
@@ -2413,22 +2503,105 @@ class AdaptiveShellV16 {
                     const edge =
                         this._dock26EdgeForMonitor(index);
 
-                    if (!edge || !edge.hover)
-                        return GLib.SOURCE_REMOVE;
-
-                    // Never over a locked screen; everywhere else the edge
-                    // reveal is honoured, fullscreen included.
-                    dock.revealed = !this._dock26Locked();
-
-                    this._dock26Layout();
+                    if (
+                        edge &&
+                        edge.hover &&
+                        !this._dock26PointerButtonHeld()
+                    )
+                        this._dock26RequestReveal(index);
 
                     return GLib.SOURCE_REMOVE;
                 }
             );
     }
 
-    _dock26ScheduleHide(index) {
-        this._dockScheduleHide(this._dockForMonitor(index));
+    // A deliberate reach for the dock on this monitor.
+    _dock26RequestReveal(index) {
+        const dock = this._dockForMonitor(index);
+
+        log(`[Adaptive Shell] dock reveal request monitor ${index}, `
+            + `dock ${dock ? 'found' : 'MISSING'}`);
+
+        if (!dock)
+            return;
+
+        this._dockCancelHide(dock);
+        this._dock26TargetMonitor = index;
+
+        // Never over a locked screen; everywhere else the reveal is
+        // honoured, fullscreen included.
+        dock.revealed = !this._dock26Locked();
+        this._dock26Layout();
+
+        if (dock.revealed)
+            this._dock26WatchPointer(dock);
+    }
+
+    // Is the pointer still using the dock? Over it, in the gap between it and
+    // the screen edge (where the push that revealed it left the pointer), or
+    // in one of its menus.
+    _dock26PointerHoldsDock(dock) {
+        if (!dock)
+            return false;
+
+        if (dock.rail && dock.rail.hover)
+            return true;
+
+        if (this._dockMenus.some(menu => menu.isOpen))
+            return true;
+
+        const monitor = (Main.layoutManager.monitors || [])[dock.index];
+        const zone = dock.zone;
+        if (!monitor || !zone)
+            return false;
+
+        try {
+            const [px, py] = global.get_pointer();
+            const slack = 8;
+
+            return (
+                px >= zone.x - slack &&
+                px < zone.x + zone.width + slack &&
+                py >= zone.y - slack &&
+                py < monitor.y + monitor.height
+            );
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // A revealed dock never sees a leave-event if the pointer never entered
+    // it - the push leaves the pointer on the edge, below the dock. So while
+    // it is revealed, watch where the pointer is and put it away once the
+    // pointer has moved off, the way the macOS Dock does.
+    _dock26WatchPointer(dock) {
+        if (!dock || dock.pointerWatchId)
+            return;
+
+        dock.pointerWatchId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            this._dock26PointerPollMs,
+            () => {
+                if (!dock.revealed) {
+                    dock.pointerWatchId = 0;
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                if (this._dock26PointerHoldsDock(dock))
+                    this._dockCancelHide(dock);
+                else if (!dock.hideId)
+                    this._dockScheduleHide(dock);
+
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+    }
+
+    _dock26StopWatchingPointer(dock) {
+        if (dock && dock.pointerWatchId) {
+            GLib.Source.remove(dock.pointerWatchId);
+            dock.pointerWatchId = 0;
+        }
     }
 
     _dock26ShowDock(dock, animated) {
@@ -2627,6 +2800,7 @@ class AdaptiveShellV16 {
             width,
             this._dock26SurfaceHeight
         );
+        dock.zone = { x, y, width };
 
         // Logged on change only, so a misplaced dock can be diagnosed from the
         // journal without a running Looking Glass.

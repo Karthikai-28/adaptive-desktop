@@ -154,6 +154,8 @@ var Telemetry = class Telemetry {
         this._tick = 0;
         this._nextProcessTick = 1;
         this._nextSlowZoneTick = 1;
+        // Walking /proc is only worth it when something is showing the result.
+        this._detailed = true;
 
         this._discover();
 
@@ -333,6 +335,25 @@ var Telemetry = class Telemetry {
         this._listeners.push(callback);
     }
 
+    // The process table is the most expensive thing sampled here. When the
+    // shade's detail is folded away nothing displays it, so stop gathering it.
+    setDetailed(detailed) {
+        if (this._detailed === detailed)
+            return;
+
+        this._detailed = detailed;
+
+        if (detailed) {
+            // Unfolding should fill the table promptly, not after the next
+            // five-second slot comes round.
+            this._nextProcessTick = this._tick + 1;
+        } else {
+            this._prevProcs = null;
+            this.snapshot.processes.byCpu = [];
+            this.snapshot.processes.byMemory = [];
+        }
+    }
+
     start() {
         if (this._timerId)
             return;
@@ -411,7 +432,7 @@ var Telemetry = class Telemetry {
         // most one expensive read happens per tick; the other waits its turn.
         let spent = false;
 
-        if (this._tick >= this._nextProcessTick) {
+        if (this._detailed && this._tick >= this._nextProcessTick) {
             this._sampleProcesses();
             this._nextProcessTick = this._tick + PROCESS_INTERVAL_TICKS;
             spent = true;

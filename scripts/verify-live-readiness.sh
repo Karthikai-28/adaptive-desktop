@@ -177,6 +177,14 @@ PY
   done
   pass "Adaptive Shade modules parse"
 
+  # Parsing is not enough. GJS resolves method names at call time, so a method
+  # that has been deleted or renamed still loads cleanly and only fails when
+  # something calls it - for a menu handler, the first time the popup opens.
+  python3 "${REPO}/scripts/verify-shell-methods.py" \
+    "${REPO}/shell/adaptive-shell@local/"{shade,telemetry,notifications,sparkline}.js \
+    || fail "a shell module calls a method it does not define"
+  pass "Every internal method call in the shade modules resolves"
+
   # The shade rearranges actors gnome-shell owns. These two assertions are what
   # stands between "reparented" and "reimplemented": the message list has to be
   # GNOME's own instance, moved and handed back, never rebuilt.

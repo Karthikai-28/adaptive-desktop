@@ -56,6 +56,21 @@ function readConfig() {
     }
 }
 
+function writeConfig(patch) {
+    try {
+        const dir = GLib.path_get_dirname(CONFIG_PATH);
+        GLib.mkdir_with_parents(dir, 0o755);
+
+        const merged = Object.assign(readConfig(), patch);
+        GLib.file_set_contents(
+            CONFIG_PATH, JSON.stringify(merged, null, 2) + '\n');
+    } catch (e) {
+        // A preference that cannot be saved is not worth an error; it just
+        // reverts to the default next time.
+        logError(e, '[Adaptive Shade] saving shade.json');
+    }
+}
+
 function pct(value) {
     return Number.isFinite(value) ? `${Math.round(value)}%` : '--';
 }
@@ -440,6 +455,11 @@ var Shade = class Shade {
 
             placeholder.y_expand = true;
             placeholder.y_align = Clutter.ActorAlign.CENTER;
+            // In the BinLayout it was centred as a whole. In a vertical box it
+            // fills the width instead, which left the label against the left
+            // edge while the icon stayed centred.
+            this._placeholderXAlign = placeholder.x_align;
+            placeholder.x_align = Clutter.ActorAlign.CENTER;
         } catch (e) {
             logError(e, '[Adaptive Shade] moving the empty-state placeholder');
             this._placeholder = null;
@@ -460,6 +480,7 @@ var Shade = class Shade {
 
             this._placeholder.y_expand = this._placeholderExpand;
             this._placeholder.y_align = this._placeholderAlign;
+            this._placeholder.x_align = this._placeholderXAlign;
             this._placeholderParent.add_child(this._placeholder);
         } catch (e) {
             logError(e, '[Adaptive Shade] restoring the empty-state placeholder');
@@ -581,10 +602,12 @@ var Shade = class Shade {
     // --------------------------------------------------------------- system
 
     _sectionTitle(parent, text) {
-        parent.add_child(new St.Label({
+        const label = new St.Label({
             text,
             style_class: 'adaptive-shade-section-title',
-        }));
+        });
+        parent.add_child(label);
+        return label;
     }
 
     _buildSystem() {
@@ -612,7 +635,31 @@ var Shade = class Shade {
         this._systemScroll.add_actor(section);
         this._systemSection = section;
 
-        this._sectionTitle(section, 'SYSTEM');
+        // Detail rows are interleaved with the summary ones - the core bars
+        // belong under CPU, swap under memory - so they cannot live in a single
+        // collapsible container without scrambling the order. They are tagged
+        // instead, and toggled together.
+        this._detail = [];
+
+        const head = new St.BoxLayout({
+            style_class: 'adaptive-shade-section-head',
+            x_expand: true,
+        });
+        section.add_child(head);
+
+        head.add_child(new St.Label({
+            text: 'SYSTEM',
+            style_class: 'adaptive-shade-section-title',
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        this._expandButton = new St.Button({
+            style_class: 'adaptive-shade-expander',
+            can_focus: true,
+        });
+        this._expandButton.connect('clicked', () => this._toggleDetail());
+        head.add_child(this._expandButton);
 
         this._cpuRow = new MetricRow('CPU', ACCENT_CPU);
         section.add_child(this._cpuRow);
@@ -625,12 +672,14 @@ var Shade = class Shade {
         });
         section.add_child(this._coreBox);
         this._coreBars = [];
+        this._detail.push(this._coreBox);
 
         this._loadLabel = new St.Label({
             text: '',
             style_class: 'adaptive-shade-load',
         });
         section.add_child(this._loadLabel);
+        this._detail.push(this._loadLabel);
 
         this._gpuRow = new MetricRow('GPU', ACCENT_GPU);
         section.add_child(this._gpuRow);
@@ -640,6 +689,7 @@ var Shade = class Shade {
 
         this._swapRow = new MeterRow('Swap');
         section.add_child(this._swapRow);
+        this._detail.push(this._swapRow);
 
         this._diskBox = new St.BoxLayout({ vertical: true, x_expand: true });
         section.add_child(this._diskBox);
@@ -650,13 +700,15 @@ var Shade = class Shade {
             style_class: 'adaptive-shade-subline',
         });
         section.add_child(this._diskIOLabel);
+        this._detail.push(this._diskIOLabel);
 
-        this._sectionTitle(section, 'NETWORK');
+        this._netTitle = this._sectionTitle(section, 'NETWORK');
         this._netBox = new St.BoxLayout({ vertical: true, x_expand: true });
         section.add_child(this._netBox);
         this._netRows = [];
+        this._detail.push(this._netTitle, this._netBox);
 
-        this._sectionTitle(section, 'TEMPERATURES');
+        this._thermalTitle = this._sectionTitle(section, 'TEMPERATURES');
         this._thermalGrid = new St.Widget({
             style_class: 'adaptive-shade-chips',
             layout_manager: new Clutter.GridLayout({
@@ -669,8 +721,9 @@ var Shade = class Shade {
         });
         section.add_child(this._thermalGrid);
         this._thermalChips = [];
+        this._detail.push(this._thermalTitle, this._thermalGrid);
 
-        this._sectionTitle(section, 'TOP PROCESSES');
+        this._procTitle = this._sectionTitle(section, 'TOP PROCESSES');
         this._procBox = new St.BoxLayout({ vertical: true, x_expand: true });
         section.add_child(this._procBox);
         this._procRows = [];
@@ -680,12 +733,48 @@ var Shade = class Shade {
             style_class: 'adaptive-shade-subline',
         });
         section.add_child(this._memoryHogsLabel);
+        this._detail.push(
+            this._procTitle, this._procBox, this._memoryHogsLabel);
 
         this._batteryLabel = new St.Label({
             text: '',
             style_class: 'adaptive-shade-footer-item',
         });
         section.add_child(this._batteryLabel);
+
+        // Defaults to showing everything - a complete picture is the point of
+        // the block. The button is there to fold it away, and that choice is
+        // remembered rather than reset at every login.
+        this._expanded = readConfig().systemExpanded !== false;
+        this._applyDetail();
+    }
+
+    _toggleDetail() {
+        this._expanded = !this._expanded;
+        this._applyDetail();
+        writeConfig({ systemExpanded: this._expanded });
+
+        // The process table is the only thing here that costs real time to
+        // gather; folding it away should stop paying for it.
+        if (this._telemetry)
+            this._telemetry.setDetailed(this._expanded);
+
+        // Folding the block away changes its natural height, so the scroll view
+        // has to be re-measured or it keeps the taller allocation.
+        this._systemHeight = -1;
+        this._fitToMonitor();
+    }
+
+    _applyDetail() {
+        for (const actor of this._detail)
+            actor.visible = this._expanded;
+
+        // Swap is hidden outright on a machine that has none, and expanding the
+        // section must not resurrect it.
+        if (this._expanded && this._swapHidden)
+            this._swapRow.visible = false;
+
+        this._expandButton.label = this._expanded ? 'Show less' : 'Show more';
     }
 
     // Give the system scroll view the smaller of what it wants and what the
@@ -742,6 +831,7 @@ var Shade = class Shade {
                 if (row && row.sparkline)
                     row.sparkline.reset();
             }
+            this._telemetry.setDetailed(this._expanded);
             this._telemetry.start();
         } else {
             this._telemetry.stop();
@@ -761,10 +851,17 @@ var Shade = class Shade {
         this._updateGpu(snapshot);
         this._updateMemory(snapshot);
         this._updateDisks(snapshot);
+        this._updateBattery(snapshot);
+
+        // Nothing below is on screen while the block is folded, and rebuilding
+        // sixteen core bars and a dozen chips into hidden actors every second
+        // is work for no one.
+        if (!this._expanded)
+            return;
+
         this._updateNetwork(snapshot);
         this._updateThermal(snapshot);
         this._updateProcesses(snapshot);
-        this._updateBattery(snapshot);
     }
 
     _updateCpu(snapshot) {
@@ -773,6 +870,9 @@ var Shade = class Shade {
         this._cpuRow.sparkline.push(cpu.percent);
         this._cpuRow.setMeta(`${mhz(cpu.freqMhz)}\n${degrees(cpu.tempC)}`);
         this._cpuRow.setMetaColor(Telemetry.tempColor(cpu.tempC));
+
+        if (!this._expanded)
+            return;
 
         this._updateCores(snapshot);
 
@@ -878,7 +978,8 @@ var Shade = class Shade {
         // Machines without swap should not be told about the swap they lack.
         const hasSwap = Number.isFinite(memory.swapTotalBytes) &&
             memory.swapTotalBytes > 0;
-        this._swapRow.visible = hasSwap;
+        this._swapHidden = !hasSwap;
+        this._swapRow.visible = hasSwap && this._expanded;
         if (hasSwap) {
             const fraction = memory.swapUsedBytes / memory.swapTotalBytes;
             this._swapRow.meter.setFraction(fraction);

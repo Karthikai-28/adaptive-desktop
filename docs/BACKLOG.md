@@ -254,6 +254,12 @@ so the marks are restated against what is actually true.
   was wanted. `verify-live-readiness.sh` now fails if anything in the shell
   reaches into the event source, so this stays deliberate rather than drifting
   back. The constraint if it is ever revisited is recorded in the gotchas below.
+- ✅ Show more/less on the system block. Summary — CPU, GPU, memory, disk,
+  battery — always shows; core bars, load, swap, disk I/O, network,
+  temperatures and processes fold away. Defaults to expanded and the choice is
+  saved to `~/.config/adaptive-desktop/shade.json`. Collapsing also stops the
+  `/proc` walk and the hidden-widget updates: 4.98 → 1.89 ms/s amortised, worst
+  tick 19.7 → 2.9 ms.
 - ✅ The shade scrolls instead of overflowing. The system block is sized against
   the monitor when the popup opens; only that block scrolls, because GNOME's
   message list already scrolls itself and nesting the two sizes neither.
@@ -367,6 +373,16 @@ the handoff: do not mark the Figma-skin items complete without the exports.
   and `ReloadExtension` is deprecated, so disable/enable re-runs the old code.
   Changed rail source needs `reload-adaptive-shell.sh --restart-shell` (X11)
   or a fresh login.
+- **`node --check` is not enough for a GJS module.** GJS resolves method names
+  at call time, so a method deleted by a bad edit still parses, still loads, and
+  fails only when something calls it — for a menu handler, the first time the
+  popup is opened. This bit twice while building v2. `verify-shell-methods.py`
+  now cross-checks every `this._x()` call site against the definitions in the
+  same file, and runs in both verification suites.
+- St's CSS parser rejects a quoted, comma-separated `font-family` list: it logs
+  "Couldn't parse family in font property" and drops the declaration silently,
+  so the font never applies. A single unquoted family works. GNOME's own shell
+  CSS sets no `font-family` at all.
 - `CalendarMessageList` stacks the "No Notifications" placeholder over the whole
   list with a `Clutter.BinLayout`, sharing that space with the box that holds the
   scroll view *and* the Do Not Disturb row. Stock GNOME only gets away with it

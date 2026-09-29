@@ -49,6 +49,11 @@ PYCHECK
 for module in extension shade telemetry notifications sparkline; do
     node --check "${REPO}/shell/adaptive-shell@local/${module}.js"
 done
+
+# Syntax is not the only way a module breaks: GJS resolves method names at call
+# time, so a deleted method loads fine and fails on first use.
+python3 "${REPO}/scripts/verify-shell-methods.py" \
+    "${REPO}/shell/adaptive-shell@local/"{shade,telemetry,notifications,sparkline}.js
 python3 "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
 
 echo
