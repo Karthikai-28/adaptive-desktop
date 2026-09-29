@@ -16,6 +16,7 @@ const Pango = imports.gi.Pango;
 
 const Me = ExtensionUtils.getCurrentExtension();
 const Shade = Me.imports.shade;
+const ControlCenter = Me.imports.controlCenter;
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
 // OLED; the ambient level is what it settles to once nobody is looking.
@@ -61,6 +62,8 @@ class AdaptiveShellV16 {
         this._clockDisplay = null;
         // Adaptive Shade: the notification center built inside GNOME's date menu.
         this._shade = null;
+        // Adaptive Control Center: the system menu rebuilt as quick settings.
+        this._controlCenter = null;
         this._projectProxy = null;
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
@@ -170,6 +173,7 @@ class AdaptiveShellV16 {
         this._hideLegacyPanelItems();
         this._restoreGNOMEClock();
         this._installShade();
+        this._installControlCenter();
         this._installRail();
 
         this._monitorChangedId = Main.layoutManager.connect(
@@ -899,6 +903,13 @@ class AdaptiveShellV16 {
             this._shade = null;
         }
 
+        // Same reason: GNOME's system-menu sections are hidden, not removed,
+        // and have to be shown again before anything else is torn down.
+        if (this._controlCenter) {
+            this._controlCenter.detach();
+            this._controlCenter = null;
+        }
+
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
@@ -1124,6 +1135,20 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the Adaptive Shade');
             this._shade = null;
+        }
+    }
+
+    // The Adaptive Control Center turns GNOME's system menu into Android/iOS
+    // quick settings: tiles, sliders, and in-place Wi-Fi, Bluetooth, power and
+    // sound pages. GNOME's indicators keep running underneath and are what it
+    // drives; their sections stay in the popup, hidden.
+    _installControlCenter() {
+        try {
+            this._controlCenter = new ControlCenter.ControlCenter();
+            this._controlCenter.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the Control Center');
+            this._controlCenter = null;
         }
     }
 

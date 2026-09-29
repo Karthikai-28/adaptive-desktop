@@ -1481,3 +1481,407 @@
     font-family: "JetBrainsMono Nerd Font", monospace;
     font-size: 11px;
 }
+
+/* ===== Adaptive Control Center v1 — quick settings =====
+ *
+ * GNOME's system menu (top-right) as Android/iOS quick settings: a header of
+ * round actions, a two-column grid of tiles, a sliders card, and drill-down
+ * pages for Wi-Fi, Bluetooth, power mode, sound output and the session.
+ *
+ * Same skin as the Shade v3 block above - the deep-navy panel, glass cards,
+ * cyan hairlines - and the same accent rule: the cyan-to-violet gradient marks
+ * only what is ON. Everything hangs off `.adaptive-cc-menu` (added to the
+ * popup by controlCenter.js) or `.adaptive-cc`, so the lock screen's stock menu
+ * keeps Yaru's look.
+ */
+
+.popup-menu-content.adaptive-cc-menu {
+    min-width: 396px;
+    padding: 0;
+    border-radius: 22px;
+    border: 1px solid rgba(102, 224, 255, 0.18);
+    background-gradient-direction: vertical;
+    background-gradient-start: #0C1628;
+    background-gradient-end: #05090F;
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.62);
+    font-family: Inter;
+}
+
+.adaptive-cc {
+    padding: 14px;
+    color: #EAF2FF;
+}
+
+.adaptive-cc-main,
+.adaptive-cc-page {
+    spacing: 14px;
+}
+
+/* ---------------------------------------------------------------
+ * Header
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-header {
+    spacing: 8px;
+}
+
+.adaptive-cc-battery {
+    padding: 6px 12px 6px 9px;
+    spacing: 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(101, 217, 181, 0.30);
+    background-color: rgba(101, 217, 181, 0.08);
+    color: #A8EFD9;
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.adaptive-cc-battery StIcon {
+    icon-size: 14px;
+}
+
+.adaptive-cc-round-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid rgba(102, 224, 255, 0.14);
+    background-color: rgba(102, 224, 255, 0.05);
+    color: #CFE3F7;
+}
+
+.adaptive-cc-round-button StIcon {
+    icon-size: 16px;
+}
+
+.adaptive-cc-round-button:hover,
+.adaptive-cc-round-button:focus {
+    border-color: rgba(102, 224, 255, 0.42);
+    background-color: rgba(102, 224, 255, 0.12);
+    color: #FFFFFF;
+}
+
+.adaptive-cc-power-button:hover,
+.adaptive-cc-power-button:focus {
+    border-color: rgba(255, 122, 144, 0.50);
+    background-color: rgba(255, 122, 144, 0.14);
+    color: #FFB3C1;
+}
+
+/* ---------------------------------------------------------------
+ * Tiles
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-tile {
+    min-height: 60px;
+    border-radius: 18px;
+    border: 1px solid rgba(102, 224, 255, 0.10);
+    background-color: rgba(102, 224, 255, 0.045);
+}
+
+.adaptive-cc-tile-main {
+    padding: 10px 10px 10px 10px;
+    border-radius: 18px;
+    color: #EAF2FF;
+}
+
+.adaptive-cc-tile-main:hover,
+.adaptive-cc-tile-main:focus {
+    background-color: rgba(102, 224, 255, 0.07);
+}
+
+.adaptive-cc-tile-box {
+    spacing: 10px;
+}
+
+.adaptive-cc-tile-icon {
+    -st-icon-style: symbolic;
+    icon-size: 18px;
+    padding: 9px;
+    border-radius: 999px;
+    background-color: rgba(102, 224, 255, 0.10);
+    color: #8FE9FF;
+}
+
+.adaptive-cc-tile-title {
+    color: #EAF2FF;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.adaptive-cc-tile-subtitle {
+    color: #8FA3BD;
+    font-size: 11px;
+}
+
+.adaptive-cc-tile-chevron {
+    icon-size: 14px;
+    color: #7FC4E0;
+}
+
+.adaptive-cc-tile-arrow {
+    width: 34px;
+    border-radius: 0 18px 18px 0;
+    border-left: 1px solid rgba(102, 224, 255, 0.10);
+    color: #7FC4E0;
+}
+
+.adaptive-cc-tile-arrow:hover,
+.adaptive-cc-tile-arrow:focus {
+    background-color: rgba(102, 224, 255, 0.10);
+    color: #FFFFFF;
+}
+
+/* ON: the accent gradient, dark ink. */
+.adaptive-cc-tile:checked {
+    border-color: rgba(102, 224, 255, 0.0);
+    background-gradient-direction: horizontal;
+    background-gradient-start: #66E0FF;
+    background-gradient-end: #9A8BFF;
+    box-shadow: 0 6px 18px rgba(102, 224, 255, 0.22);
+}
+
+.adaptive-cc-tile:checked .adaptive-cc-tile-main:hover,
+.adaptive-cc-tile:checked .adaptive-cc-tile-main:focus,
+.adaptive-cc-tile:checked .adaptive-cc-tile-arrow:hover,
+.adaptive-cc-tile:checked .adaptive-cc-tile-arrow:focus {
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.adaptive-cc-tile:checked .adaptive-cc-tile-icon {
+    background-color: rgba(4, 16, 26, 0.18);
+    color: #04101A;
+}
+
+.adaptive-cc-tile:checked .adaptive-cc-tile-title,
+.adaptive-cc-tile:checked .adaptive-cc-tile-chevron,
+.adaptive-cc-tile:checked .adaptive-cc-tile-arrow {
+    color: #04101A;
+}
+
+.adaptive-cc-tile:checked .adaptive-cc-tile-subtitle {
+    color: rgba(4, 16, 26, 0.72);
+}
+
+.adaptive-cc-tile:checked .adaptive-cc-tile-arrow {
+    border-left-color: rgba(4, 16, 26, 0.18);
+}
+
+.adaptive-cc-tile:insensitive .adaptive-cc-tile-icon {
+    background-color: rgba(102, 224, 255, 0.04);
+    color: #4D5F77;
+}
+
+.adaptive-cc-tile:insensitive .adaptive-cc-tile-title,
+.adaptive-cc-tile:insensitive .adaptive-cc-tile-subtitle {
+    color: #56687F;
+}
+
+/* ---------------------------------------------------------------
+ * Sliders
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-sliders {
+    padding: 8px 12px;
+    spacing: 4px;
+    border-radius: 18px;
+    border: 1px solid rgba(102, 224, 255, 0.12);
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(22, 37, 61, 0.80);
+    background-gradient-end: rgba(11, 19, 33, 0.80);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.adaptive-cc-slider-row {
+    spacing: 8px;
+    min-height: 40px;
+}
+
+.adaptive-cc-slider-icon-button {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+}
+
+.adaptive-cc-slider-icon-button:hover,
+.adaptive-cc-slider-icon-button:focus {
+    background-color: rgba(102, 224, 255, 0.10);
+}
+
+.adaptive-cc-slider-icon {
+    icon-size: 16px;
+    color: #8FE9FF;
+}
+
+.adaptive-cc .adaptive-cc-slider {
+    height: 28px;
+    color: #FFFFFF;
+    -barlevel-height: 6px;
+    -barlevel-background-color: rgba(102, 224, 255, 0.12);
+    -barlevel-active-background-color: #66E0FF;
+    -barlevel-overdrive-color: #FF7A90;
+    -barlevel-border-width: 0;
+    -slider-handle-radius: 8px;
+    -slider-handle-border-width: 2px;
+    -slider-handle-border-color: #66E0FF;
+}
+
+.adaptive-cc .adaptive-cc-slider:focus {
+    -slider-handle-border-color: #9A8BFF;
+}
+
+.adaptive-cc-slider-arrow {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    color: #7FC4E0;
+}
+
+.adaptive-cc-slider-arrow StIcon {
+    icon-size: 14px;
+}
+
+.adaptive-cc-slider-arrow:hover,
+.adaptive-cc-slider-arrow:focus {
+    background-color: rgba(102, 224, 255, 0.10);
+    color: #FFFFFF;
+}
+
+/* ---------------------------------------------------------------
+ * Drill-down pages
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-page-header {
+    spacing: 12px;
+}
+
+.adaptive-cc-page-title {
+    color: #F4F8FF;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.adaptive-cc-page-status {
+    padding: 22px 12px;
+    color: #8FA3BD;
+    font-size: 13px;
+    text-align: center;
+}
+
+.adaptive-cc-list {
+    spacing: 4px;
+}
+
+.adaptive-cc-row {
+    padding: 9px 10px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    color: #EAF2FF;
+}
+
+.adaptive-cc-row:hover,
+.adaptive-cc-row:focus {
+    border-color: rgba(102, 224, 255, 0.14);
+    background-color: rgba(102, 224, 255, 0.07);
+}
+
+.adaptive-cc-row:checked {
+    border-color: rgba(102, 224, 255, 0.30);
+    background-color: rgba(102, 224, 255, 0.10);
+}
+
+.adaptive-cc-row-box {
+    spacing: 12px;
+}
+
+.adaptive-cc-row-icon {
+    -st-icon-style: symbolic;
+    icon-size: 18px;
+    color: #8FE9FF;
+}
+
+.adaptive-cc-row-title {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.adaptive-cc-row-subtitle {
+    color: #7F95B2;
+    font-size: 11px;
+}
+
+.adaptive-cc-row:checked .adaptive-cc-row-subtitle {
+    color: #66E0FF;
+}
+
+.adaptive-cc-row-trailing {
+    icon-size: 14px;
+    color: #6D829E;
+}
+
+.adaptive-cc-row-check {
+    icon-size: 16px;
+    color: #66E0FF;
+}
+
+.adaptive-cc-row-danger .adaptive-cc-row-icon,
+.adaptive-cc-row-danger .adaptive-cc-row-title {
+    color: #FF9AAD;
+}
+
+.adaptive-cc-row-danger:hover,
+.adaptive-cc-row-danger:focus {
+    border-color: rgba(255, 122, 144, 0.35);
+    background-color: rgba(255, 122, 144, 0.12);
+}
+
+.adaptive-cc-pill-button {
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 122, 144, 0.35);
+    color: #FFB3C1;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-cc-pill-button:hover,
+.adaptive-cc-pill-button:focus {
+    background-color: rgba(255, 122, 144, 0.16);
+    color: #FFFFFF;
+}
+
+.adaptive-cc-footer {
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(102, 224, 255, 0.12);
+    background-color: rgba(102, 224, 255, 0.04);
+    color: #9FDFF5;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.adaptive-cc-footer:hover,
+.adaptive-cc-footer:focus {
+    border-color: rgba(102, 224, 255, 0.32);
+    background-color: rgba(102, 224, 255, 0.10);
+    color: #FFFFFF;
+}
+
+.adaptive-cc .toggle-switch {
+    width: 44px;
+    height: 24px;
+    background-size: contain;
+    background-image: url("assets/shade/toggle-off.svg");
+}
+
+.adaptive-cc .toggle-switch:checked {
+    background-image: url("assets/shade/toggle-on.svg");
+}
+
+.adaptive-cc-switch-button {
+    border-radius: 999px;
+}
+
+.adaptive-cc-switch-button:focus {
+    box-shadow: 0 0 0 2px rgba(102, 224, 255, 0.45);
+}
