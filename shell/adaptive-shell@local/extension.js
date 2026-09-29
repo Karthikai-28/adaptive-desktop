@@ -17,6 +17,7 @@ const Pango = imports.gi.Pango;
 
 const Me = ExtensionUtils.getCurrentExtension();
 const Shade = Me.imports.shade;
+const DockExtras = Me.imports.dockExtras;
 const ControlCenter = Me.imports.controlCenter;
 const UsbDevices = Me.imports.usbDevices;
 
@@ -81,6 +82,21 @@ class AdaptiveShellV16 {
         this._dockDragMonitor = null;
         this._dockRefreshPending = false;
         this._overviewDragIds = [];
+        // Dock extras: settings, badges, previews, stacks, attention, hotkeys.
+        this._dockConfig = DockExtras.readDockConfig();
+        this._dockIconSize = 36;
+        this._launcherEntries = null;
+        this._previews = null;
+        this._trash = null;
+        this._dockAttention = new Set();
+        this._dockLaunching = new Set();
+        this._dockTimers = new Set();
+        this._dockExtraIds = [];
+        this._hotkeysInstalled = false;
+        this._springId = 0;
+        this._springApp = null;
+        this._dockScrollTime = 0;
+        this._dockEntries = [];
         this._lockedOnly = false;
         this._lockClock = null;
         this._lockActivity = null;
@@ -185,6 +201,8 @@ class AdaptiveShellV16 {
 
         this._hideLegacyPanelItems();
         this._restoreGNOMEClock();
+        this._dockConfig = DockExtras.readDockConfig();
+        this._applyDockSizing();
         this._installShade();
         this._installControlCenter();
         this._installUsbPanel();
@@ -222,6 +240,7 @@ class AdaptiveShellV16 {
             }
         );
         this._installDockDnd();
+        this._installDockExtras();
 
         this._favorites = AppFavorites.getAppFavorites();
         this._favoritesChangedId = this._favorites.connect(
@@ -1008,6 +1027,7 @@ class AdaptiveShellV16 {
             this._dockDemagnifyId = 0;
         }
 
+        this._removeDockExtras();
         this._dock26Cleanup();
         this._disconnectWindowSignals();
         this._destroyDockMenus();
@@ -1248,6 +1268,24 @@ class AdaptiveShellV16 {
 
         rail.add_child(new St.Widget({ style_class: 'adaptive-rail-rule' }));
 
+        // Downloads and Trash sit after the divider, as on a Mac.
+        const downloads = this._themedDockButton('folder-download', 'Downloads', button => {
+            this._toggleDownloadsStack(button);
+        });
+        rail.add_child(downloads);
+
+        const trash = this._themedDockButton('user-trash', 'Trash', () => {
+            this._closeDockPopups();
+            Gio.AppInfo.launch_default_for_uri('trash:///', null);
+        });
+        trash.connect('button-press-event', (_actor, event) => {
+            if (event.get_button() !== 3)
+                return Clutter.EVENT_PROPAGATE;
+            this._openTrashMenu(trash);
+            return Clutter.EVENT_STOP;
+        });
+        rail.add_child(trash);
+
         const showApps = this._utilityDockButton(
             'apps.svg',
             'Applications',
@@ -1256,7 +1294,23 @@ class AdaptiveShellV16 {
         showApps.add_style_class_name('adaptive-show-apps-button');
         rail.add_child(showApps);
 
-        const dock = { index, rail, appsBox, showApps, revealed: false, hideId: 0 };
+        const dock = {
+            index, rail, appsBox, showApps, downloads, trash,
+            revealed: false, hideId: 0,
+        };
+        this._syncDockUtilities(dock);
+
+        // Right-click on the dock itself (not an icon): its settings.
+        rail.connect('button-press-event', (_actor, event) => {
+            if (event.get_button() !== 3)
+                return Clutter.EVENT_PROPAGATE;
+            const source = event.get_source();
+            if (source === rail || source === appsBox || (source && source.style_class === 'adaptive-rail-rule')) {
+                this._openDockSettingsMenu(rail);
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
 
         // The whole dock is a drop target: DND walks up from the actor under
         // the pointer to the first delegate that handles drops.
@@ -1604,6 +1658,19 @@ class AdaptiveShellV16 {
             }
         }
 
+        // Recently used apps that are neither pinned nor open, after a divider.
+        if (this._dockConfig.showRecent) {
+            const shown = new Set(entries.map(e => e.app.get_id()));
+            let recent = [];
+            try {
+                recent = Shell.AppUsage.get_default().get_most_used();
+            } catch (e) {
+            }
+            for (const app of recent.filter(a => a && !shown.has(a.get_id())).slice(0, 3))
+                entries.push({ app, windows: [], favorite: false, recent: true });
+        }
+        this._dockEntries = entries;
+
         for (const dock of this._docks)
             this._fillDock(dock, entries);
 
@@ -1619,19 +1686,47 @@ class AdaptiveShellV16 {
 
         dock.appsBox.destroy_all_children();
 
+        // With more than one display, each dock shows the windows on its own
+        // screen; pinned (and recent) apps appear on every dock.
+        const perMonitor = this._dockConfig.perMonitor && (this._docks || []).length > 1;
+        let dividerPlaced = false;
+
         for (const entry of entries) {
+            let windows = entry.windows;
+            if (perMonitor) {
+                windows = windows.filter(w => {
+                    try {
+                        return w.get_monitor() === dock.index;
+                    } catch (e) {
+                        return false;
+                    }
+                });
+                if (!entry.favorite && !entry.recent && windows.length === 0)
+                    continue;
+            }
+
+            if (entry.recent && !dividerPlaced) {
+                dock.appsBox.add_child(new St.Widget({ style_class: 'adaptive-rail-rule' }));
+                dividerPlaced = true;
+            }
+
             const button = this._appDockButton(
                 entry.app,
-                entry.windows,
-                entry.favorite
+                windows,
+                entry.favorite,
+                perMonitor ? dock.index : -1
             );
             button._adaptiveDockApp = entry.app;
+            if (entry.recent)
+                button.add_style_class_name('adaptive-dock-recent');
             dock.appsBox.add_child(button);
             this._dockButtons.push(button);
         }
 
-        if (dock.showApps)
-            this._dockButtons.push(dock.showApps);
+        for (const utility of [dock.downloads, dock.trash, dock.showApps]) {
+            if (utility && utility.visible)
+                this._dockButtons.push(utility);
+        }
     }
 
     _appWindows(app) {
@@ -1672,7 +1767,7 @@ class AdaptiveShellV16 {
         }
     }
 
-    _appDockButton(app, windows, favorite) {
+    _appDockButton(app, windows, favorite, monitorIndex = -1) {
         const appName = app.get_name() || app.get_id() || 'Application';
         const isActive = this._isFocusedApp(app);
 
@@ -1684,6 +1779,9 @@ class AdaptiveShellV16 {
             accessible_name: appName,
         });
         button.set_pivot_point(0.5, 1.0);
+        this._sizeDockButton(button);
+        if (this._dockAttention.has(app.get_id()))
+            button.add_style_class_name('attention');
 
         const content = new St.BoxLayout({
             vertical: true,
@@ -1691,22 +1789,84 @@ class AdaptiveShellV16 {
             x_align: Clutter.ActorAlign.CENTER,
         });
 
+        const size = this._dockIconSize;
         let icon;
         try {
-            icon = app.create_icon_texture(36);
+            icon = app.create_icon_texture(size);
         } catch (e) {
             icon = new St.Icon({
                 icon_name: 'application-x-executable-symbolic',
-                icon_size: 36,
+                icon_size: size,
             });
         }
         icon.add_style_class_name('adaptive-app-icon');
-        content.add_child(icon);
+
+        // The icon sits in a holder so a badge (top right) and a progress bar
+        // (bottom) can lie over it.
+        const holder = new St.Widget({
+            layout_manager: new Clutter.BinLayout(),
+            style_class: 'adaptive-dock-icon-holder',
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+        holder.add_child(icon);
+        // In a BinLayout, alignment only applies to a child that may expand.
+        const badge = new St.Label({
+            style_class: 'adaptive-dock-badge',
+            x_expand: true,
+            y_expand: true,
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.START,
+            visible: false,
+        });
+        holder.add_child(badge);
+        const progress = new St.Widget({
+            style_class: 'adaptive-dock-progress',
+            layout_manager: new Clutter.BinLayout(),
+            x_expand: true,
+            y_expand: true,
+            y_align: Clutter.ActorAlign.END,
+            visible: false,
+        });
+        const progressFill = new St.Widget({
+            style_class: 'adaptive-dock-progress-fill',
+            x_align: Clutter.ActorAlign.START,
+            y_expand: true,
+        });
+        progress.add_child(progressFill);
+        progress.connect('notify::width', () => this._syncDockBadge(button));
+        holder.add_child(progress);
+
+        content.add_child(holder);
         content.add_child(this._windowIndicators(windows.length, isActive));
         button.set_child(content);
 
+        button._adaptiveIcon = icon;
+        button._adaptiveBadge = badge;
+        button._adaptiveProgress = progress;
+        button._adaptiveProgressFill = progressFill;
+        button._adaptiveDockApp = app;
+        this._syncDockBadge(button);
+
         this._addTooltip(button, appName);
-        button.connect('clicked', () => this._activateDockApp(app));
+        button.connect('clicked', () => {
+            if (this._previews)
+                this._previews.hide();
+            this._activateDockApp(app, monitorIndex);
+        });
+
+        // Live window previews after a moment's hover.
+        button.connect('notify::hover', () => {
+            if (!this._previews)
+                return;
+            if (button.hover && !this._dockDrag && !this._dockMenus.some(m => m.isOpen))
+                this._previews.hoverStart(button, app);
+            else
+                this._previews.hoverEnd();
+        });
+
+        // Scroll over an icon to step through that app's windows.
+        button.connect('scroll-event', (_actor, event) =>
+            this._scrollDockApp(app, event, monitorIndex));
 
         // Drag to reorder, or off the dock to remove - the macOS gestures.
         // `app` on the delegate is what GNOME's own drop targets (the app
@@ -1747,6 +1907,496 @@ class AdaptiveShellV16 {
         });
 
         return button;
+    }
+
+    // ------------------------------------------------------------ dock extras
+
+    _applyDockSizing() {
+        const size = DockExtras.ICON_SIZES[this._dockConfig.iconSize] || 36;
+        this._dockIconSize = size;
+        // 36px icons had a 54px dock and a 70px reserve; keep the proportions.
+        this._dock26SurfaceHeight = size + 18;
+        this._dock26ReservedHeight = size + 34;
+    }
+
+    _sizeDockButton(button) {
+        const size = this._dockIconSize;
+        button.set_style(`width: ${size + 12}px; height: ${size + 12}px;`);
+        if (button._adaptiveIcon && button._adaptiveIcon instanceof St.Icon)
+            button._adaptiveIcon.icon_size = size;
+    }
+
+    // A dock button with a theme icon (full colour, like the app icons).
+    _themedDockButton(iconName, name, callback) {
+        const button = new St.Button({
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            style_class: 'adaptive-dock-button adaptive-utility-dock-button',
+            accessible_name: name,
+        });
+        button.set_pivot_point(0.5, 1.0);
+        const icon = new St.Icon({
+            icon_name: iconName,
+            icon_size: this._dockIconSize,
+            style_class: 'adaptive-app-icon',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        button.set_child(icon);
+        button._adaptiveIcon = icon;
+        this._sizeDockButton(button);
+        button.connect('clicked', () => callback(button));
+        this._addTooltip(button, name);
+        return button;
+    }
+
+    _syncDockUtilities(dock) {
+        if (!dock)
+            return;
+        if (dock.downloads)
+            dock.downloads.visible = this._dockConfig.showDownloads !== false;
+        if (dock.trash) {
+            dock.trash.visible = this._dockConfig.showTrash !== false;
+            if (dock.trash._adaptiveIcon) {
+                dock.trash._adaptiveIcon.icon_name =
+                    this._trash && this._trash.count > 0 ? 'user-trash-full' : 'user-trash';
+            }
+        }
+        for (const button of [dock.downloads, dock.trash, dock.showApps]) {
+            if (button)
+                this._sizeDockButton(button);
+        }
+    }
+
+    _installDockExtras() {
+        this._launcherEntries = new DockExtras.LauncherEntries(id => this._onLauncherEntry(id));
+
+        this._previews = new DockExtras.WindowPreviews({
+            windowsFor: app => this._appWindows(app),
+            onActivate: window => Main.activateWindow(window),
+            onShow: () => this._hideTooltip(),
+        });
+
+        this._trash = new DockExtras.TrashWatcher(() => {
+            for (const dock of this._docks || [])
+                this._syncDockUtilities(dock);
+        });
+
+        const attention = (_display, window) => {
+            try {
+                const app = Shell.WindowTracker.get_default().get_window_app(window);
+                this._markAttention(app);
+            } catch (e) {
+            }
+        };
+        this._dockExtraIds = [
+            [global.display, global.display.connect('window-demands-attention', attention)],
+            [global.display, global.display.connect('window-marked-urgent', attention)],
+            // Per-display docks follow windows moved between screens.
+            [global.display, global.display.connect('window-entered-monitor', () => {
+                if (this._dockConfig.perMonitor && (this._docks || []).length > 1)
+                    this._queueWindowListRefresh();
+            })],
+        ];
+        if (Main.xdndHandler) {
+            this._dockExtraIds.push([Main.xdndHandler,
+                Main.xdndHandler.connect('drag-end', () => this._cancelSpring())]);
+        }
+
+        this._installAppHotkeys();
+    }
+
+    _removeDockExtras() {
+        this._removeAppHotkeys();
+        this._cancelSpring();
+
+        for (const [obj, id] of this._dockExtraIds) {
+            try {
+                obj.disconnect(id);
+            } catch (e) {
+            }
+        }
+        this._dockExtraIds = [];
+
+        for (const id of this._dockTimers)
+            GLib.Source.remove(id);
+        this._dockTimers.clear();
+        this._dockLaunching.clear();
+
+        if (this._previews) {
+            this._previews.destroy();
+            this._previews = null;
+        }
+        if (this._launcherEntries) {
+            this._launcherEntries.destroy();
+            this._launcherEntries = null;
+        }
+        if (this._trash) {
+            this._trash.destroy();
+            this._trash = null;
+        }
+    }
+
+    _dockLater(ms, fn) {
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+            const again = fn();
+            if (!again)
+                this._dockTimers.delete(id);
+            return again ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
+        });
+        this._dockTimers.add(id);
+        return id;
+    }
+
+    // --- badges and progress
+
+    _onLauncherEntry(_desktopId) {
+        for (const button of this._dockButtons) {
+            if (!button || !button._adaptiveBadge)
+                continue;
+            this._syncDockBadge(button);
+            const entry = this._launcherEntries.lookup(button._adaptiveDockApp);
+            if (entry && entry.urgent)
+                this._markAttention(button._adaptiveDockApp);
+        }
+    }
+
+    _syncDockBadge(button) {
+        if (!button._adaptiveBadge || !this._launcherEntries)
+            return;
+        const entry = this._launcherEntries.lookup(button._adaptiveDockApp);
+
+        const count = entry && entry['count-visible'] ? Number(entry.count) || 0 : 0;
+        button._adaptiveBadge.visible = count > 0;
+        button._adaptiveBadge.text = count > 99 ? '99+' : `${count}`;
+
+        const progress = entry && entry['progress-visible'] ? Number(entry.progress) : -1;
+        const showing = progress >= 0 && progress <= 1;
+        button._adaptiveProgress.visible = showing;
+        if (showing) {
+            const width = button._adaptiveProgress.get_width();
+            if (width > 0)
+                button._adaptiveProgressFill.set_width(Math.round(width * progress));
+        }
+    }
+
+    // --- attention and bounce
+
+    _markAttention(app) {
+        if (!app || this._isFocusedApp(app))
+            return;
+        const id = app.get_id();
+        const fresh = !this._dockAttention.has(id);
+        this._dockAttention.add(id);
+        for (const button of this._dockButtons) {
+            if (button && button._adaptiveDockApp === app)
+                button.add_style_class_name('attention');
+        }
+        if (fresh)
+            this._bounceApp(app, 3);
+    }
+
+    _bounceApp(app, times = 1) {
+        for (const button of this._dockButtons) {
+            if (button && button._adaptiveDockApp === app && button._adaptiveIcon)
+                this._bounceActor(button._adaptiveIcon, times);
+        }
+    }
+
+    // The icon, not the button, moves: magnification owns the button's own
+    // translation and scale.
+    _bounceActor(actor, times) {
+        if (actor._adaptiveBouncing)
+            return;
+        actor._adaptiveBouncing = true;
+        const once = remaining => {
+            if (remaining <= 0 || !actor.get_stage()) {
+                actor._adaptiveBouncing = false;
+                if (actor.get_stage())
+                    actor.translation_y = 0;
+                return;
+            }
+            actor.ease({
+                translation_y: -Math.round(this._dockIconSize * 0.4),
+                duration: 190,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => actor.ease({
+                    translation_y: 0,
+                    duration: 260,
+                    mode: Clutter.AnimationMode.EASE_OUT_BOUNCE,
+                    onComplete: () => once(remaining - 1),
+                }),
+            });
+        };
+        once(times);
+    }
+
+    // Bounce until the app puts up a window, or give up after 8 seconds.
+    _bounceWhileLaunching(app) {
+        const id = app.get_id();
+        if (this._dockLaunching.has(id))
+            return;
+        this._dockLaunching.add(id);
+        const started = GLib.get_monotonic_time();
+        const tick = () => {
+            const done = app.get_n_windows() > 0 ||
+                GLib.get_monotonic_time() - started > 8 * 1000000;
+            if (done) {
+                this._dockLaunching.delete(id);
+                return false;
+            }
+            this._bounceApp(app, 1);
+            return true;
+        };
+        if (tick())
+            this._dockLater(520, tick);
+    }
+
+    // --- scroll
+
+    _scrollDockApp(app, event, monitorIndex) {
+        const now = GLib.get_monotonic_time();
+        if (now - this._dockScrollTime < 250000)
+            return Clutter.EVENT_STOP;
+
+        const S = Clutter.ScrollDirection;
+        const direction = event.get_scroll_direction();
+        let step = 0;
+        if (direction === S.UP || direction === S.LEFT)
+            step = -1;
+        else if (direction === S.DOWN || direction === S.RIGHT)
+            step = 1;
+        else if (direction === S.SMOOTH) {
+            const [dx, dy] = event.get_scroll_delta();
+            step = Math.sign(dy || dx);
+        }
+        if (!step)
+            return Clutter.EVENT_STOP;
+
+        let windows = this._appWindows(app);
+        if (monitorIndex >= 0) {
+            const here = windows.filter(w => w.get_monitor() === monitorIndex);
+            if (here.length)
+                windows = here;
+        }
+        if (!windows.length)
+            return Clutter.EVENT_STOP;
+
+        // A fixed order to step through: recency would reorder on every step.
+        windows.sort((a, b) => a.get_stable_sequence() - b.get_stable_sequence());
+        const current = windows.indexOf(global.display.focus_window);
+        const next = current < 0 ? windows[0]
+            : windows[(current + step + windows.length) % windows.length];
+
+        this._dockScrollTime = now;
+        if (this._previews)
+            this._previews.hide();
+        Main.activateWindow(next);
+        return Clutter.EVENT_STOP;
+    }
+
+    // --- downloads, trash, popups
+
+    _closeDockPopups() {
+        this._destroyDockMenus();
+        this._hideTooltip();
+        if (this._previews)
+            this._previews.hide();
+    }
+
+    _toggleDownloadsStack(button) {
+        const wasOpen = this._dockMenus.some(m => m.isOpen && m.sourceActor === button);
+        this._closeDockPopups();
+        if (wasOpen)
+            return;
+        const menu = DockExtras.openDownloadsStack(button, this._dockMenuManager,
+            m => this._dockMenus.push(m));
+        menu.connect('open-state-changed', (_m, open) => {
+            if (!open)
+                this._scheduleDockDemagnify();
+        });
+    }
+
+    _openTrashMenu(button) {
+        this._closeDockPopups();
+        const menu = new PopupMenu.PopupMenu(button, 0.5, St.Side.BOTTOM);
+        menu.actor.add_style_class_name('adaptive-dock-popup');
+        Main.uiGroup.add_actor(menu.actor);
+        menu.actor.hide();
+        this._dockMenuManager.addMenu(menu);
+        this._dockMenus.push(menu);
+
+        const open = new PopupMenu.PopupMenuItem('Open');
+        open.connect('activate', () => Gio.AppInfo.launch_default_for_uri('trash:///', null));
+        menu.addMenuItem(open);
+
+        const count = this._trash ? this._trash.count : 0;
+        const empty = new PopupMenu.PopupMenuItem(count ? 'Empty Trash…' : 'Trash Is Empty');
+        empty.setSensitive(count > 0);
+        empty.connect('activate', () => {
+            DockExtras.confirmEmptyTrash(count, () => {
+                try {
+                    Gio.Subprocess.new(['gio', 'trash', '--empty'], Gio.SubprocessFlags.NONE);
+                } catch (e) {
+                    logError(e, '[Adaptive Shell] emptying the trash');
+                }
+            });
+        });
+        menu.addMenuItem(empty);
+
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        const settings = new PopupMenu.PopupMenuItem('Dock Settings…');
+        settings.connect('activate', () => GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._openDockSettingsMenu(button);
+            return GLib.SOURCE_REMOVE;
+        }));
+        menu.addMenuItem(settings);
+        menu.open();
+    }
+
+    // --- dock settings
+
+    _openDockSettingsMenu(anchor) {
+        this._closeDockPopups();
+        const menu = new PopupMenu.PopupMenu(anchor, 0.5, St.Side.BOTTOM);
+        menu.actor.add_style_class_name('adaptive-dock-popup');
+        Main.uiGroup.add_actor(menu.actor);
+        menu.actor.hide();
+        this._dockMenuManager.addMenu(menu);
+        this._dockMenus.push(menu);
+
+        const config = this._dockConfig;
+        const choice = (title, key, options) => {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(title));
+            for (const [value, label] of options) {
+                const item = new PopupMenu.PopupMenuItem(label);
+                item.setOrnament(config[key] === value
+                    ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
+                item.connect('activate', () => this._setDockOption(key, value));
+                menu.addMenuItem(item);
+            }
+        };
+        choice('Icon Size', 'iconSize', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]);
+        choice('Magnification', 'magnification',
+            [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']]);
+        choice('Auto-Hide', 'autoHide', [
+            ['smart', 'When a Window Is Maximized'],
+            ['always', 'Always'],
+            ['never', 'Never'],
+        ]);
+
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Show'));
+        for (const [key, label] of [
+            ['showRecent', 'Recent Apps'],
+            ['showDownloads', 'Downloads'],
+            ['showTrash', 'Trash'],
+            ['perMonitor', 'Only Windows on Each Display'],
+        ]) {
+            const item = new PopupMenu.PopupSwitchMenuItem(label, config[key] !== false);
+            item.connect('toggled', (_i, state) => this._setDockOption(key, state));
+            menu.addMenuItem(item);
+        }
+
+        menu.connect('open-state-changed', (_m, open) => {
+            if (!open)
+                this._scheduleDockDemagnify();
+        });
+        menu.open();
+    }
+
+    _setDockOption(key, value) {
+        DockExtras.writeDockConfig({ [key]: value });
+        this._dockConfig = DockExtras.readDockConfig();
+        this._applyDockSizing();
+        for (const dock of this._docks || [])
+            this._syncDockUtilities(dock);
+        this._refreshWindowList();
+        this._dock26Layout();
+    }
+
+    // --- Super+1..9
+
+    // GNOME binds Super+1..9 to the first nine *pinned* apps. These follow
+    // the dock as shown - pinned, then open ones - and bounce what launches.
+    _installAppHotkeys() {
+        const settings = new Gio.Settings({ schema_id: 'org.gnome.shell.keybindings' });
+        try {
+            for (let i = 1; i <= 9; i++) {
+                const name = `switch-to-application-${i}`;
+                Main.wm.removeKeybinding(name);
+                Main.wm.addKeybinding(name, settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+                    Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+                    () => this._dockHotkey(i));
+            }
+            this._hotkeysInstalled = true;
+        } catch (e) {
+            logError(e, '[Adaptive Shell] dock hotkeys');
+        }
+    }
+
+    _removeAppHotkeys() {
+        if (!this._hotkeysInstalled)
+            return;
+        const settings = new Gio.Settings({ schema_id: 'org.gnome.shell.keybindings' });
+        for (let i = 1; i <= 9; i++) {
+            const name = `switch-to-application-${i}`;
+            try {
+                Main.wm.removeKeybinding(name);
+                Main.wm.addKeybinding(name, settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+                    Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+                    Main.wm._switchToApplication.bind(Main.wm));
+            } catch (e) {
+                logError(e, '[Adaptive Shell] restoring GNOME hotkeys');
+            }
+        }
+        this._hotkeysInstalled = false;
+    }
+
+    _dockHotkey(n) {
+        const entry = (this._dockEntries || [])[n - 1];
+        if (!entry)
+            return;
+        Main.overview.hide();
+        this._activateDockApp(entry.app);
+    }
+
+    // --- spring-loaded icons (files dragged from other apps)
+
+    _dockSpringLoad(dock, x) {
+        const [railX] = dock.rail.get_transformed_position();
+        const stageX = railX + x;
+        const target = this._dockSlots(dock).find(slot => {
+            const [sx] = slot.get_transformed_position();
+            const [w] = slot.get_transformed_size();
+            return stageX >= sx && stageX < sx + w;
+        });
+        const app = target ? target._adaptiveDockApp : null;
+        if (app === this._springApp)
+            return;
+
+        this._cancelSpring();
+        this._springApp = app;
+        if (!app)
+            return;
+        this._magnifyDock(target);
+        this._springId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 650, () => {
+            this._springId = 0;
+            const windows = this._appWindows(app);
+            if (windows.length)
+                Main.activateWindow(windows[0]);
+            else
+                app.activate();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelSpring() {
+        if (this._springId) {
+            GLib.Source.remove(this._springId);
+            this._springId = 0;
+        }
+        this._springApp = null;
     }
 
     // ------------------------------------------------------ dock drag & drop
@@ -1799,6 +2449,8 @@ class AdaptiveShellV16 {
 
     _dockDragBegin(button, app) {
         this._hideTooltip();
+        if (this._previews)
+            this._previews.hide();
         const favorite = this._favorites.isFavorite(app.get_id());
         this._dockDrag = { app, button, favorite, removing: false, external: false };
 
@@ -1912,6 +2564,14 @@ class AdaptiveShellV16 {
     }
 
     _dockDragOver(dock, source, x) {
+        // A file dragged from another app (Files, a browser): the shell cannot
+        // take the drop, so hovering an app's icon brings that app forward to
+        // drop into - the way GNOME's own dock does it.
+        if (source === Main.xdndHandler) {
+            this._dockSpringLoad(dock, x);
+            return DND.DragMotionResult.CONTINUE;
+        }
+
         const app = this._dockDragApp(source);
         if (!app)
             return DND.DragMotionResult.NO_DROP;
@@ -1962,6 +2622,8 @@ class AdaptiveShellV16 {
             d.rail && event.targetActor && d.rail.contains(event.targetActor));
         if (!onDock && this._dockPlaceholder)
             this._dockRemovePlaceholder();
+        if (!onDock)
+            this._cancelSpring();
 
         const drag = this._dockDrag;
         if (drag && !drag.external && drag.favorite && !onDock) {
@@ -2039,12 +2701,20 @@ class AdaptiveShellV16 {
         }
     }
 
-    _activateDockApp(app) {
-        const windows = this._appWindows(app);
+    _activateDockApp(app, monitorIndex = -1) {
+        let windows = this._appWindows(app);
 
         if (windows.length === 0) {
             app.activate();
+            this._bounceWhileLaunching(app);
             return;
+        }
+
+        // A dock on one display switches to that display's windows first.
+        if (monitorIndex >= 0) {
+            const here = windows.filter(w => w.get_monitor() === monitorIndex);
+            if (here.length)
+                windows = here;
         }
 
         const focus = global.display.focus_window;
@@ -2108,6 +2778,28 @@ class AdaptiveShellV16 {
             menu.addMenuItem(newWindowItem);
         }
 
+        // The actions the app itself declares: New Incognito Window, New
+        // Tab, a terminal profile... New Window is already above.
+        const info = app.get_app_info ? app.get_app_info() : null;
+        const actions = info && typeof info.list_actions === 'function'
+            ? info.list_actions().filter(a => !/^new[-_]?window$/i.test(a))
+            : [];
+        if (actions.length) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            for (const action of actions) {
+                const actionItem = new PopupMenu.PopupMenuItem(info.get_action_name(action) || action);
+                actionItem.connect('activate', () => {
+                    try {
+                        app.launch_action(action, global.get_current_time(), -1);
+                        this._bounceApp(app, 1);
+                    } catch (e) {
+                        logError(e, `[Adaptive Shell] app action ${action}`);
+                    }
+                });
+                menu.addMenuItem(actionItem);
+            }
+        }
+
         if (windows.length > 1) {
             menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             for (const window of windows) {
@@ -2165,11 +2857,23 @@ class AdaptiveShellV16 {
             menu.addMenuItem(closeItem);
         }
 
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        const settingsItem = new PopupMenu.PopupMenuItem('Dock Settings…');
+        settingsItem.connect('activate', () => {
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                this._openDockSettingsMenu(button);
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+        menu.addMenuItem(settingsItem);
+
         menu.connect('open-state-changed', (_menu, open) => {
             if (!open)
                 this._scheduleDockDemagnify();
         });
 
+        if (this._previews)
+            this._previews.hide();
         menu.open();
     }
 
@@ -2182,7 +2886,10 @@ class AdaptiveShellV16 {
             accessible_name: name,
         });
         button.set_pivot_point(0.5, 1.0);
-        button.set_child(this._dockContent(iconFile, name));
+        const icon = this._dockContent(iconFile, name);
+        button.set_child(icon);
+        button._adaptiveIcon = icon;
+        this._sizeDockButton(button);
         button.connect('clicked', callback);
         this._addTooltip(button, name);
         return button;
@@ -2211,12 +2918,15 @@ class AdaptiveShellV16 {
                 const distance =
                     Math.abs(i - activeIndex);
 
+                const [hoverScale, hoverLift, nearScale, nearLift] =
+                    DockExtras.MAGNIFICATION[this._dockConfig.magnification] ||
+                    DockExtras.MAGNIFICATION.medium;
                 if (distance === 0) {
-                    scale = 1.18;
-                    lift = -5;
+                    scale = hoverScale;
+                    lift = hoverLift;
                 } else if (distance === 1) {
-                    scale = 1.08;
-                    lift = -1;
+                    scale = nearScale;
+                    lift = nearLift;
                 }
             }
 
@@ -2312,6 +3022,11 @@ class AdaptiveShellV16 {
         for (const button of this._dockButtons) {
             if (!button || !button._adaptiveDockApp)
                 continue;
+
+            if (this._isFocusedApp(button._adaptiveDockApp)) {
+                this._dockAttention.delete(button._adaptiveDockApp.get_id());
+                button.remove_style_class_name('attention');
+            }
 
             this._setActorActive(
                 button,
@@ -2774,6 +3489,14 @@ class AdaptiveShellV16 {
         if (Main.overview && Main.overview.visible)
             return false;
 
+        // Dock Settings → Auto-hide. "always" keeps it down until reached
+        // for; "never" keeps it up except over fullscreen content.
+        const mode = this._dockConfig.autoHide;
+        if (mode === 'always')
+            return true;
+        if (mode === 'never')
+            return this._dock26MonitorInFullscreen(index);
+
         return (
             this._dock26MonitorInFullscreen(index) ||
             this._dock26MonitorHasFocusedMaximized(index)
@@ -2910,6 +3633,10 @@ class AdaptiveShellV16 {
         // An auto-hidden dock stays up for the whole of a drag, or the drop
         // target would slide away from under the icon being dragged.
         if (this._dockDrag)
+            return true;
+
+        // The previews float above the dock; moving into them keeps it up.
+        if (this._previews && this._previews.hovered)
             return true;
 
         if (dock.rail && dock.rail.hover)

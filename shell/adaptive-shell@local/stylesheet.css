@@ -2226,6 +2226,173 @@
     font-weight: 600;
 }
 
+/* ===== Dock extras =====
+ *
+ * Unread badges and progress bars over app icons, the attention marker, live
+ * window previews, the Downloads stack, and dock popup headings. Colours from
+ * the palette at the end of this file: red is Apple's badge colour, blue the
+ * one accent.
+ */
+
+.adaptive-dock-badge {
+    min-width: 10px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background-color: #FF453A;
+    color: #FFFFFF;
+    font-size: 10px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    text-align: center;
+}
+
+.adaptive-dock-progress {
+    height: 5px;
+    margin: 0 3px 1px 3px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.55);
+}
+
+.adaptive-dock-progress-fill {
+    height: 5px;
+    border-radius: 3px;
+    background-color: #0A84FF;
+}
+
+/* An app asking for attention: its window dots turn orange until it is used. */
+.adaptive-dock-button.attention .adaptive-running-dot {
+    background-color: #FF9F0A;
+}
+
+.adaptive-dock-button.attention .adaptive-running-indicators {
+    min-height: 4px;
+}
+
+.adaptive-dock-recent .adaptive-app-icon {
+    opacity: 0.85;
+}
+
+/* Window previews */
+.adaptive-dock-previews {
+    padding: 8px;
+    spacing: 8px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: rgba(30, 30, 32, 0.97);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+}
+
+.adaptive-dock-preview {
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid transparent;
+}
+
+.adaptive-dock-preview:hover,
+.adaptive-dock-preview:focus {
+    border-color: rgba(10, 132, 255, 0.55);
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.adaptive-dock-preview-box {
+    spacing: 6px;
+}
+
+.adaptive-dock-preview-header {
+    spacing: 6px;
+}
+
+.adaptive-dock-preview-title {
+    max-width: 170px;
+    color: #F5F5F7;
+    font-size: 12px;
+}
+
+.adaptive-dock-preview-close {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    color: #98989D;
+}
+
+.adaptive-dock-preview-close StIcon {
+    icon-size: 12px;
+}
+
+.adaptive-dock-preview-close:hover,
+.adaptive-dock-preview-close:focus {
+    background-color: #FF453A;
+    color: #FFFFFF;
+}
+
+.adaptive-dock-preview-frame {
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.30);
+}
+
+/* Downloads stack */
+.adaptive-dock-stack-menu {
+    padding: 0;
+}
+
+.adaptive-dock-stack {
+    padding: 10px 12px 12px 12px;
+    spacing: 10px;
+}
+
+.adaptive-dock-stack-header {
+    spacing: 12px;
+}
+
+.adaptive-dock-stack-title {
+    color: #F5F5F7;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.adaptive-dock-stack-link {
+    padding: 3px 8px;
+    border-radius: 8px;
+    color: #0A84FF;
+    font-size: 12px;
+}
+
+.adaptive-dock-stack-link:hover,
+.adaptive-dock-stack-link:focus {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+
+.adaptive-dock-stack-item {
+    width: 92px;
+    padding: 8px 4px;
+    border-radius: 10px;
+}
+
+.adaptive-dock-stack-item:hover,
+.adaptive-dock-stack-item:focus {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+
+.adaptive-dock-stack-name {
+    margin-top: 6px;
+    max-width: 84px;
+    color: #F5F5F7;
+    font-size: 11px;
+}
+
+.adaptive-dock-stack-status {
+    color: #98989D;
+    font-size: 12px;
+}
+
+/* Section headings in dock menus ("Icon Size", "Show"). */
+.adaptive-dock-popup .popup-separator-menu-item .popup-menu-item-label,
+.adaptive-dock-popup .popup-separator-menu-item StLabel {
+    color: #98989D;
+    font-size: 11px;
+    font-weight: 600;
+}
+
 /* ===== Adaptive palette — Apple dark appearance =====
  *
  * The one colour system for the whole desktop: this shell, the GTK themes
