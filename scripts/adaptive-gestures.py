@@ -81,7 +81,7 @@ ACTIONS = {
     "overview": "Task view (Activities)",
     "app-grid": "Show all apps",
     "search": "Search",
-    "show-desktop": "Show desktop",
+    "show-desktop": "Show desktop (minimise all)",
     "next-app": "Next app",
     "previous-app": "Previous app",
     "workspace-right": "Next desktop",
@@ -111,6 +111,9 @@ DEFAULTS = {
     "sensitivity": "medium",
     "3": {"preset": "switch-apps", "custom": {}, "shortcut": {}},
     "4": {"preset": "switch-desktops", "custom": {}, "shortcut": {}, "tap": "notifications"},
+    # Press and release Ctrl twice, on its own, to minimise every window
+    # (again, on an empty desktop, to bring them back).
+    "keyboard": {"double_ctrl": "show-desktop"},
 }
 
 # Distance a swipe must travel, in libinput's unaccelerated units.
@@ -118,6 +121,18 @@ SENSITIVITY = {"low": 180.0, "medium": 120.0, "high": 70.0}
 
 # A four-finger touch that lifts within this long, without swiping, is a tap.
 TAP_SECONDS = 0.35
+
+# Double Ctrl: a press and release of Ctrl alone counts as a tap when short;
+# a second tap soon after the first is the double press.
+CTRL_TAP_SECONDS = 0.30
+CTRL_GAP_SECONDS = 0.40
+
+# libinput hides key names unless --show-keycodes is given, and a double Ctrl
+# cannot be told apart without it. Each keyboard line is only checked against
+# Ctrl and then dropped: no key is stored, logged or written anywhere.
+KEY = re.compile(r"KEYBOARD_KEY\s+\+?([\d.]+)s\s+(\S+) \((-?\d+)\) (pressed|released)")
+POINTER_BUTTON = re.compile(r"POINTER_(BUTTON|SCROLL|AXIS)")
+CTRL_KEYS = {"KEY_LEFTCTRL", "KEY_RIGHTCTRL"}
 
 # libinput prints:  event10  GESTURE_SWIPE_UPDATE  +1.234s   3  -12.34/  0.56 ...
 EVENT = re.compile(
@@ -333,14 +348,72 @@ def perform(action, group, gesture, dry_run=False):
 # ------------------------------------------------------------------
 
 
+class DoubleCtrl:
+    """Recognises Ctrl pressed and released twice on its own.
+
+    Anything else between the presses - another key (Ctrl+C), a click
+    (Ctrl+click) or a scroll (Ctrl+scroll zoom) - means Ctrl was used as a
+    modifier, and the count starts over.
+    """
+
+    def __init__(self):
+        self.down_at = None
+        self.clean = False
+        self.last_tap = None
+        self.other_down = 0
+
+    def feed(self, line):
+        """True when this line completes a double Ctrl."""
+        key = KEY.search(line)
+        if key is None:
+            if POINTER_BUTTON.search(line):
+                self.clean = False
+                self.last_tap = None
+            return False
+
+        stamp, name, pressed = float(key.group(1)), key.group(2), key.group(4) == "pressed"
+        if name not in CTRL_KEYS:
+            self.other_down += 1 if pressed else -1
+            self.other_down = max(0, self.other_down)
+            if pressed:
+                self.clean = False
+                self.last_tap = None
+            return False
+
+        if pressed:
+            self.down_at = stamp
+            self.clean = self.other_down == 0
+            return False
+
+        tapped = self.clean and self.down_at is not None and stamp - self.down_at <= CTRL_TAP_SECONDS
+        self.down_at = None
+        if not tapped:
+            self.last_tap = None
+            return False
+        if self.last_tap is not None and stamp - self.last_tap <= CTRL_GAP_SECONDS + CTRL_TAP_SECONDS:
+            self.last_tap = None
+            return True
+        self.last_tap = stamp
+        return False
+
+
 def run(stream, settings, dry_run=False):
     dx = dy = 0.0
     fingers = 0
     swiping = False
     hold_started = None
     hold_fingers = 0
+    ctrl = DoubleCtrl()
 
     for line in stream:
+        if "KEYBOARD_KEY" in line or "POINTER_" in line:
+            if ctrl.feed(line):
+                data = settings.current()
+                if data.get("enabled", True):
+                    group = data.get("keyboard") or {}
+                    perform(group.get("double_ctrl", "none"), group, "double Ctrl", dry_run)
+            continue
+
         match = EVENT.search(line)
         if not match:
             continue
@@ -476,7 +549,7 @@ def main():
         return 0
 
     try:
-        proc = subprocess.Popen(["libinput", "debug-events"],
+        proc = subprocess.Popen(["libinput", "debug-events", "--show-keycodes"],
                                 stdout=subprocess.PIPE, text=True, bufsize=1)
     except FileNotFoundError:
         log("libinput not installed - run: sudo apt install -y libinput-tools")
@@ -486,7 +559,12 @@ def main():
               file=sys.stderr)
         return 2
 
-    log("gesture daemon started (3 and 4 fingers)")
+    # Stopping the service (install-gestures.sh sends SIGTERM) must take the
+    # libinput reader with it, or it keeps reading input devices orphaned.
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_args: sys.exit(0))
+
+    log("gesture daemon started (3 and 4 fingers, double Ctrl)")
     try:
         run(proc.stdout, settings, args.dry_run)
     except KeyboardInterrupt:

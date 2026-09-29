@@ -215,6 +215,7 @@ class GestureWindow(Gtk.ApplicationWindow):
         page.append(self.content)
         self.content.append(self._finger_card(3))
         self.content.append(self._finger_card(4))
+        self.content.append(self._keyboard_card())
         self.content.append(self._general_card())
         self.content.append(self._try_card())
 
@@ -360,6 +361,21 @@ class GestureWindow(Gtk.ApplicationWindow):
 
         self._refresh_card(fingers)
         return card
+
+    def _keyboard_card(self):
+        card = self._card("Keyboard")
+        current = (self.settings.get("keyboard") or {}).get("double_ctrl", "show-desktop")
+        card.append(self._row(
+            "Press Ctrl twice",
+            self._dropdown(ACTION_LABELS, ACTION_IDS.index(current) if current in ACTION_IDS else 0,
+                           self._set_double_ctrl),
+            hint="Ctrl on its own, twice quickly. Show desktop minimises every window; "
+                 "do it again to bring them back."))
+        return card
+
+    def _set_double_ctrl(self, index):
+        self.settings.setdefault("keyboard", {})["double_ctrl"] = ACTION_IDS[index]
+        self._save()
 
     def _general_card(self):
         card = self._card("Sensitivity")
