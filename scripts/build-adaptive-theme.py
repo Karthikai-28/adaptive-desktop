@@ -882,6 +882,30 @@ dialog .dialog-action-area button {{
     min-height: 28px;
 }}
 
+/* Yaru fills a dialog's destructive and suggested buttons itself, which
+ * left the generic red-text rule above on a red fill. In a dialog they are
+ * solid, white-labelled buttons, as in macOS alerts. */
+messagedialog .dialog-action-area button.destructive-action,
+dialog .dialog-action-area button.destructive-action {{
+    background-image: none;
+    background-color: @ad_danger;
+    color: #FFFFFF;
+}}
+
+messagedialog .dialog-action-area button.suggested-action,
+dialog .dialog-action-area button.suggested-action {{
+    background-image: none;
+    background-color: @ad_accent;
+    color: #FFFFFF;
+}}
+
+messagedialog .dialog-action-area button:not(.destructive-action):not(.suggested-action),
+dialog .dialog-action-area button:not(.destructive-action):not(.suggested-action) {{
+    background-image: none;
+    background-color: @ad_fill;
+    color: @ad_text;
+}}
+
 infobar,
 infobar > revealer > box {{
     border: none;

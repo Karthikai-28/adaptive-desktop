@@ -2,7 +2,7 @@
 Name=AdaptiveFilesIcons
 Comment=Adaptive Files scalable vector icon language
 Inherits=Yaru-blue,Yaru,Adwaita,hicolor
-Directories=scalable/apps,scalable/places,scalable/devices,scalable/mimetypes,scalable/actions
+Directories=scalable/apps,scalable/places,scalable/devices,scalable/mimetypes,scalable/actions,scalable/emblems
 
 [scalable/apps]
 Size=64
@@ -38,3 +38,10 @@ MinSize=12
 MaxSize=128
 Type=Scalable
 Context=Actions
+
+[scalable/emblems]
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Emblems

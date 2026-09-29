@@ -21,16 +21,23 @@ test -d "$PREFIX" || {
     exit 1
 }
 
-python3 -c "import ast, sys; ast.parse(open(sys.argv[1]).read())" \
-    "$REPO/extension/adaptive_preview.py"
+for source in "$REPO/extension/adaptive_preview.py" "$REPO"/extension/adaptive_files/*.py; do
+    python3 -c "import ast, sys; ast.parse(open(sys.argv[1]).read())" "$source"
+done
 
 mkdir -p "$EXT_DIR" "$CSS_DIR"
 install -m 0755 "$REPO/extension/adaptive_preview.py" "$EXT_DIR/adaptive_preview.py"
+# Helper package (models, archives, git, tags, cleanup, media). Replaced
+# whole so a module deleted in the repo does not linger in the install.
+rm -rf "$EXT_DIR/adaptive_files"
+mkdir -p "$EXT_DIR/adaptive_files"
+install -m 0644 "$REPO"/extension/adaptive_files/*.py "$EXT_DIR/adaptive_files/"
 install -m 0644 "$REPO/extension/preview.css" "$CSS_DIR/preview.css"
 install -m 0644 "$REPO/extension/adaptive-dark.xml" "$CSS_DIR/adaptive-dark.xml"
 rm -rf "$EXT_DIR/__pycache__"
 
 echo "Installed:"
 echo "  $EXT_DIR/adaptive_preview.py"
+echo "  $EXT_DIR/adaptive_files/"
 echo "  $CSS_DIR/preview.css"
 echo "  $CSS_DIR/adaptive-dark.xml"

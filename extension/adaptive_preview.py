@@ -15,9 +15,11 @@ import concurrent.futures
 import datetime as _dt
 import hashlib
 import html
+import io
 import math
 import os
 from pathlib import Path
+import shlex
 import shutil
 import json
 import stat
@@ -54,11 +56,47 @@ from gi.repository import (
     Pango,
 )
 
+# Optional pieces: each feature that needs one switches itself off when it
+# is missing, rather than taking the inspector down with it.
+try:
+    gi.require_version("Vte", "2.91")
+    from gi.repository import Vte
+except (ValueError, ImportError):
+    Vte = None
+
+try:
+    gi.require_version("Handy", "1")
+    from gi.repository import Handy
+except (ValueError, ImportError):
+    Handy = None
+
+try:
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst
+    Gst.init(None)
+    HAVE_PLAYER = Gst.ElementFactory.find("gtksink") is not None
+except (ValueError, ImportError):
+    Gst = None
+    HAVE_PLAYER = False
+
+# Helper modules live in a package beside this file: nautilus-python loads
+# every top-level .py in its extensions folder as an extension of its own.
+import sys  # noqa: E402
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from adaptive_files import archives, cleanup, gitinfo, media, models  # noqa: E402
+from adaptive_files import tags as filetags  # noqa: E402
+
 # Finder's preview pane width. The panel is one inspector column, not a
 # dashboard, so it gives the file grid back every pixel it can.
 PANEL_WIDE = 260
 PANEL_MEDIUM = 244
 PANEL_NARROW = 228
+# Windows narrower than this hide the inspector until widened again.
+AUTO_HIDE_BELOW = 1000
 
 CACHE_DIR = Path.home() / ".cache" / "adaptive-files" / "previews"
 LOG_PATH = Path.home() / ".cache" / "adaptive-files" / "preview-extension.log"
@@ -158,6 +196,46 @@ _CONTROLLERS = {}
 # the same entry appeared three times. One instance owns the menu.
 _MENU_OWNER = None
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+# Thumbnails and git status for whole folders queue here, so they never hold
+# up the selected item's own preview on _EXECUTOR.
+_BACKGROUND = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+_INFO_OWNER = None
+# Git badges re-check a repository at least this often while it is on screen;
+# commits and edits trigger a re-check sooner (index monitor, file mtimes).
+GIT_STALE_SECONDS = 30
+
+# nautilus-python starts Python and never releases the GIL: Files' main
+# thread holds it even while it sits in its own C main loop. Worker threads
+# therefore only advance while the main thread happens to be running Python,
+# which showed up as previews stuck on "Loading…" until the next click.
+# While any job is pending, a short timer on the main thread sleeps for a
+# moment - sleeping releases the GIL - so the workers get to run. With no
+# jobs pending the timer stops and costs nothing.
+_PENDING = [0]
+_PUMP = [0]
+
+
+def _pump():
+    if _PENDING[0] <= 0:
+        _PUMP[0] = 0
+        return GLib.SOURCE_REMOVE
+    time.sleep(0.004)
+    return GLib.SOURCE_CONTINUE
+
+
+def _run_async(executor, function, *args):
+    """executor.submit, plus keeping the GIL pump running until it is done."""
+    _PENDING[0] += 1
+    if not _PUMP[0]:
+        _PUMP[0] = GLib.timeout_add(10, _pump)
+    future = executor.submit(function, *args)
+
+    def settled(_future):
+        # Runs on the worker thread; the counter is only read by _pump.
+        _PENDING[0] -= 1
+
+    future.add_done_callback(settled)
+    return future
 
 
 def _log(message):
@@ -690,6 +768,8 @@ def _scan_paths(paths, max_entries=SCAN_MAX_ENTRIES, max_seconds=SCAN_MAX_SECOND
         "kind_counts": {kind: 0 for kind in KINDS},
         "days": [0] * ACTIVITY_DAYS,
         "children": [],
+        # (size, path) of files big enough to be worth de-duplicating.
+        "records": [],
     }
 
     def spent():
@@ -698,8 +778,10 @@ def _scan_paths(paths, max_entries=SCAN_MAX_ENTRIES, max_seconds=SCAN_MAX_SECOND
             return True
         return False
 
-    def account_file(name, st):
+    def account_file(name, st, path):
         size = st.st_size
+        if size >= 64 * 1024 and len(result["records"]) < 30000:
+            result["records"].append((size, path))
         kind = _kind_for_name(name)
         result["bytes"] += size
         result["files"] += 1
@@ -730,7 +812,7 @@ def _scan_paths(paths, max_entries=SCAN_MAX_ENTRIES, max_seconds=SCAN_MAX_SECOND
                             result["folders"] += 1
                             stack.append(entry.path)
                         elif stat.S_ISREG(st.st_mode):
-                            total += account_file(entry.name, st)
+                            total += account_file(entry.name, st, entry.path)
             except OSError:
                 continue
         return total
@@ -749,7 +831,7 @@ def _scan_paths(paths, max_entries=SCAN_MAX_ENTRIES, max_seconds=SCAN_MAX_SECOND
                 {"name": name, "path": path, "is_dir": True, "bytes": size, "kind": "Folder"}
             )
         else:
-            size = account_file(name, st) if stat.S_ISREG(st.st_mode) else 0
+            size = account_file(name, st, path) if stat.S_ISREG(st.st_mode) else 0
             result["children"].append(
                 {
                     "name": name,
@@ -757,6 +839,8 @@ def _scan_paths(paths, max_entries=SCAN_MAX_ENTRIES, max_seconds=SCAN_MAX_SECOND
                     "is_dir": False,
                     "bytes": size,
                     "kind": _kind_for_name(name),
+                    "mtime": st.st_mtime,
+                    "atime": st.st_atime,
                 }
             )
 
@@ -782,6 +866,101 @@ def _scan_folder(path):
     return result
 
 
+class TagDot(Gtk.Button):
+    """A tag colour as a small round toggle: filled when applied, a ring
+    when not."""
+
+    def __init__(self, color):
+        super().__init__()
+        self._color = color
+        self._filled = False
+        self.set_relief(Gtk.ReliefStyle.NONE)
+        _css(self, "adaptive-tag-dot")
+        area = Gtk.DrawingArea()
+        area.set_size_request(16, 16)
+        area.connect("draw", self._draw)
+        self.add(area)
+        self._area = area
+
+    def set_filled(self, filled):
+        self._filled = bool(filled)
+        self._area.queue_draw()
+
+    def _draw(self, area, cr):
+        width = area.get_allocated_width()
+        height = area.get_allocated_height()
+        radius = min(width, height) / 2.0 - 1.5
+        cr.arc(width / 2.0, height / 2.0, radius, 0, math.tau)
+        if self._filled:
+            cr.set_source_rgb(*self._color)
+            cr.fill_preserve()
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.85)
+            cr.set_line_width(1.5)
+            cr.stroke()
+        else:
+            cr.set_source_rgba(self._color[0], self._color[1], self._color[2], 0.9)
+            cr.set_line_width(1.5)
+            cr.stroke()
+        return False
+
+
+# NautilusFileInfo objects the info provider has seen, by URI, so a tag or
+# git change can ask Files to redraw exactly those icons. Bounded; losing an
+# old entry only means that icon updates on the next directory refresh.
+_KNOWN_FILES = {}
+_KNOWN_LIMIT = 6000
+
+
+def _remember_file(file_info):
+    try:
+        uri = file_info.get_uri()
+    except Exception:
+        return
+    _KNOWN_FILES.pop(uri, None)
+    _KNOWN_FILES[uri] = file_info
+    while len(_KNOWN_FILES) > _KNOWN_LIMIT:
+        _KNOWN_FILES.pop(next(iter(_KNOWN_FILES)))
+
+
+def _refresh_file_badges(uris=None, prefix=None):
+    """Re-run the info provider for these files (or everything under a
+    folder URI prefix), which redraws their emblems."""
+    targets = []
+    if uris:
+        targets = [_KNOWN_FILES[uri] for uri in uris if uri in _KNOWN_FILES]
+    elif prefix:
+        targets = [info for uri, info in _KNOWN_FILES.items() if uri.startswith(prefix)]
+    for info in targets:
+        try:
+            info.invalidate_extension_info()
+        except Exception:
+            pass
+
+
+def _reveal(paths):
+    """Open each file's folder in Files with the file selected. Asynchronous
+    on purpose: this process is the FileManager1 service, so a synchronous
+    call to it from here would wait on itself."""
+    uris = [Gio.File.new_for_path(path).get_uri() for path in paths]
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        bus.call(
+            "org.freedesktop.FileManager1",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1",
+            "ShowItems",
+            GLib.Variant("(ass)", (uris, "")),
+            None,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+            None,
+            None,
+        )
+    except Exception:
+        _log_exception("Reveal failed")
+
+
 class PreviewController:
     def __init__(self, window):
         self._window = window
@@ -804,6 +983,16 @@ class PreviewController:
         self.last_selection = []
         self.active_metadata_box = None
         self.location_uri = None
+        self._narrow = False
+        self._override = None
+        self._controls_installed = False
+        self._header_buttons = {}
+        self._player = None
+        self.host_column = None
+        self.terminal_slot = None
+        self.terminal = None
+        self._terminal_pid = None
+        self._terminal_cwd = None
         self._selection_key = None
         self._selection_at = 0.0
         self._current_name = ""
@@ -875,7 +1064,8 @@ class PreviewController:
             settings = Gtk.Settings.get_default()
             if settings is not None:
                 settings.set_property("gtk-icon-theme-name", "AdaptiveFilesIcons")
-                settings.set_property("gtk-application-prefer-dark-theme", True)
+                # No gtk-application-prefer-dark-theme: the Adaptive theme is
+                # dark in both variants, and libhandy warns when it is set.
                 _log("Process icon theme set to AdaptiveFilesIcons.")
         except Exception:
             _log_exception("Unable to set Adaptive Files icon theme")
@@ -955,22 +1145,249 @@ class PreviewController:
             self.panel.set_size_request(target, -1)
             self._reserve_space()
 
+        # Below this width the grid needs the room more than the inspector
+        # does. Crossing the line either way forgets a manual override, so
+        # the panel comes back on its own when the window is widened.
+        narrow = width < AUTO_HIDE_BELOW
+        if narrow != self._narrow:
+            self._narrow = narrow
+            self._override = None
+            GLib.idle_add(self._apply_panel_visibility)
+
     # --------------------------------------------------------------
     # Panel controls
     # --------------------------------------------------------------
 
-    def set_panel_visible(self, visible):
-        self.panel_visible = bool(visible)
+    def _panel_shown(self):
+        if self._override is not None:
+            return self._override
+        return self.panel_visible and not self._narrow
 
+    def _apply_panel_visibility(self):
         if self.panel is not None:
-            self.panel.set_visible(self.panel_visible)
-
+            shown = self._panel_shown()
+            self.panel.set_visible(shown)
+            if shown:
+                self.panel.show_all()
+            button = self._header_buttons.get("inspector")
+            if button is not None:
+                button.handler_block_by_func(self._on_inspector_button)
+                button.set_active(shown)
+                button.handler_unblock_by_func(self._on_inspector_button)
         self._reserve_space()
-        return self.panel_visible
+        return GLib.SOURCE_REMOVE
+
+    def set_panel_visible(self, visible):
+        visible = bool(visible)
+        if self._narrow:
+            # Showing it in a narrow window is a one-off, not a preference.
+            self._override = visible
+        else:
+            self.panel_visible = visible
+            self._override = None
+        self._apply_panel_visibility()
+        return visible
 
     def toggle_panel(self):
-        return self.set_panel_visible(not self.panel_visible)
+        return self.set_panel_visible(not self._panel_shown())
 
+    def _on_inspector_button(self, button):
+        self.set_panel_visible(button.get_active())
+
+    # --------------------------------------------------------------
+    # Toolbar buttons and shortcuts
+    # --------------------------------------------------------------
+
+    def _install_window_controls(self):
+        window = self.window
+        if window is None or self._controls_installed:
+            return GLib.SOURCE_REMOVE
+        self._controls_installed = True
+
+        try:
+            app = window.get_application()
+            for name, callback, accels in (
+                ("adaptive-inspector", lambda *_: self.toggle_panel(), ["<Control><Shift>p"]),
+                ("adaptive-terminal", lambda *_: self.toggle_terminal(), ["<Control>grave", "F4"]),
+            ):
+                if window.lookup_action(name) is None:
+                    action = Gio.SimpleAction.new(name, None)
+                    action.connect("activate", callback)
+                    window.add_action(action)
+                if app is not None:
+                    app.set_accels_for_action(f"win.{name}", accels)
+        except Exception:
+            _log_exception("Unable to add inspector shortcuts")
+
+        header = None
+        for widget in _walk(window):
+            if _type_name(widget) == "NautilusToolbar":
+                header = widget
+                break
+        if header is None or not hasattr(header, "pack_end"):
+            _log("Toolbar not found; inspector buttons skipped (shortcuts still work).")
+            return GLib.SOURCE_REMOVE
+
+        inspector = Gtk.ToggleButton()
+        inspector.add(Gtk.Image.new_from_icon_name("sidebar-show-right-symbolic", Gtk.IconSize.BUTTON))
+        inspector.set_tooltip_text("Inspector  (Ctrl+Shift+P)")
+        inspector.set_active(self._panel_shown())
+        inspector.connect("toggled", self._on_inspector_button)
+        _css(inspector, "image-button", "adaptive-toolbar-toggle")
+
+        terminal = Gtk.ToggleButton()
+        terminal.add(Gtk.Image.new_from_icon_name("utilities-terminal-symbolic", Gtk.IconSize.BUTTON))
+        terminal.set_tooltip_text("Terminal  (Ctrl+`)")
+        terminal.set_sensitive(Vte is not None)
+        terminal.connect("toggled", self._on_terminal_button)
+        _css(terminal, "image-button", "adaptive-toolbar-toggle")
+
+        # pack_end stacks leftwards: the inspector toggle ends up nearest the
+        # window's edge, where Finder keeps its preview button.
+        header.pack_end(inspector)
+        header.pack_end(terminal)
+        inspector.show_all()
+        terminal.show_all()
+        self._header_buttons = {"inspector": inspector, "terminal": terminal}
+        return GLib.SOURCE_REMOVE
+
+    # --------------------------------------------------------------
+    # Terminal drawer
+    # --------------------------------------------------------------
+
+    def _on_terminal_button(self, button):
+        if button.get_active() != self._terminal_open():
+            self.toggle_terminal()
+
+    def _terminal_open(self):
+        slot = getattr(self, "terminal_slot", None)
+        return slot is not None and slot.get_visible()
+
+    def toggle_terminal(self):
+        slot = getattr(self, "terminal_slot", None)
+        if slot is None or Vte is None:
+            return
+        if self._terminal_open():
+            slot.hide()
+            view = self.host_main_child
+            if view is not None:
+                view.grab_focus()
+        else:
+            if self.terminal is None:
+                self._spawn_terminal()
+            slot.set_no_show_all(False)
+            slot.show_all()
+            column = self.host_column
+            height = column.get_allocated_height()
+            if height > 0:
+                column.set_position(max(160, height - 260))
+            self.terminal.grab_focus()
+            self._terminal_follow()
+
+        button = self._header_buttons.get("terminal")
+        if button is not None:
+            button.handler_block_by_func(self._on_terminal_button)
+            button.set_active(self._terminal_open())
+            button.handler_unblock_by_func(self._on_terminal_button)
+
+    def _spawn_terminal(self):
+        terminal = Vte.Terminal()
+        terminal.set_scrollback_lines(5000)
+        terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.OFF)
+        terminal.set_audible_bell(False)
+        try:
+            interface = Gio.Settings.new("org.gnome.desktop.interface")
+            terminal.set_font(Pango.FontDescription.from_string(interface.get_string("monospace-font-name")))
+        except Exception:
+            pass
+
+        def rgba(value):
+            color = Gdk.RGBA()
+            color.parse(value)
+            return color
+
+        # Graphite canvas and label white from the palette; ANSI colours are
+        # left to VTE so command output keeps its usual meaning.
+        terminal.set_color_background(rgba("#141416"))
+        terminal.set_color_foreground(rgba("#F5F5F7"))
+        terminal.set_color_cursor(rgba("#0A84FF"))
+        terminal.set_color_highlight(rgba("#0058D0"))
+        terminal.set_color_highlight_foreground(rgba("#FFFFFF"))
+        terminal.set_hexpand(True)
+        terminal.set_vexpand(True)
+        terminal.connect("child-exited", self._on_terminal_exited)
+
+        shell = os.environ.get("SHELL") or "/bin/bash"
+        directory = self._location_path() or str(Path.home())
+        terminal.spawn_async(
+            Vte.PtyFlags.DEFAULT,
+            directory,
+            [shell],
+            None,
+            GLib.SpawnFlags.DEFAULT,
+            None,
+            None,
+            -1,
+            None,
+            self._on_terminal_spawned,
+        )
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.add(terminal)
+        self.terminal_slot.pack_start(scroll, True, True, 0)
+        self.terminal = terminal
+        self._terminal_cwd = directory
+
+    def _on_terminal_spawned(self, _terminal, pid, error, *_args):
+        if error is not None:
+            _log(f"Terminal failed to start: {error}")
+            return
+        self._terminal_pid = pid
+
+    def _on_terminal_exited(self, _terminal, _status):
+        # "exit" closes the drawer; the next toggle starts a fresh shell.
+        self._close_terminal()
+        button = self._header_buttons.get("terminal")
+        if button is not None:
+            button.handler_block_by_func(self._on_terminal_button)
+            button.set_active(False)
+            button.handler_unblock_by_func(self._on_terminal_button)
+
+    def _close_terminal(self):
+        slot = getattr(self, "terminal_slot", None)
+        if slot is not None:
+            for child in slot.get_children():
+                slot.remove(child)
+            slot.hide()
+        self.terminal = None
+        self._terminal_pid = None
+
+    def _location_path(self):
+        if not self.location_uri:
+            return None
+        return Gio.File.new_for_uri(self.location_uri).get_path()
+
+    def _terminal_follow(self):
+        """cd the drawer's shell to the folder Files is showing - only when
+        the shell is sitting at its prompt, never into a running program."""
+        if self.terminal is None or not self._terminal_pid or not self._terminal_open():
+            return
+        path = self._location_path()
+        if not path or path == self._terminal_cwd:
+            return
+        try:
+            pty = self.terminal.get_pty()
+            foreground = os.tcgetpgrp(pty.get_fd())
+        except Exception:
+            return
+        if foreground != self._terminal_pid:
+            return
+        self._terminal_cwd = path
+        # Ctrl-U clears a half-typed line first so the cd runs clean; the
+        # leading space keeps it out of history where the shell allows.
+        command = "\x15 cd -- " + shlex.quote(path) + "\n"
+        self.terminal.feed_child(command.encode("utf-8"))
 
     # --------------------------------------------------------------
     # Host / injection
@@ -1053,13 +1470,25 @@ class PreviewController:
                 self.panel.set_hexpand(False)
                 self.panel.set_halign(Gtk.Align.FILL)
 
-                self.host_split.pack_start(view, True, True, 0)
+                # The view sits over a terminal slot that stays hidden until
+                # asked for; a paned so the terminal's height can be dragged.
+                self.host_column = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+                self.host_column.set_hexpand(True)
+                self.host_column.set_wide_handle(False)
+                self.terminal_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+                _css(self.terminal_slot, "adaptive-terminal-slot")
+                self.terminal_slot.set_no_show_all(True)
+                self.host_column.pack1(view, True, False)
+                self.host_column.pack2(self.terminal_slot, False, False)
+
+                self.host_split.pack_start(self.host_column, True, True, 0)
                 self.host_split.pack_start(self.panel, False, False, 0)
 
                 host.add(self.host_split)
                 self.host_split.show_all()
 
-                self.panel.set_visible(self.panel_visible)
+                self._apply_panel_visibility()
+                GLib.idle_add(self._install_window_controls)
 
                 _log(
                     f"Inspector packed beside {_type_name(view)} "
@@ -1082,7 +1511,7 @@ class PreviewController:
 
                 box.pack_end(self.panel, False, False, 0)
                 self.panel.show_all()
-                self.panel.set_visible(self.panel_visible)
+                self._apply_panel_visibility()
 
                 _log(
                     "Inspector attached to horizontal box "
@@ -1303,6 +1732,14 @@ class PreviewController:
                 if self.panel.get_parent() is self.host_split:
                     self.host_split.remove(self.panel)
 
+                column = getattr(self, "host_column", None)
+                if view is not None and column is not None and view.get_parent() is column:
+                    column.remove(view)
+                if column is not None and column.get_parent() is self.host_split:
+                    self.host_split.remove(column)
+                self.host_column = None
+                self._close_terminal()
+
                 if view is not None and view.get_parent() is self.host_split:
                     self.host_split.remove(view)
 
@@ -1346,6 +1783,7 @@ class PreviewController:
         if not uri or uri == self.location_uri:
             return
         self.location_uri = uri
+        GLib.idle_add(self._terminal_follow)
         if not self.last_selection:
             # Deferred: Nautilus calls in here while it is building menus.
             self._selection_key = None
@@ -1366,6 +1804,7 @@ class PreviewController:
 
         self._selection_key = key
         self._selection_at = now
+        self._stop_player()
 
         self.selection_generation += 1
         generation = self.selection_generation
@@ -1444,8 +1883,16 @@ class PreviewController:
         body.pack_start(hero, False, False, 0)
 
         project = self._project_for_path(path)
-        if project is not None:
+        repo = gitinfo.repo_root(path) if path else None
+        if repo is not None:
+            # A repository gets a live card (branch, changes, upstream); the
+            # registered project, if any, only lends it a name.
+            body.pack_start(self._repo_card(repo, project, generation), False, False, 0)
+        elif project is not None:
             body.pack_start(self._project_chip(project), False, False, 0)
+
+        if path is not None and selected:
+            body.pack_start(self._tag_picker([gfile]), False, False, 0)
 
         if path is None:
             body.pack_start(
@@ -1551,6 +1998,21 @@ class PreviewController:
         if activity is not None:
             contents.pack_start(activity, False, False, 0)
 
+        old = cleanup.old_installers(payload["children"])
+        if old:
+            contents.pack_start(self._old_installers(old), False, False, 0)
+
+        # Duplicates need hashing, so they arrive after everything else and
+        # only take space when there is something to show.
+        duplicates = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        contents.pack_start(duplicates, False, False, 0)
+        if len(payload.get("records") or []) > 1:
+            self._submit(
+                cleanup.find_duplicates,
+                (payload["records"],),
+                lambda result, failure: self._show_duplicates(generation, duplicates, result, failure),
+            )
+
         if payload["truncated"]:
             contents.pack_start(
                 self._note(
@@ -1564,6 +2026,255 @@ class PreviewController:
 
         contents.show_all()
         return GLib.SOURCE_REMOVE
+
+    def _repo_card(self, root, project, generation):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.pack_start(self._section_label("Repository"), False, False, 0)
+        group = self._group()
+        _css(group, "adaptive-repo")
+
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        head.set_margin_top(6)
+        icon = Gtk.Image.new_from_icon_name("folder-templates-symbolic", Gtk.IconSize.BUTTON)
+        _css(icon, "adaptive-accent-icon")
+        head.pack_start(icon, False, False, 0)
+        name = Gtk.Label(
+            label=(project or {}).get("name") or os.path.basename(root) or root,
+            xalign=0,
+        )
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        _css(name, "adaptive-row-title")
+        head.pack_start(name, True, True, 0)
+        branch = Gtk.Label(label="…", xalign=1)
+        branch.set_ellipsize(Pango.EllipsizeMode.START)
+        branch.set_max_width_chars(16)
+        _css(branch, "adaptive-branch")
+        head.pack_end(branch, False, False, 0)
+        group.pack_start(head, False, False, 0)
+
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        group.pack_start(rows, False, False, 0)
+        box.pack_start(group, False, False, 0)
+
+        def done(info, error):
+            if generation != self.selection_generation:
+                return
+            if error or not info:
+                branch.set_text("")
+                rows.pack_start(self._note("Couldn't read the repository."), False, False, 0)
+                rows.show_all()
+                return
+
+            branch.set_text(info.get("branch") or "—")
+            changes = []
+            if info["conflicts"]:
+                changes.append(_count_text(info["conflicts"], "conflict"))
+            if info["modified"]:
+                changes.append(f"{info['modified']:,} modified")
+            if info["staged"]:
+                changes.append(f"{info['staged']:,} staged")
+            if info["untracked"]:
+                changes.append(f"{info['untracked']:,} new")
+            value = self._info_row(rows, "Changes", " · ".join(changes) or "Clean")
+            if info["conflicts"]:
+                _css(value, "git-conflict")
+            elif changes:
+                _css(value, "git-modified")
+
+            if info.get("upstream"):
+                sync = []
+                if info["ahead"]:
+                    sync.append(f"↑ {info['ahead']} to push")
+                if info["behind"]:
+                    sync.append(f"↓ {info['behind']} to pull")
+                self._info_row(
+                    rows,
+                    "Upstream",
+                    " · ".join(sync) or "Up to date",
+                    hint=info["upstream"],
+                )
+            else:
+                self._info_row(rows, "Upstream", "None")
+
+            if info.get("last_subject"):
+                # A commit subject is prose, not a value: it gets the full
+                # width, wrapped, with who and when underneath.
+                commit = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                _css(commit, "adaptive-info-row")
+                key = Gtk.Label(label="Last commit", xalign=0)
+                _css(key, "adaptive-meta-key")
+                subject = Gtk.Label(label=info["last_subject"], xalign=0)
+                subject.set_line_wrap(True)
+                subject.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                subject.set_max_width_chars(30)
+                _css(subject, "adaptive-row-title")
+                who = Gtk.Label(
+                    label=f"{info.get('last_author', '')} · {_relative_time(info.get('last_at', 0))}",
+                    xalign=0,
+                )
+                _css(who, "adaptive-meta-hint")
+                commit.pack_start(key, False, False, 0)
+                commit.pack_start(subject, False, False, 0)
+                commit.pack_start(who, False, False, 0)
+                rows.pack_start(commit, False, False, 0)
+            rows.show_all()
+
+        self._submit(gitinfo.summary, (root,), done)
+        return box
+
+    def _old_installers(self, items):
+        total = sum(item["bytes"] for item in items)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.pack_start(
+            self._section_label("Old Installers", trailing=_human_size(total)),
+            False,
+            False,
+            0,
+        )
+        group = self._group()
+        group.pack_start(
+            self._note(
+                f"Not opened or changed in {cleanup.OLD_DAYS} days. "
+                "Moving them to the Trash can be undone."
+            ),
+            False,
+            False,
+            0,
+        )
+        for item in items[:5]:
+            last = max(item.get("mtime", 0), item.get("atime", 0))
+            row = self._bar_row(
+                self._icon_name_for(item["name"]),
+                item["name"],
+                _human_size(item["bytes"]),
+                item["bytes"] / (total or 1),
+                SERIES_COLORS[3],
+                tooltip=f"Last used {_relative_time(last)}",
+            )
+            group.pack_start(row, False, False, 0)
+        if len(items) > 5:
+            group.pack_start(self._note(f"+ {len(items) - 5} more"), False, False, 0)
+
+        button = Gtk.Button(label=f"Move {len(items)} to Trash…")
+        button.set_margin_top(4)
+        button.set_margin_bottom(8)
+        _css(button, "adaptive-quiet-button")
+        button.connect("clicked", lambda *_: self._trash_confirmed(items, total))
+        group.pack_start(button, False, False, 0)
+
+        box.pack_start(group, False, False, 0)
+        return box
+
+    def _trash_confirmed(self, items, total):
+        dialog = Gtk.MessageDialog(
+            transient_for=self.window,
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.NONE,
+            text=f"Move {_count_text(len(items), 'item')} to the Trash?",
+        )
+        dialog.format_secondary_text(
+            f"{_human_size(total)} of installers and archives unused for "
+            f"{cleanup.OLD_DAYS} days. You can restore them from the Trash."
+        )
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        trash = dialog.add_button("Move to Trash", Gtk.ResponseType.OK)
+        _css(trash, "destructive-action")
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+
+        def answered(dialog, response):
+            dialog.destroy()
+            if response != Gtk.ResponseType.OK:
+                return
+
+            def work():
+                failed = []
+                for item in items:
+                    try:
+                        Gio.File.new_for_path(item["path"]).trash(None)
+                    except GLib.Error as error:
+                        failed.append(f"{item['name']}: {error.message}")
+                return failed
+
+            def done(failed, error):
+                if error or failed:
+                    self._show_error("Some items stayed", error or "\n".join(failed[:6]))
+                self._selection_key = None
+                self._scan_cache.clear()
+                self.update_selection(self.last_selection)
+
+            self._submit(work, (), done)
+
+        dialog.connect("response", answered)
+        dialog.show_all()
+
+    def _show_duplicates(self, generation, box, result, error):
+        if generation != self.selection_generation or error or not result:
+            return
+        groups, complete = result
+        groups = [group for group in groups if group["reclaimable"] >= 512 * 1024]
+        if not groups:
+            return
+
+        reclaimable = sum(group["reclaimable"] for group in groups)
+        box.pack_start(
+            self._section_label(
+                "Duplicates",
+                trailing=f"{_human_size(reclaimable)} reclaimable" + ("" if complete else "+"),
+            ),
+            False,
+            False,
+            0,
+        )
+        group_box = self._group()
+        group_box.pack_start(
+            self._note(
+                f"{_count_text(len(groups), 'file')} stored more than once in this "
+                "folder, matched by content."
+            ),
+            False,
+            False,
+            0,
+        )
+
+        for group in groups[:5]:
+            first = group["paths"][0]
+            expander = Gtk.Expander()
+            _css(expander, "adaptive-info-row", "adaptive-duplicate")
+            header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            icon = Gtk.Image.new_from_icon_name(self._icon_name_for(os.path.basename(first)), Gtk.IconSize.MENU)
+            icon.set_pixel_size(16)
+            header.pack_start(icon, False, False, 0)
+            label = Gtk.Label(label=os.path.basename(first), xalign=0)
+            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            _css(label, "adaptive-row-title")
+            header.pack_start(label, True, True, 0)
+            count = Gtk.Label(label=f"×{len(group['paths'])}  {_human_size(group['bytes'])}", xalign=1)
+            _css(count, "adaptive-row-value")
+            header.pack_end(count, False, False, 0)
+            expander.set_label_widget(header)
+            expander.set_label_fill(True)
+
+            copies = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            copies.set_margin_start(18)
+            here = self.location_uri and Gio.File.new_for_uri(self.location_uri).get_path()
+            for copy in group["paths"]:
+                shown = os.path.relpath(copy, here) if here and copy.startswith(here + os.sep) else _short_path(copy)
+                link = Gtk.Button(label=shown)
+                link.set_relief(Gtk.ReliefStyle.NONE)
+                link.set_tooltip_text("Show in Files")
+                link.get_child().set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                link.get_child().set_xalign(0)
+                _css(link, "adaptive-path-link")
+                link.connect("clicked", lambda _b, target=copy: _reveal([target]))
+                copies.pack_start(link, False, False, 0)
+            expander.add(copies)
+            group_box.pack_start(expander, False, False, 0)
+
+        if len(groups) > 5:
+            group_box.pack_start(self._note(f"+ {len(groups) - 5} more sets"), False, False, 0)
+        box.pack_start(group_box, False, False, 0)
+        box.show_all()
 
     def _disk_line(self, path):
         """Free space on the disk holding this folder: one line and a thin
@@ -1794,9 +2505,10 @@ class PreviewController:
     def _render_file_shell(self, item, gfile, generation):
         body = self.preview_body
         uri = item.get("uri") or ""
+        name = item.get("name") or "File"
         local_path = gfile.get_path()
         mime = item.get("mime") or ""
-        identity = _file_identity(item.get("name"), mime)
+        identity = _file_identity(name, mime)
 
         preview_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         _css(preview_card, "adaptive-preview-hero")
@@ -1805,7 +2517,17 @@ class PreviewController:
         preview_card.pack_start(media_box, True, True, 0)
         body.pack_start(preview_card, False, False, 0)
 
-        if identity.get("is_code") and local_path:
+        # Sections that depend on the file type fill this box once their
+        # worker returns; it sits between Information and the actions.
+        extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        if local_path and models.handles(name):
+            self._render_model_preview(local_path, uri, media_box, extra, generation)
+        elif local_path and HAVE_PLAYER and mime.startswith(("video/", "audio/")):
+            self._render_player(uri, mime, media_box, gfile)
+        elif local_path and mime == PDF_MIME:
+            self._render_pdf_pager(local_path, media_box, generation)
+        elif identity.get("is_code") and local_path:
             self._render_source_preview(Path(local_path), mime, media_box)
         elif mime.startswith(IMAGE_MIME_PREFIX) or mime == PDF_MIME or mime.startswith("video/"):
             self._render_native_thumbnail_preview(uri, mime, media_box, generation)
@@ -1817,14 +2539,14 @@ class PreviewController:
         else:
             self._icon_preview(media_box, identity, mime, gfile)
 
-        name = Gtk.Label(label=item.get("name") or "File")
-        name.set_line_wrap(True)
-        name.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        name.set_justify(Gtk.Justification.CENTER)
-        name.set_selectable(True)
-        name.set_margin_top(4)
-        _css(name, "adaptive-hero-title")
-        body.pack_start(name, False, False, 0)
+        title = Gtk.Label(label=name)
+        title.set_line_wrap(True)
+        title.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        title.set_justify(Gtk.Justification.CENTER)
+        title.set_selectable(True)
+        title.set_margin_top(4)
+        _css(title, "adaptive-hero-title")
+        body.pack_start(title, False, False, 0)
 
         subtitle = Gtk.Label(label=identity.get("label") or "File")
         subtitle.set_ellipsize(Pango.EllipsizeMode.END)
@@ -1832,8 +2554,17 @@ class PreviewController:
         body.pack_start(subtitle, False, False, 0)
         self._file_subtitle = subtitle
 
+        if local_path:
+            body.pack_start(self._tag_picker([gfile]), False, False, 0)
+
         self._append_details_placeholder()
         self._query_metadata_async(item, gfile, generation)
+
+        body.pack_start(extra, False, False, 0)
+        if local_path and archives.handles(name):
+            self._render_archive_section(local_path, extra, generation)
+        elif local_path and mime.startswith(IMAGE_MIME_PREFIX):
+            self._render_photo_section(local_path, extra, generation)
 
         self._append_actions(
             [
@@ -1843,6 +2574,445 @@ class PreviewController:
             ]
         )
         body.show_all()
+
+    # --------------------------------------------------------------
+    # 3D models and print files
+    # --------------------------------------------------------------
+
+    def _render_model_preview(self, path, uri, box, extra, generation):
+        loading = self._note("Rendering…")
+        loading.set_halign(Gtk.Align.CENTER)
+        loading.set_margin_top(40)
+        loading.set_margin_bottom(40)
+        box.pack_start(loading, False, False, 0)
+
+        def work():
+            suffix = Path(path).suffix.casefold()
+            data = {"kind": "gcode" if suffix in models.GCODE_SUFFIXES else "mesh"}
+            if data["kind"] == "gcode":
+                info = models.gcode_info(path)
+                data["fields"] = info["fields"]
+                data["slicer"] = info["slicer"]
+            else:
+                try:
+                    data["stats"] = models.mesh_stats(models.load_mesh(path))
+                except Exception as error:
+                    data["stats_error"] = str(error)
+
+            image = models.preview_image(path)
+            if image is not None:
+                buffer = io.BytesIO()
+                image.save(buffer, "PNG")
+                data["png"] = buffer.getvalue()
+                # Give the grid the same picture.
+                try:
+                    mtime = os.stat(path).st_mtime
+                    if models.cached_thumbnail(uri, mtime) is None:
+                        models.write_thumbnail(uri, path, image)
+                except Exception:
+                    pass
+            return data
+
+        def done(data, error):
+            if generation != self.selection_generation:
+                return
+            self._clear(box)
+            if error or not data or not data.get("png"):
+                self._fallback_media(box, f"No preview · {error}" if error else "No preview")
+            else:
+                loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+                loader.write(data["png"])
+                loader.close()
+                picture = RoundedPicture(loader.get_pixbuf(), 214, 200)
+                picture.set_halign(Gtk.Align.CENTER)
+                box.pack_start(picture, False, False, 0)
+            box.show_all()
+            if data:
+                self._fill_model_section(extra, data)
+
+        self._submit(work, (), done)
+
+    def _fill_model_section(self, extra, data):
+        rows = []
+        if data["kind"] == "gcode":
+            fields = data.get("fields") or {}
+            title = "Print"
+            time_text = fields.get("time")
+            if not time_text and fields.get("seconds"):
+                try:
+                    total = int(float(fields["seconds"]))
+                    time_text = f"{total // 3600}h {total % 3600 // 60}m"
+                except ValueError:
+                    pass
+            if time_text:
+                rows.append(("Print time", time_text))
+            used = []
+            if fields.get("grams"):
+                used.append(f"{float(fields['grams']):.1f} g")
+            if fields.get("millimetres"):
+                used.append(f"{float(fields['millimetres']) / 1000:.2f} m")
+            elif fields.get("metres"):
+                used.append(fields["metres"].replace("m", " m"))
+            if used:
+                rows.append(("Filament", "  ·  ".join(used)))
+            material = fields.get("material")
+            profile = (fields.get("filament") or "").strip('"')
+            if material or profile:
+                rows.append(("Material", " — ".join(p for p in (material, profile) if p)))
+            layer = []
+            if fields.get("layer_height"):
+                layer.append(f"{fields['layer_height']} mm layers")
+            if fields.get("nozzle"):
+                layer.append(f"{fields['nozzle']} mm nozzle")
+            if layer:
+                rows.append(("Settings", "  ·  ".join(layer)))
+            if fields.get("profile"):
+                rows.append(("Profile", fields["profile"].strip('"')))
+            if fields.get("printer"):
+                rows.append(("Printer", fields["printer"]))
+            if data.get("slicer"):
+                rows.append(("Sliced with", data["slicer"]))
+        else:
+            title = "Model"
+            stats = data.get("stats")
+            if stats:
+                x, y, z = stats["size"]
+                rows.append(("Dimensions", f"{x:.1f} × {y:.1f} × {z:.1f} mm"))
+                rows.append(("Volume", f"{stats['volume'] / 1000:.1f} cm³"))
+                rows.append(("Triangles", f"{stats['triangles']:,}"))
+            elif data.get("stats_error"):
+                rows.append(("Mesh", data["stats_error"]))
+
+        if not rows:
+            return
+        extra.pack_start(self._section_label(title), False, False, 0)
+        group = self._group()
+        for key, value in rows:
+            self._info_row(group, key, value)
+        extra.pack_start(group, False, False, 0)
+        extra.show_all()
+
+    # --------------------------------------------------------------
+    # Video and audio
+    # --------------------------------------------------------------
+
+    def _render_player(self, uri, mime, box, gfile):
+        self._stop_player()
+        is_video = mime.startswith("video/")
+
+        pipeline = Gst.ElementFactory.make("playbin", None)
+        if pipeline is None:
+            self._render_native_thumbnail_preview(uri, mime, box, self.selection_generation)
+            return
+        pipeline.set_property("uri", uri)
+
+        frame = None
+        if is_video:
+            sink = Gst.ElementFactory.make("gtksink", None)
+            pipeline.set_property("video-sink", sink)
+            video = sink.props.widget
+            video.set_halign(Gtk.Align.FILL)
+            video.set_valign(Gtk.Align.FILL)
+            # gtksink asks for the video's own size (1080 px tall for a 1080p
+            # clip). As an overlay child it gets exactly the placeholder's
+            # size instead; the placeholder is resized to the clip's aspect
+            # once the first frame is decoded.
+            frame = Gtk.DrawingArea()
+            frame.set_size_request(214, 120)
+            holder = Gtk.Overlay()
+            holder.add(frame)
+            holder.add_overlay(video)
+            _css(holder, "adaptive-video")
+            box.pack_start(holder, False, False, 0)
+        else:
+            self._icon_preview(box, _file_identity(self._current_name, mime), mime, gfile)
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        controls.set_margin_top(4)
+        play = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
+        play.set_tooltip_text("Play")
+        _css(play, "adaptive-round-button")
+        controls.pack_start(play, False, False, 0)
+
+        scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 1.0, 0.001)
+        scale.set_draw_value(False)
+        scale.set_hexpand(True)
+        _css(scale, "adaptive-scrubber")
+        controls.pack_start(scale, True, True, 0)
+
+        clock = Gtk.Label(label="0:00")
+        _css(clock, "adaptive-row-value")
+        controls.pack_end(clock, False, False, 0)
+        box.pack_start(controls, False, False, 0)
+
+        state = {"pipeline": pipeline, "playing": False, "duration": 0, "timer": 0, "bus": None}
+        self._player = state
+
+        def stamp(nanoseconds):
+            seconds = max(0, int(nanoseconds / Gst.SECOND))
+            return f"{seconds // 60}:{seconds % 60:02d}" if seconds < 3600 else \
+                f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+        def tick():
+            if self._player is not state:
+                return GLib.SOURCE_REMOVE
+            ok, position = pipeline.query_position(Gst.Format.TIME)
+            if not state["duration"]:
+                found, duration = pipeline.query_duration(Gst.Format.TIME)
+                if found and duration > 0:
+                    state["duration"] = duration
+            if frame is not None and not state.get("sized"):
+                pad = pipeline.emit("get-video-pad", 0)
+                caps = pad.get_current_caps() if pad is not None else None
+                if caps is not None and caps.get_size() > 0:
+                    structure = caps.get_structure(0)
+                    ok_w, width = structure.get_int("width")
+                    ok_h, height = structure.get_int("height")
+                    if ok_w and ok_h and width > 0:
+                        frame.set_size_request(214, max(80, min(260, int(214 * height / width))))
+                        state["sized"] = True
+            if ok and state["duration"]:
+                scale.handler_block_by_func(on_seek)
+                scale.set_value(position / state["duration"])
+                scale.handler_unblock_by_func(on_seek)
+                clock.set_text(f"{stamp(position)} / {stamp(state['duration'])}")
+            return GLib.SOURCE_CONTINUE
+
+        def set_playing(playing):
+            state["playing"] = playing
+            pipeline.set_state(Gst.State.PLAYING if playing else Gst.State.PAUSED)
+            play.get_image().set_from_icon_name(
+                "media-playback-pause-symbolic" if playing else "media-playback-start-symbolic",
+                Gtk.IconSize.BUTTON,
+            )
+            play.set_tooltip_text("Pause" if playing else "Play")
+
+        def on_seek(_scale):
+            if state["duration"]:
+                pipeline.seek_simple(
+                    Gst.Format.TIME,
+                    Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT,
+                    int(scale.get_value() * state["duration"]),
+                )
+
+        def on_message(_bus, message):
+            if self._player is not state:
+                return
+            if message.type == Gst.MessageType.EOS:
+                set_playing(False)
+                pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, 0)
+            elif message.type == Gst.MessageType.ERROR:
+                error, _debug = message.parse_error()
+                _log(f"Player error: {error.message}")
+                clock.set_text("Can't play")
+                play.set_sensitive(False)
+
+        play.connect("clicked", lambda *_: set_playing(not state["playing"]))
+        scale.connect("value-changed", on_seek)
+
+        bus = pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message", on_message)
+        state["bus"] = bus
+        state["timer"] = GLib.timeout_add(250, tick)
+
+        # Paused shows the first frame and learns the duration without
+        # making a sound.
+        pipeline.set_state(Gst.State.PAUSED)
+
+    def _stop_player(self):
+        state = getattr(self, "_player", None)
+        self._player = None
+        if not state:
+            return
+        try:
+            state["pipeline"].set_state(Gst.State.NULL)
+            if state.get("bus") is not None:
+                state["bus"].remove_signal_watch()
+            if state.get("timer"):
+                GLib.source_remove(state["timer"])
+        except Exception:
+            _log_exception("Stopping the player failed")
+
+    # --------------------------------------------------------------
+    # PDF pages
+    # --------------------------------------------------------------
+
+    def _render_pdf_pager(self, path, box, generation):
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        holder.pack_start(self._note("Loading…"), False, False, 40)
+        box.pack_start(holder, False, False, 0)
+
+        nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        nav.set_margin_top(4)
+        back = Gtk.Button.new_from_icon_name("go-previous-symbolic", Gtk.IconSize.BUTTON)
+        forward = Gtk.Button.new_from_icon_name("go-next-symbolic", Gtk.IconSize.BUTTON)
+        for button in (back, forward):
+            _css(button, "adaptive-round-button")
+        where = Gtk.Label(label="")
+        _css(where, "adaptive-row-value")
+        nav.pack_start(back, False, False, 0)
+        nav.pack_start(where, True, True, 0)
+        nav.pack_end(forward, False, False, 0)
+        box.pack_start(nav, False, False, 0)
+        nav.set_no_show_all(True)
+
+        state = {"page": 1, "count": 0}
+
+        def show(page):
+            state["page"] = page
+            back.set_sensitive(page > 1)
+            forward.set_sensitive(page < state["count"])
+            if state["count"]:
+                where.set_text(f"Page {page} of {state['count']}")
+
+            def done(png, error, wanted=page):
+                if generation != self.selection_generation or state["page"] != wanted:
+                    return
+                self._clear(holder)
+                if error:
+                    holder.pack_start(self._note(f"Can't show this page · {error}"), False, False, 20)
+                else:
+                    picture = RoundedPicture(GdkPixbuf.Pixbuf.new_from_file(png), 214, 290)
+                    picture.set_halign(Gtk.Align.CENTER)
+                    holder.pack_start(picture, False, False, 0)
+                holder.show_all()
+
+            self._submit(media.pdf_page, (path, page, 428), done)
+
+        def counted(count, error):
+            if generation != self.selection_generation:
+                return
+            state["count"] = count or 0
+            if state["count"] > 1:
+                nav.set_no_show_all(False)
+                nav.show_all()
+            show(1)
+
+        def step(delta):
+            try:
+                show(max(1, min(state["count"], state["page"] + delta)))
+            except Exception:
+                _log_exception("PDF paging failed")
+
+        back.connect("clicked", lambda *_: step(-1))
+        forward.connect("clicked", lambda *_: step(1))
+        self._submit(media.pdf_page_count, (path,), counted)
+
+    # --------------------------------------------------------------
+    # Archives
+    # --------------------------------------------------------------
+
+    def _render_archive_section(self, path, extra, generation):
+        def done(data, error):
+            if generation != self.selection_generation:
+                return
+            trailing = "partial" if data and data.get("partial") else None
+            extra.pack_start(self._section_label("Contents", trailing=trailing), False, False, 0)
+            group = self._group()
+            if error:
+                group.pack_start(self._note(f"Can't read this archive · {error}"), False, False, 0)
+                extra.pack_start(group, False, False, 0)
+                extra.show_all()
+                return
+
+            details = data.get("details") or {}
+            if details.get("Application"):
+                self._info_row(group, "Application", details["Application"])
+            for key in ("Package", "Version", "Architecture"):
+                if details.get(key):
+                    self._info_row(group, key, details[key])
+
+            self._info_row(
+                group,
+                "Holds",
+                f"{_count_text(data['files'], 'file')} · {_count_text(data['folders'], 'folder')}",
+            )
+            ratio = data["unpacked"] / data["packed"] if data["packed"] else 0
+            self._info_row(
+                group,
+                "Unpacked",
+                _human_size(data["unpacked"]),
+                hint=f"{ratio:.1f}× the archive" if ratio >= 1.05 else None,
+            )
+
+            if "executable" in details:
+                if details["executable"]:
+                    self._info_row(group, "Runs as app", "Yes")
+                else:
+                    button = Gtk.Button(label="Make Executable")
+                    _css(button, "adaptive-pill-button")
+
+                    def allow(_button):
+                        try:
+                            archives.make_executable(path)
+                            button.set_label("Done")
+                            button.set_sensitive(False)
+                        except OSError as failure:
+                            self._show_error("Couldn't change permissions", str(failure))
+
+                    button.connect("clicked", allow)
+                    self._widget_row(group, "Runs as app", button)
+
+            top = [entry for entry in data.get("top") or [] if entry["bytes"] > 0][:6]
+            total = data["unpacked"] or 1
+            for index, entry in enumerate(top):
+                group.pack_start(
+                    self._bar_row(
+                        "folder" if entry["is_dir"] else self._icon_name_for(entry["name"]),
+                        entry["name"],
+                        _human_size(entry["bytes"]),
+                        entry["bytes"] / total,
+                        ACCENT if index == 0 else SERIES_COLORS[3],
+                    ),
+                    False,
+                    False,
+                    0,
+                )
+
+            if details.get("Description"):
+                note = self._note(details["Description"])
+                group.pack_start(note, False, False, 0)
+
+            extra.pack_start(group, False, False, 0)
+            extra.show_all()
+
+        self._submit(archives.inspect, (path,), done)
+
+    # --------------------------------------------------------------
+    # Photos
+    # --------------------------------------------------------------
+
+    def _render_photo_section(self, path, extra, generation):
+        def done(details, error):
+            if generation != self.selection_generation or error or not details:
+                return
+            gps = details.pop("_gps", None)
+            if not details and not gps:
+                return
+            extra.pack_start(self._section_label("Camera"), False, False, 0)
+            group = self._group()
+            for key, value in details.items():
+                self._info_row(group, key, value)
+            if gps:
+                latitude, longitude = gps
+                where = (
+                    f"{abs(latitude):.4f}° {'N' if latitude >= 0 else 'S'}, "
+                    f"{abs(longitude):.4f}° {'E' if longitude >= 0 else 'W'}"
+                )
+                button = Gtk.Button(label="Open Map")
+                _css(button, "adaptive-pill-button")
+                url = (
+                    "https://www.openstreetmap.org/"
+                    f"?mlat={latitude:.6f}&mlon={longitude:.6f}#map=15/{latitude:.6f}/{longitude:.6f}"
+                )
+                button.connect("clicked", lambda *_: Gio.AppInfo.launch_default_for_uri(url, None))
+                button.set_tooltip_text("Opens OpenStreetMap in the browser")
+                self._widget_row(group, "Location", button, hint=where)
+            extra.pack_start(group, False, False, 0)
+            extra.show_all()
+
+        self._submit(media.photo_details, (path,), done)
 
     def _icon_preview(self, box, identity, mime, gfile=None):
         icon = None
@@ -1878,7 +3048,8 @@ class PreviewController:
             0,
         )
 
-        future = _EXECUTOR.submit(
+        future = _run_async(
+            _EXECUTOR,
             self._native_thumbnail_worker,
             uri,
             mime,
@@ -2347,6 +3518,11 @@ class PreviewController:
         except Exception:
             pass
 
+        if path:
+            self._append_git_row(section, path, generation)
+            if not is_dir:
+                self._append_checksum_row(section, path, generation)
+
         section.show_all()
 
         if dimensions_row is not None:
@@ -2362,6 +3538,147 @@ class PreviewController:
                     row.set_text("—" if error else text)
 
             self._submit(dimensions, (), done)
+
+    def _append_git_row(self, section, path, generation):
+        root = gitinfo.repo_root(path)
+        if root is None:
+            return
+        value = self._info_row(section, "Git", "…")
+
+        def work():
+            return gitinfo.badge(path), gitinfo.last_change(path)
+
+        words = {
+            "modified": "Modified",
+            "added": "Staged",
+            "untracked": "Not tracked",
+            "conflict": "Conflict",
+        }
+
+        def done(result, error):
+            if generation != self.selection_generation:
+                return
+            if error or result is None:
+                value.set_text("—")
+                return
+            state, last = result
+            text = words.get(state, "Committed" if last else "—")
+            value.set_text(text)
+            context = value.get_style_context()
+            for kind in words:
+                context.remove_class(f"git-{kind}")
+            if state:
+                context.add_class(f"git-{state}")
+            if last:
+                author, when, subject = last
+                hint = Gtk.Label(
+                    label=f"{subject}\n{author} · {_relative_time(when)}" if subject else author,
+                    xalign=1,
+                )
+                hint.set_line_wrap(True)
+                hint.set_justify(Gtk.Justification.RIGHT)
+                hint.set_max_width_chars(26)
+                _css(hint, "adaptive-meta-hint")
+                value.get_parent().pack_start(hint, False, False, 0)
+                hint.show()
+
+        self._submit(work, (), done)
+
+    def _append_checksum_row(self, section, path, generation):
+        button = Gtk.Button(label="Compute")
+        button.set_tooltip_text("SHA-256 of the whole file; the result is copied")
+        _css(button, "adaptive-pill-button")
+        holder = self._widget_row(section, "SHA-256", button)
+
+        def start(_button):
+            button.set_sensitive(False)
+            button.set_label("0%")
+
+            def progress(fraction):
+                GLib.idle_add(
+                    lambda: button.set_label(f"{fraction * 100:.0f}%")
+                    if generation == self.selection_generation else None
+                )
+
+            def cancelled():
+                return generation != self.selection_generation
+
+            def done(digest, error):
+                if generation != self.selection_generation or digest is None:
+                    return
+                holder.remove(button)
+                if error:
+                    label = Gtk.Label(label="Couldn't read the file", xalign=1)
+                    _css(label, "adaptive-meta-hint")
+                else:
+                    label = Gtk.Label(label=f"{digest[:10]}…{digest[-10:]}", xalign=1)
+                    label.set_tooltip_text(f"{digest}\nCopied to the clipboard")
+                    label.set_selectable(True)
+                    _css(label, "adaptive-meta-value", "adaptive-mono")
+                    self._copy_text(digest)
+                holder.pack_end(label, False, False, 0)
+                holder.show_all()
+
+            self._submit(cleanup.sha256, (path, progress, cancelled), done)
+
+        button.connect("clicked", start)
+
+    def _widget_row(self, parent, key, widget, hint=None):
+        """An Information row whose value is a control."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        _css(row, "adaptive-info-row")
+        left = Gtk.Label(label=key, xalign=0)
+        left.set_valign(Gtk.Align.CENTER)
+        _css(left, "adaptive-meta-key")
+        row.pack_start(left, False, False, 0)
+        widget.set_valign(Gtk.Align.CENTER)
+        row.pack_end(widget, False, False, 0)
+        if hint:
+            extra = Gtk.Label(label=hint, xalign=1)
+            extra.set_hexpand(True)
+            _css(extra, "adaptive-meta-hint")
+            row.pack_end(extra, True, True, 0)
+        parent.pack_start(row, False, False, 0)
+        return row
+
+    def _tag_picker(self, gfiles):
+        """Seven tag dots under the title; a filled dot is applied. Clicking
+        toggles that tag on the selection, as the Tags menu does."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        row.set_halign(Gtk.Align.CENTER)
+        row.set_margin_top(6)
+        _css(row, "adaptive-tag-picker")
+
+        applied = set(filetags.get(gfiles[0])) if len(gfiles) == 1 else set()
+        dots = {}
+
+        def refresh():
+            for tag, dot in dots.items():
+                dot.set_filled(tag in applied)
+
+        for tag in filetags.TAG_IDS:
+            dot = TagDot(_rgb(filetags.COLORS[tag]))
+            dot.set_tooltip_text(filetags.LABELS[tag])
+
+            def toggle(_button, which=tag):
+                try:
+                    now_on = filetags.toggle(gfiles, which)
+                except Exception as error:
+                    self._show_error("Couldn't change tags", str(error))
+                    return
+                if now_on:
+                    applied.add(which)
+                else:
+                    applied.discard(which)
+                refresh()
+                _refresh_file_badges([gfile.get_uri() for gfile in gfiles])
+
+            dot.connect("clicked", toggle)
+            dots[tag] = dot
+            row.pack_start(dot, False, False, 0)
+
+        refresh()
+        return row
 
     def _append_actions(self, actions):
         """Quick actions as a row of glyph-over-label buttons, as in Finder's
@@ -2586,7 +3903,7 @@ class PreviewController:
         """Run function(*args) off the main loop and hand (result, error) to
         callback on it. Workers return plain data; GTK is only touched in the
         callback."""
-        future = (executor or _EXECUTOR).submit(function, *args)
+        future = _run_async(executor or _EXECUTOR, function, *args)
 
         def done(fut):
             try:
@@ -2775,6 +4092,7 @@ class PreviewController:
         values = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         right = Gtk.Label(label=str(value), xalign=1)
         right.set_line_wrap(True)
+        right.set_max_width_chars(24)
         right.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
         right.set_selectable(True)
         right.set_can_focus(False)
@@ -2911,10 +4229,54 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
 
             GLib.idle_add(controller.update_selection, snapshots)
 
+            if self is _MENU_OWNER and files:
+                local = [info for info in files if info.get_uri_scheme() == "file"]
+                if local:
+                    return [self._tags_menu(controller, local)]
+
         except Exception:
             _log_exception("get_file_items failed")
 
         return []
+
+    def _tags_menu(self, controller, files):
+        """Tags ▸ one item per colour. A colour every selected item already
+        has is marked, and choosing it takes it off; otherwise it is added."""
+        locations = [info.get_location() for info in files]
+        # Reading tags is a metadata lookup per file; past a few hundred the
+        # menu would lag, so large selections just skip the marks.
+        current = [set(filetags.get(loc)) for loc in locations] if len(locations) <= 300 else []
+
+        top = Nautilus.MenuItem(name="AdaptiveTags::menu", label="Tags", tip="Colour tags")
+        submenu = Nautilus.Menu()
+        top.set_submenu(submenu)
+
+        def apply(_item, tag=None):
+            try:
+                if tag is None:
+                    filetags.clear(locations)
+                else:
+                    filetags.toggle(locations, tag)
+            except Exception as error:
+                _log(f"Tagging failed: {error}")
+            _refresh_file_badges([info.get_uri() for info in files])
+            controller._selection_key = None
+            GLib.idle_add(controller.update_selection, list(controller.last_selection))
+
+        for tag in filetags.TAG_IDS:
+            marked = bool(current) and all(tag in tags for tags in current)
+            item = Nautilus.MenuItem(
+                name=f"AdaptiveTags::{tag}",
+                label=filetags.LABELS[tag] + ("  ✓" if marked else ""),
+            )
+            item.connect("activate", apply, tag)
+            submenu.append_item(item)
+
+        if any(current):
+            item = Nautilus.MenuItem(name="AdaptiveTags::clear", label="Remove Tags")
+            item.connect("activate", apply, None)
+            submenu.append_item(item)
+        return top
 
     def get_background_items(self, *args):
         try:
@@ -2945,7 +4307,7 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
                 name="AdaptivePreview::toggle_inspector",
                 label=(
                     "Hide Inspector"
-                    if controller.panel_visible
+                    if controller._panel_shown()
                     else "Show Inspector"
                 ),
                 tip="Show or hide the Adaptive inspector panel",
@@ -2961,3 +4323,145 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
             _log_exception("get_background_items failed")
 
         return []
+
+
+class AdaptiveFilesBadges(GObject.GObject, Nautilus.InfoProvider):
+    """Icon emblems for git state and colour tags, and previews for 3D and
+    print files that Ubuntu has no thumbnailer for."""
+
+    def __init__(self):
+        global _INFO_OWNER
+
+        super().__init__()
+        # Same duplicate-instance guard as the menu: one instance does the work.
+        if _INFO_OWNER is None:
+            _INFO_OWNER = self
+        self._watches = {}
+        self._debounce = {}
+        self._thumbs_busy = set()
+        self._refreshing = set()
+        self._thumbs_failed = set()
+
+    def update_file_info_full(self, provider, handle, closure, file):
+        done = Nautilus.OperationResult.COMPLETE
+        if self is not _INFO_OWNER:
+            return done
+        try:
+            if file.get_uri_scheme() != "file":
+                return done
+            location = file.get_location()
+            path = location.get_path()
+            if not path:
+                return done
+
+            _remember_file(file)
+
+            for tag in filetags.get(location):
+                file.add_emblem(f"adaptive-tag-{tag}")
+
+            self._maybe_thumbnail(file.get_uri(), path)
+
+            root = gitinfo.repo_root(path)
+            if root is None or path == root:
+                return done
+            self._watch_repo(root)
+
+            # Emblems are added here, synchronously, from the cached status.
+            # nautilus-python's asynchronous completion path did not apply
+            # emblems added after IN_PROGRESS, and Nautilus fetches extension
+            # info one file at a time anyway, so async bought nothing. A
+            # stale or missing cache is refreshed in the background, and the
+            # refresh redraws this repository's icons when it lands.
+            cached = gitinfo.peek(root)
+            try:
+                mtime = os.lstat(path).st_mtime
+            except OSError:
+                mtime = 0
+            if cached is None or time.time() - cached[0] > GIT_STALE_SECONDS or mtime > cached[0]:
+                self._refresh_repo(root)
+            if cached is not None:
+                state = gitinfo.badge(path, cached[1])
+                if state:
+                    file.add_emblem(f"adaptive-git-{state}")
+            return done
+        except Exception:
+            _log_exception("update_file_info_full failed")
+            return done
+
+    def _refresh_repo(self, root):
+        if root in self._refreshing:
+            return
+        self._refreshing.add(root)
+        prefix = Gio.File.new_for_path(root).get_uri() + "/"
+
+        def report(_future):
+            def redraw():
+                self._refreshing.discard(root)
+                _refresh_file_badges(prefix=prefix)
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(redraw)
+
+        _run_async(_BACKGROUND, gitinfo.refresh, root).add_done_callback(report)
+
+    def cancel_update(self, provider, handle):
+        # The worker finishes regardless; Nautilus drops a completion for a
+        # handle it has already cancelled.
+        pass
+
+    def _maybe_thumbnail(self, uri, path):
+        if not models.HAVE_RENDERER or not models.handles(path):
+            return
+        try:
+            st = os.stat(path)
+        except OSError:
+            return
+        if st.st_size > 150 * 1024 * 1024:
+            return
+        key = (path, int(st.st_mtime))
+        if key in self._thumbs_busy or key in self._thumbs_failed:
+            return
+        if models.cached_thumbnail(uri, st.st_mtime) is not None:
+            return
+
+        self._thumbs_busy.add(key)
+
+        def work():
+            image = models.preview_image(path)
+            if image is None:
+                raise RuntimeError("no preview")
+            models.write_thumbnail(uri, path, image)
+
+        def report(future):
+            self._thumbs_busy.discard(key)
+            try:
+                future.result()
+            except Exception as error:
+                self._thumbs_failed.add(key)
+                _log(f"Model preview failed for {path}: {error}")
+
+        _run_async(_BACKGROUND, work).add_done_callback(report)
+
+    def _watch_repo(self, root):
+        """Refresh a repository's badges when its index changes - a commit,
+        an add or a checkout in a terminal - which Files would not notice."""
+        if root in self._watches:
+            return
+        index = Gio.File.new_for_path(os.path.join(root, ".git", "index"))
+        try:
+            monitor = index.monitor_file(Gio.FileMonitorFlags.NONE, None)
+        except GLib.Error:
+            self._watches[root] = None
+            return
+
+        def fire():
+            self._debounce.pop(root, None)
+            self._refresh_repo(root)
+            return GLib.SOURCE_REMOVE
+
+        def changed(*_args):
+            if root not in self._debounce:
+                self._debounce[root] = GLib.timeout_add(700, fire)
+
+        monitor.connect("changed", changed)
+        self._watches[root] = monitor

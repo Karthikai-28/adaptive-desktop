@@ -578,3 +578,143 @@ rubberband,
     border-radius: 10px;
     background-color: alpha(@ad_accent, 0.12);
 }
+
+/* Toolbar toggles for the inspector and terminal: accent glyph when on */
+.adaptive-toolbar-toggle:checked {
+    background-color: @ad_fill_strong;
+    color: @ad_accent;
+}
+
+/* Terminal drawer under the file view */
+.adaptive-terminal-slot {
+    border-top: 1px solid @ad_hairline;
+    background-color: #141416;
+}
+
+.adaptive-terminal-slot vte-terminal {
+    padding: 6px 10px;
+}
+
+/* Small controls inside the panel */
+.adaptive-pill-button {
+    min-height: 22px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 99px;
+    background-color: @ad_fill;
+    color: @ad_accent;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.adaptive-pill-button:hover {
+    background-color: @ad_fill_strong;
+}
+
+.adaptive-pill-button:disabled {
+    background-color: transparent;
+    color: @ad_muted;
+}
+
+.adaptive-quiet-button {
+    min-height: 26px;
+    border-radius: 7px;
+    background-color: @ad_fill;
+    color: @ad_text;
+    font-size: 12px;
+}
+
+.adaptive-quiet-button:hover {
+    background-color: @ad_fill_strong;
+}
+
+.adaptive-round-button {
+    min-height: 26px;
+    min-width: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 99px;
+    background-color: @ad_fill;
+    color: @ad_text;
+}
+
+.adaptive-round-button:hover {
+    background-color: @ad_fill_strong;
+}
+
+.adaptive-scrubber trough {
+    min-height: 4px;
+}
+
+.adaptive-scrubber slider {
+    min-width: 12px;
+    min-height: 12px;
+    margin: -5px 0;
+}
+
+.adaptive-video {
+    border-radius: 8px;
+    background-color: #000000;
+}
+
+/* Tags */
+.adaptive-tag-dot {
+    min-height: 20px;
+    min-width: 20px;
+    padding: 1px;
+    border: none;
+    border-radius: 99px;
+    background: none;
+}
+
+.adaptive-tag-dot:hover {
+    background-color: @ad_fill;
+}
+
+/* Git: the change states are status, so they take status colours */
+.adaptive-branch {
+    padding: 0 7px;
+    border-radius: 99px;
+    background-color: @ad_fill;
+    color: @ad_muted;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+}
+
+.adaptive-meta-value.git-modified,
+.adaptive-meta-value.git-conflict {
+    color: @ad_warning;
+}
+
+.adaptive-meta-value.git-conflict {
+    color: @ad_danger;
+}
+
+.adaptive-meta-value.git-added {
+    color: @ad_success;
+}
+
+.adaptive-meta-value.git-untracked {
+    color: @ad_muted;
+}
+
+/* Duplicate sets */
+.adaptive-duplicate arrow {
+    min-width: 12px;
+    min-height: 12px;
+    color: @ad_tertiary;
+}
+
+.adaptive-path-link {
+    min-height: 22px;
+    padding: 0 4px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: @ad_accent;
+    font-size: 11px;
+}
+
+.adaptive-path-link:hover {
+    background-color: @ad_fill;
+}
