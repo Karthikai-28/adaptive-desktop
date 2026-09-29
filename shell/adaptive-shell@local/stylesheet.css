@@ -1,8 +1,8 @@
 /* Adaptive Desktop Shell v1.6 — GNOME Shell 42 */
 
 #panel {
-    background-color: rgba(7, 16, 26, 0.98);
-    border-bottom: 1px solid rgba(120, 169, 255, 0.10);
+    background-color: rgba(28, 28, 30, 0.98);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow: none;
 }
 
@@ -13,15 +13,15 @@
     margin: 1px 3px;
     padding: 0 11px;
     border-radius: 7px;
-    border: 1px solid rgba(120, 169, 255, 0.09);
-    background-color: rgba(17, 26, 40, 0.64);
-    color: #F2F6EF;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background-color: rgba(44, 44, 46, 0.64);
+    color: #F5F5F7;
 }
 
 .adaptive-stock-clock:hover,
 .adaptive-stock-clock:focus {
-    border-color: rgba(120, 169, 255, 0.19);
-    background-color: rgba(30, 47, 70, 0.82);
+    border-color: rgba(255, 255, 255, 0.19);
+    background-color: rgba(58, 58, 60, 0.82);
 }
 
 /* ---------- interactive bottom dock ---------- */
@@ -41,22 +41,22 @@
     border-radius: 14px;
     border: 1px solid transparent;
     background-color: transparent;
-    color: #A9BBD3;
+    color: #98989D;
 }
 
 .adaptive-dock-button:hover {
-    border-color: rgba(120, 169, 255, 0.16);
-    background-color: rgba(27, 42, 61, 0.86);
+    border-color: rgba(255, 255, 255, 0.16);
+    background-color: rgba(58, 58, 60, 0.86);
 }
 
 .adaptive-dock-button:focus {
-    border-color: rgba(102, 224, 255, 0.34);
-    background-color: rgba(27, 42, 61, 0.90);
+    border-color: rgba(10, 132, 255, 0.34);
+    background-color: rgba(58, 58, 60, 0.90);
 }
 
 .adaptive-dock-button.active {
-    border-color: rgba(102, 224, 255, 0.22);
-    background-color: rgba(120, 169, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.22);
+    background-color: rgba(255, 255, 255, 0.10);
 }
 
 .adaptive-app-dock-content {
@@ -77,16 +77,16 @@
     width: 4px;
     height: 4px;
     border-radius: 2px;
-    background-color: rgba(150, 164, 184, 0.76);
+    background-color: rgba(235, 235, 245, 0.76);
 }
 
 .adaptive-running-dot.active {
-    background-color: #66E0FF;
+    background-color: #0A84FF;
 }
 
 .adaptive-running-count {
     margin-left: 1px;
-    color: #96A4B8;
+    color: #98989D;
     font-size: 8px;
     font-weight: 700;
 }
@@ -96,7 +96,7 @@
     width: 1px;
     height: 38px;
     margin: 9px 2px 7px 3px;
-    background-color: rgba(48, 66, 92, 0.58);
+    background-color: rgba(72, 72, 74, 0.58);
 }
 
 .adaptive-utility-dock-button {
@@ -106,9 +106,9 @@
 .adaptive-tooltip {
     padding: 6px 10px;
     border-radius: 8px;
-    border: 1px solid rgba(48, 66, 92, 0.58);
-    background-color: rgba(17, 26, 40, 0.98);
-    color: #F2F6EF;
+    border: 1px solid rgba(72, 72, 74, 0.58);
+    background-color: rgba(44, 44, 46, 0.98);
+    color: #F5F5F7;
     font-size: 11px;
     font-weight: 600;
     box-shadow: 0 7px 20px rgba(0, 0, 0, 0.38);
@@ -116,25 +116,25 @@
 
 .adaptive-dock-popup .popup-menu-content {
     border-radius: 12px;
-    border: 1px solid rgba(120, 169, 255, 0.14);
-    background-color: rgba(9, 19, 31, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background-color: rgba(28, 28, 30, 0.98);
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
 }
 
 .adaptive-dock-popup .popup-menu-item {
     min-height: 30px;
     border-radius: 8px;
-    color: #E8EEF7;
+    color: #F5F5F7;
 }
 
 .adaptive-dock-popup .popup-menu-item:focus,
 .adaptive-dock-popup .popup-menu-item:hover {
-    background-color: rgba(120, 169, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
 .adaptive-system-status-value {
     max-width: 150px;
-    color: #96A4B8;
+    color: #98989D;
     font-size: 10px;
 }
 
@@ -159,7 +159,7 @@
 
 /* Calm Adaptive overview background. */
 #overviewGroup {
-    background-color: #08111B;
+    background-color: #1E1E20;
 }
 
 .overview-controls {
@@ -172,26 +172,26 @@
     min-height: 38px;
     padding: 3px 13px;
     border-radius: 12px;
-    border: 1px solid rgba(120, 169, 255, 0.15);
-    background-color: rgba(15, 27, 43, 0.88);
-    color: #F2F6EF;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background-color: rgba(36, 36, 38, 0.88);
+    color: #F5F5F7;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
 }
 
 .search-entry:hover,
 .search-entry:focus {
-    border-color: rgba(102, 224, 255, 0.28);
-    background-color: rgba(21, 36, 55, 0.94);
+    border-color: rgba(255, 255, 255, 0.28);
+    background-color: rgba(44, 44, 46, 0.94);
 }
 
 /* Workspace preview frames */
 .workspace-thumbnail {
     border-radius: 14px;
-    background-color: rgba(17, 26, 40, 0.76);
+    background-color: rgba(44, 44, 46, 0.76);
 }
 
 .workspace-thumbnail-indicator {
-    border: 2px solid rgba(120, 169, 255, 0.92);
+    border: 2px solid rgba(10, 132, 255, 0.92);
     border-radius: 14px;
 }
 
@@ -207,14 +207,14 @@
 
 .app-well-app:hover .overview-icon,
 .grid-search-result:hover .overview-icon {
-    background-color: rgba(120, 169, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.10);
 }
 
 /* Keep the top clock pill visually connected to the popup */
 .adaptive-stock-clock {
-    border-color: rgba(120, 169, 255, 0.15);
-    background-color: rgba(14, 27, 44, 0.90);
-    color: #F2F6EF;
+    border-color: rgba(255, 255, 255, 0.15);
+    background-color: rgba(36, 36, 38, 0.90);
+    color: #F5F5F7;
     font-weight: 650;
 }
 
@@ -439,7 +439,6 @@
     font-size: 76px;
     font-weight: 200;
     font-feature-settings: "tnum";
-    letter-spacing: 1px;
 }
 
 .unlock-dialog-clock-date {
@@ -447,7 +446,6 @@
     color: #FFFFFF;
     font-size: 18px;
     font-weight: 400;
-    letter-spacing: 0.4px;
 }
 
 /* Running-process line. Dim white rather than an accent colour: on an OLED
@@ -458,7 +456,6 @@
     color: rgba(255, 255, 255, 0.55);
     font-size: 12px;
     font-weight: 500;
-    letter-spacing: 0.8px;
     text-align: center;
 }
 
@@ -471,7 +468,6 @@
     color: rgba(255, 255, 255, 0.68);
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.6px;
 }
 
 /* ---------- unlock prompt ---------- */
@@ -579,14 +575,12 @@
     color: rgba(255, 255, 255, 0.62);
     font-size: 92px;
     font-weight: 200;
-    letter-spacing: 1px;
 }
 
 .adaptive-aod-date {
     color: rgba(255, 255, 255, 0.38);
     font-size: 17px;
     font-weight: 400;
-    letter-spacing: 0.5px;
 }
 
 
@@ -596,11 +590,11 @@
  * per application, full system telemetry, and GNOME's own calendar. No
  * controls beyond Do Not Disturb and Clear - the aggregate menu owns the rest.
  *
- * LOOK. A HUD on deep-space navy: one gradient panel with a cyan hairline,
- * three glass cards inside it (system, notifications, calendar), readouts set
- * in JetBrains Mono with tracked capitals for labels, and a cyan-to-violet
- * accent reserved for the few things that are "now" - today, the live dot, the
- * count badge, an enabled switch.
+ * LOOK. Apple's dark appearance, as the whole desktop now uses it (see
+ * "Adaptive palette" at the end of this file): a graphite menu material, cards
+ * one step lighter, white labels in three strengths, and a single accent -
+ * system blue - for whatever is selected, on, or today. Green, orange and red
+ * are status colours only. No gradients, no glows.
  *
  * SCOPE. Everything hangs off `.adaptive-shade-menu` (added to the popup by
  * shade.js - GNOME 42 gives the date menu no class of its own, which is why
@@ -608,15 +602,9 @@
  * or `#calendarArea`, GNOME's id for the popup's contents. The id is also what
  * lifts these rules over Yaru's, several of which carry !important.
  *
- * TYPE. Nothing below 10px, and 10px only for tracked capitals. Inter carries
- * the UI, JetBrains Mono the numbers; both are in ~/.local/share/fonts.
- *
- * Palette, extending tokens/adaptive.tokens.json:
- *   void #05090F · panel #0B1424 · glass rgba(20,34,56,.78)
- *   text #EAF2FF · secondary #9FB3CC · muted #6D829E
- *   cyan #66E0FF · accent #78A9FF · violet #9A8BFF
- *   success #65D9B5 · warning #F3C96B · danger #FF7A90
- * No blur: GNOME 42 St has none and the project does not fake it.
+ * TYPE. Inter throughout (the nearest free face to SF Pro), with tabular
+ * figures wherever numbers tick. Section labels are sentence case, not
+ * tracked capitals.
  *
  * One block. Do not add override rules further down the file.
  */
@@ -626,12 +614,10 @@
  * --------------------------------------------------------------- */
 
 .popup-menu-content.adaptive-shade-menu {
+    background-color: #1E1E20;
     padding: 0;
     border-radius: 22px;
-    border: 1px solid rgba(102, 224, 255, 0.18);
-    background-gradient-direction: vertical;
-    background-gradient-start: #0C1628;
-    background-gradient-end: #05090F;
+    border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow: 0 22px 56px rgba(0, 0, 0, 0.62);
     font-family: Inter;
 }
@@ -639,24 +625,21 @@
 #calendarArea {
     padding: 14px;
     spacing: 14px;
-    color: #EAF2FF;
+    color: #F5F5F7;
 }
 
-/* The shared card: a faint gradient glass with a top highlight. */
+/* The shared card: one step lighter than the menu, like a macOS widget. */
 .adaptive-shade-system,
 #calendarArea .adaptive-shade .message-list,
 #calendarArea .datemenu-calendar-column {
+    background-color: rgba(44, 44, 46, 0.80);
     border-radius: 18px;
-    border: 1px solid rgba(102, 224, 255, 0.12);
-    background-gradient-direction: vertical;
-    background-gradient-start: rgba(22, 37, 61, 0.80);
-    background-gradient-end: rgba(11, 19, 33, 0.80);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-/* HUD labels: tracked monospace capitals. St leaves letter-spacing out of a
- * label's preferred width, so tracking only goes on labels that are given more
- * room than they ask for; anything sized to its text ellipsizes. */
+/* Section and row labels: Apple's footnote style - small, semibold, and the
+ * secondary label colour set on each rule below. */
 .adaptive-shade-date,
 .adaptive-shade-uptime,
 .adaptive-shade-section-title,
@@ -664,10 +647,8 @@
 .adaptive-meter-name,
 .adaptive-notif-heading-label,
 .adaptive-notif-more {
-    font-family: "JetBrainsMono Nerd Font", monospace;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 2px;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 /* Something is live: the uptime chip, the system card. */
@@ -675,8 +656,7 @@
     width: 6px;
     height: 6px;
     border-radius: 3px;
-    background-color: #65D9B5;
-    box-shadow: 0 0 8px rgba(101, 217, 181, 0.85);
+    background-color: #30D158;
 }
 
 /* ---------------------------------------------------------------
@@ -686,7 +666,7 @@
 .adaptive-shade {
     width: 440px;
     spacing: 12px;
-    color: #EAF2FF;
+    color: #F5F5F7;
     font-family: Inter;
 }
 
@@ -700,24 +680,23 @@
 }
 
 .adaptive-shade-time {
-    color: #F4F8FF;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #F5F5F7;
+    font-feature-settings: "tnum";
     font-size: 46px;
     font-weight: 200;
-    text-shadow: 0 0 18px rgba(102, 224, 255, 0.35);
 }
 
 .adaptive-shade-seconds {
     padding-bottom: 8px;
-    color: #66E0FF;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 18px;
     font-weight: 300;
 }
 
 .adaptive-shade-date {
     margin-top: 2px;
-    color: #7F95B2;
+    color: #8E8E93;
 }
 
 .adaptive-shade-uptime {
@@ -725,9 +704,9 @@
     padding: 5px 11px 5px 9px;
     spacing: 7px;
     border-radius: 999px;
-    border: 1px solid rgba(101, 217, 181, 0.30);
-    background-color: rgba(101, 217, 181, 0.08);
-    color: #A8EFD9;
+    border: 1px solid rgba(48, 209, 88, 0.30);
+    background-color: rgba(48, 209, 88, 0.08);
+    color: #30D158;
 }
 
 /* ---------------------------------------------------------------
@@ -767,19 +746,16 @@
 }
 
 .adaptive-notif-heading-label {
-    min-width: 112px;
-    color: #7FC4E0;
+    color: #98989D;
 }
 
 .adaptive-notif-heading-count {
+    background-color: #0A84FF;
     min-width: 12px;
     padding: 1px 7px;
     border-radius: 999px;
-    background-gradient-direction: horizontal;
-    background-gradient-start: #66E0FF;
-    background-gradient-end: #9A8BFF;
-    color: #04101A;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #FFFFFF;
+    font-feature-settings: "tnum";
     font-size: 10px;
     font-weight: 800;
     text-align: center;
@@ -787,7 +763,7 @@
 
 /* "Do Not Disturb" */
 #calendarArea .message-list-controls > StLabel {
-    color: #8FA3BD;
+    color: #98989D;
     font-size: 11px;
     font-weight: 500;
 }
@@ -800,7 +776,7 @@
 }
 
 #calendarArea .message-list-controls .dnd-button:focus {
-    box-shadow: 0 0 0 2px rgba(102, 224, 255, 0.45);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.45);
 }
 
 #calendarArea .toggle-switch {
@@ -817,9 +793,9 @@
 #calendarArea .message-list-clear-button {
     padding: 4px 11px;
     border-radius: 999px;
-    border: 1px solid rgba(102, 224, 255, 0.22);
-    background-color: rgba(102, 224, 255, 0.06);
-    color: #9FDFF5;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #0A84FF;
     font-size: 11px;
     font-weight: 600;
     box-shadow: none;
@@ -827,14 +803,14 @@
 
 #calendarArea .message-list-clear-button:hover,
 #calendarArea .message-list-clear-button:focus {
-    border-color: rgba(255, 122, 144, 0.45);
-    background-color: rgba(255, 122, 144, 0.12);
-    color: #FFB3C1;
+    border-color: rgba(255, 69, 58, 0.45);
+    background-color: rgba(255, 69, 58, 0.12);
+    color: #FF453A;
 }
 
 #calendarArea .message-list-clear-button:insensitive {
-    color: #4D5F77;
-    border-color: rgba(102, 224, 255, 0.08);
+    color: #636366;
+    border-color: rgba(255, 255, 255, 0.08);
     background-color: transparent;
 }
 
@@ -845,19 +821,16 @@
 }
 
 #calendarArea .message-list .message-list-placeholder > StIcon {
+    background-color: rgba(255, 255, 255, 0.06);
     icon-size: 22px;
     padding: 17px;
     border-radius: 999px;
-    border: 1px solid rgba(102, 224, 255, 0.34);
-    background-gradient-direction: radial;
-    background-gradient-start: rgba(102, 224, 255, 0.24);
-    background-gradient-end: rgba(102, 224, 255, 0.0);
-    box-shadow: 0 0 24px rgba(102, 224, 255, 0.16);
-    color: #8FE9FF;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: #98989D;
 }
 
 #calendarArea .message-list .message-list-placeholder > StLabel {
-    color: #9FB3CC;
+    color: #98989D;
     font-size: 13px;
     font-weight: 500;
 }
@@ -869,35 +842,35 @@
 
 .adaptive-notif-group {
     border-radius: 16px;
-    border: 1px solid rgba(102, 224, 255, 0.10);
-    background-color: rgba(102, 224, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.035);
 }
 
 .adaptive-notif-group:hover {
-    border-color: rgba(102, 224, 255, 0.20);
+    border-color: rgba(255, 255, 255, 0.20);
 }
 
 .adaptive-notif-group-header {
     padding: 10px 12px 6px 10px;
     border-radius: 16px;
-    color: #DCE6F2;
+    color: #F5F5F7;
 }
 
 .adaptive-notif-group-header:hover,
 .adaptive-notif-group-header:focus {
-    background-color: rgba(102, 224, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.06);
 }
 
 .adaptive-notif-group-icon {
     margin-right: 10px;
     padding: 5px;
     border-radius: 9px;
-    border: 1px solid rgba(102, 224, 255, 0.16);
-    background-color: rgba(102, 224, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-notif-group-title {
-    color: #CFE3F7;
+    color: #F5F5F7;
     font-size: 12px;
     font-weight: 600;
 }
@@ -907,9 +880,9 @@
     margin: 0 8px;
     padding: 1px 7px;
     border-radius: 999px;
-    background-color: rgba(102, 224, 255, 0.16);
-    color: #A9F0FF;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    background-color: rgba(255, 255, 255, 0.16);
+    color: #F5F5F7;
+    font-feature-settings: "tnum";
     font-size: 10px;
     font-weight: 800;
     text-align: center;
@@ -917,7 +890,7 @@
 
 .adaptive-notif-group-chevron {
     icon-size: 14px;
-    color: #66E0FF;
+    color: #0A84FF;
 }
 
 .adaptive-notif-group-list {
@@ -929,15 +902,15 @@
     margin: 0 10px 10px 10px;
     padding: 6px;
     border-radius: 10px;
-    border: 1px solid rgba(102, 224, 255, 0.14);
-    color: #66E0FF;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #0A84FF;
 }
 
 .adaptive-notif-more:hover,
 .adaptive-notif-more:focus {
-    border-color: rgba(102, 224, 255, 0.34);
-    background-color: rgba(102, 224, 255, 0.08);
-    color: #DDF8FF;
+    border-color: rgba(10, 132, 255, 0.34);
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #F5F5F7;
 }
 
 /* A single notification inside a group. */
@@ -947,23 +920,23 @@
     border: 1px solid transparent;
     background-color: transparent;
     box-shadow: none;
-    color: #EAF2FF;
+    color: #F5F5F7;
 }
 
 #calendarArea .message:hover {
-    border-color: rgba(102, 224, 255, 0.14);
-    background-color: rgba(102, 224, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.14);
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 #calendarArea .message:focus,
 #calendarArea .message:focus:active {
-    border-color: rgba(102, 224, 255, 0.42);
-    background-color: rgba(102, 224, 255, 0.06);
+    border-color: rgba(10, 132, 255, 0.42);
+    background-color: rgba(255, 255, 255, 0.06);
     box-shadow: none;
 }
 
 #calendarArea .message:active {
-    background-color: rgba(102, 224, 255, 0.09);
+    background-color: rgba(255, 255, 255, 0.09);
 }
 
 #calendarArea .message .message-icon-bin,
@@ -984,42 +957,42 @@
 
 #calendarArea .message .message-title {
     padding-top: 0;
-    color: #F2F7FF;
+    color: #F5F5F7;
     font-size: 13px;
     font-weight: 600;
 }
 
 #calendarArea .message .message-body {
-    color: #9FB3CC;
+    color: #98989D;
     font-size: 12px;
 }
 
 #calendarArea .message .message-secondary-bin > .event-time {
-    color: #5FB9D6;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 10px;
 }
 
 #calendarArea .message .message-close-button {
     padding: 4px;
     border-radius: 999px;
-    background-color: rgba(102, 224, 255, 0.08);
-    color: #9FB3CC;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #98989D;
 }
 
 #calendarArea .message .message-close-button:hover {
-    background-color: rgba(255, 122, 144, 0.22);
-    color: #FFB3C1;
+    background-color: rgba(255, 69, 58, 0.22);
+    color: #FF453A;
 }
 
 /* Media player card */
 #calendarArea .message-media-control {
     border-radius: 999px;
-    color: #CFE3F7;
+    color: #F5F5F7;
 }
 
 #calendarArea .message-media-control:hover {
-    background-color: rgba(102, 224, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.10);
     color: #FFFFFF;
 }
 
@@ -1031,19 +1004,17 @@
 #notification-container .notification-banner:hover,
 #notification-container .notification-banner:focus,
 #notification-container .notification-banner:active {
+    background-color: #1E1E20;
     margin: 10px;
     border-radius: 18px;
-    border: 1px solid rgba(102, 224, 255, 0.22);
-    background-gradient-direction: vertical;
-    background-gradient-start: #0F1B2E;
-    background-gradient-end: #070C15;
+    border: 1px solid rgba(255, 255, 255, 0.22);
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
-    color: #EAF2FF;
+    color: #F5F5F7;
     font-family: Inter;
 }
 
 #notification-container .notification-banner:hover {
-    border-color: rgba(102, 224, 255, 0.38);
+    border-color: rgba(10, 132, 255, 0.38);
 }
 
 #notification-container .notification-banner .message-icon-bin > StIcon {
@@ -1051,17 +1022,17 @@
 }
 
 #notification-container .notification-banner .message-title {
-    color: #F2F7FF;
+    color: #F5F5F7;
     font-weight: 600;
 }
 
 #notification-container .notification-banner .message-body {
-    color: #9FB3CC;
+    color: #98989D;
 }
 
 #notification-container .notification-banner .message-secondary-bin > .event-time {
-    color: #5FB9D6;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
 }
 
 #notification-container .notification-banner .notification-button {
@@ -1069,14 +1040,14 @@
     padding: 7px;
     border-radius: 10px;
     border-width: 0;
-    background-color: rgba(102, 224, 255, 0.10);
-    color: #CFEFFF;
+    background-color: rgba(255, 255, 255, 0.10);
+    color: #F5F5F7;
     font-weight: 600;
 }
 
 #notification-container .notification-banner .notification-button:hover,
 #notification-container .notification-banner .notification-button:focus {
-    background-color: rgba(102, 224, 255, 0.20);
+    background-color: rgba(255, 255, 255, 0.20);
     color: #FFFFFF;
 }
 
@@ -1100,29 +1071,29 @@
 .adaptive-shade-expander {
     padding: 3px 11px;
     border-radius: 999px;
-    border: 1px solid rgba(102, 224, 255, 0.22);
-    background-color: rgba(102, 224, 255, 0.05);
-    color: #9FDFF5;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #0A84FF;
     font-size: 11px;
     font-weight: 600;
 }
 
 .adaptive-shade-expander:hover,
 .adaptive-shade-expander:focus {
-    border-color: rgba(102, 224, 255, 0.42);
-    background-color: rgba(102, 224, 255, 0.12);
+    border-color: rgba(10, 132, 255, 0.42);
+    background-color: rgba(255, 255, 255, 0.12);
     color: #FFFFFF;
 }
 
 .adaptive-shade-section-title {
     margin-top: 4px;
-    color: #7FC4E0;
+    color: #98989D;
 }
 
 .adaptive-shade-load,
 .adaptive-shade-subline {
-    color: #7F95B2;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #8E8E93;
+    font-feature-settings: "tnum";
     font-size: 10px;
 }
 
@@ -1137,20 +1108,20 @@
 }
 
 .adaptive-metric-name {
-    color: #6D829E;
+    color: #8E8E93;
 }
 
 .adaptive-metric-value {
-    color: #F4F8FF;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #F5F5F7;
+    font-feature-settings: "tnum";
     font-size: 22px;
     font-weight: 300;
 }
 
 .adaptive-metric-meta {
     width: 92px;
-    color: #9FB3CC;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 10px;
     text-align: right;
 }
@@ -1168,25 +1139,25 @@
 
 .adaptive-meter-name {
     width: 70px;
-    color: #6D829E;
+    color: #8E8E93;
 }
 
 .adaptive-meter {
     height: 6px;
     border-radius: 3px;
-    background-color: rgba(102, 224, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.07);
 }
 
 .adaptive-meter-fill {
     height: 6px;
     border-radius: 3px;
-    background-color: #78A9FF;
+    background-color: #0A84FF;
 }
 
 .adaptive-meter-value {
     width: 132px;
-    color: #9FB3CC;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 10px;
     text-align: right;
 }
@@ -1199,12 +1170,12 @@
 
 .adaptive-core {
     border-radius: 2px;
-    background-color: rgba(102, 224, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.06);
 }
 
 .adaptive-core-fill {
     border-radius: 2px;
-    background-color: #78A9FF;
+    background-color: #0A84FF;
 }
 
 /* Network, one row per interface that has actually carried traffic. */
@@ -1213,14 +1184,14 @@
 }
 
 .adaptive-net-name {
-    color: #9FB3CC;
+    color: #98989D;
     font-size: 11px;
     font-weight: 600;
 }
 
 .adaptive-net-rate {
-    color: #9FB3CC;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 10px;
 }
 
@@ -1233,19 +1204,19 @@
     padding: 7px 8px;
     spacing: 2px;
     border-radius: 10px;
-    border: 1px solid rgba(102, 224, 255, 0.08);
-    background-color: rgba(102, 224, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-chip-name {
-    color: #7F95B2;
+    color: #8E8E93;
     font-size: 10px;
     font-weight: 600;
 }
 
 .adaptive-chip-value {
-    color: #65D9B5;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #30D158;
+    font-feature-settings: "tnum";
     font-size: 14px;
     font-weight: 600;
 }
@@ -1257,14 +1228,14 @@
 }
 
 .adaptive-proc-name {
-    color: #D8E3EF;
+    color: #F5F5F7;
     font-size: 12px;
 }
 
 .adaptive-proc-cpu {
     width: 52px;
-    color: #9FB3CC;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 11px;
     font-weight: 600;
     text-align: right;
@@ -1272,8 +1243,8 @@
 
 .adaptive-proc-mem {
     width: 72px;
-    color: #7F95B2;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #8E8E93;
+    font-feature-settings: "tnum";
     font-size: 10px;
     text-align: right;
 }
@@ -1281,9 +1252,9 @@
 .adaptive-shade-footer-item {
     margin-top: 4px;
     padding-top: 9px;
-    border-top: 1px solid rgba(102, 224, 255, 0.10);
-    color: #9FB3CC;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 10px;
     font-weight: 600;
 }
@@ -1297,39 +1268,37 @@
     width: 300px;
     padding: 12px;
     spacing: 10px;
-    color: #D5DFEB;
+    color: #F5F5F7;
 }
 
 #calendarArea .datemenu-displays-box {
     spacing: 8px;
 }
 
-/* Today: the one gradient card in the column. */
+/* Today: a plain card; the weekday carries the accent. */
 #calendarArea .datemenu-today-button {
+    background-color: rgba(255, 255, 255, 0.06);
     margin: 0;
     padding: 12px 14px;
     border-radius: 14px;
-    border: 1px solid rgba(102, 224, 255, 0.24);
-    background-gradient-direction: horizontal;
-    background-gradient-start: rgba(102, 224, 255, 0.16);
-    background-gradient-end: rgba(154, 139, 255, 0.10);
-    color: #F4F8FF;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #F5F5F7;
 }
 
 #calendarArea .datemenu-today-button:hover,
 #calendarArea .datemenu-today-button:focus {
-    border-color: rgba(102, 224, 255, 0.44);
+    border-color: rgba(10, 132, 255, 0.44);
 }
 
 #calendarArea .datemenu-today-button .day-label {
-    color: #66E0FF;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #0A84FF;
+    font-feature-settings: "tnum";
     font-size: 11px;
     font-weight: 700;
 }
 
 #calendarArea .datemenu-today-button .date-label {
-    color: #F4F8FF;
+    color: #F5F5F7;
     font-size: 18px;
     font-weight: 600;
 }
@@ -1339,12 +1308,12 @@
     padding: 0;
     border-width: 0;
     background-color: transparent;
-    color: #D5DFEB;
+    color: #F5F5F7;
 }
 
 #calendarArea .calendar .calendar-month-label {
-    color: #EAF2FF;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #F5F5F7;
+    font-feature-settings: "tnum";
     font-size: 12px;
     font-weight: 700;
 }
@@ -1353,14 +1322,14 @@
     width: 28px;
     height: 28px;
     border-radius: 999px;
-    color: #7FC4E0;
+    color: #98989D;
     background-color: transparent;
 }
 
 #calendarArea .calendar .calendar-month-header .pager-button:hover,
 #calendarArea .calendar .calendar-month-header .pager-button:focus {
     color: #FFFFFF;
-    background-color: rgba(102, 224, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
 /* Yaru sizes days with !important, so these have to as well. */
@@ -1370,14 +1339,14 @@
     margin: 2px;
     padding: 0 !important;
     border-radius: 999px;
-    color: #C6D2E0;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #F5F5F7;
+    font-feature-settings: "tnum";
     font-size: 12px;
     text-align: center;
 }
 
 #calendarArea .calendar .calendar-day-base:hover {
-    background-color: rgba(102, 224, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.10);
     color: #FFFFFF;
 }
 
@@ -1385,8 +1354,8 @@
 #calendarArea .calendar .calendar-day-base:selected,
 #calendarArea .calendar .calendar-day-base:active,
 #calendarArea .calendar .calendar-day-base:selected:focus {
-    background-color: rgba(102, 224, 255, 0.10);
-    box-shadow: inset 0 0 0 1px rgba(102, 224, 255, 0.55);
+    background-color: rgba(255, 255, 255, 0.10);
+    box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.55);
     color: #FFFFFF;
 }
 
@@ -1395,22 +1364,22 @@
     padding-top: 2px !important;
     background-color: transparent;
     box-shadow: none;
-    color: #5E7390;
+    color: #636366;
     font-size: 10px;
     font-weight: 700;
 }
 
 #calendarArea .calendar .calendar-nonwork-day {
-    color: #7F95B2;
+    color: #8E8E93;
 }
 
 #calendarArea .calendar .calendar-other-month-day,
 #calendarArea .calendar .calendar-other-month-day.calendar-nonwork-day {
-    color: rgba(127, 149, 178, 0.38);
+    color: rgba(235, 235, 245, 0.38);
 }
 
 #calendarArea .calendar .calendar-day-with-events {
-    color: #EAF2FF;
+    color: #F5F5F7;
     background-image: url("assets/shade/event-dot.svg");
     background-size: contain;
 }
@@ -1420,17 +1389,14 @@
 #calendarArea .calendar .calendar-today:focus,
 #calendarArea .calendar .calendar-today:selected,
 #calendarArea .calendar .calendar-today:active {
-    background-gradient-direction: horizontal;
-    background-gradient-start: #66E0FF;
-    background-gradient-end: #9A8BFF;
-    box-shadow: 0 0 14px rgba(102, 224, 255, 0.40);
-    color: #04101A !important;
+    background-color: #0A84FF;
+    color: #FFFFFF !important;
     font-weight: 800;
 }
 
 #calendarArea .calendar .calendar-week-number {
-    color: #5E7390;
-    background-color: rgba(102, 224, 255, 0.05);
+    color: #636366;
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 /* Events, world clocks, weather */
@@ -1440,10 +1406,10 @@
     margin: 0;
     padding: 11px 13px;
     border-radius: 14px;
-    border: 1px solid rgba(102, 224, 255, 0.10);
-    background-color: rgba(102, 224, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.04);
     box-shadow: none;
-    color: #DCE6F2;
+    color: #F5F5F7;
 }
 
 #calendarArea .events-button:hover,
@@ -1452,18 +1418,17 @@
 #calendarArea .world-clocks-button:focus,
 #calendarArea .weather-button:hover,
 #calendarArea .weather-button:focus {
-    border-color: rgba(102, 224, 255, 0.26);
-    background-color: rgba(102, 224, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.26);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 #calendarArea .events-title,
 #calendarArea .world-clocks-header,
 #calendarArea .weather-header {
-    color: #7FC4E0;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #98989D;
+    font-feature-settings: "tnum";
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 2px;
 }
 
 #calendarArea .events-list {
@@ -1471,14 +1436,14 @@
 }
 
 #calendarArea .event-placeholder {
-    color: #9FB3CC;
+    color: #98989D;
     font-size: 13px;
 }
 
 #calendarArea .events-button .event-time,
 #calendarArea .world-clocks-button .world-clocks-time {
-    color: #66E0FF;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    color: #0A84FF;
+    font-feature-settings: "tnum";
     font-size: 11px;
 }
 
@@ -1488,28 +1453,26 @@
  * round actions, a two-column grid of tiles, a sliders card, and drill-down
  * pages for Wi-Fi, Bluetooth, power mode, sound output and the session.
  *
- * Same skin as the Shade v3 block above - the deep-navy panel, glass cards,
- * cyan hairlines - and the same accent rule: the cyan-to-violet gradient marks
- * only what is ON. Everything hangs off `.adaptive-cc-menu` (added to the
+ * Same skin as the Shade block above, and macOS Control Center's rule for
+ * state: a tile never changes colour; its icon circle turns system blue, with
+ * a white glyph, when it is on. Everything hangs off `.adaptive-cc-menu` (added to the
  * popup by controlCenter.js) or `.adaptive-cc`, so the lock screen's stock menu
  * keeps Yaru's look.
  */
 
 .popup-menu-content.adaptive-cc-menu {
+    background-color: #1E1E20;
     min-width: 396px;
     padding: 0;
     border-radius: 22px;
-    border: 1px solid rgba(102, 224, 255, 0.18);
-    background-gradient-direction: vertical;
-    background-gradient-start: #0C1628;
-    background-gradient-end: #05090F;
+    border: 1px solid rgba(255, 255, 255, 0.18);
     box-shadow: 0 22px 56px rgba(0, 0, 0, 0.62);
     font-family: Inter;
 }
 
 .adaptive-cc {
     padding: 14px;
-    color: #EAF2FF;
+    color: #F5F5F7;
 }
 
 .adaptive-cc-main,
@@ -1529,10 +1492,10 @@
     padding: 6px 12px 6px 9px;
     spacing: 6px;
     border-radius: 999px;
-    border: 1px solid rgba(101, 217, 181, 0.30);
-    background-color: rgba(101, 217, 181, 0.08);
-    color: #A8EFD9;
-    font-family: "JetBrainsMono Nerd Font", monospace;
+    border: 1px solid rgba(48, 209, 88, 0.30);
+    background-color: rgba(48, 209, 88, 0.08);
+    color: #30D158;
+    font-feature-settings: "tnum";
     font-size: 11px;
     font-weight: 700;
 }
@@ -1545,9 +1508,9 @@
     width: 36px;
     height: 36px;
     border-radius: 999px;
-    border: 1px solid rgba(102, 224, 255, 0.14);
-    background-color: rgba(102, 224, 255, 0.05);
-    color: #CFE3F7;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #F5F5F7;
 }
 
 .adaptive-cc-round-button StIcon {
@@ -1556,16 +1519,16 @@
 
 .adaptive-cc-round-button:hover,
 .adaptive-cc-round-button:focus {
-    border-color: rgba(102, 224, 255, 0.42);
-    background-color: rgba(102, 224, 255, 0.12);
+    border-color: rgba(10, 132, 255, 0.42);
+    background-color: rgba(255, 255, 255, 0.12);
     color: #FFFFFF;
 }
 
 .adaptive-cc-power-button:hover,
 .adaptive-cc-power-button:focus {
-    border-color: rgba(255, 122, 144, 0.50);
-    background-color: rgba(255, 122, 144, 0.14);
-    color: #FFB3C1;
+    border-color: rgba(255, 69, 58, 0.50);
+    background-color: rgba(255, 69, 58, 0.14);
+    color: #FF453A;
 }
 
 /* ---------------------------------------------------------------
@@ -1575,19 +1538,19 @@
 .adaptive-cc-tile {
     min-height: 60px;
     border-radius: 18px;
-    border: 1px solid rgba(102, 224, 255, 0.10);
-    background-color: rgba(102, 224, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.045);
 }
 
 .adaptive-cc-tile-main {
     padding: 10px 10px 10px 10px;
     border-radius: 18px;
-    color: #EAF2FF;
+    color: #F5F5F7;
 }
 
 .adaptive-cc-tile-main:hover,
 .adaptive-cc-tile-main:focus {
-    background-color: rgba(102, 224, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.07);
 }
 
 .adaptive-cc-tile-box {
@@ -1599,82 +1562,53 @@
     icon-size: 18px;
     padding: 9px;
     border-radius: 999px;
-    background-color: rgba(102, 224, 255, 0.10);
-    color: #8FE9FF;
+    background-color: rgba(255, 255, 255, 0.10);
+    color: #F5F5F7;
 }
 
 .adaptive-cc-tile-title {
-    color: #EAF2FF;
+    color: #F5F5F7;
     font-size: 13px;
     font-weight: 600;
 }
 
 .adaptive-cc-tile-subtitle {
-    color: #8FA3BD;
+    color: #98989D;
     font-size: 11px;
 }
 
 .adaptive-cc-tile-chevron {
     icon-size: 14px;
-    color: #7FC4E0;
+    color: #98989D;
 }
 
 .adaptive-cc-tile-arrow {
     width: 34px;
     border-radius: 0 18px 18px 0;
-    border-left: 1px solid rgba(102, 224, 255, 0.10);
-    color: #7FC4E0;
+    border-left: 1px solid rgba(255, 255, 255, 0.10);
+    color: #98989D;
 }
 
 .adaptive-cc-tile-arrow:hover,
 .adaptive-cc-tile-arrow:focus {
-    background-color: rgba(102, 224, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.10);
     color: #FFFFFF;
 }
 
-/* ON: the accent gradient, dark ink. */
-.adaptive-cc-tile:checked {
-    border-color: rgba(102, 224, 255, 0.0);
-    background-gradient-direction: horizontal;
-    background-gradient-start: #66E0FF;
-    background-gradient-end: #9A8BFF;
-    box-shadow: 0 6px 18px rgba(102, 224, 255, 0.22);
-}
-
-.adaptive-cc-tile:checked .adaptive-cc-tile-main:hover,
-.adaptive-cc-tile:checked .adaptive-cc-tile-main:focus,
-.adaptive-cc-tile:checked .adaptive-cc-tile-arrow:hover,
-.adaptive-cc-tile:checked .adaptive-cc-tile-arrow:focus {
-    background-color: rgba(255, 255, 255, 0.14);
-}
-
+/* ON: the icon circle goes system blue; the tile itself stays grey. */
 .adaptive-cc-tile:checked .adaptive-cc-tile-icon {
-    background-color: rgba(4, 16, 26, 0.18);
-    color: #04101A;
-}
-
-.adaptive-cc-tile:checked .adaptive-cc-tile-title,
-.adaptive-cc-tile:checked .adaptive-cc-tile-chevron,
-.adaptive-cc-tile:checked .adaptive-cc-tile-arrow {
-    color: #04101A;
-}
-
-.adaptive-cc-tile:checked .adaptive-cc-tile-subtitle {
-    color: rgba(4, 16, 26, 0.72);
-}
-
-.adaptive-cc-tile:checked .adaptive-cc-tile-arrow {
-    border-left-color: rgba(4, 16, 26, 0.18);
+    background-color: #0A84FF;
+    color: #FFFFFF;
 }
 
 .adaptive-cc-tile:insensitive .adaptive-cc-tile-icon {
-    background-color: rgba(102, 224, 255, 0.04);
-    color: #4D5F77;
+    background-color: rgba(255, 255, 255, 0.04);
+    color: #636366;
 }
 
 .adaptive-cc-tile:insensitive .adaptive-cc-tile-title,
 .adaptive-cc-tile:insensitive .adaptive-cc-tile-subtitle {
-    color: #56687F;
+    color: #636366;
 }
 
 /* ---------------------------------------------------------------
@@ -1682,13 +1616,11 @@
  * --------------------------------------------------------------- */
 
 .adaptive-cc-sliders {
+    background-color: rgba(44, 44, 46, 0.80);
     padding: 8px 12px;
     spacing: 4px;
     border-radius: 18px;
-    border: 1px solid rgba(102, 224, 255, 0.12);
-    background-gradient-direction: vertical;
-    background-gradient-start: rgba(22, 37, 61, 0.80);
-    background-gradient-end: rgba(11, 19, 33, 0.80);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -1705,36 +1637,36 @@
 
 .adaptive-cc-slider-icon-button:hover,
 .adaptive-cc-slider-icon-button:focus {
-    background-color: rgba(102, 224, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.10);
 }
 
 .adaptive-cc-slider-icon {
     icon-size: 16px;
-    color: #8FE9FF;
+    color: #F5F5F7;
 }
 
 .adaptive-cc .adaptive-cc-slider {
     height: 28px;
     color: #FFFFFF;
     -barlevel-height: 6px;
-    -barlevel-background-color: rgba(102, 224, 255, 0.12);
-    -barlevel-active-background-color: #66E0FF;
-    -barlevel-overdrive-color: #FF7A90;
+    -barlevel-background-color: rgba(255, 255, 255, 0.12);
+    -barlevel-active-background-color: #0A84FF;
+    -barlevel-overdrive-color: #FF453A;
     -barlevel-border-width: 0;
-    -slider-handle-radius: 8px;
-    -slider-handle-border-width: 2px;
-    -slider-handle-border-color: #66E0FF;
+    -slider-handle-radius: 9px;
+    -slider-handle-border-width: 1px;
+    -slider-handle-border-color: rgba(0, 0, 0, 0.25);
 }
 
 .adaptive-cc .adaptive-cc-slider:focus {
-    -slider-handle-border-color: #9A8BFF;
+    -slider-handle-border-color: #0A84FF;
 }
 
 .adaptive-cc-slider-arrow {
     width: 30px;
     height: 30px;
     border-radius: 999px;
-    color: #7FC4E0;
+    color: #98989D;
 }
 
 .adaptive-cc-slider-arrow StIcon {
@@ -1743,7 +1675,7 @@
 
 .adaptive-cc-slider-arrow:hover,
 .adaptive-cc-slider-arrow:focus {
-    background-color: rgba(102, 224, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.10);
     color: #FFFFFF;
 }
 
@@ -1756,14 +1688,14 @@
 }
 
 .adaptive-cc-page-title {
-    color: #F4F8FF;
+    color: #F5F5F7;
     font-size: 16px;
     font-weight: 600;
 }
 
 .adaptive-cc-page-status {
     padding: 22px 12px;
-    color: #8FA3BD;
+    color: #98989D;
     font-size: 13px;
     text-align: center;
 }
@@ -1776,18 +1708,18 @@
     padding: 9px 10px;
     border-radius: 14px;
     border: 1px solid transparent;
-    color: #EAF2FF;
+    color: #F5F5F7;
 }
 
 .adaptive-cc-row:hover,
 .adaptive-cc-row:focus {
-    border-color: rgba(102, 224, 255, 0.14);
-    background-color: rgba(102, 224, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.14);
+    background-color: rgba(255, 255, 255, 0.07);
 }
 
 .adaptive-cc-row:checked {
-    border-color: rgba(102, 224, 255, 0.30);
-    background-color: rgba(102, 224, 255, 0.10);
+    border-color: rgba(10, 132, 255, 0.30);
+    background-color: rgba(255, 255, 255, 0.10);
 }
 
 .adaptive-cc-row-box {
@@ -1797,7 +1729,7 @@
 .adaptive-cc-row-icon {
     -st-icon-style: symbolic;
     icon-size: 18px;
-    color: #8FE9FF;
+    color: #F5F5F7;
 }
 
 .adaptive-cc-row-title {
@@ -1806,64 +1738,64 @@
 }
 
 .adaptive-cc-row-subtitle {
-    color: #7F95B2;
+    color: #8E8E93;
     font-size: 11px;
 }
 
 .adaptive-cc-row:checked .adaptive-cc-row-subtitle {
-    color: #66E0FF;
+    color: #0A84FF;
 }
 
 .adaptive-cc-row-trailing {
     icon-size: 14px;
-    color: #6D829E;
+    color: #8E8E93;
 }
 
 .adaptive-cc-row-check {
     icon-size: 16px;
-    color: #66E0FF;
+    color: #0A84FF;
 }
 
 .adaptive-cc-row-danger .adaptive-cc-row-icon,
 .adaptive-cc-row-danger .adaptive-cc-row-title {
-    color: #FF9AAD;
+    color: #FF453A;
 }
 
 .adaptive-cc-row-danger:hover,
 .adaptive-cc-row-danger:focus {
-    border-color: rgba(255, 122, 144, 0.35);
-    background-color: rgba(255, 122, 144, 0.12);
+    border-color: rgba(255, 69, 58, 0.35);
+    background-color: rgba(255, 69, 58, 0.12);
 }
 
 .adaptive-cc-pill-button {
     padding: 4px 11px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 122, 144, 0.35);
-    color: #FFB3C1;
+    border: 1px solid rgba(255, 69, 58, 0.35);
+    color: #FF453A;
     font-size: 11px;
     font-weight: 600;
 }
 
 .adaptive-cc-pill-button:hover,
 .adaptive-cc-pill-button:focus {
-    background-color: rgba(255, 122, 144, 0.16);
+    background-color: rgba(255, 69, 58, 0.16);
     color: #FFFFFF;
 }
 
 .adaptive-cc-footer {
     padding: 10px 12px;
     border-radius: 14px;
-    border: 1px solid rgba(102, 224, 255, 0.12);
-    background-color: rgba(102, 224, 255, 0.04);
-    color: #9FDFF5;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.04);
+    color: #0A84FF;
     font-size: 12px;
     font-weight: 600;
 }
 
 .adaptive-cc-footer:hover,
 .adaptive-cc-footer:focus {
-    border-color: rgba(102, 224, 255, 0.32);
-    background-color: rgba(102, 224, 255, 0.10);
+    border-color: rgba(10, 132, 255, 0.32);
+    background-color: rgba(255, 255, 255, 0.10);
     color: #FFFFFF;
 }
 
@@ -1883,5 +1815,24 @@
 }
 
 .adaptive-cc-switch-button:focus {
-    box-shadow: 0 0 0 2px rgba(102, 224, 255, 0.45);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.45);
 }
+
+/* ===== Adaptive palette — Apple dark appearance =====
+ *
+ * The one colour system for the whole desktop: this shell, the GTK themes
+ * (generated from tokens/adaptive.tokens.json), and the Adaptive apps. St has
+ * no CSS variables, so the values are written out; this is the table they
+ * come from. Add a colour here before using it anywhere above.
+ *
+ *   Materials   menu #1E1E20 · card rgba(44,44,46,.80) · tile rgba(255,255,255,.045)
+ *               fill rgba(255,255,255,.06-.12) · hairline rgba(255,255,255,.08-.10)
+ *   Labels      primary #F5F5F7 · secondary #98989D · tertiary #8E8E93 · quaternary #636366
+ *   Accent      system blue #0A84FF - selected, on, focused, today, links. The only one.
+ *   Status      green #30D158 · orange #FF9F0A · red #FF453A - never decoration.
+ *   Data only   indigo #5E5CE6 · cyan #64D2FF - to tell chart series apart.
+ *
+ * The system accent (org.gnome.desktop.interface gtk-theme) is Yaru-blue-dark,
+ * so the stock shell and GTK apps draw their selection and switches in the
+ * same blue family instead of Ubuntu orange.
+ */

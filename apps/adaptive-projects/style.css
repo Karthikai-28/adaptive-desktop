@@ -1,16 +1,16 @@
 /* Project mode - same tokens as the shell and the palette. */
 
-@define-color ad_bg        #08111B;
-@define-color ad_bg_deep   #07101A;
-@define-color ad_surface   #111A28;
-@define-color ad_surface_2 #162233;
-@define-color ad_divider   #30425C;
-@define-color ad_text      #F2F6EF;
-@define-color ad_muted     #96A4B8;
-@define-color ad_accent    #78A9FF;
-@define-color ad_cyan      #66E0FF;
-@define-color ad_violet    #9A8BFF;
-@define-color ad_warning   #F3C96B;
+@define-color ad_bg        #1C1C1E;
+@define-color ad_bg_deep   #141416;
+@define-color ad_surface   #2C2C2E;
+@define-color ad_surface_2 #3A3A3C;
+@define-color ad_divider   #48484A;
+@define-color ad_text      #F5F5F7;
+@define-color ad_muted     #98989D;
+@define-color ad_accent    #0A84FF;
+@define-color ad_cyan      #64D2FF;
+@define-color ad_violet    #5E5CE6;
+@define-color ad_warning   #FF9F0A;
 
 window.adaptive-projects { background-color: @ad_bg; }
 
@@ -97,7 +97,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 .card.band-idle  { border-left-color: alpha(@ad_muted, 0.42); }
 
 .card.active {
-    border-color: alpha(@ad_cyan, 0.55);
+    border-color: alpha(@ad_accent, 0.55);
     background-color: alpha(@ad_accent, 0.13);
 }
 
@@ -144,9 +144,9 @@ window.adaptive-projects { background-color: @ad_bg; }
 }
 
 .chip-active {
-    border: 1px solid alpha(@ad_cyan, 0.5);
-    background-color: alpha(@ad_cyan, 0.16);
-    color: @ad_cyan;
+    border: 1px solid alpha(@ad_accent, 0.5);
+    background-color: alpha(@ad_accent, 0.16);
+    color: @ad_accent;
     font-weight: 700;
 }
 
@@ -193,12 +193,12 @@ window.adaptive-projects { background-color: @ad_bg; }
 }
 
 .legend { color: @ad_muted; font-size: 10px; font-weight: 600; }
-.legend-0 { color: #78A9FF; }
-.legend-1 { color: #66E0FF; }
-.legend-2 { color: #9A8BFF; }
-.legend-3 { color: #F3C96B; }
-.legend-4 { color: #65D9B5; }
-.legend-5 { color: #FF7A90; }
+.legend-0 { color: #0A84FF; }
+.legend-1 { color: #64D2FF; }
+.legend-2 { color: #5E5CE6; }
+.legend-3 { color: #FF9F0A; }
+.legend-4 { color: #30D158; }
+.legend-5 { color: #FF453A; }
 
 .author { color: @ad_text; font-size: 11px; font-weight: 600; }
 .author-count { color: @ad_muted; font-size: 10px; }
@@ -243,7 +243,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 .doc-entry:hover { background-color: @ad_surface; }
 
 .doc-entry.selected {
-    border-color: alpha(@ad_cyan, 0.4);
+    border-color: alpha(@ad_accent, 0.4);
     background-color: alpha(@ad_accent, 0.14);
 }
 
@@ -270,7 +270,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 
 .doc-h1 { color: #FFFFFF; }
 .doc-h2 { color: alpha(@ad_text, 0.95); }
-.doc-h3 { color: @ad_cyan; }
+.doc-h3 { color: @ad_accent; }
 
 .doc-rule {
     margin: 6px 0;
@@ -318,7 +318,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 }
 
 .code-copy:hover {
-    border-color: alpha(@ad_cyan, 0.5);
+    border-color: alpha(@ad_accent, 0.5);
     background-color: @ad_surface_2;
 }
 

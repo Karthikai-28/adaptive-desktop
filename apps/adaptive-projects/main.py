@@ -657,11 +657,11 @@ class Projects(Gtk.ApplicationWindow):
     def _md_inline(self, body):
         """Inline markdown to Pango markup. Input must already be escaped."""
         body = re.sub(r"`([^`]+)`",
-                      r'<tt><span foreground="#66E0FF">\1</span></tt>', body)
+                      r'<tt><span foreground="#0A84FF">\1</span></tt>', body)
         body = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", body)
         body = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?![*\w])", r"<i>\1</i>", body)
         body = re.sub(r"\[([^\]]+)\]\([^)]*\)",
-                      r'<span foreground="#78A9FF" underline="single">\1</span>',
+                      r'<span foreground="#0A84FF" underline="single">\1</span>',
                       body)
         return body
 
@@ -682,8 +682,8 @@ class Projects(Gtk.ApplicationWindow):
         enough to make a block readable without a parser per language."""
         def paint(match):
             kind = match.lastgroup
-            colour = {"str": "#65D9B5", "com": "#6F8198",
-                      "num": "#F3C96B", "kw": "#9A8BFF"}[kind]
+            colour = {"str": "#30D158", "com": "#636366",
+                      "num": "#FF9F0A", "kw": "#5E5CE6"}[kind]
             weight = ' weight="bold"' if kind == "kw" else ""
             style = ' style="italic"' if kind == "com" else ""
             return (f'<span foreground="{colour}"{weight}{style}>'
@@ -761,15 +761,15 @@ class Projects(Gtk.ApplicationWindow):
             number = re.match(r"^(\s*)(\d+)\.\s+(.*)$", body)
 
             if quote:
-                body = ('<span foreground="#66E0FF">\u2503</span>  '
+                body = ('<span foreground="#0A84FF">\u2503</span>  '
                         f"<i>{quote.group(1)}</i>")
             elif bullet:
                 body = (f"{bullet.group(1)}   "
-                        f'<span foreground="#78A9FF">\u2022</span>  '
+                        f'<span foreground="#0A84FF">\u2022</span>  '
                         f"{bullet.group(2)}")
             elif number:
                 body = (f"{number.group(1)}   "
-                        f'<span foreground="#78A9FF">{number.group(2)}.</span>'
+                        f'<span foreground="#0A84FF">{number.group(2)}.</span>'
                         f"  {number.group(3)}")
 
             out.append(self._md_inline(body))
@@ -848,7 +848,7 @@ class Projects(Gtk.ApplicationWindow):
                               for i, cell in enumerate(row))
             if index == 0:
                 out.append(f"<b>{cells}</b>")
-                out.append('<span foreground="#30425C">'
+                out.append('<span foreground="#48484A">'
                            + "\u2500" * min(len(cells), 92) + "</span>")
             else:
                 out.append(cells)

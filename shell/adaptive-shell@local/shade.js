@@ -33,11 +33,13 @@ const Notifications = Me.imports.notifications;
 const NOTIFICATION_MIN_HEIGHT = 220;
 const MIN_SYSTEM_HEIGHT = 260;
 
-const ACCENT_CPU = '#78A9FF';
-const ACCENT_GPU = '#9A8BFF';
-const ACCENT_NET = '#66E0FF';
-const WARNING = '#F3C96B';
-const DANGER = '#FF7A90';
+// Apple's dark-appearance system colours. Blue is the one UI accent; indigo
+// and cyan only tell data series apart; orange and red are status.
+const ACCENT_CPU = '#0A84FF';
+const ACCENT_GPU = '#5E5CE6';
+const ACCENT_NET = '#64D2FF';
+const WARNING = '#FF9F0A';
+const DANGER = '#FF453A';
 
 // Matches the ~/.config/adaptive-desktop/projects.json convention already used
 // by the Projects app.
@@ -87,17 +89,10 @@ function degrees(value) {
     return Number.isFinite(value) ? `${Math.round(value)}°C` : '--';
 }
 
-// Fills are drawn as a gradient that brightens towards the reading, so a bar
-// reads as energy rather than a flat block. The colour still comes from the
-// value (accent, warning, danger), which is why this is inline style and not a
-// stylesheet rule: a CSS gradient would override the per-value colour.
-function gradientStyle(hex, direction = 'horizontal') {
-    const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
-    const faint = `rgba(${r}, ${g}, ${b}, 0.30)`;
-    const [start, end] = direction === 'vertical' ? [hex, faint] : [faint, hex];
-    return `background-gradient-direction: ${direction}; ` +
-        `background-gradient-start: ${start}; ` +
-        `background-gradient-end: ${end};`;
+// Fills are flat, in the colour the value calls for (accent, warning,
+// danger) - which is why this is inline style rather than a stylesheet rule.
+function fillStyle(hex) {
+    return `background-color: ${hex};`;
 }
 
 // A percentage bar. St has no progress widget, so the fill is a plain actor
@@ -136,7 +131,7 @@ class Meter extends St.Widget {
         if (this._color === hex)
             return;
         this._color = hex;
-        this._fill.style = gradientStyle(hex);
+        this._fill.style = fillStyle(hex);
     }
 
     _apply() {
@@ -554,7 +549,7 @@ var Shade = class Shade {
                 y_align: Clutter.ActorAlign.CENTER,
             });
             heading.add_child(new St.Label({
-                text: 'NOTIFICATIONS',
+                text: 'Notifications',
                 style_class: 'adaptive-notif-heading-label',
                 y_align: Clutter.ActorAlign.CENTER,
             }));
@@ -774,7 +769,7 @@ var Shade = class Shade {
         const now = GLib.DateTime.new_now_local();
         this._timeLabel.text = now.format('%H:%M');
         this._secondsLabel.text = now.format(':%S');
-        this._dateLabel.text = now.format('%A · %-d %B %Y').toUpperCase();
+        this._dateLabel.text = now.format('%A, %-d %B %Y');
     }
 
     // --------------------------------------------------------------- system
@@ -831,7 +826,7 @@ var Shade = class Shade {
         }));
 
         head.add_child(new St.Label({
-            text: 'SYSTEM',
+            text: 'System',
             style_class: 'adaptive-shade-section-title',
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
@@ -885,13 +880,13 @@ var Shade = class Shade {
         section.add_child(this._diskIOLabel);
         this._detail.push(this._diskIOLabel);
 
-        this._netTitle = this._sectionTitle(section, 'NETWORK');
+        this._netTitle = this._sectionTitle(section, 'Network');
         this._netBox = new St.BoxLayout({ vertical: true, x_expand: true });
         section.add_child(this._netBox);
         this._netRows = [];
         this._detail.push(this._netTitle, this._netBox);
 
-        this._thermalTitle = this._sectionTitle(section, 'TEMPERATURES');
+        this._thermalTitle = this._sectionTitle(section, 'Temperatures');
         this._thermalGrid = new St.Widget({
             style_class: 'adaptive-shade-chips',
             layout_manager: new Clutter.GridLayout({
@@ -906,7 +901,7 @@ var Shade = class Shade {
         this._thermalChips = [];
         this._detail.push(this._thermalTitle, this._thermalGrid);
 
-        this._procTitle = this._sectionTitle(section, 'TOP PROCESSES');
+        this._procTitle = this._sectionTitle(section, 'Top processes');
         this._procBox = new St.BoxLayout({ vertical: true, x_expand: true });
         section.add_child(this._procBox);
         this._procRows = [];
@@ -1027,7 +1022,7 @@ var Shade = class Shade {
         // section's natural height is not final when the popup opens.
         this._fitToMonitor();
         this._uptimeLabel.text = snapshot.uptimeSeconds
-            ? `UP ${Telemetry.formatDuration(snapshot.uptimeSeconds)}`.toUpperCase()
+            ? `Up ${Telemetry.formatDuration(snapshot.uptimeSeconds)}`
             : '';
         this._uptimeChip.visible = !!snapshot.uptimeSeconds;
 
@@ -1120,7 +1115,7 @@ var Shade = class Shade {
                 : ACCENT_CPU;
         if (bar.color !== color) {
             bar.color = color;
-            bar.fill.style = gradientStyle(color, 'vertical');
+            bar.fill.style = fillStyle(color);
         }
     }
 

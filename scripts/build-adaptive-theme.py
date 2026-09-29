@@ -48,9 +48,9 @@ COLOR_NAMES = {
     "state.success": "ad_success",
 }
 
-# Selection uses a desaturated accent so selected rows stay readable behind
-# text rather than glowing.
-SELECTION_BG = "#244E7A"
+# Selection is macOS's selected-content blue: the accent, darkened enough that
+# white text on it stays readable.
+SELECTION_BG = "#0058D0"
 
 
 def load_tokens():

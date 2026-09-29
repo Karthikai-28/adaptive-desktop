@@ -9,16 +9,16 @@
  * stack falls through to Ubuntu, which shares its geometric build.
  */
 
-@define-color ad_bg          #08111B;
-@define-color ad_bg_deep     #07101A;
-@define-color ad_surface     #111A28;
-@define-color ad_surface_2   #162233;
-@define-color ad_divider     #30425C;
-@define-color ad_text        #F2F6EF;
-@define-color ad_muted       #96A4B8;
-@define-color ad_accent      #78A9FF;
-@define-color ad_cyan        #66E0FF;
-@define-color ad_violet      #9A8BFF;
+@define-color ad_bg          #1C1C1E;
+@define-color ad_bg_deep     #141416;
+@define-color ad_surface     #2C2C2E;
+@define-color ad_surface_2   #3A3A3C;
+@define-color ad_divider     #48484A;
+@define-color ad_text        #F5F5F7;
+@define-color ad_muted       #98989D;
+@define-color ad_accent      #0A84FF;
+@define-color ad_cyan        #64D2FF;
+@define-color ad_violet      #5E5CE6;
 
 window.adaptive-command {
     background-color: transparent;

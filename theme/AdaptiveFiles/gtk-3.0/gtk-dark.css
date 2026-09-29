@@ -6,28 +6,28 @@
  * It intentionally does not modify the user's global GTK theme.
  */
 
-@define-color af_bg             #08111B;
-@define-color af_bg_deep        #07101A;
-@define-color af_surface        #111A28;
-@define-color af_surface_2      #162233;
-@define-color af_surface_hover  #1B2A3D;
-@define-color af_divider        #30425C;
-@define-color af_text           #F2F6EF;
-@define-color af_text_2         #C8D2E0;
-@define-color af_muted          #96A4B8;
-@define-color af_muted_2        #6F8097;
-@define-color af_accent         #78A9FF;
-@define-color af_cyan           #66E0FF;
-@define-color af_violet         #9A8BFF;
-@define-color af_warning        #F3C96B;
-@define-color af_danger         #FF7A90;
-@define-color af_success        #65D9B5;
+@define-color af_bg             #1C1C1E;
+@define-color af_bg_deep        #141416;
+@define-color af_surface        #2C2C2E;
+@define-color af_surface_2      #3A3A3C;
+@define-color af_surface_hover  #333336;
+@define-color af_divider        #48484A;
+@define-color af_text           #F5F5F7;
+@define-color af_text_2         #C7C7CC;
+@define-color af_muted          #98989D;
+@define-color af_muted_2        #636366;
+@define-color af_accent         #0A84FF;
+@define-color af_cyan           #64D2FF;
+@define-color af_violet         #5E5CE6;
+@define-color af_warning        #FF9F0A;
+@define-color af_danger         #FF453A;
+@define-color af_success        #30D158;
 
 @define-color theme_bg_color             @af_bg;
 @define-color theme_fg_color             @af_text;
 @define-color theme_base_color           @af_bg_deep;
 @define-color theme_text_color           @af_text;
-@define-color theme_selected_bg_color    #244E7A;
+@define-color theme_selected_bg_color    #0058D0;
 @define-color theme_selected_fg_color    @af_text;
 @define-color insensitive_bg_color       @af_surface;
 @define-color insensitive_fg_color       @af_muted_2;
@@ -132,7 +132,7 @@ button:checked {
 
 button:focus {
     border-color: alpha(@af_accent, 0.45);
-    box-shadow: inset 0 0 0 1px alpha(@af_cyan, 0.10);
+    box-shadow: inset 0 0 0 1px alpha(@af_accent, 0.10);
 }
 
 button:disabled {
@@ -309,7 +309,7 @@ placessidebar row image,
 placessidebar row:selected image,
 .sidebar row:selected image,
 .navigation-sidebar row:selected image {
-    color: @af_cyan;
+    color: @af_accent;
 }
 
 placessidebar .sidebar-icon {
@@ -465,8 +465,8 @@ progressbar trough {
 progressbar progress {
     min-height: 5px;
     border-radius: 99px;
-    background-image:
-        linear-gradient(to right, @af_accent, @af_cyan);
+    background-image: none;
+    background-color: @af_accent;
 }
 
 levelbar trough {
@@ -687,7 +687,7 @@ flowbox {
 .view:selected,
 iconview:selected,
 flowboxchild:selected {
-    background-color: rgba(120, 169, 255, 0.16);
+    background-color: rgba(10, 132, 255, 0.16);
 }
 
 .view:selected image,
