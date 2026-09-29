@@ -2413,3 +2413,74 @@
  * Files adds only its own widgets (extension/preview.css), and the session
  * font is Inter, as here.
  */
+
+/* ===== Tasks panel =====
+ *
+ * Shares the Control Center's popup, rows and headings with the USB panel;
+ * adds the CPU column, the sort chips and the End pill.
+ */
+
+.adaptive-tasks {
+    width: 440px;
+    spacing: 8px;
+}
+
+.adaptive-tasks-heading {
+    padding-right: 6px;
+    spacing: 4px;
+}
+
+.adaptive-tasks-sort {
+    padding: 2px 9px;
+    border-radius: 999px;
+    color: #98989D;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-tasks-sort:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #F5F5F7;
+}
+
+.adaptive-tasks-sort:checked {
+    background-color: rgba(255, 255, 255, 0.14);
+    color: #F5F5F7;
+}
+
+.adaptive-tasks-icon {
+    icon-size: 20px;
+}
+
+.adaptive-tasks-meta {
+    font-feature-settings: "tnum";
+}
+
+/* CPU is status, so it takes status colours only when it is high. */
+.adaptive-tasks-cpu {
+    min-width: 44px;
+    margin-right: 8px;
+    color: #98989D;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+    text-align: right;
+}
+
+.adaptive-tasks-warm {
+    color: #FF9F0A;
+}
+
+.adaptive-tasks-hot {
+    color: #FF453A;
+    font-weight: 600;
+}
+
+.adaptive-tasks-end:hover,
+.adaptive-tasks-end:focus {
+    background-color: rgba(255, 69, 58, 0.22);
+    color: #FF453A;
+}
+
+.adaptive-tasks-footer {
+    padding: 2px 4px 0 4px;
+}

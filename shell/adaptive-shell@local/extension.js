@@ -20,6 +20,8 @@ const Shade = Me.imports.shade;
 const DockExtras = Me.imports.dockExtras;
 const ControlCenter = Me.imports.controlCenter;
 const UsbDevices = Me.imports.usbDevices;
+const ShellActions = Me.imports.shellActions;
+const TaskManager = Me.imports.taskManager;
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
 // OLED; the ambient level is what it settles to once nobody is looking.
@@ -71,6 +73,8 @@ class AdaptiveShellV16 {
         this._controlCenter = null;
         // Adaptive USB panel: plugged-in devices and serial ports, top right.
         this._usbPanel = null;
+        this._shellActions = null;
+        this._taskPanel = null;
         this._projectProxy = null;
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
@@ -206,6 +210,8 @@ class AdaptiveShellV16 {
         this._installShade();
         this._installControlCenter();
         this._installUsbPanel();
+        this._installTaskPanel();
+        this._installShellActions();
         this._installRail();
 
         this._monitorChangedId = Main.layoutManager.connect(
@@ -957,6 +963,16 @@ class AdaptiveShellV16 {
             this._usbPanel = null;
         }
 
+        if (this._shellActions) {
+            this._shellActions.detach();
+            this._shellActions = null;
+        }
+
+        if (this._taskPanel) {
+            this._taskPanel.detach();
+            this._taskPanel = null;
+        }
+
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
@@ -1199,6 +1215,30 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the Control Center');
             this._controlCenter = null;
+        }
+    }
+
+    // Running apps and busy processes, each with an End button; next to the
+    // USB panel. See taskManager.js.
+    _installTaskPanel() {
+        try {
+            this._taskPanel = new TaskManager.TaskPanel();
+            this._taskPanel.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the Tasks panel');
+            this._taskPanel = null;
+        }
+    }
+
+    // Shell-only actions (app grid, search, Shade, Control Center, workspaces)
+    // for the touchpad gesture daemon; see shellActions.js.
+    _installShellActions() {
+        try {
+            this._shellActions = new ShellActions.ShellActions();
+            this._shellActions.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] exporting gesture actions');
+            this._shellActions = null;
         }
     }
 

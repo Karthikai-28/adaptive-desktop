@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Touchpad Gestures
+GenericName=Gesture Settings
+Comment=Three- and four-finger swipes, set up like Windows
+Keywords=touchpad;gesture;gestures;swipe;trackpad;fingers;
+Exec=/usr/bin/python3 /home/karthi/adaptive-desktop/apps/adaptive-gestures/main.py
+Icon=input-touchpad
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupNotify=true
+StartupWMClass=com.karthi.AdaptiveGestures
