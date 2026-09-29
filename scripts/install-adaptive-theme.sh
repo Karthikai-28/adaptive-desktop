@@ -26,21 +26,18 @@ ICONS_DST="${HOME}/.local/share/icons/AdaptiveFilesIcons"
 BG_SRC="${REPO}/design/backgrounds"
 BG_DST="${HOME}/.local/share/backgrounds"
 
-# Cantarell and JetBrainsMono are both already on this machine, so the skin
-# needs no font download to stop looking like Ubuntu. Ubuntu/Ubuntu Mono are
-# the single most recognisable thing left on screen once the palette is right.
-UI_FONT="Cantarell 11"
-DOC_FONT="Cantarell 11"
+# Inter is the shell's type (panel, dock, Shade, Control Center), so the
+# session font is Inter too: one typeface across shell chrome and every GTK
+# window is most of what "the same skin" means once the palette matches.
+# 10.5pt keeps GTK text the size Cantarell 11 was; Inter runs wider.
+# Cantarell stays installed as the fallback if Inter is unavailable.
+UI_FONT="Inter 10.5"
+DOC_FONT="Inter 11"
 MONO_FONT="JetBrainsMono Nerd Font 12"
 
-# Inter carries the shade's UI text. It is genuinely clearer than Cantarell at
-# the 11-14px the notification and agenda rows use, which is where the shade
-# lives. Installed per-user from Ubuntu's own package rather than with apt, so
-# this script still needs no root; `rm -rf ~/.local/share/fonts/inter` undoes it.
-#
-# Note this does NOT touch org.gnome.desktop.interface font-name below - the
-# session font stays Cantarell. Only the shade's own CSS asks for Inter, because
-# switching the session font would restyle every GTK app on the machine.
+# Inter is installed per-user from Ubuntu's own package rather than with apt,
+# so this script still needs no root; `rm -rf ~/.local/share/fonts/inter`
+# undoes it.
 install_inter() {
     local dst="${HOME}/.local/share/fonts/inter"
 
@@ -63,12 +60,14 @@ install_inter() {
     else
         # Not fatal: the shade's font stack falls back to Cantarell, so the
         # only loss is a little crispness at small sizes.
-        echo "  Inter unavailable (offline?); the shade falls back to Cantarell"
+        echo "  Inter unavailable (offline?); falling back to Cantarell"
+        UI_FONT="Cantarell 11"
+        DOC_FONT="Cantarell 11"
     fi
     rm -rf "$tmp"
 }
 
-echo "Installing Inter for the Adaptive Shade..."
+echo "Installing Inter, the Adaptive UI typeface..."
 install_inter
 
 echo "Building theme from tokens..."

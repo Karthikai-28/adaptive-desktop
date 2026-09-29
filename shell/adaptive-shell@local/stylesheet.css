@@ -2408,7 +2408,8 @@
  *   Status      green #30D158 · orange #FF9F0A · red #FF453A - never decoration.
  *   Data only   indigo #5E5CE6 · cyan #64D2FF - to tell chart series apart.
  *
- * The system accent (org.gnome.desktop.interface gtk-theme) is Yaru-blue-dark,
- * so the stock shell and GTK apps draw their selection and switches in the
- * same blue family instead of Ubuntu orange.
+ * GTK apps share it: the session gtk-theme is Adaptive (theme/Adaptive,
+ * generated from tokens/adaptive.tokens.json over a Yaru-blue-dark base),
+ * Files adds only its own widgets (extension/preview.css), and the session
+ * font is Inter, as here.
  */

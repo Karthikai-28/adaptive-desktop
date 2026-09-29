@@ -4,10 +4,16 @@
     "bg.deep": "#141416",
     "surface.1": "#2C2C2E",
     "surface.2": "#3A3A3C",
+    "material.menu": "#1E1E20",
+    "material.sidebar": "#28282A",
     "divider": "#48484A",
     "text.primary": "#F5F5F7",
     "text.muted": "#98989D",
+    "text.tertiary": "#8E8E93",
+    "text.quaternary": "#636366",
     "accent.primary": "#0A84FF",
+    "accent.hover": "#409CFF",
+    "accent.selection": "#0058D0",
     "accent.cyan": "#64D2FF",
     "accent.violet": "#5E5CE6",
     "state.warning": "#FF9F0A",
@@ -46,5 +52,6 @@
     "ui.title": 14,
     "body": 12,
     "metadata": 10
-  }
+  },
+  "_comment": "material.sidebar is the card material (rgba(44,44,46,.80)) flattened over bg.canvas, for panels that must be opaque. accent.selection is the selected-content blue that keeps white text readable."
 }

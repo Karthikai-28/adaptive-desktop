@@ -50,8 +50,12 @@ prepare_adaptive_environment() {
         export GI_TYPELIB_PATH="$PREFIX/lib/x86_64-linux-gnu/girepository-1.0:${GI_TYPELIB_PATH:-}"
     fi
 
-    if [[ -d "$PREFIX/share/themes/AdaptiveFiles" ]]; then
-        export GTK_THEME="AdaptiveFiles"
+    # Files draws with the session theme, the same sheet as every other GTK
+    # window; extension/preview.css adds only what is specific to Files.
+    # Pinned here so Files keeps the skin even if the session theme is
+    # switched back to Yaru for troubleshooting.
+    if [[ -f "${XDG_DATA_HOME:-$HOME/.local/share}/themes/Adaptive/gtk-3.0/gtk.css" ]]; then
+        export GTK_THEME="Adaptive"
     fi
 
     # The inspector extension finds its stylesheet through these. The retired

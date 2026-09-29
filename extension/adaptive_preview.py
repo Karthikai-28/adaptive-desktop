@@ -22,6 +22,7 @@ import shutil
 import json
 import stat
 import subprocess
+import time
 import traceback
 import weakref
 
@@ -155,6 +156,9 @@ _CONTROLLERS = {}
 # the same entry appeared three times. One instance owns the menu.
 _MENU_OWNER = None
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+# Home measurement can take minutes on a cold cache; it gets its own thread so
+# it never queues ahead of a preview.
+_SLOW_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
 def _log(message):
@@ -209,19 +213,12 @@ def _ancestors(widget):
 
 
 def _human_size(value):
+    # GLib's decimal units, the same ones the Files status bar and the
+    # Properties dialog print, so a file never shows two different sizes.
     try:
-        number = float(value)
+        return GLib.format_size(max(0, int(value)))
     except Exception:
         return "—"
-
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if number < 1024.0 or unit == "TB":
-            if unit == "B":
-                return f"{int(number)} {unit}"
-            return f"{number:.1f} {unit}"
-        number /= 1024.0
-
-    return "—"
 
 
 def _format_timestamp(seconds):
@@ -369,44 +366,555 @@ def _theme_icon_for_identity(identity, mime):
     )
 
 
+# ------------------------------------------------------------------
+# Data visualisation
+#
+# Colours come from the palette table at the end of the shell stylesheet.
+# Blue, indigo and cyan tell series apart, then the label greys. Green,
+# orange and red are status only - capacity thresholds - never a series.
+# ------------------------------------------------------------------
+
+
+def _rgb(value):
+    value = value.lstrip("#")
+    return tuple(int(value[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+
+SERIES_COLORS = [
+    _rgb(value)
+    for value in ("#0A84FF", "#5E5CE6", "#64D2FF", "#98989D", "#636366", "#48484A")
+]
+TRACK_RGBA = (1.0, 1.0, 1.0, 0.10)
+ACCENT = _rgb("#0A84FF")
+STATUS_WARN = _rgb("#FF9F0A")
+STATUS_CRIT = _rgb("#FF453A")
+
+# Capacity is "getting full" from 85% and "almost full" from 93%.
+CAPACITY_WARN = 0.85
+CAPACITY_CRIT = 0.93
+
+KINDS = ("Documents", "Images", "Media", "Code", "Archives", "Other")
+KIND_COLORS = dict(zip(KINDS, SERIES_COLORS))
+
+_EXT_KIND = {}
+for _kind, _exts in {
+    "Documents": (
+        "pdf doc docx odt rtf txt md rst tex epub xls xlsx ods csv tsv "
+        "ppt pptx odp key pages numbers"
+    ),
+    "Images": (
+        "png jpg jpeg gif bmp tif tiff webp svg heic heif ico psd xcf "
+        "raw cr2 nef dng exr hdr"
+    ),
+    "Media": (
+        "mp4 mkv mov avi webm m4v flv wmv mpg mpeg mp3 wav flac ogg oga "
+        "m4a aac opus wma mid midi"
+    ),
+    "Code": (
+        "py pyw ipynb js mjs cjs ts tsx jsx c h cpp cxx cc hpp hxx java kt "
+        "kts rs go sh bash zsh fish json jsonc yaml yml toml ini cfg conf "
+        "xml html htm css scss sql cmake lua rb php swift ino cu cuh proto "
+        "launch urdf xacro msg srv"
+    ),
+    "Archives": (
+        "zip tar gz tgz xz txz bz2 tbz2 7z rar zst deb rpm snap appimage "
+        "iso img whl jar apk dmg"
+    ),
+}.items():
+    for _ext in _exts.split():
+        _EXT_KIND[_ext] = _kind
+
+
+def _kind_for_name(name):
+    stem, dot, ext = (name or "").rpartition(".")
+    if not dot or not stem:
+        return "Other"
+    return _EXT_KIND.get(ext.casefold(), "Other")
+
+
+def _capacity_color(fraction):
+    if fraction >= CAPACITY_CRIT:
+        return STATUS_CRIT
+    if fraction >= CAPACITY_WARN:
+        return STATUS_WARN
+    return ACCENT
+
+
+def _count_text(number, singular, plural=None):
+    word = singular if number == 1 else (plural or singular + "s")
+    return f"{number:,} {word}"
+
+
+def _relative_time(seconds):
+    try:
+        then = _dt.datetime.fromtimestamp(int(seconds))
+    except Exception:
+        return "—"
+
+    delta = _dt.datetime.now() - then
+    minutes = int(delta.total_seconds() // 60)
+
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes} min ago"
+    if minutes < 24 * 60:
+        return f"{minutes // 60} h ago"
+    if delta.days == 1:
+        return "yesterday"
+    if delta.days < 7:
+        return f"{delta.days} days ago"
+    if then.year == _dt.datetime.now().year:
+        return then.strftime("%b %-d")
+    return then.strftime("%b %-d, %Y")
+
+
+def _short_path(path):
+    home = str(Path.home())
+    path = str(path or "")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
+def _rounded_rect(cr, x, y, width, height, radius):
+    radius = max(0.0, min(radius, height / 2.0, width / 2.0))
+    cr.new_sub_path()
+    cr.arc(x + width - radius, y + radius, radius, -math.pi / 2.0, 0.0)
+    cr.arc(x + width - radius, y + height - radius, radius, 0.0, math.pi / 2.0)
+    cr.arc(x + radius, y + height - radius, radius, math.pi / 2.0, math.pi)
+    cr.arc(x + radius, y + radius, radius, math.pi, math.pi * 1.5)
+    cr.close_path()
+
+
+class SegmentBar(Gtk.DrawingArea):
+    """A rounded track filled left to right by coloured segments.
+
+    Segments are (fraction_of_track, rgb). Adjacent segments are split by a
+    1px gap left unpainted, so the card behind shows through whatever its
+    colour, and whatever the fractions leave over stays as track.
+    """
+
+    def __init__(self, height=10):
+        super().__init__()
+        self._segments = []
+        self.set_size_request(-1, height)
+        self.set_hexpand(True)
+        self.set_valign(Gtk.Align.CENTER)
+
+    def set_segments(self, segments):
+        self._segments = [
+            (max(0.0, float(fraction)), color)
+            for fraction, color in segments
+            if fraction and fraction > 0
+        ]
+        self.queue_draw()
+        return self
+
+    def do_draw(self, cr):
+        width = self.get_allocated_width()
+        height = self.get_allocated_height()
+        if width <= 0 or height <= 0:
+            return False
+
+        _rounded_rect(cr, 0, 0, width, height, height / 2.0)
+        cr.clip()
+
+        x = 0.0
+        count = len(self._segments)
+        for index, (fraction, color) in enumerate(self._segments):
+            span = min(width - x, max(fraction * width, 2.0))
+            if span <= 0:
+                break
+            last = index == count - 1
+            painted = span if last and x + span >= width - 0.5 else span - 1.0
+            cr.set_source_rgb(*color)
+            cr.rectangle(x, 0, max(painted, 1.0), height)
+            cr.fill()
+            x += span
+
+        if x < width:
+            cr.set_source_rgba(*TRACK_RGBA)
+            cr.rectangle(x, 0, width - x, height)
+            cr.fill()
+
+        return False
+
+
+def _add_scheme_path(manager):
+    """Let GtkSourceView find adaptive-dark.xml, installed beside
+    preview.css (see scripts/install-files-extension.sh)."""
+    css_path = os.environ.get("ADAPTIVE_FILES_PREVIEW_CSS")
+    if not css_path:
+        return
+    folder = str(Path(css_path).parent)
+    if folder not in (manager.get_search_path() or []):
+        manager.append_search_path(folder)
+
+
+class RoundedPicture(Gtk.DrawingArea):
+    """A thumbnail scaled to fit, never enlarged, with rounded corners and a
+    hairline edge - GTK3 CSS cannot round an image by itself."""
+
+    def __init__(self, pixbuf, max_width, max_height, radius=8.0):
+        super().__init__()
+        scale = min(max_width / pixbuf.get_width(), max_height / pixbuf.get_height(), 1.0)
+        width = max(1, int(pixbuf.get_width() * scale))
+        height = max(1, int(pixbuf.get_height() * scale))
+        self._pixbuf = pixbuf.scale_simple(width, height, GdkPixbuf.InterpType.BILINEAR)
+        self._radius = radius
+        self.set_size_request(width, height)
+
+    def do_draw(self, cr):
+        width = self._pixbuf.get_width()
+        height = self._pixbuf.get_height()
+        _rounded_rect(cr, 0, 0, width, height, self._radius)
+        cr.save()
+        cr.clip()
+        Gdk.cairo_set_source_pixbuf(cr, self._pixbuf, 0, 0)
+        cr.paint()
+        cr.restore()
+        _rounded_rect(cr, 0.5, 0.5, width - 1, height - 1, self._radius)
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.10)
+        cr.set_line_width(1.0)
+        cr.stroke()
+        return False
+
+
 class UsageRing(Gtk.DrawingArea):
-    def __init__(self):
+    """Percentage donut; the arc takes its status colour from the fraction."""
+
+    def __init__(self, size=84, line_width=9.0):
         super().__init__()
         self._fraction = 0.0
-        self.set_size_request(116, 116)
+        self._line_width = line_width
+        self.set_size_request(size, size)
+        self.set_valign(Gtk.Align.CENTER)
 
     def set_fraction(self, fraction):
         self._fraction = max(0.0, min(1.0, float(fraction)))
         self.queue_draw()
+        return self
 
     def do_draw(self, cr):
-        allocation = self.get_allocation()
-        width = allocation.width
-        height = allocation.height
-
+        width = self.get_allocated_width()
+        height = self.get_allocated_height()
         cx = width / 2.0
         cy = height / 2.0
-        radius = min(width, height) * 0.32
-        line_width = 9.0
+        radius = min(width, height) / 2.0 - self._line_width / 2.0 - 1.0
 
-        cr.set_line_width(line_width)
+        cr.set_line_width(self._line_width)
         cr.set_line_cap(1)
 
-        cr.set_source_rgba(0.18, 0.25, 0.35, 0.76)
+        cr.set_source_rgba(*TRACK_RGBA)
         cr.arc(cx, cy, radius, 0.0, math.tau)
         cr.stroke()
 
-        cr.set_source_rgba(0.47, 0.66, 1.0, 0.98)
-        cr.arc(
-            cx,
-            cy,
-            radius,
-            -math.pi / 2.0,
-            -math.pi / 2.0 + math.tau * self._fraction,
-        )
-        cr.stroke()
+        if self._fraction > 0:
+            cr.set_source_rgb(*_capacity_color(self._fraction))
+            start = -math.pi / 2.0
+            cr.arc(cx, cy, radius, start, start + math.tau * self._fraction)
+            cr.stroke()
 
         return False
+
+
+class ActivityChart(Gtk.DrawingArea):
+    """Daily bars, oldest on the left. Today is the accent, earlier days a
+    lighter blue, and empty days a short tick so the axis stays readable."""
+
+    def __init__(self, height=46):
+        super().__init__()
+        self._values = []
+        self.set_size_request(-1, height)
+        self.set_hexpand(True)
+
+    def set_values(self, values):
+        self._values = list(values or [])
+        self.queue_draw()
+        return self
+
+    def do_draw(self, cr):
+        values = self._values
+        if not values:
+            return False
+
+        width = self.get_allocated_width()
+        height = self.get_allocated_height()
+        count = len(values)
+        gap = 3.0
+        bar = max(2.0, (width - gap * (count - 1)) / count)
+        peak = max(values) or 1
+
+        for index, value in enumerate(values):
+            x = index * (bar + gap)
+            if value <= 0:
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.12)
+                _rounded_rect(cr, x, height - 2.0, bar, 2.0, 1.0)
+                cr.fill()
+                continue
+
+            span = max(4.0, (value / peak) * (height - 2.0))
+            if index == count - 1:
+                cr.set_source_rgb(*ACCENT)
+            else:
+                cr.set_source_rgba(ACCENT[0], ACCENT[1], ACCENT[2], 0.55)
+            _rounded_rect(cr, x, height - span, bar, span, min(3.0, bar / 2.0))
+            cr.fill()
+
+        return False
+
+
+class Swatch(Gtk.DrawingArea):
+    """A legend dot."""
+
+    def __init__(self, color, size=8):
+        super().__init__()
+        self._color = color
+        self.set_size_request(size, size)
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_halign(Gtk.Align.CENTER)
+
+    def do_draw(self, cr):
+        width = self.get_allocated_width()
+        height = self.get_allocated_height()
+        radius = min(width, height) / 2.0
+        cr.set_source_rgb(*self._color)
+        cr.arc(width / 2.0, height / 2.0, radius, 0, math.tau)
+        cr.fill()
+        # The darkest greys all but vanish on the panel; a faint ring keeps
+        # their dots findable without changing the colour they stand for.
+        if sum(self._color) / 3.0 < 0.35:
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.28)
+            cr.set_line_width(1.0)
+            cr.arc(width / 2.0, height / 2.0, radius - 0.5, 0, math.tau)
+            cr.stroke()
+        return False
+
+
+# ------------------------------------------------------------------
+# Measurement workers - plain data only, never GTK objects
+# ------------------------------------------------------------------
+
+SCAN_MAX_ENTRIES = 60000
+SCAN_MAX_SECONDS = 2.0
+ACTIVITY_DAYS = 14
+
+
+def _midnight(timestamp):
+    moment = _dt.datetime.fromtimestamp(timestamp)
+    return moment.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def _scan_paths(paths, max_entries=SCAN_MAX_ENTRIES, max_seconds=SCAN_MAX_SECONDS):
+    """Size, kind mix and recent activity for a set of top-level paths.
+
+    Each path becomes one "child" whose size includes everything under it.
+    The walk never follows symlinks, and stops early once either budget is
+    spent; the result then says truncated=True and the sizes are lower
+    bounds.
+    """
+    started = time.monotonic()
+    today = _midnight(time.time())
+    remaining = [max_entries]
+
+    result = {
+        "bytes": 0,
+        "files": 0,
+        "folders": 0,
+        "truncated": False,
+        "kinds": {kind: 0 for kind in KINDS},
+        "kind_counts": {kind: 0 for kind in KINDS},
+        "days": [0] * ACTIVITY_DAYS,
+        "children": [],
+    }
+
+    def spent():
+        if remaining[0] <= 0 or time.monotonic() - started > max_seconds:
+            result["truncated"] = True
+            return True
+        return False
+
+    def account_file(name, st):
+        size = st.st_size
+        kind = _kind_for_name(name)
+        result["bytes"] += size
+        result["files"] += 1
+        result["kinds"][kind] += size
+        result["kind_counts"][kind] += 1
+
+        age_days = int((today - _midnight(st.st_mtime)) // 86400)
+        if 0 <= age_days < ACTIVITY_DAYS:
+            result["days"][ACTIVITY_DAYS - 1 - age_days] += 1
+        return size
+
+    def walk_dir(path):
+        total = 0
+        stack = [path]
+        while stack:
+            if spent():
+                break
+            current = stack.pop()
+            try:
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        remaining[0] -= 1
+                        try:
+                            st = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        if stat.S_ISDIR(st.st_mode):
+                            result["folders"] += 1
+                            stack.append(entry.path)
+                        elif stat.S_ISREG(st.st_mode):
+                            total += account_file(entry.name, st)
+            except OSError:
+                continue
+        return total
+
+    for path in paths:
+        name = os.path.basename(path.rstrip(os.sep)) or path
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+
+        if stat.S_ISDIR(st.st_mode):
+            result["folders"] += 1
+            size = 0 if spent() else walk_dir(path)
+            result["children"].append(
+                {"name": name, "path": path, "is_dir": True, "bytes": size, "kind": "Folder"}
+            )
+        else:
+            size = account_file(name, st) if stat.S_ISREG(st.st_mode) else 0
+            result["children"].append(
+                {
+                    "name": name,
+                    "path": path,
+                    "is_dir": False,
+                    "bytes": size,
+                    "kind": _kind_for_name(name),
+                }
+            )
+
+    result["children"].sort(key=lambda child: child["bytes"], reverse=True)
+    result["seconds"] = time.monotonic() - started
+    return result
+
+
+def _scan_folder(path):
+    """_scan_paths over a folder's own children, hidden ones included: they
+    take real space, and a storage view that hides .cache is lying."""
+    try:
+        with os.scandir(path) as entries:
+            children = [entry.path for entry in entries]
+    except OSError as error:
+        raise RuntimeError(error.strerror or str(error)) from error
+
+    result = _scan_paths(children)
+    result["items"] = len(children)
+    result["visible_items"] = sum(
+        1 for child in children if not os.path.basename(child).startswith(".")
+    )
+    return result
+
+
+HOME_USAGE_CACHE = Path.home() / ".cache" / "adaptive-files" / "home-usage.json"
+HOME_USAGE_MAX_AGE = 20 * 60
+
+
+def _measure_home():
+    """Allocated bytes per top-level Home entry, via du at idle priority.
+
+    du reports allocated blocks (-B1), the same unit statvfs uses for "used",
+    so the Home share and the system remainder add up to the real disk.
+    Unreadable directories make du exit 1 with partial output; that output
+    is still the best available answer, so it is kept.
+    """
+    home = str(Path.home())
+    trash = str(Path.home() / ".local" / "share" / "Trash")
+    idle = ["nice", "-n", "19", "ionice", "-c", "3"]
+
+    def du(*args):
+        # Separate runs: du counts an inode once across all its operands,
+        # so Trash (inside Home) would read as empty in the same call.
+        return subprocess.run(
+            idle + ["du", "-x", "-B1", *args],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        ).stdout.splitlines()
+
+    total = 0
+    rows = []
+    for line in du("-d", "1", home):
+        size_text, _, path = line.partition("\t")
+        try:
+            size = int(size_text)
+        except ValueError:
+            continue
+        if path == home:
+            total = size
+        elif os.path.dirname(path) == home:
+            rows.append({"name": os.path.basename(path), "path": path, "bytes": size})
+
+    trash_bytes = 0
+    if os.path.isdir(trash):
+        for line in du("-s", trash):
+            try:
+                trash_bytes = int(line.partition("\t")[0])
+            except ValueError:
+                pass
+
+    rows.sort(key=lambda row: row["bytes"], reverse=True)
+    data = {
+        "measured_at": time.time(),
+        "total": total,
+        "trash": trash_bytes,
+        "rows": rows,
+    }
+
+    try:
+        HOME_USAGE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        HOME_USAGE_CACHE.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass
+
+    return data
+
+
+def _cached_home_usage():
+    try:
+        data = json.loads(HOME_USAGE_CACHE.read_text(encoding="utf-8"))
+        if data.get("rows") is not None:
+            return data
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _volume_label(path):
+    """Friendly name for the filesystem holding path: its label, else the
+    device's model-ish name, else the mount point."""
+    try:
+        proc = subprocess.run(
+            ["findmnt", "-n", "-o", "SOURCE,FSTYPE,TARGET,LABEL", "--target", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        parts = proc.stdout.strip().splitlines()[0].split(None, 3)
+    except Exception:
+        return {"source": "", "fstype": "", "target": str(path), "label": ""}
+
+    while len(parts) < 4:
+        parts.append("")
+    source, fstype, target, label = parts
+    return {"source": source, "fstype": fstype, "target": target, "label": label}
 
 
 class PreviewController:
@@ -418,8 +926,7 @@ class PreviewController:
         self.stack = None
 
         self.preview_body = None
-        self.preview_title = None
-        self.preview_subtitle = None
+        self.project_body = None
 
         self.storage_body = None
         self.network_body = None
@@ -435,6 +942,15 @@ class PreviewController:
         self.selection_generation = 0
         self.last_selection = []
         self.active_metadata_box = None
+        self.location_uri = None
+        self._selection_key = None
+        self._selection_at = 0.0
+        self._current_name = ""
+        self._file_subtitle = None
+        self._scan_cache = {}
+        self._home_usage = None
+        self._home_measuring = False
+        self._projects_cache = None
 
         self._active_project_id = None
         self._dbus_proxy = None
@@ -542,48 +1058,23 @@ class PreviewController:
         panel.set_vexpand(True)
         _css(panel, "adaptive-preview-panel")
 
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=9)
-        header.set_margin_start(12)
-        header.set_margin_end(12)
-        header.set_margin_top(10)
-        header.set_margin_bottom(7)
-        _css(header, "adaptive-preview-header")
-
-        glyph = Gtk.Image.new_from_icon_name("adaptive-inspector-symbolic", Gtk.IconSize.BUTTON)
-        glyph.set_pixel_size(22)
-        _css(glyph, "adaptive-preview-glyph")
-        header.pack_start(glyph, False, False, 0)
-
-        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        title_box.set_hexpand(True)
-
-        title = Gtk.Label(label="Inspector", xalign=0)
-        title.set_ellipsize(Pango.EllipsizeMode.END)
-        _css(title, "adaptive-preview-title")
-
-        subtitle = Gtk.Label(label="Select an item", xalign=0)
-        subtitle.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        _css(subtitle, "adaptive-preview-subtitle")
-
-        title_box.pack_start(title, False, False, 0)
-        title_box.pack_start(subtitle, False, False, 0)
-
-        header.pack_start(title_box, True, True, 0)
-        panel.pack_start(header, False, False, 0)
-
         stack = Gtk.Stack()
         stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         stack.set_transition_duration(120)
         stack.set_hexpand(True)
         stack.set_vexpand(True)
 
+        # A segmented control is the whole header: each tab opens on its own
+        # title, so a panel-wide "Inspector" heading only repeated the tab.
         switcher = Gtk.StackSwitcher()
         switcher.set_stack(stack)
+        switcher.set_homogeneous(True)
         switcher.set_halign(Gtk.Align.FILL)
         switcher.set_hexpand(True)
-        switcher.set_margin_start(10)
-        switcher.set_margin_end(10)
-        switcher.set_margin_bottom(8)
+        switcher.set_margin_start(14)
+        switcher.set_margin_end(14)
+        switcher.set_margin_top(12)
+        switcher.set_margin_bottom(6)
         _css(switcher, "adaptive-inspector-switcher")
         panel.pack_start(switcher, False, False, 0)
 
@@ -592,17 +1083,15 @@ class PreviewController:
         network_scroll, network_body = self._make_scroll_body()
         project_scroll, project_body = self._make_scroll_body()
 
-        stack.add_titled(preview_scroll, "preview", "Preview")
+        stack.add_titled(preview_scroll, "preview", "Info")
         stack.add_titled(storage_scroll, "storage", "Storage")
         stack.add_titled(network_scroll, "network", "Network")
-        stack.add_titled(project_scroll, "project", "Project")
+        stack.add_titled(project_scroll, "project", "Projects")
 
         panel.pack_start(stack, True, True, 0)
 
         self.panel = panel
         self.stack = stack
-        self.preview_title = title
-        self.preview_subtitle = subtitle
 
         self.preview_body = preview_body
         self.storage_body = storage_body
@@ -612,8 +1101,6 @@ class PreviewController:
         stack.connect("notify::visible-child-name", self._on_stack_changed)
 
         self._render_empty_preview()
-        self._render_storage()
-        self._render_network()
         self._render_project()
 
     def _make_scroll_body(self):
@@ -623,11 +1110,11 @@ class PreviewController:
         scroll.set_hexpand(True)
         scroll.set_vexpand(True)
 
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(4)
-        body.set_margin_bottom(16)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        body.set_margin_start(14)
+        body.set_margin_end(14)
+        body.set_margin_top(8)
+        body.set_margin_bottom(18)
 
         scroll.add(body)
         return scroll, body
@@ -1049,20 +1536,45 @@ class PreviewController:
     # Selection / preview
     # --------------------------------------------------------------
 
+    def set_location(self, uri):
+        """The folder the window is showing; the Info tab describes it when
+        nothing is selected."""
+        if not uri or uri == self.location_uri:
+            return
+        self.location_uri = uri
+        if not self.last_selection:
+            # Deferred: Nautilus calls in here while it is building menus.
+            self._selection_key = None
+            GLib.idle_add(self.update_selection, [])
+
     def update_selection(self, selection):
         self.ensure_attached()
 
+        selection = list(selection)
+        key = (self.location_uri, tuple(item.get("uri") for item in selection))
+        now = time.monotonic()
+
+        # Nautilus rebuilds its menus - and so calls here - on focus and
+        # hover changes too, not only when the selection moves. Re-measuring
+        # an unchanged selection would only make the panel flicker.
+        if key == self._selection_key and now - self._selection_at < 10.0:
+            return GLib.SOURCE_REMOVE
+
+        self._selection_key = key
+        self._selection_at = now
+
         self.selection_generation += 1
         generation = self.selection_generation
-        self.last_selection = list(selection)
+        self.last_selection = selection
         self.active_metadata_box = None
+        self._file_subtitle = None
 
         if not selection:
             self._render_empty_preview()
             return GLib.SOURCE_REMOVE
 
         if len(selection) > 1:
-            self._render_multiple_selection(selection)
+            self._render_multiple_selection(selection, generation)
             return GLib.SOURCE_REMOVE
 
         item = selection[0]
@@ -1071,373 +1583,423 @@ class PreviewController:
         if not uri:
             self._render_message(
                 "Preview unavailable",
-                "The selected item does not expose a usable URI.",
+                "The selected item does not expose a usable address.",
             )
             return GLib.SOURCE_REMOVE
 
-        self.preview_title.set_text(item.get("name") or "Item")
-
-        if item.get("is_dir"):
-            subtitle = "Folder"
-        else:
-            identity = _file_identity(
-                item.get("name"),
-                item.get("mime"),
-            )
-            subtitle = (
-                identity.get("label")
-                or item.get("mime")
-                or "File"
-            )
-
-        self.preview_subtitle.set_text(subtitle)
-
+        self._current_name = item.get("name") or "Item"
         self._clear(self.preview_body)
 
         gfile = Gio.File.new_for_uri(uri)
 
         if item.get("is_dir"):
-            self._render_folder_shell(item, gfile, generation)
+            self._render_folder_summary(gfile, item.get("name"), generation, selected=True)
         else:
             self._render_file_shell(item, gfile, generation)
 
-        self._query_metadata_async(item, gfile, generation)
         return GLib.SOURCE_REMOVE
 
     def _render_empty_preview(self):
-        self.preview_title.set_text("Inspector")
-        self.preview_subtitle.set_text("Single click an item")
         self._clear(self.preview_body)
 
-        card = self._card()
-        card.set_halign(Gtk.Align.FILL)
-
-        glyph = Gtk.Label(label="◇")
-        glyph.set_halign(Gtk.Align.CENTER)
-        _css(glyph, "adaptive-empty-glyph")
-        card.pack_start(glyph, False, False, 4)
-
-        title = Gtk.Label(label="Nothing selected")
-        title.set_halign(Gtk.Align.CENTER)
-        _css(title, "adaptive-empty-title")
-        card.pack_start(title, False, False, 0)
-
-        text = Gtk.Label(
-            label=(
-                "Single click a file or folder to inspect it here. "
-                "Double click remains the normal Nautilus open action."
-            ),
-            xalign=0.5,
-        )
-        text.set_line_wrap(True)
-        text.set_justify(Gtk.Justification.CENTER)
-        _css(text, "adaptive-empty-copy")
-        card.pack_start(text, False, False, 4)
-
-        self.preview_body.pack_start(card, False, False, 0)
-
-        self.preview_body.pack_start(
-            self._section_label("QUICK ACTIONS"),
-            False,
-            False,
-            0,
-        )
-
-        actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        actions.pack_start(
-            self._button(
-                "Bookmark Current Location",
-                lambda *_: self._bookmark_current_location(),
-            ),
-            False,
-            False,
-            0,
-        )
-        actions.pack_start(
-            self._button(
-                "Copy Current Path",
-                lambda *_: self._copy_current_path(),
-            ),
-            False,
-            False,
-            0,
-        )
-        self.preview_body.pack_start(actions, False, False, 0)
-
-        self.preview_body.show_all()
-
-    def _render_multiple_selection(self, selection):
-        self.preview_title.set_text(f"{len(selection)} items")
-        self.preview_subtitle.set_text("Multiple selection")
-        self._clear(self.preview_body)
-
-        card = self._card()
-
-        count = Gtk.Label(label=str(len(selection)))
-        count.set_halign(Gtk.Align.CENTER)
-        _css(count, "adaptive-selection-count")
-        card.pack_start(count, False, False, 2)
-
-        caption = Gtk.Label(label="selected items")
-        caption.set_halign(Gtk.Align.CENTER)
-        _css(caption, "adaptive-empty-copy")
-        card.pack_start(caption, False, False, 0)
-
-        self.preview_body.pack_start(card, False, False, 0)
-
-        self.preview_body.pack_start(
-            self._section_label("SELECTION"),
-            False,
-            False,
-            0,
-        )
-
-        for item in selection[:10]:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
-            _css(row, "adaptive-content-row")
-            icon = Gtk.Image.new_from_icon_name(
-                "folder-symbolic" if item.get("is_dir") else "text-x-generic-symbolic",
-                Gtk.IconSize.MENU,
+        uri = self.location_uri
+        if not uri:
+            self._render_message(
+                "Nothing selected",
+                "Select a file or folder to see its preview and details.",
             )
-            label = Gtk.Label(label=item.get("name") or "Item", xalign=0)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            label.set_hexpand(True)
+            return
 
-            row.pack_start(icon, False, False, 0)
-            row.pack_start(label, True, True, 0)
-            self.preview_body.pack_start(row, False, False, 0)
-
-        if len(selection) > 10:
-            extra = Gtk.Label(
-                label=f"+ {len(selection) - 10} more",
-                xalign=0,
-            )
-            _css(extra, "adaptive-muted")
-            self.preview_body.pack_start(extra, False, False, 0)
-
-        self.preview_body.show_all()
-
-    def _render_folder_shell(self, item, gfile, generation):
-        hero = self._card()
-        _css(hero, "adaptive-preview-hero")
-
-        icon = Gtk.Image.new_from_icon_name(
-            "folder",
-            Gtk.IconSize.DIALOG,
-        )
-        icon.set_pixel_size(66)
-        icon.set_halign(Gtk.Align.CENTER)
-        _css(icon, "adaptive-icon-tile")
-        hero.pack_start(icon, False, False, 4)
-
-        name = Gtk.Label(label=item.get("name") or "Folder")
-        name.set_halign(Gtk.Align.CENTER)
-        name.set_ellipsize(Pango.EllipsizeMode.END)
-        _css(name, "adaptive-hero-name")
-        hero.pack_start(name, False, False, 2)
-
-        self.preview_body.pack_start(hero, False, False, 0)
-
-        self.preview_body.pack_start(
-            self._section_label("CONTENTS"),
-            False,
-            False,
-            0,
-        )
-
-        contents = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        _css(contents, "adaptive-contents-card")
-
-        loading = Gtk.Label(label="Loading folder contents…", xalign=0)
-        _css(loading, "adaptive-muted")
-        contents.pack_start(loading, False, False, 7)
-
-        self.preview_body.pack_start(contents, False, False, 0)
-
-        self._enumerate_folder_async(
+        gfile = Gio.File.new_for_uri(uri)
+        self.selection_generation += 1
+        self._render_folder_summary(
             gfile,
-            generation,
-            contents,
+            None,
+            self.selection_generation,
+            selected=False,
         )
 
-        self._append_details_placeholder()
-        self._append_path_and_actions(item)
+    # --------------------------------------------------------------
+    # Folder summary - current location, or one selected folder
+    # --------------------------------------------------------------
 
-    def _render_file_shell(self, item, gfile, generation):
-        preview_card = self._card()
-        _css(preview_card, "adaptive-preview-hero")
+    def _render_folder_summary(self, gfile, name, generation, selected):
+        body = self.preview_body
+        path = gfile.get_path()
 
-        media_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=8,
-        )
-        media_box.set_halign(Gtk.Align.FILL)
-        preview_card.pack_start(
-            media_box,
-            False,
-            False,
-            0,
-        )
+        if not name:
+            try:
+                info = gfile.query_info("standard::display-name", Gio.FileQueryInfoFlags.NONE, None)
+                name = info.get_display_name()
+            except Exception:
+                name = gfile.get_basename() or gfile.get_uri()
 
-        self.preview_body.pack_start(
-            preview_card,
-            False,
-            False,
-            0,
-        )
+        self._current_name = name or "Folder"
 
-        uri = item.get("uri") or ""
-        local_path = gfile.get_path()
-        mime = item.get("mime") or ""
-        identity = _file_identity(
-            item.get("name"),
-            mime,
-        )
+        hero, subtitle = self._hero(self._gicon_image(gfile, "folder", 64), self._current_name, "Folder")
+        body.pack_start(hero, False, False, 0)
 
-        self._render_file_identity(
-            item,
-            mime,
-            identity,
-            media_box,
-        )
+        project = self._project_for_path(path)
+        if project is not None:
+            body.pack_start(self._project_chip(project), False, False, 0)
 
-        if identity.get("is_code") and local_path:
-            self._render_source_preview(
-                Path(local_path),
-                mime,
-                media_box,
-            )
-        elif (
-            mime.startswith(IMAGE_MIME_PREFIX)
-            or mime == PDF_MIME
-        ):
-            self._render_native_thumbnail_preview(
-                uri,
-                mime,
-                media_box,
-                generation,
-            )
-        elif local_path and (
-            Path(local_path).suffix.casefold() in TEXT_EXTENSIONS
-            or mime.startswith("text/")
-        ):
-            self._render_source_preview(
-                Path(local_path),
-                mime,
-                media_box,
-            )
-        else:
-            icon = _theme_icon_for_identity(
-                identity,
-                mime,
-            )
-            icon.set_pixel_size(72)
-            icon.set_halign(Gtk.Align.CENTER)
-            _css(icon, "adaptive-icon-tile")
-            media_box.pack_start(
-                icon,
+        if path is None:
+            body.pack_start(
+                self._note(
+                    "This location is not a local folder, so its contents "
+                    "can't be measured here."
+                ),
                 False,
                 False,
-                10,
+                0,
             )
+            if selected:
+                self._append_details_placeholder()
+                self._query_metadata_async({"uri": gfile.get_uri()}, gfile, generation)
+            body.show_all()
+            return
 
-            caption = Gtk.Label(
-                label=identity.get("label") or "File",
-            )
-            caption.set_halign(Gtk.Align.CENTER)
-            _css(caption, "adaptive-muted")
-            media_box.pack_start(
-                caption,
+        tiles = self._stat_tiles([("—", "Size"), ("—", "Files"), ("—", "Folders")])
+        body.pack_start(tiles, False, False, 0)
+
+        contents = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        contents.pack_start(self._note("Measuring…"), False, False, 0)
+        body.pack_start(contents, False, False, 0)
+
+        if selected:
+            self._append_details_placeholder()
+            self._query_metadata_async({"uri": gfile.get_uri()}, gfile, generation)
+
+        self._append_actions(
+            [
+                ("document-open-symbolic", "Open", lambda *_: self._view_action("open-with-default-application")),
+                ("edit-copy-symbolic", "Copy Path", lambda *_: self._copy_text(path)),
+                ("utilities-terminal-symbolic", "Terminal", lambda *_: self._open_terminal(path)),
+            ]
+            if selected
+            else [
+                ("edit-copy-symbolic", "Copy Path", lambda *_: self._copy_text(path)),
+                ("utilities-terminal-symbolic", "Terminal", lambda *_: self._open_terminal(path)),
+                ("starred-symbolic", "Bookmark", lambda *_: self._bookmark_current_location()),
+                ("document-properties-symbolic", "Properties", lambda *_: self._view_action("current-directory-properties")),
+            ]
+        )
+        body.show_all()
+
+        widgets = {"subtitle": subtitle, "tiles": tiles, "contents": contents}
+        cached = self._scan_cache.get(path)
+        if cached and time.monotonic() - cached[0] < 30.0:
+            self._finish_folder_summary(generation, widgets, cached[1], None)
+            return
+
+        self._submit(
+            _scan_folder,
+            (path,),
+            lambda payload, error: self._finish_folder_summary(
+                generation, widgets, payload, error, cache_path=path
+            ),
+        )
+
+    def _finish_folder_summary(self, generation, widgets, payload, error, cache_path=None):
+        if generation != self.selection_generation:
+            return GLib.SOURCE_REMOVE
+
+        contents = widgets["contents"]
+        self._clear(contents)
+
+        if error:
+            contents.pack_start(self._note(f"Can't read this folder: {error}"), False, False, 0)
+            contents.show_all()
+            return GLib.SOURCE_REMOVE
+
+        if cache_path:
+            self._scan_cache[cache_path] = (time.monotonic(), payload)
+            if len(self._scan_cache) > 48:
+                oldest = min(self._scan_cache, key=lambda key: self._scan_cache[key][0])
+                self._scan_cache.pop(oldest, None)
+
+        approx = "≈ " if payload["truncated"] else ""
+        widgets["subtitle"].set_text(
+            "Folder · " + _count_text(payload.get("visible_items", payload.get("items", 0)), "item")
+        )
+        self._set_stat_tiles(
+            widgets["tiles"],
+            [
+                (approx + _human_size(payload["bytes"]), "Size"),
+                (f"{payload['files']:,}", "Files"),
+                (f"{payload['folders']:,}", "Folders"),
+            ],
+        )
+
+        if payload["bytes"] <= 0 and payload["files"] == 0:
+            contents.pack_start(self._note("This folder is empty."), False, False, 0)
+            contents.show_all()
+            return GLib.SOURCE_REMOVE
+
+        contents.pack_start(self._kind_breakdown(payload), False, False, 0)
+        contents.pack_start(self._largest_items(payload), False, False, 0)
+
+        activity = self._activity(payload)
+        if activity is not None:
+            contents.pack_start(activity, False, False, 0)
+
+        if payload["truncated"]:
+            contents.pack_start(
+                self._note(
+                    "Large folder - figures cover the first "
+                    f"{SCAN_MAX_ENTRIES:,} items and are lower bounds."
+                ),
                 False,
                 False,
                 0,
             )
 
-        self._append_details_placeholder()
-        self._append_path_and_actions(item)
+        contents.show_all()
+        return GLib.SOURCE_REMOVE
 
-    def _render_file_identity(
-        self,
-        item,
-        mime,
-        identity,
-        box,
-    ):
-        row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8,
-        )
-        _css(row, "adaptive-file-identity")
+    def _kind_breakdown(self, payload):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.pack_start(self._section_label("Contents"), False, False, 0)
 
-        icon = _theme_icon_for_identity(
-            identity,
-            mime,
-        )
-        icon.set_pixel_size(26)
-        _css(icon, "adaptive-file-type-icon")
-        row.pack_start(icon, False, False, 0)
+        group = self._group()
+        total = payload["bytes"] or 1
 
-        labels = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=0,
+        bar = SegmentBar(height=10).set_segments(
+            [(payload["kinds"][kind] / total, KIND_COLORS[kind]) for kind in KINDS]
         )
-        labels.set_hexpand(True)
+        bar.set_margin_top(4)
+        bar.set_margin_bottom(6)
+        group.pack_start(bar, False, False, 0)
 
-        primary = Gtk.Label(
-            label=identity.get("label") or "File",
-            xalign=0,
-        )
-        primary.set_ellipsize(
-            Pango.EllipsizeMode.END
-        )
-        _css(
-            primary,
-            "adaptive-file-type-title",
-        )
+        rows = [
+            (
+                KIND_COLORS[kind],
+                kind,
+                _human_size(payload["kinds"][kind]),
+                f"{payload['kind_counts'][kind]:,}",
+            )
+            for kind in KINDS
+            if payload["kind_counts"][kind]
+        ]
+        group.pack_start(self._legend(rows), False, False, 0)
 
-        secondary_parts = []
-        suffix = identity.get("suffix")
+        box.pack_start(group, False, False, 0)
+        return box
 
-        if suffix:
-            secondary_parts.append(
-                suffix.lstrip(".").upper()
+    def _largest_items(self, payload, title="Largest Items", limit=5):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.pack_start(self._section_label(title), False, False, 0)
+
+        group = self._group()
+        total = payload["bytes"] or 1
+        children = [child for child in payload["children"] if child["bytes"] > 0][:limit]
+
+        if not children:
+            group.pack_start(self._note("Nothing here takes up space yet."), False, False, 0)
+
+        for index, child in enumerate(children):
+            color = ACCENT if index == 0 else SERIES_COLORS[3]
+            group.pack_start(
+                self._bar_row(
+                    "folder" if child["is_dir"] else self._icon_name_for(child["name"]),
+                    child["name"],
+                    _human_size(child["bytes"]),
+                    child["bytes"] / total,
+                    color,
+                    tooltip=_short_path(child["path"]),
+                ),
+                False,
+                False,
+                0,
             )
 
-        if mime:
-            secondary_parts.append(mime)
+        box.pack_start(group, False, False, 0)
+        return box
 
-        secondary = Gtk.Label(
-            label=" · ".join(secondary_parts),
-            xalign=0,
-        )
-        secondary.set_ellipsize(
-            Pango.EllipsizeMode.END
-        )
-        _css(
-            secondary,
-            "adaptive-file-type-subtitle",
-        )
+    def _activity(self, payload):
+        days = payload.get("days") or []
+        changed = sum(days)
+        if not changed:
+            return None
 
-        labels.pack_start(
-            primary,
-            False,
-            False,
-            0,
-        )
-        labels.pack_start(
-            secondary,
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.pack_start(
+            self._section_label("Activity", trailing=f"{changed:,} changed · 14 days"),
             False,
             False,
             0,
         )
 
-        row.pack_start(
-            labels,
-            True,
-            True,
-            0,
+        group = self._group()
+        chart = ActivityChart(height=44).set_values(days)
+        chart.set_margin_top(4)
+        group.pack_start(chart, False, False, 0)
+
+        axis = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        start = Gtk.Label(label="2 weeks ago", xalign=0)
+        end = Gtk.Label(label="Today", xalign=1)
+        _css(start, "adaptive-axis-label")
+        _css(end, "adaptive-axis-label")
+        axis.pack_start(start, True, True, 0)
+        axis.pack_end(end, False, False, 0)
+        group.pack_start(axis, False, False, 0)
+
+        box.pack_start(group, False, False, 0)
+        return box
+
+    # --------------------------------------------------------------
+    # Multiple selection
+    # --------------------------------------------------------------
+
+    def _render_multiple_selection(self, selection, generation):
+        self._clear(self.preview_body)
+        body = self.preview_body
+
+        folders = sum(1 for item in selection if item.get("is_dir"))
+        files = len(selection) - folders
+        parts = []
+        if files:
+            parts.append(_count_text(files, "file"))
+        if folders:
+            parts.append(_count_text(folders, "folder"))
+
+        first = Gio.File.new_for_uri(selection[0].get("uri")) if selection[0].get("uri") else None
+        icon = self._gicon_image(first, "edit-select-all-symbolic", 64) if first else None
+        hero, subtitle = self._hero(icon, _count_text(len(selection), "item"), " · ".join(parts))
+        body.pack_start(hero, False, False, 0)
+
+        tiles = self._stat_tiles([("—", "Total Size"), ("—", "Files"), ("—", "Folders")])
+        body.pack_start(tiles, False, False, 0)
+
+        contents = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        contents.pack_start(self._note("Measuring…"), False, False, 0)
+        body.pack_start(contents, False, False, 0)
+
+        paths = [
+            Gio.File.new_for_uri(item["uri"]).get_path()
+            for item in selection
+            if item.get("uri")
+        ]
+        paths = [path for path in paths if path]
+
+        self._append_actions(
+            [
+                ("edit-copy-symbolic", "Copy Paths", lambda *_: self._copy_text("\n".join(paths))),
+                ("package-x-generic-symbolic", "Compress", lambda *_: self._view_action("compress")),
+                ("document-properties-symbolic", "Properties", lambda *_: self._view_action("properties")),
+            ]
         )
-        box.pack_start(row, False, False, 0)
+        body.show_all()
+
+        if not paths:
+            self._clear(contents)
+            contents.pack_start(self._note("These items are not on a local disk."), False, False, 0)
+            contents.show_all()
+            return
+
+        def finish(payload, error):
+            if generation != self.selection_generation:
+                return
+            self._clear(contents)
+            if error:
+                contents.pack_start(self._note(f"Can't measure the selection: {error}"), False, False, 0)
+                contents.show_all()
+                return
+
+            approx = "≈ " if payload["truncated"] else ""
+            self._set_stat_tiles(
+                tiles,
+                [
+                    (approx + _human_size(payload["bytes"]), "Total Size"),
+                    (f"{payload['files']:,}", "Files"),
+                    (f"{payload['folders']:,}", "Folders"),
+                ],
+            )
+            if payload["bytes"] > 0:
+                contents.pack_start(self._kind_breakdown(payload), False, False, 0)
+            contents.pack_start(
+                self._largest_items(payload, title="By Size", limit=12),
+                False,
+                False,
+                0,
+            )
+            hidden = len(payload["children"]) - 12
+            if hidden > 0:
+                contents.pack_start(self._note(f"+ {hidden:,} smaller items"), False, False, 0)
+            contents.show_all()
+
+        self._submit(_scan_paths, (paths,), finish)
+
+    # --------------------------------------------------------------
+    # Single file
+    # --------------------------------------------------------------
+
+    def _render_file_shell(self, item, gfile, generation):
+        body = self.preview_body
+        uri = item.get("uri") or ""
+        local_path = gfile.get_path()
+        mime = item.get("mime") or ""
+        identity = _file_identity(item.get("name"), mime)
+
+        preview_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        _css(preview_card, "adaptive-preview-hero")
+        media_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        media_box.set_halign(Gtk.Align.FILL)
+        preview_card.pack_start(media_box, True, True, 0)
+        body.pack_start(preview_card, False, False, 0)
+
+        if identity.get("is_code") and local_path:
+            self._render_source_preview(Path(local_path), mime, media_box)
+        elif mime.startswith(IMAGE_MIME_PREFIX) or mime == PDF_MIME or mime.startswith("video/"):
+            self._render_native_thumbnail_preview(uri, mime, media_box, generation)
+        elif local_path and (
+            Path(local_path).suffix.casefold() in TEXT_EXTENSIONS
+            or mime.startswith("text/")
+        ):
+            self._render_source_preview(Path(local_path), mime, media_box)
+        else:
+            self._icon_preview(media_box, identity, mime, gfile)
+
+        name = Gtk.Label(label=item.get("name") or "File")
+        name.set_line_wrap(True)
+        name.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        name.set_justify(Gtk.Justification.CENTER)
+        name.set_selectable(True)
+        name.set_margin_top(4)
+        _css(name, "adaptive-hero-title")
+        body.pack_start(name, False, False, 0)
+
+        subtitle = Gtk.Label(label=identity.get("label") or "File")
+        subtitle.set_ellipsize(Pango.EllipsizeMode.END)
+        _css(subtitle, "adaptive-hero-subtitle")
+        body.pack_start(subtitle, False, False, 0)
+        self._file_subtitle = subtitle
+
+        self._append_details_placeholder()
+        self._query_metadata_async(item, gfile, generation)
+
+        self._append_actions(
+            [
+                ("document-open-symbolic", "Open", lambda *_: self._view_action("open-with-default-application")),
+                ("view-more-symbolic", "Open With", lambda *_: self._view_action("open-with-other-application")),
+                ("edit-copy-symbolic", "Copy Path", lambda *_: self._copy_text(local_path or uri)),
+                ("document-properties-symbolic", "Properties", lambda *_: self._view_action("properties")),
+            ]
+        )
+        body.show_all()
+
+    def _icon_preview(self, box, identity, mime, gfile=None):
+        icon = None
+        if gfile is not None:
+            icon = self._gicon_image(gfile, None, 96)
+        if icon is None:
+            icon = _theme_icon_for_identity(identity, mime)
+            icon.set_pixel_size(96)
+        icon.set_halign(Gtk.Align.CENTER)
+        icon.set_margin_top(18)
+        icon.set_margin_bottom(18)
+        _css(icon, "adaptive-hero-icon")
+        box.pack_start(icon, False, False, 0)
 
     def _render_native_thumbnail_preview(
         self,
@@ -1447,15 +2009,17 @@ class PreviewController:
         generation,
     ):
         loading = Gtk.Label(
-            label="Loading native Ubuntu preview…",
+            label="Loading preview…",
         )
         loading.set_halign(Gtk.Align.CENTER)
-        _css(loading, "adaptive-muted")
+        _css(loading, "adaptive-note")
+        loading.set_margin_top(40)
+        loading.set_margin_bottom(40)
         box.pack_start(
             loading,
             False,
             False,
-            14,
+            0,
         )
 
         future = _EXECUTOR.submit(
@@ -1621,100 +2185,18 @@ class PreviewController:
         if generation != self.selection_generation:
             return GLib.SOURCE_REMOVE
 
-        for child in list(box.get_children()):
-            try:
-                classes = (
-                    child
-                    .get_style_context()
-                    .list_classes()
-                )
-            except Exception:
-                classes = []
-
-            if "adaptive-file-identity" in classes:
-                continue
-
-            box.remove(child)
+        self._clear(box)
 
         if error or not thumb_path:
-            identity = _file_identity(
-                self.preview_title.get_text(),
-                mime,
-            )
-
-            icon = _theme_icon_for_identity(
-                identity,
-                mime,
-            )
-            icon.set_pixel_size(72)
-            icon.set_halign(Gtk.Align.CENTER)
-            _css(icon, "adaptive-icon-tile")
-            box.pack_start(
-                icon,
-                False,
-                False,
-                8,
-            )
-
-            message = Gtk.Label(
-                label=(
-                    error
-                    or "Native preview unavailable"
-                ),
-            )
-            message.set_halign(Gtk.Align.CENTER)
-            message.set_line_wrap(True)
-            _css(message, "adaptive-muted")
-            box.pack_start(
-                message,
-                False,
-                False,
-                2,
-            )
+            identity = _file_identity(self._current_name, mime)
+            self._icon_preview(box, identity, mime)
             box.show_all()
             return GLib.SOURCE_REMOVE
 
         try:
-            pixbuf = (
-                GdkPixbuf.Pixbuf
-                .new_from_file_at_scale(
-                    str(thumb_path),
-                    282,
-                    246,
-                    True,
-                )
-            )
-
-            image = Gtk.Image.new_from_pixbuf(
-                pixbuf
-            )
-            image.set_halign(Gtk.Align.CENTER)
-            _css(
-                image,
-                "adaptive-media-preview",
-            )
-            box.pack_start(
-                image,
-                False,
-                False,
-                2,
-            )
-
-            source = Gtk.Label(
-                label="Ubuntu native thumbnail pipeline",
-            )
-            source.set_halign(Gtk.Align.CENTER)
-            _css(
-                source,
-                "adaptive-native-preview-caption",
-            )
-            box.pack_start(
-                source,
-                False,
-                False,
-                0,
-            )
-
+            picture = RoundedPicture(GdkPixbuf.Pixbuf.new_from_file(str(thumb_path)), 270, 230)
+            picture.set_halign(Gtk.Align.CENTER)
+            box.pack_start(picture, False, False, 0)
         except Exception:
             _log_exception(
                 "Unable to display native thumbnail "
@@ -1722,7 +2204,7 @@ class PreviewController:
             )
             self._fallback_media(
                 box,
-                "Native preview could not be displayed",
+                "Preview could not be displayed",
             )
 
         box.show_all()
@@ -1799,8 +2281,10 @@ class PreviewController:
                         .StyleSchemeManager
                         .get_default()
                     )
+                    _add_scheme_path(schemes)
                     scheme = (
-                        schemes.get_scheme("oblivion")
+                        schemes.get_scheme("adaptive-dark")
+                        or schemes.get_scheme("oblivion")
                         or schemes.get_scheme(
                             "solarized-dark"
                         )
@@ -1890,258 +2374,19 @@ class PreviewController:
         caption = Gtk.Label(label=text)
         caption.set_halign(Gtk.Align.CENTER)
         caption.set_line_wrap(True)
-        _css(caption, "adaptive-muted")
+        _css(caption, "adaptive-note")
         box.pack_start(caption, False, False, 2)
 
-    def _enumerate_folder_async(self, gfile, generation, box):
-        """
-        Enumerate in a worker thread and return plain Python data to GTK.
-
-        The previous implementation kept Gtk/PyGObject wrappers only through
-        weak refs while chaining enumerate_children_async() and
-        next_files_async(). On Ubuntu 22.04 this could leave the card forever
-        at "Loading folder contents…".
-
-        GIO still performs the actual native enumeration; only the orchestration
-        is changed.
-        """
-        uri = gfile.get_uri()
-
-        _log(f"Folder preview start: generation={generation} uri={uri}")
-
-        future = _EXECUTOR.submit(
-            self._folder_contents_worker,
-            uri,
-        )
-
-        def done(fut):
-            error = None
-            payload = None
-
-            try:
-                payload = fut.result()
-            except Exception as exc:
-                error = str(exc)
-                _log_exception(f"Folder preview worker failed for {uri}")
-
-            GLib.idle_add(
-                self._finish_folder_contents,
-                generation,
-                box,
-                payload,
-                error,
-            )
-
-        future.add_done_callback(done)
-
-    @staticmethod
-    def _folder_contents_worker(uri):
-        attributes = ",".join(
-            [
-                "standard::name",
-                "standard::display-name",
-                "standard::type",
-                "standard::size",
-                "standard::content-type",
-                "standard::is-hidden",
-            ]
-        )
-
-        gfile = Gio.File.new_for_uri(uri)
-        enumerator = None
-        rows = []
-        has_more = False
-
-        try:
-            enumerator = gfile.enumerate_children(
-                attributes,
-                Gio.FileQueryInfoFlags.NONE,
-                None,
-            )
-
-            while True:
-                info = enumerator.next_file(None)
-
-                if info is None:
-                    break
-
-                try:
-                    if info.get_is_hidden():
-                        continue
-                except Exception:
-                    pass
-
-                if len(rows) >= 12:
-                    has_more = True
-                    break
-
-                is_dir = info.get_file_type() == Gio.FileType.DIRECTORY
-                content_type = info.get_content_type() or ""
-
-                display_name = (
-                    info.get_display_name()
-                    or info.get_name()
-                    or "Item"
-                )
-
-                if is_dir:
-                    icon_name = "folder-symbolic"
-                    type_label = "Folder"
-                else:
-                    identity = _file_identity(
-                        display_name,
-                        content_type,
-                    )
-                    icon_name = (
-                        identity.get("icon_name")
-                        or "text-x-generic"
-                    )
-                    type_label = (
-                        identity.get("label")
-                        or "File"
-                    )
-
-                rows.append(
-                    {
-                        "name": display_name,
-                        "type_label": type_label,
-                        "is_dir": is_dir,
-                        "size": 0 if is_dir else info.get_size(),
-                        "icon_name": icon_name,
-                    }
-                )
-
-        finally:
-            if enumerator is not None:
-                try:
-                    enumerator.close(None)
-                except Exception:
-                    pass
-
-        return {
-            "rows": rows,
-            "has_more": has_more,
-        }
-
-    def _finish_folder_contents(
-        self,
-        generation,
-        box,
-        payload,
-        error,
-    ):
-        if generation != self.selection_generation:
-            return GLib.SOURCE_REMOVE
-
-        if box is None:
-            return GLib.SOURCE_REMOVE
-
-        self._clear(box)
-
-        if error:
-            label = Gtk.Label(
-                label=f"Unable to preview folder · {error}",
-                xalign=0,
-            )
-            label.set_line_wrap(True)
-            _css(label, "adaptive-muted")
-            box.pack_start(label, False, False, 7)
-            box.show_all()
-            return GLib.SOURCE_REMOVE
-
-        payload = payload or {}
-        rows = payload.get("rows") or []
-
-        if not rows:
-            empty = Gtk.Label(
-                label="No visible contents",
-                xalign=0,
-            )
-            _css(empty, "adaptive-muted")
-            box.pack_start(empty, False, False, 7)
-
-        for row_data in rows:
-            row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL,
-                spacing=7,
-            )
-            _css(row, "adaptive-content-row")
-
-            icon = Gtk.Image.new_from_icon_name(
-                row_data.get("icon_name") or "text-x-generic",
-                Gtk.IconSize.MENU,
-            )
-            icon.set_pixel_size(16)
-
-            name = Gtk.Label(
-                label=row_data.get("name") or "Item",
-                xalign=0,
-            )
-            name.set_hexpand(True)
-            name.set_ellipsize(Pango.EllipsizeMode.END)
-            name.set_tooltip_text(
-                row_data.get("type_label")
-                or row_data.get("name")
-                or ""
-            )
-
-            row.pack_start(icon, False, False, 0)
-            row.pack_start(name, True, True, 0)
-
-            if not row_data.get("is_dir"):
-                size = Gtk.Label(
-                    label=_human_size(row_data.get("size", 0)),
-                    xalign=1,
-                )
-                _css(size, "adaptive-row-size")
-                row.pack_end(size, False, False, 0)
-
-            box.pack_start(row, False, False, 0)
-
-        if payload.get("has_more"):
-            more = Gtk.Label(
-                label="+ more items",
-                xalign=0,
-            )
-            _css(more, "adaptive-muted")
-            box.pack_start(more, False, False, 5)
-
-        _log(
-            "Folder preview complete: "
-            f"generation={generation} rows={len(rows)} "
-            f"has_more={bool(payload.get('has_more'))}"
-        )
-
-        box.show_all()
-        return GLib.SOURCE_REMOVE
+    # --------------------------------------------------------------
+    # Information list
+    # --------------------------------------------------------------
 
     def _append_details_placeholder(self):
-        self.preview_body.pack_start(
-            self._section_label("DETAILS"),
-            False,
-            False,
-            0,
-        )
+        self.preview_body.pack_start(self._section_label("Information"), False, False, 0)
 
-        section = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=6,
-        )
-        _css(section, "adaptive-metadata-card")
-
-        loading = Gtk.Label(
-            label="Loading details…",
-            xalign=0,
-        )
-        _css(loading, "adaptive-muted")
-        section.pack_start(loading, False, False, 0)
-
-        self.preview_body.pack_start(
-            section,
-            False,
-            False,
-            0,
-        )
+        section = self._group()
+        section.pack_start(self._note("Loading…"), False, False, 0)
+        self.preview_body.pack_start(section, False, False, 0)
 
         self.active_metadata_box = section
         return section
@@ -2150,12 +2395,15 @@ class PreviewController:
         attributes = ",".join(
             [
                 "standard::size",
+                "standard::allocated-size",
                 "standard::display-name",
                 "standard::content-type",
                 "standard::type",
                 "time::modified",
                 "time::created",
                 "unix::mode",
+                "access::can-write",
+                "owner::user",
             ]
         )
 
@@ -2178,7 +2426,6 @@ class PreviewController:
             return
 
         section = self.active_metadata_box
-
         if section is None:
             return
 
@@ -2188,124 +2435,102 @@ class PreviewController:
             info = gfile.query_info_finish(result)
         except Exception as error:
             _log(f"Metadata query failed: {error}")
-
-            label = Gtk.Label(
-                label=f"Details unavailable · {error}",
-                xalign=0,
-            )
-            label.set_line_wrap(True)
-            _css(label, "adaptive-muted")
-            section.pack_start(label, False, False, 0)
+            section.pack_start(self._note(f"Details unavailable · {error}"), False, False, 0)
             section.show_all()
             return
 
-        content_type = info.get_content_type() or item.get("mime") or "—"
-        display_type = (
-            Gio.content_type_get_description(content_type)
-            or content_type
+        is_dir = info.get_file_type() == Gio.FileType.DIRECTORY
+        content_type = info.get_content_type() or item.get("mime") or ""
+        kind = "Folder" if is_dir else (
+            Gio.content_type_get_description(content_type) or content_type or "File"
         )
 
-        self._metadata_row(section, "Type", display_type)
+        self._info_row(section, "Kind", kind)
 
-        if info.get_file_type() != Gio.FileType.DIRECTORY:
-            self._metadata_row(
-                section,
-                "Size",
-                _human_size(info.get_size()),
-            )
+        if not is_dir:
+            size = info.get_size()
+            self._info_row(section, "Size", f"{_human_size(size)}  ({size:,} bytes)")
+            subtitle = getattr(self, "_file_subtitle", None)
+            if subtitle is not None:
+                subtitle.set_text(f"{kind} · {_human_size(size)}")
 
-        modified = 0
-        created = 0
+        # No "Opened" row: reading the file for this very preview updates its
+        # access time, so it would always say "just now".
+        for key, attribute in (
+            ("Created", "time::created"),
+            ("Modified", "time::modified"),
+        ):
+            try:
+                value = info.get_attribute_uint64(attribute)
+            except Exception:
+                value = 0
+            if value:
+                self._info_row(section, key, f"{_format_timestamp(value)}", hint=_relative_time(value))
 
-        try:
-            modified = info.get_attribute_uint64("time::modified")
-        except Exception:
-            pass
+        dimensions_row = None
+        path = gfile.get_path()
+        if not is_dir and path and content_type.startswith("image/"):
+            dimensions_row = self._info_row(section, "Dimensions", "…")
 
-        try:
-            created = info.get_attribute_uint64("time::created")
-        except Exception:
-            pass
-
-        if modified:
-            self._metadata_row(
-                section,
-                "Modified",
-                _format_timestamp(modified),
-            )
-
-        if created:
-            self._metadata_row(
-                section,
-                "Created",
-                _format_timestamp(created),
-            )
+        parent = gfile.get_parent()
+        if parent is not None:
+            self._info_row(section, "Where", _short_path(parent.get_path() or parent.get_uri()), mono=True)
 
         try:
             mode = info.get_attribute_uint32("unix::mode")
+            owner = info.get_attribute_string("owner::user") or ""
+            writable = info.get_attribute_boolean("access::can-write")
+            access = "Read & write" if writable else "Read only"
             if mode:
-                self._metadata_row(
+                self._info_row(
                     section,
-                    "Permissions",
-                    _mode_text(mode),
+                    "Access",
+                    access,
+                    hint=f"{_mode_text(mode)}{'  ' + owner if owner else ''}",
                 )
         except Exception:
             pass
 
         section.show_all()
 
-    def _append_path_and_actions(self, item):
-        uri = item.get("uri") or ""
-        gfile = Gio.File.new_for_uri(uri)
-        path = gfile.get_path() or uri
+        if dimensions_row is not None:
+            def dimensions(image_path=path):
+                fmt, width, height = GdkPixbuf.Pixbuf.get_file_info(image_path)
+                if not width:
+                    raise RuntimeError("unknown")
+                megapixels = width * height / 1e6
+                return f"{width:,} × {height:,}" + (f"  ·  {megapixels:.1f} MP" if megapixels >= 1 else "")
 
-        self.preview_body.pack_start(
-            self._section_label("LOCATION"),
-            False,
-            False,
-            0,
-        )
+            def done(text, error, row=dimensions_row):
+                if generation == self.selection_generation:
+                    row.set_text("—" if error else text)
 
-        path_card = self._card()
-        path_label = Gtk.Label(label=path, xalign=0)
-        path_label.set_selectable(True)
-        path_label.set_line_wrap(True)
-        path_label.set_line_wrap_mode(Pango.WrapMode.CHAR)
-        _css(path_label, "adaptive-path-value")
-        path_card.pack_start(path_label, False, False, 0)
-        self.preview_body.pack_start(path_card, False, False, 0)
+            self._submit(dimensions, (), done)
 
-        self.preview_body.pack_start(
-            self._section_label("ACTIONS"),
-            False,
-            False,
-            0,
-        )
+    def _append_actions(self, actions):
+        """Quick actions as a row of glyph-over-label buttons, as in Finder's
+        preview pane."""
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        bar.set_homogeneous(True)
+        bar.set_margin_top(10)
+        _css(bar, "adaptive-action-bar")
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        for icon_name, label, callback in actions:
+            button = Gtk.Button()
+            button.set_tooltip_text(label)
+            content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.BUTTON)
+            icon.set_pixel_size(16)
+            text = Gtk.Label(label=label)
+            text.set_ellipsize(Pango.EllipsizeMode.END)
+            content.pack_start(icon, False, False, 0)
+            content.pack_start(text, False, False, 0)
+            button.add(content)
+            button.connect("clicked", callback)
+            _css(button, "adaptive-action")
+            bar.pack_start(button, True, True, 0)
 
-        actions.pack_start(
-            self._button(
-                "Copy Path",
-                lambda *_: self._copy_text(path),
-            ),
-            False,
-            False,
-            0,
-        )
-
-        actions.pack_start(
-            self._button(
-                "Bookmark Current Location",
-                lambda *_: self._bookmark_current_location(),
-            ),
-            False,
-            False,
-            0,
-        )
-
-        self.preview_body.pack_start(actions, False, False, 0)
-        self.preview_body.show_all()
+        self.preview_body.pack_start(bar, False, False, 0)
 
     # --------------------------------------------------------------
     # Storage
@@ -2313,197 +2538,374 @@ class PreviewController:
 
     def _render_storage(self):
         self._clear(self.storage_body)
+        body = self.storage_body
+
+        path = Gio.File.new_for_uri(self.location_uri).get_path() if self.location_uri else None
+        path = path or str(Path.home())
 
         try:
-            usage = shutil.disk_usage(str(Path.home()))
-            used = usage.total - usage.free
-            fraction = used / usage.total if usage.total else 0.0
+            usage = shutil.disk_usage(path)
         except Exception:
-            self._render_storage_error("Unable to read storage usage.")
+            body.pack_start(self._note("Unable to read storage usage."), False, False, 0)
+            body.show_all()
             return
 
-        overview = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        _css(overview, "adaptive-storage-overview")
+        used = usage.total - usage.free
+        fraction = used / usage.total if usage.total else 0.0
+        volume = _volume_label(path)
+        on_home_disk = self._same_filesystem(path, str(Path.home()))
+
+        # Hero: ring + what is left, status in words as well as colour.
+        hero = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        _css(hero, "adaptive-storage-hero")
 
         overlay = Gtk.Overlay()
-        overlay.set_size_request(116, 116)
-
-        ring = UsageRing()
-        ring.set_fraction(fraction)
+        ring = UsageRing(size=84, line_width=9.0).set_fraction(fraction)
         overlay.add(ring)
-
-        center = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        center.set_halign(Gtk.Align.CENTER)
-        center.set_valign(Gtk.Align.CENTER)
-
         percent = Gtk.Label(label=f"{fraction * 100:.0f}%")
-        _css(percent, "adaptive-storage-percent")
-        center.pack_start(percent, False, False, 0)
+        percent.set_halign(Gtk.Align.CENTER)
+        percent.set_valign(Gtk.Align.CENTER)
+        _css(percent, "adaptive-ring-value")
+        overlay.add_overlay(percent)
+        hero.pack_start(overlay, False, False, 0)
 
-        caption = Gtk.Label(label="USED")
-        _css(caption, "adaptive-storage-used-caption")
-        center.pack_start(caption, False, False, 0)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text.set_valign(Gtk.Align.CENTER)
 
-        overlay.add_overlay(center)
-        overview.pack_start(overlay, False, False, 0)
-
-        summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        summary.set_valign(Gtk.Align.CENTER)
-        summary.set_hexpand(True)
-
-        free = Gtk.Label(label=_human_size(usage.free), xalign=0)
-        _css(free, "adaptive-storage-free")
-        summary.pack_start(free, False, False, 0)
-
-        free_caption = Gtk.Label(label="Available", xalign=0)
-        _css(free_caption, "adaptive-storage-label")
-        summary.pack_start(free_caption, False, False, 0)
-
-        used_value = Gtk.Label(label=_human_size(used), xalign=0)
-        _css(used_value, "adaptive-storage-used-value")
-        summary.pack_start(used_value, False, False, 8)
-
-        used_caption = Gtk.Label(label="Used", xalign=0)
-        _css(used_caption, "adaptive-storage-label")
-        summary.pack_start(used_caption, False, False, 0)
-
-        overview.pack_start(summary, True, True, 0)
-        self.storage_body.pack_start(overview, False, False, 0)
-
-        self.storage_body.pack_start(
-            self._section_label("CAPACITY"),
-            False,
-            False,
-            0,
-        )
-
-        capacity = self._card()
-
-        values = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-
-        total = Gtk.Label(
-            label=f"Total  {_human_size(usage.total)}",
+        name = Gtk.Label(
+            label=volume["label"] or ("System Disk" if volume["target"] == "/" else _short_path(volume["target"])),
             xalign=0,
         )
-        total.set_hexpand(True)
-        _css(total, "adaptive-capacity-label")
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        _css(name, "adaptive-storage-name")
+        text.pack_start(name, False, False, 0)
 
-        free_value = Gtk.Label(
-            label=f"{_human_size(usage.free)} free",
-            xalign=1,
-        )
-        _css(free_value, "adaptive-capacity-label")
+        free = Gtk.Label(label=f"{_human_size(usage.free)} available", xalign=0)
+        _css(free, "adaptive-storage-free")
+        text.pack_start(free, False, False, 0)
 
-        values.pack_start(total, True, True, 0)
-        values.pack_end(free_value, False, False, 0)
-        capacity.pack_start(values, False, False, 0)
+        of_total = Gtk.Label(label=f"of {_human_size(usage.total)}", xalign=0)
+        _css(of_total, "adaptive-storage-caption")
+        text.pack_start(of_total, False, False, 0)
 
-        bar = Gtk.ProgressBar()
-        bar.set_fraction(fraction)
-        _css(bar, "adaptive-storage-bar")
-        capacity.pack_start(bar, False, False, 7)
+        status = Gtk.Label(xalign=0)
+        if fraction >= CAPACITY_CRIT:
+            status.set_text("Almost full")
+            _css(status, "adaptive-status", "critical")
+        elif fraction >= CAPACITY_WARN:
+            status.set_text("Getting full")
+            _css(status, "adaptive-status", "warning")
+        else:
+            status.set_text("Plenty of space")
+            _css(status, "adaptive-status", "good")
+        status.set_halign(Gtk.Align.START)
+        status.set_margin_top(5)
+        text.pack_start(status, False, False, 0)
 
-        self.storage_body.pack_start(capacity, False, False, 0)
+        hero.pack_start(text, True, True, 0)
+        body.pack_start(hero, False, False, 0)
 
-        volume = self._volume_details()
-
-        self.storage_body.pack_start(
-            self._section_label("VOLUME"),
-            False,
-            False,
-            0,
-        )
-
-        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-        _css(details, "adaptive-metadata-card")
-
-        self._metadata_row(details, "Device", volume["source"])
-        self._metadata_row(details, "Filesystem", volume["fstype"])
-        self._metadata_row(details, "Mounted at", volume["target"])
-        self._metadata_row(details, "Home", str(Path.home()))
-
-        self.storage_body.pack_start(details, False, False, 0)
-
-        self.storage_body.pack_start(
-            self._section_label("OPEN"),
-            False,
-            False,
-            0,
+        # Composition: the biggest Home folders, the rest of Home, then
+        # everything outside Home, against the free space as track.
+        home_usage = self._home_usage or _cached_home_usage()
+        self._home_usage = home_usage
+        stale = (
+            home_usage is None
+            or time.time() - home_usage.get("measured_at", 0) > HOME_USAGE_MAX_AGE
         )
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        actions.pack_start(
-            self._button(
-                "Home",
-                lambda *_: self._open_location(Path.home().as_uri()),
-            ),
-            False,
-            False,
-            0,
-        )
-        actions.pack_start(
-            self._button(
-                "Filesystem",
-                lambda *_: self._open_location("file:///"),
-            ),
-            False,
-            False,
-            0,
-        )
-        actions.pack_start(
-            self._button(
-                "Refresh Storage",
-                lambda *_: self._render_storage(),
-            ),
-            False,
-            False,
-            0,
-        )
+        composition = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        trailing = None
+        if home_usage is not None:
+            trailing = (
+                "Measuring…"
+                if self._home_measuring
+                else "Measured " + _relative_time(home_usage.get("measured_at", 0))
+            )
+        composition.pack_start(self._section_label("Used Space", trailing=trailing), False, False, 0)
+        group = self._group()
 
-        self.storage_body.pack_start(actions, False, False, 0)
-        self.storage_body.show_all()
+        if home_usage is None or not on_home_disk:
+            bar = SegmentBar(height=12).set_segments([(fraction, _capacity_color(fraction))])
+            group.pack_start(bar, False, False, 4)
+            if on_home_disk:
+                group.pack_start(
+                    self._note("Measuring what Home holds - this runs once in the background."),
+                    False,
+                    False,
+                    0,
+                )
+            else:
+                group.pack_start(
+                    self._legend([
+                        (_capacity_color(fraction), "Used", _human_size(used), f"{fraction * 100:.0f}%"),
+                        (_rgb("#48484A"), "Available", _human_size(usage.free), ""),
+                    ]),
+                    False,
+                    False,
+                    0,
+                )
+        else:
+            total = usage.total or 1
+            rows = home_usage.get("rows") or []
+            top = rows[:4]
+            home_total = home_usage.get("total") or sum(row["bytes"] for row in rows)
+            rest = max(0, home_total - sum(row["bytes"] for row in top))
+            system = max(0, used - home_total)
 
-    def _render_storage_error(self, text):
-        label = Gtk.Label(label=text, xalign=0)
-        label.set_line_wrap(True)
-        _css(label, "adaptive-muted")
-        self.storage_body.pack_start(label, False, False, 0)
-        self.storage_body.show_all()
+            series = [
+                (row["bytes"], SERIES_COLORS[index], row["name"])
+                for index, row in enumerate(top)
+            ]
+            series.append((rest, SERIES_COLORS[4], "Rest of Home"))
+            series.append((system, SERIES_COLORS[5], "System & Apps"))
 
-    def _volume_details(self):
-        values = {
-            "source": "Unknown",
-            "fstype": "Linux filesystem",
-            "target": "/",
-        }
-
-        try:
-            proc = subprocess.run(
-                [
-                    "findmnt",
-                    "-n",
-                    "-o",
-                    "SOURCE,FSTYPE,TARGET",
-                    "--target",
-                    str(Path.home()),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=3,
-                check=False,
+            bar = SegmentBar(height=12).set_segments(
+                [(value / total, color) for value, color, _label in series]
+            )
+            group.pack_start(bar, False, False, 4)
+            group.pack_start(
+                self._legend(
+                    [
+                        (color, label, _human_size(value), f"{value / total * 100:.0f}%")
+                        for value, color, label in series
+                        if value > 0
+                    ]
+                    + [(_rgb("#3A3A3C"), "Available", _human_size(usage.free), f"{usage.free / total * 100:.0f}%")]
+                ),
+                False,
+                False,
+                0,
             )
 
-            line = proc.stdout.strip().splitlines()[0]
-            parts = line.split()
+        composition.pack_start(group, False, False, 0)
+        body.pack_start(composition, False, False, 0)
 
-            if len(parts) >= 3:
-                values["source"] = parts[0]
-                values["fstype"] = parts[1]
-                values["target"] = " ".join(parts[2:])
+        # When space is short, say where it can come from.
+        if home_usage is not None and on_home_disk and fraction >= CAPACITY_WARN:
+            body.pack_start(self._recommendations(home_usage), False, False, 0)
+
+        if home_usage is not None and on_home_disk and home_usage.get("rows"):
+            payload = {
+                "bytes": home_usage.get("total") or 1,
+                "children": [
+                    {"name": row["name"], "path": row["path"], "is_dir": True, "bytes": row["bytes"]}
+                    for row in home_usage["rows"]
+                ],
+            }
+            body.pack_start(self._largest_items(payload, title="Largest in Home", limit=8), False, False, 0)
+
+        volumes = self._other_volumes(path)
+        if volumes:
+            body.pack_start(volumes, False, False, 0)
+
+        body.pack_start(self._section_label("Volume"), False, False, 0)
+        details = self._group()
+        self._info_row(details, "Device", volume["source"] or "—", mono=True)
+        self._info_row(details, "Format", volume["fstype"] or "—")
+        self._info_row(details, "Mounted at", volume["target"] or "—", mono=True)
+        body.pack_start(details, False, False, 0)
+
+        self._actions_row(
+            self.storage_body,
+            [
+                ("view-refresh-symbolic", "Measure Again", lambda *_: self._measure_home(force=True)),
+                ("user-home-symbolic", "Home", lambda *_: self._open_location(Path.home().as_uri())),
+                ("drive-harddisk-symbolic", "Computer", lambda *_: self._open_location("file:///")),
+            ],
+        )
+
+        body.show_all()
+
+        if stale and on_home_disk:
+            self._measure_home()
+
+    def _measure_home(self, force=False):
+        if self._home_measuring:
+            return
+        if not force and self._home_usage is not None:
+            age = time.time() - self._home_usage.get("measured_at", 0)
+            if age < HOME_USAGE_MAX_AGE:
+                return
+
+        self._home_measuring = True
+
+        def done(data, error):
+            self._home_measuring = False
+            if error:
+                _log(f"Home measurement failed: {error}")
+            else:
+                self._home_usage = data
+            if self.stack is not None and self.stack.get_visible_child_name() == "storage":
+                self._render_storage()
+
+        self._submit(_measure_home, (), done, executor=_SLOW_EXECUTOR)
+        if self.stack is not None and self.stack.get_visible_child_name() == "storage":
+            self._render_storage()
+
+    def _recommendations(self, home_usage):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.pack_start(self._section_label("Free Up Space"), False, False, 0)
+        group = self._group()
+
+        by_name = {row["name"]: row["bytes"] for row in home_usage.get("rows") or []}
+        candidates = [
+            ("user-trash-symbolic", "Trash", home_usage.get("trash", 0), "trash:///",
+             "Deleted files still take space until the Trash is emptied."),
+            ("folder-download-symbolic", "Downloads", by_name.get("Downloads", 0),
+             (Path.home() / "Downloads").as_uri(), "Installers and archives tend to pile up here."),
+            ("folder-symbolic", "Caches", by_name.get(".cache", 0),
+             (Path.home() / ".cache").as_uri(), "Apps rebuild these when needed."),
+        ]
+
+        shown = 0
+        for icon_name, title, size, uri, why in candidates:
+            if size < 256 * 1024 * 1024:
+                continue
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            _css(row, "adaptive-info-row")
+            icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.BUTTON)
+            icon.set_pixel_size(18)
+            _css(icon, "adaptive-accent-icon")
+            row.pack_start(icon, False, False, 0)
+
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            head = Gtk.Label(label=f"{title} · {_human_size(size)}", xalign=0)
+            _css(head, "adaptive-row-title")
+            detail = Gtk.Label(label=why, xalign=0)
+            detail.set_line_wrap(True)
+            _css(detail, "adaptive-row-subtitle")
+            text.pack_start(head, False, False, 0)
+            text.pack_start(detail, False, False, 0)
+            row.pack_start(text, True, True, 0)
+
+            review = Gtk.Button(label="Review")
+            review.set_valign(Gtk.Align.CENTER)
+            review.connect("clicked", lambda _b, target=uri: self._open_location(target))
+            _css(review, "adaptive-pill-button")
+            row.pack_end(review, False, False, 0)
+
+            group.pack_start(row, False, False, 0)
+            shown += 1
+
+        if not shown:
+            group.pack_start(
+                self._note("Trash, Downloads and caches are small. See Largest in Home below."),
+                False,
+                False,
+                0,
+            )
+
+        box.pack_start(group, False, False, 0)
+        return box
+
+    def _other_volumes(self, current_path):
+        rows = []
+        seen = set()
+
+        try:
+            current_target = _volume_label(current_path)["target"]
         except Exception:
-            pass
+            current_target = "/"
+        seen.add(current_target)
 
-        return values
+        try:
+            mounts = Gio.VolumeMonitor.get().get_mounts()
+        except Exception:
+            mounts = []
+
+        for mount in mounts:
+            try:
+                root = mount.get_root()
+                path = root.get_path()
+            except Exception:
+                continue
+            # GVfs network shares are FUSE mounts under /run/user; statvfs on
+            # one whose server went away blocks. They belong to Network.
+            if not path or path in seen or "/gvfs/" in path:
+                continue
+            seen.add(path)
+            try:
+                usage = shutil.disk_usage(path)
+            except Exception:
+                continue
+            rows.append((mount, path, usage))
+
+        if not rows:
+            return None
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.pack_start(self._section_label("Other Volumes"), False, False, 0)
+        group = self._group()
+
+        for mount, path, usage in rows:
+            fraction = (usage.total - usage.free) / usage.total if usage.total else 0.0
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            _css(row, "adaptive-info-row")
+
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            icon = Gtk.Image.new_from_gicon(mount.get_symbolic_icon(), Gtk.IconSize.BUTTON)
+            _css(icon, "adaptive-accent-icon")
+            line.pack_start(icon, False, False, 0)
+
+            name = Gtk.Label(label=mount.get_name() or _short_path(path), xalign=0)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            _css(name, "adaptive-row-title")
+            line.pack_start(name, True, True, 0)
+
+            free = Gtk.Label(label=f"{_human_size(usage.free)} free", xalign=1)
+            _css(free, "adaptive-row-value")
+            line.pack_end(free, False, False, 0)
+
+            if mount.can_eject() or mount.can_unmount():
+                eject = Gtk.Button.new_from_icon_name("media-eject-symbolic", Gtk.IconSize.BUTTON)
+                eject.set_tooltip_text("Eject")
+                eject.connect("clicked", lambda _b, m=mount: self._eject(m))
+                _css(eject, "adaptive-icon-button")
+                line.pack_end(eject, False, False, 0)
+
+            row.pack_start(line, False, False, 0)
+            bar = SegmentBar(height=5).set_segments([(fraction, _capacity_color(fraction))])
+            row.pack_start(bar, False, False, 0)
+
+            open_button = Gtk.EventBox()
+            open_button.add(row)
+            open_button.connect(
+                "button-release-event",
+                lambda _w, _e, uri=Path(path).as_uri(): self._open_location(uri) or True,
+            )
+            group.pack_start(open_button, False, False, 0)
+
+        box.pack_start(group, False, False, 0)
+        return box
+
+    def _eject(self, mount):
+        operation = Gtk.MountOperation.new(self.window)
+
+        def finished(source, result, _data=None):
+            try:
+                if mount.can_eject():
+                    source.eject_with_operation_finish(result)
+                else:
+                    source.unmount_with_operation_finish(result)
+            except Exception as error:
+                self._show_error("Couldn't eject", str(error))
+            GLib.idle_add(self._render_storage)
+
+        try:
+            if mount.can_eject():
+                mount.eject_with_operation(Gio.MountUnmountFlags.NONE, operation, None, finished, None)
+            else:
+                mount.unmount_with_operation(Gio.MountUnmountFlags.NONE, operation, None, finished, None)
+        except Exception as error:
+            self._show_error("Couldn't eject", str(error))
+
+    @staticmethod
+    def _same_filesystem(first, second):
+        try:
+            return os.stat(first).st_dev == os.stat(second).st_dev
+        except OSError:
+            return False
 
     # --------------------------------------------------------------
     # Network / native GVfs frontend
@@ -2511,113 +2913,142 @@ class PreviewController:
 
     def _render_network(self):
         self._clear(self.network_body)
+        body = self.network_body
 
-        intro = self._card()
-
-        title = Gtk.Label(label="Remote Locations", xalign=0)
-        _css(title, "adaptive-network-title")
-        intro.pack_start(title, False, False, 0)
-
-        copy = Gtk.Label(
-            label=(
-                "Connections are handled by Ubuntu's native GIO/GVfs stack. "
-                "This panel only provides the Adaptive Files interface."
-            ),
-            xalign=0,
-        )
-        copy.set_line_wrap(True)
-        _css(copy, "adaptive-network-copy")
-        intro.pack_start(copy, False, False, 4)
-
-        self.network_body.pack_start(intro, False, False, 0)
-
-        self.network_body.pack_start(
-            self._section_label("CONNECT TO SERVER"),
-            False,
-            False,
-            0,
-        )
-
-        connect_card = self._card()
-
-        entry = Gtk.Entry()
-        entry.set_text("smb://")
-        entry.set_placeholder_text("smb://server/share")
-        entry.set_hexpand(True)
-        _css(entry, "adaptive-network-entry")
-        connect_card.pack_start(entry, False, False, 0)
-
-        connect = self._button(
-            "Connect",
-            lambda *_: self._connect_remote(entry.get_text()),
-        )
-        connect_card.pack_start(connect, False, False, 7)
-
-        self.network_body.pack_start(connect_card, False, False, 0)
-
-        self.network_body.pack_start(
-            self._section_label("NATIVE NETWORK"),
-            False,
-            False,
-            0,
-        )
-
-        native_actions = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=5,
-        )
-
-        native_actions.pack_start(
-            self._button(
-                "Browse Network",
-                lambda *_: self._open_location("network:///"),
-            ),
-            False,
-            False,
-            0,
-        )
-
-        native_actions.pack_start(
-            self._button(
-                "Enter Location",
-                lambda *_: self._activate_window_action("enter-location"),
-            ),
-            False,
-            False,
-            0,
-        )
-
-        self.network_body.pack_start(native_actions, False, False, 0)
+        icon = Gtk.Image.new_from_icon_name("network-server-symbolic", Gtk.IconSize.DIALOG)
+        icon.set_pixel_size(40)
+        hero, _subtitle = self._hero(icon, "Network", "Servers and shared folders")
+        body.pack_start(hero, False, False, 0)
 
         mounts = self._remote_mounts()
+        body.pack_start(
+            self._section_label("Connected", trailing=str(len(mounts)) if mounts else None),
+            False,
+            False,
+            0,
+        )
+        connected = self._group()
+        if not mounts:
+            connected.pack_start(self._note("No servers connected."), False, False, 0)
+        for mount in mounts:
+            connected.pack_start(self._remote_row(mount), False, False, 0)
+        body.pack_start(connected, False, False, 0)
 
-        if mounts:
-            self.network_body.pack_start(
-                self._section_label("CONNECTED"),
-                False,
-                False,
-                0,
-            )
+        body.pack_start(self._section_label("Connect to Server"), False, False, 0)
+        connect_card = self._group()
 
-            mounted = Gtk.Box(
-                orientation=Gtk.Orientation.VERTICAL,
-                spacing=4,
-            )
+        chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        chips.set_homogeneous(True)
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("smb://server/share")
+        entry.set_hexpand(True)
+        entry.connect("activate", lambda e: self._connect_remote(e.get_text()))
+        _css(entry, "adaptive-network-entry")
 
-            for name, uri in mounts:
-                mounted.pack_start(
-                    self._button(
-                        name,
-                        lambda _button, target=uri: self._open_location(target),
-                    ),
+        for label, scheme in (("SMB", "smb://"), ("SFTP", "sftp://"), ("FTP", "ftp://"), ("WebDAV", "davs://")):
+            chip = Gtk.Button(label=label)
+            _css(chip, "adaptive-chip")
+
+            def use_scheme(_button, prefix=scheme):
+                text = entry.get_text()
+                rest = text.split("://", 1)[1] if "://" in text else text
+                entry.set_text(prefix + rest)
+                entry.grab_focus()
+                entry.set_position(-1)
+
+            chip.connect("clicked", use_scheme)
+            chips.pack_start(chip, True, True, 0)
+
+        connect_card.pack_start(chips, False, False, 0)
+        connect_card.pack_start(entry, False, False, 2)
+
+        connect = Gtk.Button(label="Connect")
+        connect.connect("clicked", lambda *_: self._connect_remote(entry.get_text()))
+        _css(connect, "adaptive-primary-button")
+        connect_card.pack_start(connect, False, False, 0)
+        body.pack_start(connect_card, False, False, 0)
+
+        recent = self._recent_servers()
+        if recent:
+            body.pack_start(self._section_label("Recent Servers"), False, False, 0)
+            group = self._group()
+            for title, uri in recent:
+                group.pack_start(
+                    self._link_row("folder-remote-symbolic", title, uri, lambda target=uri: self._connect_remote(target)),
                     False,
                     False,
                     0,
                 )
+            body.pack_start(group, False, False, 0)
 
-            self.network_body.pack_start(mounted, False, False, 0)
+        self._actions_row(
+            body,
+            [
+                ("network-workgroup-symbolic", "Browse", lambda *_: self._open_location("network:///")),
+                ("go-jump-symbolic", "Go to Location", lambda *_: self._activate_window_action("enter-location")),
+            ],
+        )
+        body.show_all()
 
-        self.network_body.show_all()
+    def _remote_row(self, mount):
+        uri = mount.get_root().get_uri()
+        row = self._link_row(
+            None,
+            mount.get_name() or uri,
+            uri,
+            lambda target=uri: self._open_location(target),
+            gicon=mount.get_symbolic_icon(),
+            status=True,
+        )
+        if mount.can_unmount():
+            button = Gtk.Button.new_from_icon_name("media-eject-symbolic", Gtk.IconSize.BUTTON)
+            button.set_tooltip_text("Disconnect")
+            button.set_valign(Gtk.Align.CENTER)
+            button.connect("clicked", lambda *_: self._disconnect(mount))
+            _css(button, "adaptive-icon-button")
+            row.get_child().pack_end(button, False, False, 0)
+        return row
+
+    def _disconnect(self, mount):
+        def finished(source, result, _data=None):
+            try:
+                source.unmount_with_operation_finish(result)
+            except Exception as error:
+                self._show_error("Couldn't disconnect", str(error))
+            GLib.idle_add(self._render_network)
+
+        mount.unmount_with_operation(
+            Gio.MountUnmountFlags.NONE,
+            Gtk.MountOperation.new(self.window),
+            None,
+            finished,
+            None,
+        )
+
+    def _recent_servers(self):
+        """Servers GTK's "Connect to Server" remembers, newest first."""
+        path = Path(GLib.get_user_config_dir()) / "gtk-3.0" / "servers"
+        result = []
+        try:
+            bookmarks = GLib.BookmarkFile()
+            bookmarks.load_from_file(str(path))
+            uris = bookmarks.get_uris()
+        except Exception:
+            return result
+
+        def modified(uri):
+            try:
+                return bookmarks.get_modified(uri)
+            except Exception:
+                return 0
+
+        for uri in sorted(uris, key=modified, reverse=True)[:6]:
+            try:
+                title = bookmarks.get_title(uri)
+            except Exception:
+                title = None
+            result.append((title or uri.split("://", 1)[-1].rstrip("/"), uri))
+        return result
 
     def _connect_remote(self, text):
         uri = (text or "").strip()
@@ -2631,17 +3062,19 @@ class PreviewController:
         allowed = (
             "smb://",
             "sftp://",
+            "ssh://",
             "ftp://",
             "dav://",
             "davs://",
             "nfs://",
+            "afp://",
         )
 
         if not uri.casefold().startswith(allowed):
             self._show_error(
                 "Unsupported address",
                 (
-                    "Use a native GVfs URI such as smb://server/share, "
+                    "Use a GVfs address such as smb://server/share, "
                     "sftp://host/path, ftp://host/path, dav:// or davs://."
                 ),
             )
@@ -2655,17 +3088,235 @@ class PreviewController:
         try:
             monitor = Gio.VolumeMonitor.get()
             for mount in monitor.get_mounts():
-                root = mount.get_root()
-                uri = root.get_uri()
-
-                if uri.startswith("file://"):
-                    continue
-
-                result.append((mount.get_name() or uri, uri))
+                if not mount.get_root().get_uri().startswith("file://"):
+                    result.append(mount)
         except Exception:
             pass
 
         return result[:12]
+
+    # --------------------------------------------------------------
+    # Projects
+    # --------------------------------------------------------------
+
+    def _load_projects(self):
+        """Project registry from the Project Context Service, one entry per
+        path (the registry can hold duplicates), favourites first, then most
+        recently active. Short timeouts: a stuck service must not stall the
+        Files window."""
+        if not self._dbus_proxy:
+            return None, []
+
+        active_id = None
+        try:
+            res = self._dbus_proxy.call_sync("GetActiveProject", None, Gio.DBusCallFlags.NONE, 1500, None)
+            active_id = res.unpack()[0] or None
+        except Exception:
+            _log_exception("GetActiveProject failed")
+
+        try:
+            res = self._dbus_proxy.call_sync("ListProjects", None, Gio.DBusCallFlags.NONE, 1500, None)
+            projects = json.loads(res.unpack()[0]) or {}
+        except Exception:
+            _log_exception("ListProjects failed")
+            return active_id, []
+
+        by_path = {}
+        for pid, data in projects.items():
+            path = data.get("path") or ""
+            current = by_path.get(path)
+            richer = bool((data.get("metadata") or {}).get("git"))
+            if current is None or (richer and not (current.get("metadata") or {}).get("git")) or pid == active_id:
+                entry = dict(data)
+                entry["id"] = pid
+                by_path[path] = entry
+
+        def rank(entry):
+            metadata = entry.get("metadata") or {}
+            return (
+                0 if entry["id"] == active_id else 1,
+                0 if metadata.get("favorite") else 1,
+                -(entry.get("last_active_at") or 0),
+            )
+
+        ordered = sorted(by_path.values(), key=rank)
+        self._projects_cache = (active_id, ordered)
+        return active_id, ordered
+
+    def _project_for_path(self, path):
+        if not path:
+            return None
+        _active, projects = self._projects_cache or (None, [])
+        best = None
+        for project in projects:
+            root = project.get("path") or ""
+            if root and (path == root or path.startswith(root.rstrip(os.sep) + os.sep)):
+                if best is None or len(root) > len(best.get("path") or ""):
+                    best = project
+        return best
+
+    def _project_chip(self, project):
+        chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        _css(chip, "adaptive-project-chip")
+
+        icon = Gtk.Image.new_from_icon_name("folder-templates-symbolic", Gtk.IconSize.BUTTON)
+        _css(icon, "adaptive-accent-icon")
+        chip.pack_start(icon, False, False, 0)
+
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        name = Gtk.Label(label=project.get("name") or "Project", xalign=0)
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        _css(name, "adaptive-row-title")
+        text.pack_start(name, False, False, 0)
+
+        git = (project.get("metadata") or {}).get("git") or {}
+        detail = Gtk.Label(label=self._git_summary(git) or "Project folder", xalign=0)
+        detail.set_ellipsize(Pango.EllipsizeMode.END)
+        _css(detail, "adaptive-row-subtitle")
+        text.pack_start(detail, False, False, 0)
+        chip.pack_start(text, True, True, 0)
+        return chip
+
+    @staticmethod
+    def _git_summary(git):
+        # The scanner records "-" as the branch of a folder that is not a
+        # repository; such a project has nothing to summarise.
+        branch = (git or {}).get("branch") or ""
+        if not git or (branch in ("", "-") and not git.get("commits")):
+            return ""
+        parts = []
+        if branch not in ("", "-"):
+            parts.append(branch)
+        dirty = git.get("dirty") or 0
+        parts.append(_count_text(dirty, "change") if dirty else "clean")
+        if git.get("last_commit_at"):
+            parts.append("committed " + _relative_time(git["last_commit_at"]))
+        return " · ".join(parts)
+
+    def _render_project(self):
+        self._clear(self.project_body)
+        body = self.project_body
+
+        if not self._dbus_proxy:
+            body.pack_start(
+                self._note("The Project Context Service isn't running, so projects can't be listed."),
+                False,
+                False,
+                0,
+            )
+            body.show_all()
+            return
+
+        active_id, projects = self._load_projects()
+        self._active_project_id = active_id
+        active = next((p for p in projects if p["id"] == active_id), None)
+
+        if active is not None:
+            icon = Gtk.Image.new_from_icon_name("folder-templates", Gtk.IconSize.DIALOG)
+            icon.set_pixel_size(56)
+            hero, _subtitle = self._hero(icon, active.get("name") or "Project", _short_path(active.get("path")))
+            body.pack_start(hero, False, False, 0)
+
+            git = (active.get("metadata") or {}).get("git") or {}
+            if git:
+                tiles = self._stat_tiles(
+                    [
+                        (git.get("branch") or "—", "Branch"),
+                        (f"{git.get('dirty') or 0:,}", "Changes"),
+                        (f"{git.get('commits') or 0:,}", "Commits"),
+                    ]
+                )
+                body.pack_start(tiles, False, False, 0)
+                if git.get("last_commit_subject"):
+                    body.pack_start(self._section_label("Last Commit"), False, False, 0)
+                    group = self._group()
+                    subject = Gtk.Label(label=git["last_commit_subject"], xalign=0)
+                    subject.set_line_wrap(True)
+                    _css(subject, "adaptive-row-title")
+                    group.pack_start(subject, False, False, 0)
+                    who = " · ".join(
+                        part
+                        for part in (
+                            git.get("last_commit_author") or "",
+                            _relative_time(git["last_commit_at"]) if git.get("last_commit_at") else "",
+                        )
+                        if part
+                    )
+                    if who:
+                        meta = Gtk.Label(label=who, xalign=0)
+                        _css(meta, "adaptive-row-subtitle")
+                        group.pack_start(meta, False, False, 0)
+                    body.pack_start(group, False, False, 0)
+
+            self._actions_row(
+                body,
+                [
+                    ("folder-open-symbolic", "Open Folder", lambda *_: self._open_location(Path(active["path"]).as_uri())),
+                    ("utilities-terminal-symbolic", "Terminal", lambda *_: self._open_terminal(active["path"])),
+                    ("edit-copy-symbolic", "Copy Path", lambda *_: self._copy_text(active["path"])),
+                ],
+            )
+        else:
+            body.pack_start(
+                self._note("No active project. Pick one below to make it the context for Files and the shell."),
+                False,
+                False,
+                0,
+            )
+
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text(f"Search {len(projects)} projects")
+        search.set_margin_top(12)
+        _css(search, "adaptive-search")
+        body.pack_start(search, False, False, 0)
+
+        group = self._group()
+        rows = []
+        for project in projects:
+            row = self._project_row(project, project["id"] == active_id)
+            rows.append((project, row))
+            group.pack_start(row, False, False, 0)
+        if not projects:
+            group.pack_start(self._note("No projects found."), False, False, 0)
+        body.pack_start(group, False, False, 0)
+
+        def apply_filter(entry):
+            needle = entry.get_text().casefold().strip()
+            for project, row in rows:
+                haystack = f"{project.get('name', '')} {project.get('path', '')}".casefold()
+                row.set_visible(not needle or needle in haystack)
+
+        search.connect("search-changed", apply_filter)
+        body.show_all()
+
+    def _project_row(self, project, is_active):
+        git = (project.get("metadata") or {}).get("git") or {}
+        subtitle = self._git_summary(git) or _short_path(project.get("path"))
+
+        row = self._link_row(
+            "emblem-default-symbolic" if is_active else (
+                "starred-symbolic" if (project.get("metadata") or {}).get("favorite") else "folder-symbolic"
+            ),
+            project.get("name") or "Project",
+            subtitle,
+            lambda target=project["id"]: self._set_active_project(target),
+            active=is_active,
+        )
+        row.set_tooltip_text(project.get("path") or "")
+        return row
+
+    def _set_active_project(self, project_id):
+        try:
+            self._dbus_proxy.call_sync(
+                "SetActiveProject",
+                GLib.Variant("(s)", (project_id,)),
+                Gio.DBusCallFlags.NONE,
+                1500,
+                None,
+            )
+        except Exception:
+            _log_exception("SetActiveProject failed")
+        self._render_project()
 
     # --------------------------------------------------------------
     # Native actions / helpers
@@ -2675,25 +3326,8 @@ class PreviewController:
         if not self._activate_window_action("bookmark-current-location"):
             self._show_error(
                 "Bookmark unavailable",
-                (
-                    "The native Nautilus bookmark action is not available "
-                    "for this location."
-                ),
+                "Files can't bookmark this location.",
             )
-
-    def _copy_current_path(self):
-        text = None
-
-        if self.last_selection:
-            uri = self.last_selection[0].get("uri")
-            if uri:
-                gfile = Gio.File.new_for_uri(uri)
-                text = gfile.get_parent().get_path() if gfile.get_parent() else None
-
-        if not text:
-            text = str(Path.home())
-
-        self._copy_text(text)
 
     def _activate_window_action(self, action_name):
         window = self.window
@@ -2714,6 +3348,49 @@ class PreviewController:
         except Exception:
             _log_exception(f"Unable to activate action {action_name}")
             return False
+
+    def _view_action(self, action_name):
+        """Run one of the files view's own actions ("view.<name>") on the
+        current selection, so Open, Open With and Properties behave exactly
+        as the context menu does."""
+        window = self.window
+        if window is None:
+            return False
+        try:
+            group = window.get_action_group("view")
+            if group is None or not group.has_action(action_name):
+                _log(f"View action not present: {action_name}")
+                return False
+            if not group.get_action_enabled(action_name):
+                return False
+            group.activate_action(action_name, None)
+            return True
+        except Exception:
+            _log_exception(f"Unable to activate view action {action_name}")
+            return False
+
+    def _open_terminal(self, path):
+        command = None
+        try:
+            settings = Gio.Settings.new("org.gnome.desktop.default-applications.terminal")
+            command = settings.get_string("exec") or None
+        except Exception:
+            pass
+
+        for candidate in (command, "x-terminal-emulator", "gnome-terminal"):
+            if candidate and shutil.which(candidate):
+                try:
+                    subprocess.Popen(
+                        [candidate],
+                        cwd=path,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    return
+                except Exception:
+                    continue
+        self._show_error("No terminal found", "Set a default terminal in Settings.")
 
     def _open_location(self, uri):
         binary = os.environ.get("ADAPTIVE_FILES_BIN")
@@ -2756,170 +3433,265 @@ class PreviewController:
         dialog.connect("response", lambda dialog, *_: dialog.destroy())
         dialog.show_all()
 
+    def _submit(self, function, args, callback, executor=None):
+        """Run function(*args) off the main loop and hand (result, error) to
+        callback on it. Workers return plain data; GTK is only touched in the
+        callback."""
+        future = (executor or _EXECUTOR).submit(function, *args)
+
+        def done(fut):
+            try:
+                payload, error = fut.result(), None
+            except Exception as exc:
+                payload, error = None, str(exc) or type(exc).__name__
+                _log(f"Worker {getattr(function, '__name__', function)} failed: {error}")
+
+            def deliver():
+                try:
+                    callback(payload, error)
+                except Exception:
+                    _log_exception("Worker callback failed")
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(deliver)
+
+        future.add_done_callback(done)
+
     # --------------------------------------------------------------
-    # UI helpers
+    # UI building blocks
     # --------------------------------------------------------------
 
     def _clear(self, box):
         for child in list(box.get_children()):
             box.remove(child)
 
-    def _card(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_margin_top(1)
-        box.set_margin_bottom(1)
-        box.set_margin_start(0)
-        box.set_margin_end(0)
-        _css(box, "adaptive-card")
+    def _group(self):
+        """Grouped rows on a tile, hairline between rows (see preview.css)."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        _css(box, "adaptive-group")
         return box
 
-    def _section_label(self, text):
+    def _section_label(self, text, trailing=None):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        _css(row, "adaptive-section")
         label = Gtk.Label(label=text, xalign=0)
         _css(label, "adaptive-section-label")
+        row.pack_start(label, True, True, 0)
+        if trailing:
+            extra = Gtk.Label(label=trailing, xalign=1)
+            _css(extra, "adaptive-section-trailing")
+            row.pack_end(extra, False, False, 0)
+        return row
+
+    def _note(self, text):
+        label = Gtk.Label(label=text, xalign=0)
+        label.set_line_wrap(True)
+        _css(label, "adaptive-note")
         return label
 
-    def _button(self, label, callback):
-        button = Gtk.Button(label=label)
-        button.set_halign(Gtk.Align.FILL)
-        button.set_hexpand(True)
-        _css(button, "adaptive-inspector-button")
-        button.connect("clicked", callback)
-        return button
+    def _hero(self, icon, title, subtitle):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        _css(box, "adaptive-hero")
 
-    def _metadata_row(self, parent, key, value):
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        if icon is not None:
+            icon.set_halign(Gtk.Align.CENTER)
+            icon.set_margin_bottom(6)
+            _css(icon, "adaptive-hero-icon")
+            box.pack_start(icon, False, False, 0)
+
+        name = Gtk.Label(label=title or "")
+        name.set_line_wrap(True)
+        name.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        name.set_justify(Gtk.Justification.CENTER)
+        name.set_max_width_chars(28)
+        _css(name, "adaptive-hero-title")
+        box.pack_start(name, False, False, 0)
+
+        caption = Gtk.Label(label=subtitle or "")
+        caption.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        _css(caption, "adaptive-hero-subtitle")
+        box.pack_start(caption, False, False, 0)
+        return box, caption
+
+    def _gicon_image(self, gfile, fallback_name, size):
+        """The icon Files itself shows for gfile (custom folder icons, the
+        special Home/Downloads glyphs), else fallback_name."""
+        gicon = None
+        if gfile is not None:
+            try:
+                info = gfile.query_info("standard::icon", Gio.FileQueryInfoFlags.NONE, None)
+                gicon = info.get_icon()
+            except Exception:
+                gicon = None
+        if gicon is not None:
+            image = Gtk.Image.new_from_gicon(gicon, Gtk.IconSize.DIALOG)
+        elif fallback_name:
+            image = Gtk.Image.new_from_icon_name(fallback_name, Gtk.IconSize.DIALOG)
+        else:
+            return None
+        image.set_pixel_size(size)
+        return image
+
+    def _icon_name_for(self, name):
+        try:
+            content_type, _uncertain = Gio.content_type_guess(name, None)
+            icon = Gio.content_type_get_icon(content_type)
+            names = icon.get_names() if hasattr(icon, "get_names") else []
+            theme = Gtk.IconTheme.get_default()
+            for candidate in names:
+                if theme.has_icon(candidate):
+                    return candidate
+        except Exception:
+            pass
+        return "text-x-generic"
+
+    def _stat_tiles(self, tiles):
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.set_homogeneous(True)
+        box.set_margin_top(8)
+        _css(box, "adaptive-stats")
+        for value, caption in tiles:
+            tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            _css(tile, "adaptive-stat")
+            number = Gtk.Label(label=value)
+            number.set_ellipsize(Pango.EllipsizeMode.END)
+            _css(number, "adaptive-stat-value")
+            label = Gtk.Label(label=caption)
+            _css(label, "adaptive-stat-caption")
+            tile.pack_start(number, False, False, 0)
+            tile.pack_start(label, False, False, 0)
+            box.pack_start(tile, True, True, 0)
+        return box
+
+    def _set_stat_tiles(self, box, tiles):
+        for tile, (value, caption) in zip(box.get_children(), tiles):
+            number, label = tile.get_children()
+            number.set_text(value)
+            label.set_text(caption)
+
+    def _legend(self, rows):
+        grid = Gtk.Grid()
+        grid.set_column_spacing(8)
+        grid.set_row_spacing(5)
+        _css(grid, "adaptive-legend")
+        for index, (color, label, value, share) in enumerate(rows):
+            grid.attach(Swatch(color), 0, index, 1, 1)
+            name = Gtk.Label(label=label, xalign=0)
+            name.set_hexpand(True)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            _css(name, "adaptive-legend-label")
+            grid.attach(name, 1, index, 1, 1)
+            size = Gtk.Label(label=value, xalign=1)
+            _css(size, "adaptive-legend-value")
+            grid.attach(size, 2, index, 1, 1)
+            extra = Gtk.Label(label=share, xalign=1)
+            extra.set_width_chars(4)
+            _css(extra, "adaptive-legend-share")
+            grid.attach(extra, 3, index, 1, 1)
+        return grid
+
+    def _bar_row(self, icon_name, name, value, fraction, color, tooltip=None):
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        _css(row, "adaptive-info-row", "adaptive-bar-row")
+        if tooltip:
+            row.set_tooltip_text(tooltip)
+
+        line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
+        icon.set_pixel_size(16)
+        line.pack_start(icon, False, False, 0)
+        label = Gtk.Label(label=name, xalign=0)
+        label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        _css(label, "adaptive-row-title")
+        line.pack_start(label, True, True, 0)
+        size = Gtk.Label(label=value, xalign=1)
+        _css(size, "adaptive-row-value")
+        line.pack_end(size, False, False, 0)
+        row.pack_start(line, False, False, 0)
+
+        bar = SegmentBar(height=4).set_segments([(fraction, color)])
+        bar.set_margin_start(24)
+        row.pack_start(bar, False, False, 0)
+        return row
+
+    def _info_row(self, parent, key, value, mono=False, hint=None):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        _css(row, "adaptive-info-row")
 
         left = Gtk.Label(label=key, xalign=0)
-        left.set_hexpand(True)
+        left.set_valign(Gtk.Align.START)
         _css(left, "adaptive-meta-key")
+        row.pack_start(left, False, False, 0)
 
+        values = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         right = Gtk.Label(label=str(value), xalign=1)
         right.set_line_wrap(True)
+        right.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
         right.set_selectable(True)
-        _css(right, "adaptive-meta-value")
-
-        row.pack_start(left, True, True, 0)
-        row.pack_end(right, False, False, 0)
+        right.set_can_focus(False)
+        _css(right, "adaptive-meta-value", *(("adaptive-mono",) if mono else ()))
+        values.pack_start(right, False, False, 0)
+        if hint:
+            extra = Gtk.Label(label=hint, xalign=1)
+            _css(extra, "adaptive-meta-hint")
+            values.pack_start(extra, False, False, 0)
+        row.pack_end(values, True, True, 0)
 
         parent.pack_start(row, False, False, 0)
+        return right
+
+    def _link_row(self, icon_name, title, subtitle, on_activate, gicon=None, active=False, status=False):
+        button = Gtk.Button()
+        button.set_relief(Gtk.ReliefStyle.NONE)
+        _css(button, "adaptive-link-row", *(("active",) if active else ()))
+        button.connect("clicked", lambda *_: on_activate())
+
+        line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        if gicon is not None:
+            icon = Gtk.Image.new_from_gicon(gicon, Gtk.IconSize.BUTTON)
+        else:
+            icon = Gtk.Image.new_from_icon_name(icon_name or "folder-symbolic", Gtk.IconSize.BUTTON)
+        icon.set_pixel_size(16)
+        _css(icon, "adaptive-accent-icon")
+        line.pack_start(icon, False, False, 0)
+
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        head = Gtk.Label(label=title, xalign=0)
+        head.set_ellipsize(Pango.EllipsizeMode.END)
+        _css(head, "adaptive-row-title")
+        text.pack_start(head, False, False, 0)
+        if subtitle:
+            sub = Gtk.Label(label=subtitle, xalign=0)
+            sub.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            _css(sub, "adaptive-row-subtitle")
+            text.pack_start(sub, False, False, 0)
+        line.pack_start(text, True, True, 0)
+
+        if status:
+            dot = Swatch(_rgb("#30D158"), size=7)
+            dot.set_tooltip_text("Connected")
+            line.pack_end(dot, False, False, 0)
+
+        button.add(line)
+        return button
+
+    def _actions_row(self, body, actions):
+        previous = self.preview_body
+        self.preview_body = body
+        try:
+            self._append_actions(actions)
+        finally:
+            self.preview_body = previous
 
     def _render_message(self, title, body):
-        self.preview_title.set_text(title)
-        self.preview_subtitle.set_text("")
         self._clear(self.preview_body)
 
-        card = self._card()
-
-        headline = Gtk.Label(label=title, xalign=0)
-        _css(headline, "adaptive-empty-title")
-        card.pack_start(headline, False, False, 0)
-
-        copy = Gtk.Label(label=body, xalign=0)
-        copy.set_line_wrap(True)
-        _css(copy, "adaptive-empty-copy")
-        card.pack_start(copy, False, False, 0)
-
-        self.preview_body.pack_start(card, False, False, 0)
+        icon = Gtk.Image.new_from_icon_name("document-open-recent-symbolic", Gtk.IconSize.DIALOG)
+        icon.set_pixel_size(40)
+        hero, _subtitle = self._hero(icon, title, "")
+        self.preview_body.pack_start(hero, False, False, 0)
+        self.preview_body.pack_start(self._note(body), False, False, 0)
         self.preview_body.show_all()
-
-    def _render_project(self):
-        self._clear(self.project_body)
-        
-        card = self._card()
-        _css(card, "adaptive-project-card")
-        
-        headline = Gtk.Label(label="PROJECT CONTEXT", xalign=0)
-        _css(headline, "adaptive-metadata-key")
-        card.pack_start(headline, False, False, 0)
-        
-        if not self._dbus_proxy:
-            err = Gtk.Label(label="Project Context Service offline", xalign=0)
-            _css(err, "adaptive-muted")
-            card.pack_start(err, False, False, 8)
-            self.project_body.pack_start(card, False, False, 0)
-            self.project_body.show_all()
-            return
-            
-        try:
-            res = self._dbus_proxy.call_sync(
-                "GetActiveProject",
-                None,
-                Gio.DBusCallFlags.NONE,
-                -1,
-                None,
-            )
-            pid, name, path = res.unpack()
-            self._active_project_id = pid or None
-            
-            if pid:
-                title = Gtk.Label(label=name, xalign=0)
-                _css(title, "adaptive-empty-title", "adaptive-project-active-badge")
-                card.pack_start(title, False, False, 4)
-                
-                path_label = Gtk.Label(label=path, xalign=0)
-                path_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-                _css(path_label, "adaptive-muted")
-                card.pack_start(path_label, False, False, 0)
-            else:
-                title = Gtk.Label(label="No active project", xalign=0)
-                _css(title, "adaptive-muted")
-                card.pack_start(title, False, False, 4)
-                
-        except Exception as e:
-            _log_exception("GetActiveProject failed")
-            
-        self.project_body.pack_start(card, False, False, 0)
-        
-        try:
-            res = self._dbus_proxy.call_sync(
-                "ListProjects",
-                None,
-                Gio.DBusCallFlags.NONE,
-                -1,
-                None,
-            )
-            projects = json.loads(res.unpack()[0])
-            
-            list_card = self._card()
-            _css(list_card, "adaptive-project-card")
-            
-            list_head = Gtk.Label(label="AVAILABLE PROJECTS", xalign=0)
-            _css(list_head, "adaptive-metadata-key")
-            list_card.pack_start(list_head, False, False, 8)
-            
-            if not projects:
-                empty = Gtk.Label(label="No projects found", xalign=0)
-                _css(empty, "adaptive-muted")
-                list_card.pack_start(empty, False, False, 0)
-            else:
-                for pid, pdata in projects.items():
-                    is_active = (pid == self._active_project_id)
-                    btn = Gtk.Button(label="★ " + pdata["name"] if is_active else pdata["name"])
-                    btn.set_halign(Gtk.Align.FILL)
-                    _css(btn, "adaptive-project-list-row")
-                    if is_active:
-                        _css(btn, "adaptive-project-active-badge")
-                    
-                    def set_active(button, target_id=pid):
-                        try:
-                            self._dbus_proxy.call_sync(
-                                "SetActiveProject",
-                                GLib.Variant.new("(s)", [target_id]),
-                                Gio.DBusCallFlags.NONE,
-                                -1,
-                                None
-                            )
-                        except Exception as e:
-                            _log_exception("SetActiveProject failed")
-                            
-                    btn.connect("clicked", set_active)
-                    list_card.pack_start(btn, False, False, 2)
-            
-            self.project_body.pack_start(list_card, False, False, 0)
-        except Exception as e:
-            _log_exception("ListProjects failed")
-            
-        self.project_body.show_all()
 
 
 class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.LocationWidgetProvider):
@@ -2989,6 +3761,7 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
 
             controller.ensure_attached()
             GLib.idle_add(controller.ensure_attached)
+            controller.set_location(uri)
 
             # No widget. This provider stays because it is the one callback
             # Nautilus makes on every location change, which is what gives the
@@ -3045,6 +3818,15 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
                 return []
 
             GLib.idle_add(controller.ensure_attached)
+
+            # Nautilus passes the folder being shown; with nothing selected
+            # the Info tab summarises it.
+            folder = args[-1] if args else None
+            if folder is not None and not isinstance(folder, Gtk.Window):
+                try:
+                    controller.set_location(folder.get_uri())
+                except Exception:
+                    pass
 
             if self is not _MENU_OWNER:
                 return []

@@ -1,425 +1,740 @@
-/* Adaptive Files Phase 2.1 inspector */
+/*
+ * Adaptive Files - what is specific to Files
+ *
+ * The palette, controls and window chrome come from the session theme
+ * (theme/Adaptive, generated from tokens/adaptive.tokens.json); the @ad_*
+ * colours below are defined there. This sheet only covers:
+ *
+ *   1. Nautilus's own widgets. Nautilus ships a stylesheet at APPLICATION
+ *      priority that outranks any GTK theme; this one loads at
+ *      APPLICATION + 20, so these rules are what finally draws the window.
+ *   2. The inspector panel built by adaptive_preview.py.
+ *
+ * Accent blue is the only colour that means "selected / on / link". Chart
+ * series use blue, indigo, cyan then greys (set in adaptive_preview.py);
+ * green, orange and red only ever mean status.
+ */
 
-.adaptive-preview-panel {
-    /* Fully opaque. The inspector sits as an overlay directly on top of the
-       file grid, so any transparency at all lets icons ghost through it. */
-    background-color: #09121E;
-    color: #F2F6EF;
-    border-left: 1px solid rgba(48, 66, 92, 0.72);
+/* =========================================================
+ * 1. Files window
+ * ========================================================= */
+
+.nautilus-window,
+.nautilus-window notebook,
+.nautilus-window notebook > stack {
+    background: @ad_bg;
 }
 
-.adaptive-preview-header {
-    min-height: 46px;
+/* Tabs */
+.nautilus-window notebook > header {
+    background-color: @ad_surface;
+    border-bottom: 1px solid @ad_hairline;
 }
 
-.adaptive-preview-glyph {
-    min-width: 30px;
-    min-height: 30px;
-    border-radius: 9px;
-    background-color: rgba(120, 169, 255, 0.12);
-    color: #66E0FF;
-    font-size: 18px;
-    font-weight: 700;
-}
-
-.adaptive-preview-title {
-    color: #F2F6EF;
-    font-size: 14px;
-    font-weight: 700;
-}
-
-.adaptive-preview-subtitle {
-    color: #96A4B8;
-    font-size: 10px;
-}
-
-.adaptive-inspector-switcher {
-    border-radius: 9px;
-    background-color: rgba(17, 26, 40, 0.78);
-}
-
-.adaptive-inspector-switcher button {
-    min-height: 29px;
-    padding: 2px 7px;
-    color: #96A4B8;
-    font-size: 10px;
+.nautilus-window notebook > header > tabs > tab {
+    min-height: 28px;
     border-radius: 7px;
+    margin: 4px 2px;
+    box-shadow: none;
 }
 
-.adaptive-inspector-switcher button:checked {
-    color: #F2F6EF;
-    background-color: rgba(120, 169, 255, 0.15);
-    border-color: rgba(120, 169, 255, 0.24);
+.nautilus-window notebook > header > tabs > tab:checked {
+    background-color: @ad_fill_strong;
+    box-shadow: none;
 }
 
-.adaptive-card,
-.adaptive-preview-hero,
-.adaptive-contents-card,
-.adaptive-metadata-card,
-.adaptive-storage-overview {
-    padding: 10px;
-    border-radius: 11px;
-    border: 1px solid rgba(48, 66, 92, 0.34);
-    background-color: rgba(17, 26, 40, 0.72);
+/* Path bar: one quiet field in the toolbar, current folder in bold */
+.nautilus-path-bar scrolledwindow,
+.nautilus-path-bar scrolledwindow:backdrop {
+    border: none;
+    background-color: @ad_fill;
 }
 
-.adaptive-preview-hero {
-    background-color: rgba(15, 27, 43, 0.82);
+.nautilus-path-bar scrolledwindow:dir(ltr),
+.nautilus-path-bar scrolledwindow:dir(ltr) undershoot.left {
+    border-radius: 8px 0 0 8px;
 }
 
-.adaptive-section-label {
-    margin-top: 5px;
-    color: #91A4BD;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.8px;
+.nautilus-path-bar scrolledwindow undershoot.left,
+.nautilus-path-bar scrolledwindow undershoot.right {
+    background: none;
 }
 
-.adaptive-empty-glyph {
-    color: #78A9FF;
-    font-size: 35px;
+.nautilus-path-bar > button,
+.nautilus-path-bar > menubutton > button {
+    min-height: 28px;
+    border: none;
+    border-radius: 0 8px 8px 0;
+    background-color: @ad_fill;
+    color: @ad_muted;
 }
 
-.adaptive-empty-title {
-    color: #E8EEF8;
-    font-size: 13px;
-    font-weight: 700;
+.nautilus-path-bar > button:hover,
+.nautilus-path-bar > menubutton > button:hover {
+    background-color: @ad_fill_strong;
+    color: @ad_text;
 }
 
-.adaptive-empty-copy,
-.adaptive-muted {
-    color: #96A4B8;
-    font-size: 10.5px;
-}
-
-.adaptive-selection-count {
-    color: #F2F6EF;
-    font-size: 28px;
-    font-weight: 800;
-}
-
-.adaptive-hero-name {
-    color: #EAF1FA;
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.adaptive-content-row {
-    min-height: 29px;
-    padding: 2px 4px;
+.path-buttons-box button {
+    min-height: 26px;
+    padding: 0 7px;
+    margin: 1px 0;
+    border: none;
     border-radius: 6px;
-    color: #D9E2EE;
+    background: none;
+    box-shadow: none;
+    color: @ad_muted;
 }
 
-.adaptive-content-row:hover {
-    background-color: rgba(120, 169, 255, 0.07);
+.path-buttons-box button:not(.current-dir):not(:backdrop):hover {
+    background: @ad_fill;
+    box-shadow: none;
+    color: @ad_text;
 }
 
-.adaptive-content-row label {
-    font-size: 10px;
-}
-
-.adaptive-row-size {
-    color: #788BA5;
-    font-size: 9px;
-}
-
-.adaptive-media-preview {
-    border-radius: 9px;
-}
-
-.adaptive-text-frame {
-    border: 1px solid rgba(48, 66, 92, 0.34);
-    border-radius: 9px;
-    background-color: #0B1522;
-}
-
-.adaptive-text-preview {
-    padding: 9px;
-    background-color: #0B1522;
-    color: #DCE6F2;
-    font-family: monospace;
-    font-size: 10px;
-}
-
-.adaptive-meta-key {
-    color: #8194AE;
-    font-size: 10.5px;
-}
-
-.adaptive-meta-value {
-    color: #D8E2EE;
-    font-size: 10.5px;
+.path-buttons-box button.current-dir,
+.path-buttons-box button.current-dir label {
+    color: @ad_text;
     font-weight: 600;
 }
 
-.adaptive-path-value {
-    color: #C9D5E4;
-    font-family: monospace;
-    font-size: 9.5px;
+.path-buttons-box button image {
+    color: @ad_accent;
 }
 
-.adaptive-inspector-button {
-    min-height: 31px;
-    padding: 2px 9px;
+.path-buttons-box .dim-label {
+    color: @ad_quaternary;
+}
+
+/* Sidebar: Finder's - accent glyphs, neutral selection */
+.nautilus-window placessidebar,
+.nautilus-window placessidebar list {
+    background-color: @ad_sidebar;
+}
+
+.nautilus-window .sidebar-row {
+    min-height: 28px;
+    margin: 1px 8px;
+    padding: 0 8px;
+    border-radius: 6px;
+}
+
+.nautilus-window .sidebar-row:hover {
+    background: @ad_tile;
+}
+
+.nautilus-window .sidebar-row:selected,
+.nautilus-window .sidebar-row:selected:focus {
+    background: @ad_fill_strong;
+}
+
+.nautilus-window .sidebar-row:selected,
+.nautilus-window .sidebar-row:selected label {
+    color: @ad_text;
+}
+
+.nautilus-window .sidebar-row image,
+.nautilus-window .sidebar-row:selected image {
+    color: @ad_accent;
+}
+
+.nautilus-window .sidebar-row .sidebar-icon {
+    margin-right: 8px;
+}
+
+.nautilus-window .sidebar-row:selected:backdrop {
+    background: @ad_fill;
+}
+
+.nautilus-window .sidebar-row:selected:backdrop,
+.nautilus-window .sidebar-row:selected:backdrop label {
+    color: @ad_muted;
+}
+
+.nautilus-window .sidebar-row .sidebar-button {
+    min-height: 20px;
+    min-width: 20px;
+    padding: 0;
+    border-radius: 99px;
+    background: none;
+    color: @ad_tertiary;
+}
+
+.nautilus-window .sidebar-row .sidebar-button:hover {
+    background: @ad_fill_strong;
+    color: @ad_text;
+}
+
+/* Icon view: the label is a blue pill when selected; the icon itself is
+ * only dimmed a touch. Nautilus multiplies a selected icon by this
+ * background colour (eel_create_colorized_pixbuf), so a light grey dims it
+ * while blue would turn every icon navy. */
+.view.nautilus-canvas-item:selected,
+.view.nautilus-canvas-item:active {
+    background-color: #DCDCE1;
+}
+
+.view.nautilus-canvas-item.label-text {
+    color: @ad_text;
+    border-radius: 5px;
+}
+
+.view.nautilus-canvas-item.label-text:selected {
+    background-color: @ad_selection;
+    color: #FFFFFF;
+}
+
+.view.nautilus-canvas-item.label-text:selected:backdrop {
+    background-color: @ad_fill_strong;
+    color: @ad_text;
+}
+
+.view.nautilus-canvas-item.dim-label {
+    color: @ad_muted;
+}
+
+.view.nautilus-canvas-item.dim-label:selected {
+    color: alpha(#FFFFFF, 0.78);
+}
+
+.nautilus-canvas-item.thumbnail {
+    border-radius: 4px;
+    box-shadow: 0 0 0 1px alpha(#FFFFFF, 0.10), 0 2px 6px alpha(#000000, 0.35);
+}
+
+/* List view: no rules between rows; the selection carries the eye */
+.nautilus-list-view .view:not(:drop(active)) {
+    border-bottom: 1px solid alpha(#FFFFFF, 0.03);
+}
+
+.nautilus-list-view .view {
+    background-color: @ad_bg;
+}
+
+.nautilus-list-view .view:selected {
+    background-color: @ad_selection;
+    color: #FFFFFF;
+}
+
+.nautilus-list-view .view:selected:backdrop {
+    background-color: @ad_fill_strong;
+    color: @ad_text;
+}
+
+.nautilus-list-view .view.dim-label,
+.nautilus-list-view .dim-label {
+    color: @ad_muted;
+}
+
+rubberband,
+.nautilus-window .view rubberband {
+    border: 1px solid alpha(@ad_accent, 0.85);
+    border-radius: 3px;
+    background-color: alpha(@ad_accent, 0.16);
+}
+
+/* Floating status: a small pill in the corner, not a tab glued to the edge */
+.floating-bar,
+.floating-bar.bottom.left,
+.floating-bar.bottom.right {
+    margin: 10px;
+    padding: 3px 10px;
+    border: 1px solid alpha(#FFFFFF, 0.12);
     border-radius: 8px;
-    border: 1px solid rgba(48, 66, 92, 0.34);
-    background-color: rgba(22, 34, 51, 0.76);
-    color: #DCE6F2;
+    background-color: @ad_menu;
+    box-shadow: 0 4px 14px alpha(#000000, 0.40);
+    color: @ad_muted;
+}
+
+.floating-bar:backdrop {
+    background-color: @ad_menu;
+    border-color: @ad_hairline;
+}
+
+.floating-bar label {
+    color: @ad_muted;
+    font-size: 11.5px;
+    font-feature-settings: "tnum";
+}
+
+.floating-bar button {
+    min-height: 18px;
+    min-width: 18px;
+    padding: 0;
+    border-radius: 99px;
+}
+
+/* Empty folders, search */
+.nautilus-empty-state-icon {
+    color: @ad_quaternary;
+    opacity: 1;
+}
+
+.search-information {
+    padding: 4px;
+    background-color: alpha(@ad_accent, 0.18);
+    color: @ad_text;
+}
+
+/* Conflict dialog rows (Nautilus draws these light yellow) */
+.conflict-row {
+    background: alpha(@ad_warning, 0.16);
+    color: @ad_text;
+}
+
+.conflict-row:hover {
+    background-color: alpha(@ad_warning, 0.24);
+}
+
+.conflict-row:selected {
+    background: @ad_selection;
+    color: #FFFFFF;
+}
+
+/* Properties dialog usage pie: accent for used, track for free */
+@define-color disk_space_used    @ad_accent;
+@define-color disk_space_free    #3A3A3C;
+@define-color disk_space_unknown @ad_quaternary;
+
+.disk-space-display,
+.disk-space-display.used,
+.disk-space-display.free,
+.disk-space-display.unknown {
+    border-width: 0;
+}
+
+.disk-space-display.used.border,
+.disk-space-display.free.border,
+.disk-space-display.unknown.border {
+    color: @ad_bg;
+}
+
+/* The operations button pulses when a copy finishes; Nautilus animates it
+ * through light-theme greys. */
+@keyframes needs_attention_keyframes {
+    0%   { background-color: transparent; }
+    30%  { background-color: alpha(@ad_accent, 0.40); }
+    90%  { background-color: alpha(@ad_accent, 0.40); }
+    100% { background-color: transparent; }
+}
+
+.operations-list progressbar trough {
+    min-height: 4px;
+}
+
+/* =========================================================
+ * 2. Inspector
+ * ========================================================= */
+
+.adaptive-preview-panel {
+    /* Opaque: the panel overlays the file grid, and any transparency lets
+     * icons ghost through. This is the card material flattened over the
+     * canvas - the same value as the sidebar. */
+    background-color: @ad_sidebar;
+    background-image: none;
+    border-left: 1px solid @ad_hairline;
+    color: @ad_text;
+}
+
+/* Segmented control */
+.adaptive-inspector-switcher {
+    padding: 2px;
+    border-radius: 9px;
+    background-color: @ad_fill;
+}
+
+.adaptive-inspector-switcher button {
+    min-height: 24px;
+    padding: 0 4px;
+    border: none;
+    border-radius: 7px;
+    background: none;
+    box-shadow: none;
+    color: @ad_text;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.adaptive-inspector-switcher button:hover {
+    background-color: @ad_tile;
+}
+
+.adaptive-inspector-switcher button:checked {
+    background-color: alpha(#FFFFFF, 0.20);
+    box-shadow: 0 1px 2px alpha(#000000, 0.30);
+    font-weight: 600;
+}
+
+/* Hero: icon or preview, name, kind */
+.adaptive-hero {
+    margin-top: 14px;
+    margin-bottom: 2px;
+}
+
+.adaptive-hero-title {
+    color: @ad_text;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.adaptive-hero-subtitle {
+    color: @ad_muted;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-preview-hero {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 12px;
+    background-color: alpha(#000000, 0.18);
+    border: 1px solid @ad_hairline;
+}
+
+/* Section headings: sentence case, no tracking */
+.adaptive-section {
+    margin-top: 14px;
+    margin-bottom: 5px;
+    margin-left: 2px;
+    margin-right: 2px;
+}
+
+.adaptive-section-label {
+    color: @ad_muted;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.adaptive-section-trailing {
+    color: @ad_tertiary;
+    font-size: 11px;
+    font-feature-settings: "tnum";
+}
+
+/* Grouped rows on a tile, hairline between */
+.adaptive-group {
+    padding: 4px 11px;
+    border-radius: 10px;
+    border: 1px solid @ad_hairline;
+    background-color: @ad_tile;
+}
+
+.adaptive-info-row {
+    padding: 7px 0;
+}
+
+.adaptive-group > .adaptive-info-row:not(:first-child),
+.adaptive-group > eventbox:not(:first-child) > .adaptive-info-row {
+    border-top: 1px solid @ad_hairline;
+}
+
+.adaptive-bar-row {
+    padding: 7px 0 8px 0;
+}
+
+.adaptive-meta-key {
+    color: @ad_muted;
+    font-size: 12px;
+}
+
+.adaptive-meta-value {
+    color: @ad_text;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-meta-hint {
+    color: @ad_tertiary;
+    font-size: 11px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-mono {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+}
+
+.adaptive-row-title {
+    color: @ad_text;
+    font-size: 12px;
+}
+
+.adaptive-row-subtitle {
+    color: @ad_muted;
+    font-size: 11px;
+}
+
+.adaptive-row-value {
+    color: @ad_muted;
+    font-size: 11.5px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-note {
+    padding: 6px 2px;
+    color: @ad_muted;
+    font-size: 11.5px;
+}
+
+/* Stat tiles */
+.adaptive-stat {
+    padding: 8px 4px 7px 4px;
+    border-radius: 10px;
+    border: 1px solid @ad_hairline;
+    background-color: @ad_tile;
+}
+
+.adaptive-stat-value {
+    color: @ad_text;
+    font-size: 15px;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-stat-caption {
+    color: @ad_muted;
     font-size: 10.5px;
 }
 
-.adaptive-inspector-button:hover {
-    background-color: rgba(41, 61, 88, 0.86);
-    border-color: rgba(120, 169, 255, 0.22);
-    color: #F2F6EF;
+/* Legends and charts */
+.adaptive-legend {
+    margin: 2px 0 7px 0;
 }
 
-/* Storage */
-
-.adaptive-storage-overview {
-    background-image:
-        linear-gradient(
-            135deg,
-            rgba(30, 48, 74, 0.88),
-            rgba(13, 24, 39, 0.90)
-        );
-    border-color: rgba(120, 169, 255, 0.16);
+.adaptive-legend-label {
+    color: @ad_text;
+    font-size: 12px;
 }
 
-.adaptive-storage-percent {
-    color: #F2F6EF;
-    font-size: 24px;
-    font-weight: 800;
+.adaptive-legend-value {
+    color: @ad_text;
+    font-size: 12px;
+    font-feature-settings: "tnum";
 }
 
-.adaptive-storage-used-caption {
-    color: #8497B0;
-    font-size: 9px;
-    font-weight: 700;
+.adaptive-legend-share {
+    color: @ad_tertiary;
+    font-size: 11px;
+    font-feature-settings: "tnum";
 }
 
-.adaptive-storage-free {
-    color: #F2F6EF;
-    font-size: 19px;
-    font-weight: 800;
-}
-
-.adaptive-storage-used-value {
-    color: #D7E2EF;
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.adaptive-storage-label,
-.adaptive-capacity-label {
-    color: #8FA1B9;
+.adaptive-axis-label {
+    margin: 3px 0 4px 0;
+    color: @ad_tertiary;
     font-size: 10px;
 }
 
-.adaptive-storage-bar trough {
-    min-height: 6px;
-    border-radius: 99px;
-    background-color: rgba(48, 66, 92, 0.58);
+/* Quick actions */
+.adaptive-action-bar {
+    margin-top: 14px;
 }
 
-.adaptive-storage-bar progress {
-    min-height: 6px;
-    border-radius: 99px;
-    background-image: linear-gradient(to right, #78A9FF, #66E0FF);
+.adaptive-action {
+    min-height: 44px;
+    padding: 6px 2px;
+    border: 1px solid @ad_hairline;
+    border-radius: 10px;
+    background-color: @ad_tile;
+    color: @ad_muted;
 }
 
-/* Network */
-
-.adaptive-network-title {
-    color: #EDF3FA;
-    font-size: 13px;
-    font-weight: 700;
+.adaptive-action:hover {
+    background-color: @ad_fill;
+    color: @ad_text;
 }
 
-.adaptive-network-copy {
-    color: #91A3BA;
+.adaptive-action image {
+    color: @ad_accent;
+}
+
+.adaptive-action label {
     font-size: 10.5px;
 }
 
-.adaptive-network-entry {
-    min-height: 30px;
-    font-size: 10.5px;
-}
-
-
-/* v1.1 startup strip + translucent inspector */
-.adaptive-preview-panel {
-    background-image:
-        linear-gradient(
-            180deg,
-            rgba(10, 20, 33, 0.965),
-            rgba(7, 16, 26, 0.935)
-        );
-    border-left: 1px solid rgba(120, 169, 255, 0.16);
-}
-
-
-
-
-
-
-.adaptive-card,
-.adaptive-preview-hero,
-.adaptive-contents-card,
-.adaptive-metadata-card {
-    background-color: rgba(17, 26, 40, 0.69);
-    border-color: rgba(120, 169, 255, 0.10);
-}
-
-.adaptive-storage-overview {
-    background-image:
-        linear-gradient(
-            135deg,
-            rgba(30, 48, 74, 0.78),
-            rgba(13, 24, 39, 0.76)
-        );
-}
-
-.adaptive-icon-tile {
-    min-width: 66px;
-    min-height: 66px;
-    padding: 9px;
-    border-radius: 16px;
-    background-image:
-        radial-gradient(
-            circle at 35% 25%,
-            rgba(102, 224, 255, 0.11),
-            rgba(120, 169, 255, 0.035)
-        );
-    border: 1px solid rgba(120, 169, 255, 0.12);
-}
-
-
-/* v1.2 — make inspector unmistakable once attached */
-.adaptive-preview-panel {
-    min-width: 300px;
-    box-shadow: -10px 0 28px rgba(0, 0, 0, 0.22);
-    background-image:
-        radial-gradient(
-            circle at 68% 0%,
-            rgba(102, 224, 255, 0.075),
-            transparent 34%
-        ),
-        linear-gradient(
-            180deg,
-            rgba(12, 24, 39, 0.975),
-            rgba(7, 16, 27, 0.955)
-        );
-}
-
-.adaptive-preview-header {
-    background-color: rgba(120, 169, 255, 0.035);
-    border-bottom: 1px solid rgba(120, 169, 255, 0.08);
-}
-
-.adaptive-inspector-switcher {
-    padding: 3px;
-    border: 1px solid rgba(120, 169, 255, 0.08);
-    background-color: rgba(18, 31, 49, 0.72);
-}
-
-
-
-
-/* v1.3 preview bugfix polish */
-.adaptive-contents-card {
-    min-height: 36px;
-}
-
-.adaptive-content-row image {
+/* Previews */
+.adaptive-hero-icon {
     -gtk-icon-effect: none;
-    opacity: 1;
+    -gtk-icon-shadow: none;
 }
 
-.adaptive-metadata-card {
-    padding: 10px 11px;
+.adaptive-text-frame,
+.adaptive-text-frame > border {
+    min-height: 240px;
+    border: none;
+    border-radius: 8px;
+    background-color: @ad_bg_deep;
 }
 
-.adaptive-path-value {
-    color: #B9C9DB;
-}
-
-.adaptive-preview-hero image {
-    -gtk-icon-effect: none;
-    opacity: 1;
-}
-
-
-/* v1.4 — Ubuntu native preview + source identity */
-.adaptive-file-identity {
-    min-height: 34px;
-    padding: 6px 7px;
-    border-radius: 9px;
-    border: 1px solid rgba(120, 169, 255, 0.10);
-    background-color: rgba(10, 22, 36, 0.62);
-}
-
-.adaptive-file-type-icon {
-    -gtk-icon-effect: none;
-    opacity: 1;
-}
-
-.adaptive-file-type-title {
-    color: #EDF4FC;
-    font-size: 11.5px;
-    font-weight: 700;
-}
-
-.adaptive-file-type-subtitle {
-    color: #7F93AD;
-    font-size: 8.8px;
-}
-
-.adaptive-native-preview-caption {
-    color: #6F849E;
-    font-size: 8.5px;
-}
-
-.adaptive-code-preview {
-    padding: 4px;
-    font-family: monospace;
-    font-size: 9.5px;
-}
-
-.adaptive-text-frame {
-    min-height: 244px;
-    border-color: rgba(120, 169, 255, 0.10);
-    background-color: rgba(5, 12, 20, 0.86);
-}
-
+.adaptive-text-preview,
+.adaptive-code-preview,
 .adaptive-code-preview text {
-    background-color: transparent;
+    padding: 4px;
+    background-color: @ad_bg_deep;
+    color: @ad_text;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
 }
 
-/* v1.5 — Project Context */
-.adaptive-project-card {
-    border-radius: 9px;
-    border: 1px solid rgba(120, 169, 255, 0.10);
-    background-color: rgba(10, 22, 36, 0.62);
-    padding: 10px;
+.adaptive-code-preview gutter,
+.adaptive-code-preview border {
+    background-color: @ad_bg_deep;
+    color: @ad_quaternary;
 }
 
-.adaptive-project-list-row {
-    background-color: transparent;
-    color: #96A4B8;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 6px;
-    font-size: 11.5px;
+/* Storage */
+.adaptive-storage-hero {
+    margin-top: 10px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid @ad_hairline;
+    background-color: @ad_tile;
 }
 
-.adaptive-project-list-row:hover {
-    background-color: rgba(120, 169, 255, 0.12);
-    color: #EDF4FC;
-}
-
-.adaptive-project-active-badge {
-    color: #66E0FF;
+.adaptive-ring-value {
+    color: @ad_text;
+    font-size: 16px;
     font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-storage-name {
+    color: @ad_muted;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.adaptive-storage-free {
+    color: @ad_text;
+    font-size: 18px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-storage-caption {
+    color: @ad_muted;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-status {
+    padding: 1px 8px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-status.good {
+    background-color: alpha(@ad_success, 0.16);
+    color: @ad_success;
+}
+
+.adaptive-status.warning {
+    background-color: alpha(@ad_warning, 0.16);
+    color: @ad_warning;
+}
+
+.adaptive-status.critical {
+    background-color: alpha(@ad_danger, 0.16);
+    color: @ad_danger;
+}
+
+/* Buttons, chips, rows */
+.adaptive-accent-icon {
+    color: @ad_accent;
+}
+
+.adaptive-pill-button {
+    min-height: 22px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 99px;
+    background-color: @ad_fill;
+    color: @ad_accent;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.adaptive-pill-button:hover {
+    background-color: @ad_fill_strong;
+}
+
+.adaptive-icon-button {
+    min-height: 22px;
+    min-width: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 99px;
+    background: none;
+    color: @ad_tertiary;
+}
+
+.adaptive-icon-button:hover {
+    background-color: @ad_fill_strong;
+    color: @ad_text;
+}
+
+.adaptive-chip {
+    min-height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 99px;
+    background-color: @ad_fill;
+    color: @ad_text;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-chip:hover {
+    background-color: @ad_fill_strong;
+}
+
+.adaptive-network-entry,
+.adaptive-search {
+    min-height: 28px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+.adaptive-search {
+    border-radius: 99px;
+    margin-bottom: 8px;
+}
+
+.adaptive-primary-button {
+    min-height: 28px;
+    margin-bottom: 6px;
+    border: none;
+    border-radius: 8px;
+    background-color: @ad_accent;
+    color: #FFFFFF;
+    font-weight: 600;
+}
+
+.adaptive-primary-button:hover {
+    background-color: @ad_accent_hover;
+}
+
+.adaptive-link-row {
+    min-height: 34px;
+    margin: 1px -6px;
+    padding: 5px 6px;
+    border: none;
+    border-radius: 7px;
+    background: none;
+    box-shadow: none;
+}
+
+.adaptive-link-row:hover {
+    background-color: @ad_fill;
+}
+
+.adaptive-link-row.active {
+    background-color: alpha(@ad_accent, 0.16);
+}
+
+.adaptive-project-chip {
+    margin-top: 10px;
+    padding: 8px 11px;
+    border-radius: 10px;
+    background-color: alpha(@ad_accent, 0.12);
 }

@@ -34,9 +34,13 @@ test -f "${PREFIX}/share/applications/org.gnome.Nautilus.desktop" \
   || fail "fork desktop entry missing"
 pass "fork desktop entry"
 
-test -f "${PREFIX}/share/themes/AdaptiveFiles/gtk-3.0/gtk.css" \
-  || fail "AdaptiveFiles GTK theme missing"
-pass "AdaptiveFiles GTK theme"
+test -f "${XDG_DATA_HOME:-$HOME/.local/share}/themes/Adaptive/gtk-3.0/gtk.css" \
+  || fail "Adaptive GTK theme missing (run ./scripts/install-adaptive-theme.sh)"
+pass "Adaptive GTK theme"
+
+test -f "${PREFIX}/share/adaptive-files/preview.css" \
+  || fail "Files stylesheet missing (run ./scripts/install-files-extension.sh)"
+pass "Files stylesheet"
 
 test -f "${PREFIX}/share/icons/AdaptiveFilesIcons/index.theme" \
   || fail "AdaptiveFilesIcons missing"

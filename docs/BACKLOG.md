@@ -202,6 +202,10 @@ contains a Command icon. Search lives in the app process, never in the shell.
 - ✅ Nautilus native preview/inspector layer exists.
 - ✅ Project registry format is understood by Adaptive Files.
 - 🔬 Nautilus preview has a Project tab backed by Project Context Service.
+- ✅ Files redesigned on the shared skin: Finder-style sidebar, path bar and
+  selection; the inspector is Info / Storage / Network / Projects with data
+  views - kind breakdown, largest items and 14-day activity per folder, disk
+  ring with Home composition and free-up suggestions, git state per project.
 - ⬜ Files window skinned to the Figma frames.
 
 ## Milestone 8 — Settings
@@ -331,7 +335,11 @@ Files, Settings, and the top-right system panel alike.
   Adwaita 42 does not.
 - ✅ Settings carries the Adaptive palette — `gnome-control-center` renders
   90.8% `bg.canvas` with `surface.2` chrome, no CSS parse errors.
-- 🔬 Files window under the session theme; the running instance predates it.
+- ✅ Files window under the session theme. The separate AdaptiveFiles GTK
+  theme is gone; Files uses theme/Adaptive plus extension/preview.css.
+- ✅ theme/Adaptive imports Yaru-blue-dark through a gtk.gresource symlink,
+  so widgets without an Adaptive rule look like Yaru, not raw GTK.
+- ✅ Session font is Inter, the shell's typeface.
 - ⬜ Top-right panel restyled in shell CSS; rail System button removed once it
   lands, so system controls live in one place.
 - ⬜ Session wrapper reinstall (needs sudo) to pick up `XDG_DATA_DIRS`.

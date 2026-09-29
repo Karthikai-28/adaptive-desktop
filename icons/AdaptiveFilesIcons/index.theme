@@ -1,7 +1,7 @@
 [Icon Theme]
 Name=AdaptiveFilesIcons
 Comment=Adaptive Files scalable vector icon language
-Inherits=Yaru,Adwaita,hicolor
+Inherits=Yaru-blue,Yaru,Adwaita,hicolor
 Directories=scalable/apps,scalable/places,scalable/devices,scalable/mimetypes,scalable/actions
 
 [scalable/apps]

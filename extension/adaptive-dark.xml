@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Adaptive Dark - GtkSourceView scheme for the Files inspector's code preview.
+
+  Palette table colours only (shell stylesheet.css, end): blue for keywords,
+  cyan for strings, indigo for literals, label greys for everything quieter.
+  No orange or red - those mean status on this desktop, never syntax.
+-->
+<style-scheme id="adaptive-dark" name="Adaptive Dark" version="1.0">
+  <author>Adaptive Desktop</author>
+  <description>Apple dark palette for code previews</description>
+
+  <color name="canvas"     value="#141416"/>
+  <color name="primary"    value="#F5F5F7"/>
+  <color name="secondary"  value="#98989D"/>
+  <color name="tertiary"   value="#8E8E93"/>
+  <color name="quaternary" value="#636366"/>
+  <color name="blue"       value="#0A84FF"/>
+  <color name="cyan"       value="#64D2FF"/>
+  <color name="indigo"     value="#5E5CE6"/>
+  <color name="selection"  value="#0058D0"/>
+
+  <style name="text"                  foreground="primary" background="canvas"/>
+  <style name="selection"             foreground="#FFFFFF" background="selection"/>
+  <style name="cursor"                foreground="primary"/>
+  <style name="line-numbers"          foreground="quaternary" background="canvas"/>
+  <style name="current-line"          background="#1C1C1E"/>
+  <style name="bracket-match"         foreground="primary" background="#3A3A3C"/>
+
+  <style name="def:comment"           foreground="tertiary" italic="true"/>
+  <style name="def:shebang"           foreground="tertiary" bold="true"/>
+  <style name="def:doc-comment-element" foreground="secondary" italic="true"/>
+  <style name="def:keyword"           foreground="blue" bold="true"/>
+  <style name="def:statement"         foreground="blue" bold="true"/>
+  <style name="def:builtin"           foreground="blue"/>
+  <style name="def:type"              foreground="cyan"/>
+  <style name="def:string"            foreground="cyan"/>
+  <style name="def:special-char"      foreground="indigo"/>
+  <style name="def:constant"          foreground="indigo"/>
+  <style name="def:boolean"           foreground="indigo"/>
+  <style name="def:number"            foreground="indigo"/>
+  <style name="def:decimal"           foreground="indigo"/>
+  <style name="def:floating-point"    foreground="indigo"/>
+  <style name="def:identifier"        foreground="primary"/>
+  <style name="def:function"          foreground="primary" bold="true"/>
+  <style name="def:preprocessor"      foreground="secondary"/>
+  <style name="def:operator"          foreground="secondary"/>
+  <style name="def:note"              foreground="blue" bold="true"/>
+  <style name="def:error"             underline="error"/>
+  <style name="def:heading"           foreground="primary" bold="true"/>
+  <style name="def:emphasis"          italic="true"/>
+  <style name="def:strong-emphasis"   bold="true"/>
+  <style name="def:link-text"         foreground="blue"/>
+  <style name="def:link-destination"  foreground="cyan" underline="single"/>
+</style-scheme>
