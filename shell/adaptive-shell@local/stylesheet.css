@@ -2203,6 +2203,29 @@
     font-size: 12px;
 }
 
+/* ===== Dock drag and drop =====
+ *
+ * The gap a dragged icon will land in, and the hint shown when a pinned icon
+ * is dragged far enough above the dock to be unpinned.
+ */
+
+.adaptive-dock-placeholder {
+    width: 48px;
+    height: 50px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.adaptive-dock-remove-hint {
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 69, 58, 0.50);
+    background-color: rgba(30, 30, 32, 0.95);
+    color: #FF453A;
+    font-size: 12px;
+    font-weight: 600;
+}
+
 /* ===== Adaptive palette — Apple dark appearance =====
  *
  * The one colour system for the whole desktop: this shell, the GTK themes
