@@ -1926,6 +1926,281 @@
 }
 
 
+/* ---------------------------------------------------------------
+ * Control Center extras: now playing, privacy, record, edit, apps
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-media {
+    padding: 10px 12px 10px 10px;
+    spacing: 8px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.045);
+}
+
+.adaptive-cc-media-art-bin {
+    width: 52px;
+    height: 52px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.adaptive-cc-media-art {
+    color: #98989D;
+}
+
+.adaptive-cc-media-body {
+    padding: 2px 4px;
+    border-radius: 10px;
+}
+
+.adaptive-cc-media-body:hover,
+.adaptive-cc-media-body:focus {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.adaptive-cc-media-title {
+    color: #F5F5F7;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.adaptive-cc-media-artist {
+    color: #98989D;
+    font-size: 12px;
+}
+
+.adaptive-cc-media-app {
+    color: #636366;
+    font-size: 11px;
+}
+
+.adaptive-cc-media-button {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    color: #F5F5F7;
+}
+
+.adaptive-cc-media-button StIcon {
+    icon-size: 16px;
+}
+
+.adaptive-cc-media-button:hover,
+.adaptive-cc-media-button:focus {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+
+.adaptive-cc-media-button:insensitive {
+    color: #636366;
+}
+
+.adaptive-cc-media-play {
+    width: 36px;
+    height: 36px;
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Orange is the microphone, green the camera - the iOS convention. */
+.adaptive-cc-privacy {
+    padding: 8px 12px;
+    spacing: 4px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 159, 10, 0.30);
+    background-color: rgba(255, 159, 10, 0.08);
+}
+
+.adaptive-cc-privacy-row {
+    spacing: 8px;
+}
+
+.adaptive-cc-privacy-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+}
+
+.adaptive-cc-privacy-mic {
+    background-color: #FF9F0A;
+}
+
+.adaptive-cc-privacy-cam {
+    background-color: #30D158;
+}
+
+.adaptive-cc-privacy-label {
+    color: #F5F5F7;
+    font-size: 12px;
+}
+
+.adaptive-privacy-panel-dot {
+    width: 6px;
+    height: 6px;
+    margin: 0 4px 0 2px;
+    border-radius: 3px;
+    background-color: #FF9F0A;
+}
+
+/* Recording: the record button fills red until it is pressed again. */
+.adaptive-cc-record-button:checked {
+    border-color: rgba(255, 69, 58, 0.60);
+    background-color: #FF453A;
+    color: #FFFFFF;
+}
+
+.adaptive-cc-pill-quiet {
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #0A84FF;
+}
+
+.adaptive-cc-pill-quiet:hover,
+.adaptive-cc-pill-quiet:focus {
+    background-color: rgba(10, 132, 255, 0.16);
+    color: #FFFFFF;
+}
+
+.adaptive-cc-row-dim .adaptive-cc-row-title,
+.adaptive-cc-row-dim .adaptive-cc-row-icon {
+    color: #636366;
+}
+
+.adaptive-cc-edit-row {
+    spacing: 10px;
+}
+
+.adaptive-cc-edit-check {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    color: #98989D;
+}
+
+.adaptive-cc-edit-check StIcon {
+    icon-size: 12px;
+}
+
+.adaptive-cc-edit-check:checked {
+    border-color: #0A84FF;
+    background-color: #0A84FF;
+    color: #FFFFFF;
+}
+
+.adaptive-cc-edit-hidden {
+    color: #636366;
+}
+
+.adaptive-cc-edit-move {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: #98989D;
+}
+
+.adaptive-cc-edit-move StIcon {
+    icon-size: 14px;
+}
+
+.adaptive-cc-edit-move:hover,
+.adaptive-cc-edit-move:focus {
+    background-color: rgba(255, 255, 255, 0.10);
+    color: #F5F5F7;
+}
+
+.adaptive-cc-edit-move:insensitive {
+    color: #48484A;
+}
+
+.adaptive-cc-app-volume {
+    padding: 4px 10px 4px 6px;
+    spacing: 8px;
+}
+
+.adaptive-cc-app-volume-name {
+    color: #F5F5F7;
+    font-size: 12px;
+}
+
+.adaptive-cc-slider-icon-button:checked {
+    background-color: rgba(255, 69, 58, 0.16);
+}
+
+.adaptive-cc-share {
+    spacing: 12px;
+}
+
+.adaptive-cc-share-caption {
+    color: #98989D;
+    text-align: center;
+}
+
+.adaptive-cc-share-password {
+    font-size: 16px;
+}
+
+/* The code itself is always black on white: phones read that best. */
+.adaptive-qr {
+    border-radius: 10px;
+}
+
+/* ===== Adaptive USB panel =====
+ *
+ * The top-bar USB indicator's popup. It borrows the Control Center's menu,
+ * rows, headings and form card (see above) and adds only its own header,
+ * the detail grid and the serial-port count badge.
+ */
+
+.adaptive-usb {
+    spacing: 8px;
+}
+
+.adaptive-usb-header {
+    padding: 0 4px 2px 6px;
+}
+
+.adaptive-usb-title {
+    color: #F5F5F7;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.adaptive-usb-summary {
+    color: #98989D;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-usb-badge {
+    margin-left: 3px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background-color: #0A84FF;
+    color: #FFFFFF;
+    font-size: 10px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-usb-key {
+    color: #98989D;
+    font-size: 12px;
+}
+
+.adaptive-usb-value {
+    color: #F5F5F7;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-usb-actions {
+    spacing: 6px;
+}
+
+.adaptive-usb-warning {
+    color: #FF9F0A;
+    font-size: 12px;
+}
+
 /* ===== Adaptive palette — Apple dark appearance =====
  *
  * The one colour system for the whole desktop: this shell, the GTK themes

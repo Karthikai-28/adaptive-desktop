@@ -19,13 +19,17 @@
 
 /* exported ControlCenter */
 
-const { Clutter, Gio, GLib, Shell, St } = imports.gi;
+const { Clutter, Gio, GLib, Meta, Shell, St } = imports.gi;
 const Main = imports.ui.main;
+const Mpris = imports.ui.mpris;
 const Slider = imports.ui.slider;
 const SystemActions = imports.misc.systemActions;
 const Util = imports.misc.util;
 const Volume = imports.ui.status.volume;
 const Rfkill = imports.ui.status.rfkill;
+
+const Me = imports.misc.extensionUtils.getCurrentExtension();
+const QrCode = Me.imports.qrcode;
 
 // NetworkManager is optional at build time in GNOME; without it the Wi-Fi
 // tile just reports itself unavailable.
@@ -41,6 +45,131 @@ const LIST_MAX_HEIGHT = 264;
 const DROPDOWN_FADE_MS = 140;
 const WIFI_SCAN_INTERVAL_S = 15;
 const MAX_NETWORKS = 24;
+
+const CAMERA_POLL_S = 3;
+// imports.ui.screenshot keeps its UIMode private; SCREENCAST is 1.
+const UI_MODE_SCREENCAST = 1;
+
+// Tiles in their default order. The saved order (Edit Controls) lives in
+// ~/.config/adaptive-desktop/control-center.json.
+const DEFAULT_TILES = [
+    'wifi', 'bluetooth', 'power', 'nightLight', 'dnd',
+    'airplane', 'awake', 'mic', 'tailscale',
+];
+// Tiles whose arrow opens a dropdown, and which one.
+const TILE_DROPDOWNS = {
+    wifi: 'wifi', bluetooth: 'bluetooth', power: 'power', tailscale: 'tailscale',
+};
+
+const CONFIG_PATH = GLib.build_filenamev(
+    [GLib.get_user_config_dir(), 'adaptive-desktop', 'control-center.json']);
+
+function readConfig() {
+    try {
+        const [ok, bytes] = GLib.file_get_contents(CONFIG_PATH);
+        return ok ? JSON.parse(new TextDecoder().decode(bytes)) || {} : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeConfig(patch) {
+    try {
+        GLib.mkdir_with_parents(GLib.path_get_dirname(CONFIG_PATH), 0o755);
+        const merged = Object.assign(readConfig(), patch);
+        for (const key of Object.keys(merged)) {
+            if (merged[key] === null)
+                delete merged[key];
+        }
+        GLib.file_set_contents(CONFIG_PATH, `${JSON.stringify(merged, null, 2)}\n`);
+    } catch (e) {
+        logError(e, '[Adaptive Control Center] saving control-center.json');
+    }
+}
+
+// Run a command off the main loop and hand back (ok, stdout, stderr).
+function run(argv, callback) {
+    try {
+        const proc = Gio.Subprocess.new(argv,
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+        proc.communicate_utf8_async(null, null, (p, res) => {
+            let out = '';
+            let err = '';
+            let ok = false;
+            try {
+                [, out, err] = p.communicate_utf8_finish(res);
+                ok = p.get_successful();
+            } catch (e) {
+                err = e.message;
+            }
+            callback(ok, out || '', err || '');
+        });
+    } catch (e) {
+        callback(false, '', e.message);
+    }
+}
+
+// The app behind a process: walk up the process tree to whichever ancestor
+// owns a window (Chrome's camera runs in a helper), else the process name.
+function appNameForPid(pid) {
+    const tracker = Shell.WindowTracker.get_default();
+    let current = pid;
+    for (let depth = 0; depth < 6 && current > 1; depth++) {
+        const app = tracker.get_app_from_pid(current);
+        if (app)
+            return app.get_name();
+        try {
+            const [, bytes] = GLib.file_get_contents(`/proc/${current}/stat`);
+            const stat = new TextDecoder().decode(bytes);
+            current = parseInt(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1], 10);
+        } catch (e) {
+            break;
+        }
+    }
+    try {
+        const [, bytes] = GLib.file_get_contents(`/proc/${pid}/comm`);
+        return new TextDecoder().decode(bytes).trim();
+    } catch (e) {
+        return null;
+    }
+}
+
+// The name a person knows an app by. Audio streams often carry an engine's
+// name instead ("ZOOM VoiceEngine", "Chromium input"), so failing an exact
+// .desktop match, the first word is searched among installed apps.
+function friendlyAppName(appId, streamName) {
+    const system = Shell.AppSystem.get_default();
+    if (appId) {
+        const app = system.lookup_app(`${appId}.desktop`) || system.lookup_desktop_wmclass(appId);
+        if (app)
+            return app.get_name();
+    }
+
+    const word = (streamName || '')
+        .replace(/\b(voice ?engine|input|output|audio|playback|recording|stream)\b/ig, '')
+        .trim().split(/\s+/)[0];
+    if (!word)
+        return streamName || 'An app';
+
+    try {
+        for (const group of Shell.AppSystem.search(word) || []) {
+            for (const id of group) {
+                const app = system.lookup_app(id);
+                if (app)
+                    return app.get_name();
+            }
+        }
+    } catch (e) {
+    }
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+// An icon shipped with the extension, drawn in the text colour like a theme
+// symbolic icon.
+function extensionIcon(name) {
+    const file = Me.dir.get_child('assets').get_child('panel').get_child(`${name}.svg`);
+    return new Gio.FileIcon({ file });
+}
 
 // org.gnome.SessionManager.Inhibit flags: suspend | idle.
 const INHIBIT_SUSPEND_AND_IDLE = 4 | 8;
@@ -218,13 +347,13 @@ function makeRoundButton(iconName, accessibleName, onClick, extraClass = '') {
 // One line in a dropdown list: icon, title and subtitle, trailing icons,
 // and optionally a trailing action button.
 function makeRow({
-    icon = null, title, subtitle = '', trailing = [], action = null,
+    icon = null, title, subtitle = '', trailing = [], action = null, actions = null,
     active = false, danger = false, alert = false, onActivate = null,
 }) {
     const button = new St.Button({
         style_class: danger ? 'adaptive-cc-row adaptive-cc-row-danger' : 'adaptive-cc-row',
         can_focus: !!onActivate,
-        reactive: !!onActivate || !!action,
+        reactive: !!onActivate || !!action || !!actions,
         x_expand: true,
     });
     if (active)
@@ -266,14 +395,15 @@ function makeRow({
         }));
     }
 
-    if (action) {
+    for (const item of actions || (action ? [action] : [])) {
         const pill = new St.Button({
-            style_class: 'adaptive-cc-pill-button',
-            label: action.label,
+            style_class: item.quiet
+                ? 'adaptive-cc-pill-button adaptive-cc-pill-quiet' : 'adaptive-cc-pill-button',
+            label: item.label,
             can_focus: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        pill.connect('clicked', action.onClick);
+        pill.connect('clicked', item.onClick);
         box.add_child(pill);
     }
 
@@ -288,6 +418,8 @@ function makeRow({
 // the dropdown, the way Android splits the two.
 var Tile = class Tile {
     constructor({ icon, title, onToggle = null, onOpen = null }) {
+        this.title = title;
+        this.iconName = icon;
         this.actor = new St.BoxLayout({
             style_class: 'adaptive-cc-tile',
             x_expand: true,
@@ -305,7 +437,7 @@ var Tile = class Tile {
         this._main.set_child(box);
 
         this._icon = new St.Icon({
-            icon_name: icon,
+            ...iconProps(icon),
             style_class: 'adaptive-cc-tile-icon',
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -412,6 +544,12 @@ var ControlCenter = class ControlCenter {
         this._joinWatch = null;
         this._agentExport = null;
         this._agentRegistered = false;
+        this._wifiShare = null;
+        this._players = new Map();
+        this._mprisSub = 0;
+        this._camTimer = 0;
+        this._dotIds = [];
+        this._ts = null;
         this._attached = false;
     }
 
@@ -443,6 +581,7 @@ var ControlCenter = class ControlCenter {
 
             this._build();
             this._buildAgent();
+            this._installPanelDot();
 
             // GNOME's sections stay in the popup, hidden. Their own code
             // toggles their visibility for its own reasons, so the wanted
@@ -508,6 +647,9 @@ var ControlCenter = class ControlCenter {
         this._cancelPairing();
         this._unregisterAgent();
         this._stopWatchingJoin();
+        this._removePanelDot();
+        this._stopMpris();
+        this._stopCameraPolling();
         if (this._agentExport) {
             try {
                 this._agentExport.unexport();
@@ -596,20 +738,25 @@ var ControlCenter = class ControlCenter {
         this._mainPage.insert_child_above(
             this._buildDropdown('session', {}), this._header);
 
-        const grid = this._grid.layout_manager;
-        grid.attach(this._buildDropdown('wifi', {
-            settings: ['wifi', 'Network Settings'],
-        }), 0, 1, 2, 1);
-        grid.attach(this._buildDropdown('bluetooth', {
-            settings: ['bluetooth', 'Bluetooth Settings'],
-        }), 0, 1, 2, 1);
-        grid.attach(this._buildDropdown('power', {
-            settings: ['power', 'Power Settings'],
-        }), 0, 3, 2, 1);
+        this._buildDropdown('wifi', { settings: ['wifi', 'Network Settings'] });
+        this._buildDropdown('bluetooth', { settings: ['bluetooth', 'Bluetooth Settings'] });
+        this._buildDropdown('power', { settings: ['power', 'Power Settings'] });
+        this._buildDropdown('tailscale', {
+            link: ['Admin Console', () => {
+                this._closeMenu();
+                Gio.AppInfo.launch_default_for_uri('https://login.tailscale.com/admin/machines', null);
+            }],
+        });
+        this._layoutTiles();
 
         this._slidersBox.insert_child_above(this._buildDropdown('sound', {
             settings: ['sound', 'Sound Settings'],
         }), this._volume.row);
+        this._slidersBox.insert_child_above(this._buildDropdown('display', {
+            settings: ['display', 'Display Settings'],
+        }), this._brightness.row);
+
+        this._mainPage.add_child(this._buildDropdown('edit', {}));
     }
 
     _buildMainPage() {
@@ -640,6 +787,9 @@ var ControlCenter = class ControlCenter {
 
         header.add_child(makeRoundButton('camera-photo-symbolic', 'Screenshot',
             () => this._screenshot()));
+        this._recordButton = makeRoundButton('media-record-symbolic', 'Record Screen',
+            () => this._record(), 'adaptive-cc-record-button');
+        header.add_child(this._recordButton);
         this._settingsButton = makeRoundButton('emblem-system-symbolic', 'Settings',
             () => this._launchSettingsApp());
         header.add_child(this._settingsButton);
@@ -652,6 +802,9 @@ var ControlCenter = class ControlCenter {
         this._powerButton = makeRoundButton('system-shutdown-symbolic', 'Power Off / Log Out',
             () => this._toggleDropdown('session'), 'adaptive-cc-power-button');
         header.add_child(this._powerButton);
+
+        // Microphone and camera in use, when they are.
+        page.add_child(this._buildPrivacy());
 
         // Tiles, two to a row. Grid rows alternate: tiles on even rows, and the
         // odd row under each pair is where that pair's dropdown opens.
@@ -718,11 +871,16 @@ var ControlCenter = class ControlCenter {
                         source.change_is_muted(!source.is_muted);
                 },
             }),
+            tailscale: new Tile({
+                icon: extensionIcon('tailscale-symbolic'),
+                title: 'Tailscale',
+                onToggle: () => this._toggleTailscale(),
+                onOpen: () => this._toggleDropdown('tailscale'),
+            }),
         };
+        // Placed by _layoutTiles(), once their dropdowns exist.
 
-        Object.values(this._tiles).forEach((tile, i) => {
-            grid.layout_manager.attach(tile.actor, i % 2, 2 * Math.floor(i / 2), 1, 1);
-        });
+        page.add_child(this._buildMediaCard());
 
         // Sliders.
         const sliders = new St.BoxLayout({
@@ -747,6 +905,7 @@ var ControlCenter = class ControlCenter {
 
         this._brightness = this._makeSliderRow('display-brightness-symbolic', {
             name: 'Brightness',
+            onArrow: () => this._toggleDropdown('display'),
             onChange: value => {
                 const proxy = this._brightnessProxy();
                 if (proxy)
@@ -754,6 +913,15 @@ var ControlCenter = class ControlCenter {
             },
         });
         sliders.add_child(this._brightness.row);
+
+        this._editButton = new St.Button({
+            style_class: 'adaptive-cc-dropdown-link adaptive-cc-edit-link',
+            label: 'Edit Controls…',
+            can_focus: true,
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+        this._editButton.connect('clicked', () => this._toggleDropdown('edit'));
+        page.add_child(this._editButton);
     }
 
     _makeSliderRow(iconName, { name, onIcon = null, onArrow = null, onChange }) {
@@ -798,7 +966,7 @@ var ControlCenter = class ControlCenter {
             const arrow = new St.Button({
                 style_class: 'adaptive-cc-slider-arrow',
                 can_focus: true,
-                accessible_name: `${name} output`,
+                accessible_name: `${name} options`,
                 child: new St.Icon({ icon_name: 'pan-down-symbolic' }),
                 y_align: Clutter.ActorAlign.CENTER,
             });
@@ -819,7 +987,7 @@ var ControlCenter = class ControlCenter {
         }
     }
 
-    _buildDropdown(name, { settings = null }) {
+    _buildDropdown(name, { settings = null, link = null }) {
         const actor = new St.BoxLayout({
             style_class: 'adaptive-cc-dropdown',
             vertical: true,
@@ -872,6 +1040,16 @@ var ControlCenter = class ControlCenter {
             });
             link.connect('clicked', () => this._openSettings(panel));
             actor.add_child(link);
+        } else if (link) {
+            const [label, onClick] = link;
+            const button = new St.Button({
+                style_class: 'adaptive-cc-dropdown-link',
+                can_focus: true,
+                x_align: Clutter.ActorAlign.START,
+                label: `${label}…`,
+            });
+            button.connect('clicked', onClick);
+            actor.add_child(button);
         }
 
         this._pages[name] = { actor, list, scroll, status };
@@ -947,6 +1125,11 @@ var ControlCenter = class ControlCenter {
 
         if (this._open === 'session')
             this._systemActions.forceUpdate();
+        if (this._open === 'tailscale')
+            this._tsRefresh();
+        if (this._open !== 'wifi')
+            this._wifiShare = null;
+        this._soundSignature = null;
 
         this._syncPage();
     }
@@ -958,8 +1141,12 @@ var ControlCenter = class ControlCenter {
             return;
         }
 
-        const button = name === 'session' ? this._powerButton
-            : name === 'sound' ? this._volume.arrow : null;
+        const button = {
+            session: this._powerButton,
+            sound: this._volume.arrow,
+            display: this._brightness.arrow,
+            edit: this._editButton,
+        }[name];
         if (!button)
             return;
 
@@ -968,7 +1155,7 @@ var ControlCenter = class ControlCenter {
         else
             button.remove_style_pseudo_class('expanded');
 
-        if (name === 'sound')
+        if (name === 'sound' || name === 'display')
             button.child.icon_name = open ? 'pan-up-symbolic' : 'pan-down-symbolic';
     }
 
@@ -980,6 +1167,9 @@ var ControlCenter = class ControlCenter {
 
         this._connectLive();
         this._openDropdown(null);
+        this._startMpris();
+        this._startCameraPolling();
+        this._tsRefresh();
         this._syncAll();
     }
 
@@ -987,6 +1177,9 @@ var ControlCenter = class ControlCenter {
         this._dropLive();
         this._stopScanning();
         this._setBtDiscovery(false);
+        this._stopMpris();
+        this._stopCameraPolling();
+        this._wifiShare = null;
 
         // Nobody can answer a pairing prompt in a closed panel.
         this._cancelPairing();
@@ -1036,6 +1229,14 @@ var ControlCenter = class ControlCenter {
                 'notify::active-connections', 'device-added', 'device-removed',
             ])
                 this._listen(client, signal, queue);
+        }
+
+        this._listen(Main.layoutManager, 'monitors-changed', queue);
+        if (client) {
+            for (const device of client.get_devices()) {
+                if (device.get_device_type() === NM.DeviceType.ETHERNET)
+                    this._listen(device, 'state-changed', queue);
+            }
         }
 
         const wifi = this._wifiDevice();
@@ -1112,6 +1313,8 @@ var ControlCenter = class ControlCenter {
             () => this._syncHeader(),
             () => this._syncTiles(),
             () => this._syncSliders(),
+            () => this._syncMedia(),
+            () => this._syncPrivacy(),
             () => this._syncPage(),
         ]) {
             try {
@@ -1188,6 +1391,13 @@ var ControlCenter = class ControlCenter {
         }
 
         this._lockButton.visible = this._systemActions.can_lock_screen;
+
+        const recording = !!(Main.screenshotUI && Main.screenshotUI.screencast_in_progress);
+        if (recording)
+            this._recordButton.add_style_pseudo_class('checked');
+        else
+            this._recordButton.remove_style_pseudo_class('checked');
+        this._recordButton.accessible_name = recording ? 'Stop Recording' : 'Record Screen';
         this._settingsButton.visible = Main.sessionMode.allowSettings;
     }
 
@@ -1217,6 +1427,7 @@ var ControlCenter = class ControlCenter {
         this._syncWifiTile();
         this._syncBluetoothTile();
         this._syncPowerTile();
+        this._syncTailscaleTile();
 
         const night = this._colorSettings.get_boolean('night-light-enabled');
         this._tiles.nightLight.update({ active: night, subtitle: night ? 'On' : 'Off' });
@@ -1388,6 +1599,15 @@ var ControlCenter = class ControlCenter {
         case 'session':
             this._syncSessionPage();
             break;
+        case 'tailscale':
+            this._syncTailscalePage();
+            break;
+        case 'display':
+            this._syncDisplayPage();
+            break;
+        case 'edit':
+            this._syncEditPage();
+            break;
         }
     }
 
@@ -1488,14 +1708,17 @@ var ControlCenter = class ControlCenter {
 
         const enabled = client.wireless_enabled && !this._rfkill.airplaneMode;
 
+        // Wired links sit at the top: they are the other half of "network".
+        const ethernet = this._ethernetRows(client);
+
         if (this._rfkill.airplaneMode) {
             this._wifiJoin = null;
-            this._fillPage(page, [], 'Airplane mode is on. Tap Wi-Fi to turn it back on.');
+            this._fillPage(page, ethernet, 'Airplane mode is on. Tap Wi-Fi to turn it back on.');
             return;
         }
         if (!enabled) {
             this._wifiJoin = null;
-            this._fillPage(page, [], 'Wi-Fi is off.');
+            this._fillPage(page, ethernet, 'Wi-Fi is off.');
             return;
         }
 
@@ -1521,12 +1744,17 @@ var ControlCenter = class ControlCenter {
             signalLevel(n.ap.strength), apSecured(n.ap),
         ].join('|')).join('\n') +
             `|${connecting}|${join ? `${join.name}:${join.stage}` : ''}` +
-            `|${[...this._wifiErrors].join(',')}`;
+            `|${[...this._wifiErrors].join(',')}` +
+            `|${client.get_devices().filter(d => d.get_device_type() === NM.DeviceType.ETHERNET)
+                .map(d => d.get_state()).join(',')}` +
+            `|${this._wifiShare ? JSON.stringify(this._wifiShare) : ''}`;
         if (!force && signature === this._wifiSignature && page.list.get_n_children() > 0)
             return;
         this._wifiSignature = signature;
 
-        const rows = [];
+        const rows = [...ethernet];
+        if (ethernet.length)
+            rows.push(makeHeading('Wi-Fi'));
         let form = null;
         const add = network => {
             rows.push(this._wifiRow(network, device, connecting));
@@ -1534,6 +1762,8 @@ var ControlCenter = class ControlCenter {
                 form = this._wifiJoinForm(network);
                 rows.push(form);
             }
+            if (network.active && this._wifiShare && this._wifiShare.name === network.name)
+                rows.push(this._shareForm(network, device));
         };
 
         networks.filter(n => n.active).forEach(add);
@@ -1586,10 +1816,14 @@ var ControlCenter = class ControlCenter {
             alert: !!error && !network.active && !joining,
             trailing,
             active: network.active,
-            action: network.active ? {
+            actions: network.active && !connecting ? [{
+                label: 'Share',
+                quiet: true,
+                onClick: () => this._startShare(network, device),
+            }, {
                 label: 'Disconnect',
                 onClick: () => this._disconnectWifi(device),
-            } : null,
+            }] : null,
             onActivate: network.active || joining ? null : () => this._connectWifi(network),
         });
     }
@@ -2414,28 +2648,1053 @@ var ControlCenter = class ControlCenter {
 
     // --- Sound output
 
-    _syncSoundPage() {
-        const page = this._pages.sound;
-        const current = this._mixer.get_default_sink();
-        const sinks = this._mixer.get_sinks() || [];
+    // ------------------------------------------------------ tile layout
 
-        const rows = sinks.map(sink => {
-            const active = !!current && sink.get_id() === current.get_id();
-            const { title, subtitle, icon } = describeSink(this._mixer, sink);
-            return makeRow({
+    // The tile order and visibility, from ~/.config/adaptive-desktop/
+    // control-center.json, with any tile the file does not mention (a new one,
+    // or a file from before it existed) appended and shown.
+    _tileOrder() {
+        const saved = Array.isArray(readConfig().tiles) ? readConfig().tiles : [];
+        const order = saved.filter(t => t && DEFAULT_TILES.includes(t.id))
+            .map(t => ({ id: t.id, visible: t.visible !== false }));
+        for (const id of DEFAULT_TILES) {
+            if (!order.some(t => t.id === id))
+                order.push({ id, visible: true });
+        }
+        return order;
+    }
+
+    // Tiles two to a row; the grid row under each pair holds that pair's
+    // dropdowns, so a dropdown always opens directly under its own tile
+    // wherever the tile has been moved to.
+    _layoutTiles() {
+        const grid = this._grid;
+        for (const child of grid.get_children())
+            grid.remove_child(child);
+
+        const visible = this._tileOrder().filter(t => t.visible && this._tiles[t.id]).map(t => t.id);
+        visible.forEach((id, i) => {
+            const row = 2 * Math.floor(i / 2);
+            grid.layout_manager.attach(this._tiles[id].actor, i % 2, row, 1, 1);
+            const dropdown = TILE_DROPDOWNS[id];
+            if (dropdown && this._pages[dropdown])
+                grid.layout_manager.attach(this._pages[dropdown].actor, 0, row + 1, 2, 1);
+        });
+
+        // A hidden tile's dropdown cannot stay open with nothing above it.
+        const tileDropdowns = Object.values(TILE_DROPDOWNS);
+        if (this._open && tileDropdowns.includes(this._open) &&
+            !visible.some(id => TILE_DROPDOWNS[id] === this._open))
+            this._openDropdown(null);
+
+        if (this._media)
+            this._syncMedia();
+    }
+
+    _saveTiles(order) {
+        writeConfig({ tiles: order.map(({ id, visible }) => ({ id, visible })) });
+        this._layoutTiles();
+        this._syncEditPage();
+    }
+
+    _syncEditPage() {
+        const page = this._pages.edit;
+        const order = this._tileOrder();
+        const rows = [makeHeading('Controls')];
+
+        order.forEach((entry, i) => {
+            const tile = this._tiles[entry.id];
+            if (!tile)
+                return;
+
+            const row = new St.BoxLayout({
+                style_class: 'adaptive-cc-row adaptive-cc-edit-row',
+                x_expand: true,
+            });
+
+            const check = new St.Button({
+                style_class: 'adaptive-cc-edit-check',
+                can_focus: true,
+                accessible_name: entry.visible ? `Hide ${tile.title}` : `Show ${tile.title}`,
+                child: new St.Icon({ icon_name: entry.visible ? 'object-select-symbolic' : 'list-add-symbolic' }),
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            if (entry.visible)
+                check.add_style_pseudo_class('checked');
+            check.connect('clicked', () => {
+                order[i].visible = !order[i].visible;
+                this._saveTiles(order);
+            });
+            row.add_child(check);
+
+            row.add_child(new St.Icon({
+                ...iconProps(tile.iconName),
+                style_class: 'adaptive-cc-row-icon',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            row.add_child(new St.Label({
+                text: tile.title,
+                style_class: entry.visible ? 'adaptive-cc-row-title' : 'adaptive-cc-row-title adaptive-cc-edit-hidden',
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+
+            const move = (icon, delta, label) => {
+                const target = i + delta;
+                const button = new St.Button({
+                    style_class: 'adaptive-cc-edit-move',
+                    can_focus: true,
+                    accessible_name: `${label} ${tile.title}`,
+                    child: new St.Icon({ icon_name: icon }),
+                    reactive: target >= 0 && target < order.length,
+                    y_align: Clutter.ActorAlign.CENTER,
+                });
+                if (!button.reactive)
+                    button.add_style_pseudo_class('insensitive');
+                button.connect('clicked', () => {
+                    [order[i], order[target]] = [order[target], order[i]];
+                    this._saveTiles(order);
+                });
+                row.add_child(button);
+            };
+            move('go-up-symbolic', -1, 'Move up');
+            move('go-down-symbolic', 1, 'Move down');
+
+            rows.push(row);
+        });
+
+        rows.push(makeHeading('Cards'));
+        const showMedia = readConfig().showMedia !== false;
+        rows.push(makeRow({
+            icon: 'audio-x-generic-symbolic',
+            title: 'Now Playing',
+            subtitle: showMedia ? 'Shown while something plays' : 'Hidden',
+            trailing: showMedia ? ['object-select-symbolic'] : [],
+            onActivate: () => {
+                writeConfig({ showMedia: !showMedia });
+                this._syncMedia();
+                this._syncEditPage();
+            },
+        }));
+        rows.push(makeRow({
+            icon: 'edit-undo-symbolic',
+            title: 'Reset to Default',
+            onActivate: () => {
+                writeConfig({ tiles: null, showMedia: true });
+                this._layoutTiles();
+                this._syncEditPage();
+            },
+        }));
+
+        this._fillPage(page, rows);
+    }
+
+    // -------------------------------------------------------- now playing
+
+    _buildMediaCard() {
+        const actor = new St.BoxLayout({
+            style_class: 'adaptive-cc-media',
+            x_expand: true,
+            visible: false,
+        });
+
+        const art = new St.Icon({
+            style_class: 'adaptive-cc-media-art',
+            icon_size: 44,
+            fallback_icon_name: 'audio-x-generic-symbolic',
+        });
+        actor.add_child(new St.Bin({
+            style_class: 'adaptive-cc-media-art-bin',
+            child: art,
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        // The text raises the player, the way tapping Now Playing does on a Mac.
+        const body = new St.Button({
+            style_class: 'adaptive-cc-media-body',
+            can_focus: true,
+            x_expand: true,
+        });
+        const text = new St.BoxLayout({ vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        const title = new St.Label({ style_class: 'adaptive-cc-media-title' });
+        const artist = new St.Label({ style_class: 'adaptive-cc-media-artist' });
+        const app = new St.Label({ style_class: 'adaptive-cc-media-app' });
+        text.add_child(title);
+        text.add_child(artist);
+        text.add_child(app);
+        body.set_child(text);
+        body.connect('clicked', () => {
+            const player = this._currentPlayer();
+            if (player) {
+                this._closeMenu();
+                player.raise();
+            }
+        });
+        actor.add_child(body);
+
+        const control = (icon, name, fn) => {
+            const button = new St.Button({
+                style_class: 'adaptive-cc-media-button',
+                can_focus: true,
+                accessible_name: name,
+                child: new St.Icon({ icon_name: icon }),
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            button.connect('clicked', () => {
+                const player = this._currentPlayer();
+                if (player)
+                    fn(player);
+            });
+            actor.add_child(button);
+            return button;
+        };
+        const prev = control('media-skip-backward-symbolic', 'Previous', p => p.previous());
+        const play = control('media-playback-start-symbolic', 'Play', p => p.playPause());
+        const next = control('media-skip-forward-symbolic', 'Next', p => p.next());
+        play.add_style_class_name('adaptive-cc-media-play');
+
+        this._media = { actor, art, title, artist, app, prev, play, next };
+        this._players = new Map();
+        return actor;
+    }
+
+    // MPRIS players come and go with their apps; the list of bus names is read
+    // when the panel opens and followed while it stays open.
+    _startMpris() {
+        this._stopMpris();
+
+        Gio.DBus.session.call('org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'ListNames', null, new GLib.VariantType('(as)'),
+            Gio.DBusCallFlags.NONE, -1, null, (conn, res) => {
+                try {
+                    const [names] = conn.call_finish(res).deep_unpack();
+                    for (const name of names) {
+                        if (name.startsWith('org.mpris.MediaPlayer2.'))
+                            this._addPlayer(name);
+                    }
+                } catch (e) {
+                    logError(e, '[Adaptive Control Center] listing media players');
+                }
+                this._syncMedia();
+            });
+
+        this._mprisSub = Gio.DBus.session.signal_subscribe('org.freedesktop.DBus',
+            'org.freedesktop.DBus', 'NameOwnerChanged', '/org/freedesktop/DBus',
+            'org.mpris.MediaPlayer2', Gio.DBusSignalFlags.MATCH_ARG0_NAMESPACE,
+            (_c, _s, _p, _i, _sig, params) => {
+                const [name, , newOwner] = params.deep_unpack();
+                if (newOwner)
+                    this._addPlayer(name);
+            });
+    }
+
+    _stopMpris() {
+        if (this._mprisSub) {
+            Gio.DBus.session.signal_unsubscribe(this._mprisSub);
+            this._mprisSub = 0;
+        }
+    }
+
+    _addPlayer(name) {
+        if (this._players.has(name))
+            return;
+        try {
+            const player = new Mpris.MprisPlayer(name);
+            const ids = [
+                player.connect('changed', () => this._syncMedia()),
+                player.connect('closed', () => {
+                    for (const id of ids)
+                        player.disconnect(id);
+                    this._players.delete(name);
+                    this._syncMedia();
+                }),
+            ];
+            this._players.set(name, player);
+        } catch (e) {
+            logError(e, `[Adaptive Control Center] media player ${name}`);
+        }
+    }
+
+    // The one playing, else the most recently seen one with a track.
+    _currentPlayer() {
+        const players = [...this._players.values()].filter(p => {
+            try {
+                return p._playerProxy && p.trackTitle && p._visible !== false;
+            } catch (e) {
+                return false;
+            }
+        });
+        return players.find(p => p.status === 'Playing') || players[players.length - 1] || null;
+    }
+
+    _syncMedia() {
+        const media = this._media;
+        if (!media)
+            return;
+
+        const player = this._currentPlayer();
+        const show = !!player && readConfig().showMedia !== false;
+        media.actor.visible = show;
+        if (!show)
+            return;
+
+        media.title.text = player.trackTitle || 'Unknown title';
+        const artists = Array.isArray(player.trackArtists) ? player.trackArtists.join(', ') : '';
+        media.artist.text = artists;
+        media.artist.visible = !!artists;
+
+        let appName = '';
+        try {
+            appName = (player._mprisProxy && player._mprisProxy.Identity) || '';
+        } catch (e) {
+        }
+        media.app.text = appName;
+        media.app.visible = !!appName;
+
+        const url = player.trackCoverUrl || '';
+        if (url.startsWith('file://')) {
+            media.art.gicon = new Gio.FileIcon({ file: Gio.File.new_for_uri(url) });
+        } else if (url.startsWith('http')) {
+            // Remote art is not fetched from inside the shell.
+            media.art.gicon = null;
+            media.art.icon_name = 'audio-x-generic-symbolic';
+        } else {
+            media.art.gicon = null;
+            media.art.icon_name = 'audio-x-generic-symbolic';
+        }
+
+        const playing = player.status === 'Playing';
+        media.play.child.icon_name = playing ? 'media-playback-pause-symbolic' : 'media-playback-start-symbolic';
+        media.play.accessible_name = playing ? 'Pause' : 'Play';
+
+        for (const [button, can] of [[media.prev, player.canGoPrevious], [media.next, player.canGoNext]]) {
+            button.reactive = !!can;
+            if (can)
+                button.remove_style_pseudo_class('insensitive');
+            else
+                button.add_style_pseudo_class('insensitive');
+        }
+    }
+
+    // ------------------------------------------------------------- privacy
+
+    // Apps recording from a microphone, by the name a person knows them by.
+    _micApps() {
+        const names = new Set();
+        let outputs = [];
+        try {
+            outputs = this._mixer.get_source_outputs() || [];
+        } catch (e) {
+            return [];
+        }
+        for (const stream of outputs) {
+            if (stream.is_event_stream)
+                continue;
+            const id = stream.get_application_id() || '';
+            const name = stream.get_name() || '';
+            // Level meters and mixers read the mic without recording anyone.
+            if (/peak detect|volumecontrol|pavucontrol|gnome-shell|speech-dispatcher/i.test(`${name} ${id}`))
+                continue;
+            names.add(friendlyAppName(id, name));
+        }
+        return [...names];
+    }
+
+    _buildPrivacy() {
+        const box = new St.BoxLayout({
+            style_class: 'adaptive-cc-privacy',
+            vertical: true,
+            x_expand: true,
+            visible: false,
+        });
+        const line = dotClass => {
+            const row = new St.BoxLayout({ style_class: 'adaptive-cc-privacy-row' });
+            row.add_child(new St.Widget({
+                style_class: `adaptive-cc-privacy-dot ${dotClass}`,
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            const label = new St.Label({
+                style_class: 'adaptive-cc-privacy-label',
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            label.clutter_text.line_wrap = true;
+            row.add_child(label);
+            box.add_child(row);
+            return { row, label };
+        };
+        this._privacyMic = line('adaptive-cc-privacy-mic');
+        this._privacyCam = line('adaptive-cc-privacy-cam');
+        this._privacy = box;
+        this._cameraApps = [];
+        return box;
+    }
+
+    _syncPrivacy() {
+        if (!this._privacy)
+            return;
+        const mic = this._micApps();
+        const cam = this._cameraApps || [];
+        const list = names => {
+            if (names.length <= 2)
+                return names.join(' and ');
+            return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+        };
+        this._privacyMic.label.text = `Microphone in use by ${list(mic)}`;
+        this._privacyMic.row.visible = mic.length > 0;
+        this._privacyCam.label.text = `Camera in use by ${list(cam)}`;
+        this._privacyCam.row.visible = cam.length > 0;
+        this._privacy.visible = mic.length > 0 || cam.length > 0;
+    }
+
+    // Nothing reports camera use, so the panel asks the kernel who has a
+    // /dev/video* open - only while the panel is open, and off the main loop.
+    _pollCamera() {
+        if (this._camBusy)
+            return;
+        const nodes = [];
+        for (let i = 0; i < 16; i++) {
+            if (GLib.file_test(`/dev/video${i}`, GLib.FileTest.EXISTS))
+                nodes.push(`/dev/video${i}`);
+        }
+        if (!nodes.length || !GLib.find_program_in_path('fuser')) {
+            this._cameraApps = [];
+            return;
+        }
+
+        this._camBusy = true;
+        run(['fuser', ...nodes], (_ok, out) => {
+            this._camBusy = false;
+            const pids = [...new Set(out.match(/\d+/g) || [])].map(p => parseInt(p, 10));
+            const names = new Set();
+            for (const pid of pids) {
+                const name = appNameForPid(pid);
+                if (name && !/^(pipewire|wireplumber)$/.test(name))
+                    names.add(friendlyAppName(null, name));
+            }
+            this._cameraApps = [...names];
+            this._syncPrivacy();
+        });
+    }
+
+    _startCameraPolling() {
+        this._stopCameraPolling();
+        this._pollCamera();
+        this._camTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, CAMERA_POLL_S, () => {
+            this._pollCamera();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopCameraPolling() {
+        if (this._camTimer) {
+            GLib.Source.remove(this._camTimer);
+            this._camTimer = 0;
+        }
+    }
+
+    // An orange dot beside the system icons whenever something records from
+    // a microphone, like iOS. The mixer tells us when streams come and go, so
+    // this listens all the time without polling anything.
+    _installPanelDot() {
+        const box = this._agg && this._agg._indicators;
+        if (!box)
+            return;
+        this._panelDot = new St.Widget({
+            style_class: 'adaptive-privacy-panel-dot',
+            y_align: Clutter.ActorAlign.CENTER,
+            visible: false,
+        });
+        box.insert_child_at_index(this._panelDot, 0);
+        const sync = () => {
+            if (this._panelDot)
+                this._panelDot.visible = this._micApps().length > 0;
+            if (this._menu && this._menu.isOpen)
+                this._syncPrivacy();
+        };
+        this._dotIds = ['stream-added', 'stream-removed', 'state-changed']
+            .map(signal => this._mixer.connect(signal, sync));
+        sync();
+    }
+
+    _removePanelDot() {
+        for (const id of this._dotIds || [])
+            this._mixer.disconnect(id);
+        this._dotIds = [];
+        if (this._panelDot) {
+            this._panelDot.destroy();
+            this._panelDot = null;
+        }
+    }
+
+    // ----------------------------------------------------------- tailscale
+
+    _tsRefresh() {
+        if (this._tsBusy)
+            return;
+        if (!GLib.find_program_in_path('tailscale')) {
+            this._ts = { installed: false };
+            return;
+        }
+        this._tsBusy = true;
+        run(['tailscale', 'status', '--json'], (_ok, out) => {
+            this._tsBusy = false;
+            let status = null;
+            try {
+                status = JSON.parse(out);
+            } catch (e) {
+            }
+            this._ts = status ? {
+                installed: true,
+                state: status.BackendState,
+                self: status.Self || {},
+                ips: status.TailscaleIPs || (status.Self && status.Self.TailscaleIPs) || [],
+                peers: Object.values(status.Peer || {}),
+            } : { installed: true, state: 'Unknown', self: {}, ips: [], peers: [] };
+            this._queueSync();
+        });
+    }
+
+    _toggleTailscale() {
+        const ts = this._ts;
+        if (!ts || !ts.installed || this._tsPending)
+            return;
+
+        this._tsPending = true;
+        this._tsError = null;
+        this._queueSync();
+
+        if (ts.state === 'Running') {
+            run(['tailscale', 'down'], (ok, out, err) => this._tsDone(ok, `${out}${err}`));
+            return;
+        }
+
+        // `tailscale up` waits for a browser login when one is needed and
+        // prints the URL to visit; open it for the user as soon as it appears.
+        let output = '';
+        try {
+            const proc = Gio.Subprocess.new(['tailscale', 'up'],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE);
+            const stream = new Gio.DataInputStream({ base_stream: proc.get_stdout_pipe() });
+            const readLine = () => {
+                stream.read_line_async(GLib.PRIORITY_DEFAULT, null, (s, res) => {
+                    let line = null;
+                    try {
+                        [line] = s.read_line_finish_utf8(res);
+                    } catch (e) {
+                    }
+                    if (line === null)
+                        return;
+                    output += `${line}\n`;
+                    const url = line.match(/https:\/\/login\.tailscale\.com\/\S+/);
+                    if (url) {
+                        this._closeMenu();
+                        try {
+                            Gio.AppInfo.launch_default_for_uri(url[0], null);
+                        } catch (e) {
+                            logError(e, '[Adaptive Control Center] opening the Tailscale login');
+                        }
+                    }
+                    readLine();
+                });
+            };
+            readLine();
+            proc.wait_check_async(null, (p, res) => {
+                let ok = false;
+                try {
+                    ok = p.wait_check_finish(res);
+                } catch (e) {
+                }
+                this._tsDone(ok, output);
+            });
+        } catch (e) {
+            this._tsDone(false, e.message);
+        }
+    }
+
+    _tsDone(ok, output) {
+        this._tsPending = false;
+        if (!ok && /access denied|checkprefs|operator|permission/i.test(output || ''))
+            this._tsError = 'permission';
+        else if (!ok)
+            this._tsError = 'failed';
+        this._tsRefresh();
+    }
+
+    _syncTailscaleTile() {
+        const tile = this._tiles.tailscale;
+        const ts = this._ts;
+        if (!ts) {
+            tile.update({ subtitle: '…' });
+            return;
+        }
+        if (!ts.installed) {
+            tile.update({ subtitle: 'Not installed', sensitive: false });
+            return;
+        }
+
+        const ipv4 = (ts.ips || []).find(ip => ip.includes('.'));
+        let subtitle = {
+            Running: ipv4 || 'Connected',
+            Stopped: 'Off',
+            NeedsLogin: 'Signed out',
+            NeedsMachineAuth: 'Awaiting approval',
+            Starting: 'Connecting…',
+        }[ts.state] || ts.state || 'Unknown';
+        if (this._tsPending)
+            subtitle = ts.state === 'Running' ? 'Disconnecting…' : 'Connecting…';
+        else if (this._tsError === 'permission')
+            subtitle = 'Needs one-time setup';
+
+        tile.update({ active: ts.state === 'Running', subtitle });
+    }
+
+    _syncTailscalePage() {
+        const page = this._pages.tailscale;
+        const ts = this._ts;
+
+        if (!ts) {
+            this._fillPage(page, [], 'Checking Tailscale…');
+            return;
+        }
+        if (!ts.installed) {
+            this._fillPage(page, [], 'Tailscale is not installed.');
+            return;
+        }
+
+        const rows = [];
+
+        if (this._tsError === 'permission') {
+            const command = 'sudo tailscale set --operator=$USER';
+            rows.push(this._makeConfirmForm({
+                prompt: 'To switch Tailscale from here, allow your user to control it. ' +
+                    'Run this once in a terminal:',
+                code: command,
+                cancelLabel: 'Copy Command',
+                onCancel: () => {
+                    St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, command);
+                    this._tsError = null;
+                    this._syncTailscalePage();
+                },
+            }));
+        }
+
+        if (ts.state === 'NeedsLogin') {
+            rows.push(makeRow({
+                icon: 'avatar-default-symbolic',
+                title: 'Sign in to Tailscale',
+                subtitle: 'Opens the login page in your browser',
+                onActivate: () => this._toggleTailscale(),
+            }));
+        } else if (ts.state === 'Running') {
+            const self = ts.self || {};
+            rows.push(this._copyRow({
+                icon: 'computer-symbolic',
+                title: `${self.HostName || 'This computer'} (this device)`,
+                value: (ts.ips || []).find(ip => ip.includes('.')) || '',
+            }));
+
+            const peers = (ts.peers || []).slice().sort((a, b) =>
+                (b.Online - a.Online) || (a.HostName || '').localeCompare(b.HostName || ''));
+            if (peers.length) {
+                rows.push(makeHeading('Devices'));
+                for (const peer of peers) {
+                    const ip = (peer.TailscaleIPs || []).find(x => x.includes('.')) || '';
+                    rows.push(this._copyRow({
+                        icon: /android|ios/i.test(peer.OS || '') ? 'phone-symbolic' : 'computer-symbolic',
+                        title: peer.HostName || peer.DNSName || 'Device',
+                        value: ip,
+                        suffix: peer.Online ? 'Online' : 'Offline',
+                        dim: !peer.Online,
+                    }));
+                }
+            }
+        }
+
+        const status = {
+            Stopped: 'Tailscale is off. Tap the tile to connect.',
+            NeedsMachineAuth: 'This device is waiting for approval in the admin console.',
+        }[ts.state] || (this._tsError === 'failed' ? "Couldn't change Tailscale." : '');
+
+        this._fillPage(page, rows, status);
+    }
+
+    // A row whose value is copied when tapped, and which says so.
+    _copyRow({ icon, title, value, suffix = '', dim = false }) {
+        const copied = this._copiedValue === value && value;
+        const subtitle = copied ? 'Copied to clipboard'
+            : [value, suffix].filter(Boolean).join(' · ');
+        const row = makeRow({
+            icon,
+            title,
+            subtitle,
+            trailing: value ? ['edit-copy-symbolic'] : [],
+            onActivate: value ? () => {
+                St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, value);
+                this._copiedValue = value;
+                this._syncPage();
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1200, () => {
+                    if (this._copiedValue === value) {
+                        this._copiedValue = null;
+                        if (this._menu && this._menu.isOpen)
+                            this._syncPage();
+                    }
+                    return GLib.SOURCE_REMOVE;
+                });
+            } : null,
+        });
+        if (dim)
+            row.add_style_class_name('adaptive-cc-row-dim');
+        return row;
+    }
+
+    // ------------------------------------------------------------- display
+
+    _syncDisplayPage() {
+        const page = this._pages.display;
+        const monitors = Main.layoutManager.monitors || [];
+        const primary = Main.layoutManager.primaryIndex;
+        const rows = [makeHeading('Displays')];
+
+        monitors.forEach((m, i) => {
+            rows.push(makeRow({
+                icon: 'video-display-symbolic',
+                title: i === primary ? 'Main display' : `Display ${i + 1}`,
+                subtitle: `${m.width} × ${m.height}${m.geometry_scale && m.geometry_scale !== 1 ? ` · ${m.geometry_scale}×` : ''}`,
+            }));
+        });
+
+        let manager = null;
+        try {
+            manager = Meta.MonitorManager.get();
+        } catch (e) {
+        }
+
+        if (!manager || !manager.can_switch_config()) {
+            this._fillPage(page, rows, monitors.length < 2
+                ? 'Connect another display to extend or mirror your screen.' : '');
+            return;
+        }
+
+        const current = manager.get_switch_config();
+        const T = Meta.MonitorSwitchConfigType;
+        rows.push(makeHeading('Arrangement'));
+        for (const [type, title, icon] of [
+            [T.ALL_LINEAR, 'Extend', 'video-joined-displays-symbolic'],
+            [T.ALL_MIRROR, 'Mirror', 'view-mirror-symbolic'],
+            [T.EXTERNAL, 'External Only', 'video-single-display-symbolic'],
+            [T.BUILTIN, 'Built-in Only', 'computer-symbolic'],
+        ]) {
+            const active = current === type;
+            rows.push(makeRow({
                 icon,
                 title,
-                subtitle,
                 trailing: active ? ['object-select-symbolic'] : [],
                 active,
                 onActivate: active ? null : () => {
-                    this._mixer.set_default_sink(sink);
+                    manager.switch_config(type);
                     this._queueSync();
                 },
-            });
+            }));
+        }
+
+        this._fillPage(page, rows);
+    }
+
+    // --------------------------------------------------------------- sound
+
+    _syncSoundPage(force = false) {
+        const page = this._pages.sound;
+        if (!force && this._holdForPointer(page))
+            return;
+
+        const sink = this._mixer.get_default_sink();
+        const source = this._mixer.get_default_source();
+        const sinks = this._mixer.get_sinks() || [];
+        const sources = (this._mixer.get_sources() || [])
+            .filter(s => !/\.monitor$/.test(s.get_name() || ''));
+        const apps = (this._mixer.get_sink_inputs() || []).filter(s => !s.is_event_stream);
+
+        // Per-app sliders are dragged in place; rebuilding the list would drop
+        // the drag, so only a change in what is listed rebuilds it.
+        const signature = [
+            sinks.map(s => s.get_id()).join(','), sink ? sink.get_id() : '',
+            sources.map(s => s.get_id()).join(','), source ? source.get_id() : '',
+            apps.map(s => `${s.get_id()}:${s.get_name()}`).join(','),
+        ].join('|');
+        if (!force && signature === this._soundSignature && page.list.get_n_children() > 0)
+            return;
+        this._soundSignature = signature;
+
+        const rows = [makeHeading('Output')];
+        for (const s of sinks) {
+            const active = !!sink && s.get_id() === sink.get_id();
+            const { title, subtitle, icon } = describeSink(this._mixer, s);
+            rows.push(makeRow({
+                icon, title, subtitle,
+                trailing: active ? ['object-select-symbolic'] : [],
+                active,
+                onActivate: active ? null : () => {
+                    this._mixer.set_default_sink(s);
+                    this._queueSync();
+                },
+            }));
+        }
+
+        if (sources.length) {
+            rows.push(makeHeading('Input'));
+            for (const s of sources) {
+                const active = !!source && s.get_id() === source.get_id();
+                const { title, subtitle } = describeSink(this._mixer, s);
+                rows.push(makeRow({
+                    icon: /head(set|phone)/i.test(title) ? 'audio-headset-symbolic' : 'audio-input-microphone-symbolic',
+                    title, subtitle,
+                    trailing: active ? ['object-select-symbolic'] : [],
+                    active,
+                    onActivate: active ? null : () => {
+                        this._mixer.set_default_source(s);
+                        this._queueSync();
+                    },
+                }));
+            }
+        }
+
+        if (apps.length) {
+            rows.push(makeHeading('Apps'));
+            for (const stream of apps)
+                rows.push(this._appVolumeRow(stream));
+        }
+
+        this._fillPage(page, rows, sinks.length ? '' : 'No sound outputs were found.');
+    }
+
+    _appVolumeRow(stream) {
+        const id = stream.get_application_id() || '';
+        const app = id ? Shell.AppSystem.get_default().lookup_app(`${id}.desktop`) : null;
+        const name = friendlyAppName(id, stream.get_name() || 'App');
+        const max = this._mixer.get_vol_max_norm();
+
+        const row = new St.BoxLayout({ style_class: 'adaptive-cc-app-volume', x_expand: true });
+
+        const mute = new St.Button({
+            style_class: 'adaptive-cc-slider-icon-button',
+            can_focus: true,
+            accessible_name: `Mute ${name}`,
+            child: app ? app.create_icon_texture(20)
+                : new St.Icon({ icon_name: stream.get_icon_name() || 'applications-multimedia-symbolic', icon_size: 20 }),
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        if (stream.is_muted)
+            mute.add_style_pseudo_class('checked');
+        mute.connect('clicked', () => {
+            stream.change_is_muted(!stream.is_muted);
+            if (!stream.is_muted)
+                mute.add_style_pseudo_class('checked');
+            else
+                mute.remove_style_pseudo_class('checked');
+        });
+        row.add_child(mute);
+
+        const column = new St.BoxLayout({ vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        column.add_child(new St.Label({ text: name, style_class: 'adaptive-cc-app-volume-name' }));
+        const slider = new Slider.Slider(stream.is_muted ? 0 : Math.min(stream.volume / max, 1));
+        slider.add_style_class_name('adaptive-cc-slider');
+        slider.accessible_name = `${name} volume`;
+        slider.connect('notify::value', () => {
+            stream.volume = slider.value * max;
+            if (stream.is_muted && slider.value > 0)
+                stream.change_is_muted(false);
+            stream.push_volume();
+        });
+        column.add_child(slider);
+        row.add_child(column);
+        return row;
+    }
+
+    // --------------------------------------------------- ethernet & share
+
+    _ethernetRows(client) {
+        const devices = client.get_devices().filter(d =>
+            d.get_device_type() === NM.DeviceType.ETHERNET && d.get_managed());
+        if (!devices.length)
+            return [];
+
+        const S = NM.DeviceState;
+        const rows = [makeHeading('Ethernet')];
+        for (const device of devices) {
+            const state = device.get_state();
+            const busy = state > S.DISCONNECTED && state < S.ACTIVATED;
+            let subtitle;
+            if (state === S.ACTIVATED) {
+                const address = device.get_ip4_config() &&
+                    device.get_ip4_config().get_addresses()[0];
+                subtitle = address ? `Connected · ${address.get_address()}` : 'Connected';
+            } else if (state === S.IP_CONFIG) {
+                subtitle = 'Getting an IP address…';
+            } else if (busy) {
+                subtitle = 'Connecting…';
+            } else if (state === S.UNAVAILABLE) {
+                subtitle = 'Cable unplugged';
+            } else if (state === S.FAILED) {
+                subtitle = "Couldn't connect";
+            } else {
+                subtitle = 'Not connected';
+            }
+
+            const product = (device.get_product() || '').replace(/\s+/g, ' ').trim();
+            rows.push(makeRow({
+                icon: 'network-wired-symbolic',
+                title: product ? `${product}` : 'Ethernet',
+                subtitle: `${device.get_iface()} · ${subtitle}`,
+                active: state === S.ACTIVATED,
+                trailing: state === S.ACTIVATED ? ['object-select-symbolic'] : [],
+                action: state === S.ACTIVATED || busy ? {
+                    label: busy ? 'Stop' : 'Disconnect',
+                    onClick: () => device.disconnect_async(null, null),
+                } : null,
+                onActivate: state === S.DISCONNECTED || state === S.FAILED
+                    ? () => client.activate_connection_async(null, device, null, null, null)
+                    : null,
+            }));
+        }
+        return rows;
+    }
+
+    // "Share": a QR code a phone camera can join from, and the password.
+    _shareForm(network, device) {
+        const box = new St.BoxLayout({
+            style_class: 'adaptive-cc-form adaptive-cc-share',
+            vertical: true,
+            x_expand: true,
         });
 
-        this._fillPage(page, rows, rows.length ? '' : 'No sound outputs were found.');
+        const share = this._wifiShare;
+        if (!share || share.name !== network.name)
+            return box;
+
+        if (share.error) {
+            box.add_child(new St.Label({ text: share.error, style_class: 'adaptive-cc-form-prompt' }));
+        } else if (share.password === undefined) {
+            box.add_child(new St.Label({ text: 'Getting the password…', style_class: 'adaptive-cc-form-prompt' }));
+        } else {
+            const escape = s => s.replace(/([\;,:"])/g, '\\$1');
+            const type = share.password ? 'WPA' : 'nopass';
+            const payload = `WIFI:T:${type};S:${escape(network.name)};` +
+                (share.password ? `P:${escape(share.password)};` : '') + ';';
+            try {
+                box.add_child(new QrCode.QrCodeActor(payload, 176));
+            } catch (e) {
+                logError(e, '[Adaptive Control Center] QR code');
+            }
+            box.add_child(new St.Label({
+                text: `Point a phone camera at the code to join “${network.name}”.`,
+                style_class: 'adaptive-cc-form-prompt adaptive-cc-share-caption',
+                x_align: Clutter.ActorAlign.CENTER,
+            }));
+
+            if (share.password) {
+                const passwordLabel = new St.Label({
+                    text: share.reveal ? share.password : '•'.repeat(Math.min(share.password.length, 16)),
+                    style_class: 'adaptive-cc-form-code adaptive-cc-share-password',
+                    x_align: Clutter.ActorAlign.CENTER,
+                });
+                passwordLabel.clutter_text.line_wrap = true;
+                box.add_child(passwordLabel);
+            }
+        }
+
+        const buttons = new St.BoxLayout({
+            style_class: 'adaptive-cc-form-buttons',
+            x_align: Clutter.ActorAlign.END,
+        });
+        box.add_child(buttons);
+        const button = (label, primary, fn) => {
+            const b = new St.Button({
+                style_class: primary ? 'adaptive-cc-form-button adaptive-cc-form-primary' : 'adaptive-cc-form-button',
+                label,
+                can_focus: true,
+            });
+            b.connect('clicked', fn);
+            buttons.add_child(b);
+            return b;
+        };
+        if (share.password) {
+            button(share.reveal ? 'Hide' : 'Show', false, () => {
+                share.reveal = !share.reveal;
+                this._syncWifiPage(true);
+            });
+            const copyButton = button('Copy Password', false, () => {
+                St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, share.password);
+                copyButton.label = 'Copied';
+            });
+        }
+        box._entry = button('Done', true, () => {
+            this._wifiShare = null;
+            this._syncWifiPage(true);
+        });
+        return box;
+    }
+
+    _startShare(network, device) {
+        if (this._wifiShare && this._wifiShare.name === network.name) {
+            this._wifiShare = null;
+            this._syncWifiPage(true);
+            return;
+        }
+
+        const share = { name: network.name, password: undefined, reveal: false, error: null };
+        this._wifiShare = share;
+        this._syncWifiPage(true);
+
+        const active = device.get_active_connection();
+        const remote = active ? active.get_connection() : network.connections[0];
+        if (!remote) {
+            share.error = "This network's details aren't available.";
+            this._syncWifiPage(true);
+            return;
+        }
+
+        const security = remote.get_setting_wireless_security();
+        if (!security) {
+            share.password = '';
+            this._syncWifiPage(true);
+            return;
+        }
+
+        remote.get_secrets_async('802-11-wireless-security', null, (c, res) => {
+            try {
+                const secrets = c.get_secrets_finish(res).recursiveUnpack();
+                const wsec = secrets['802-11-wireless-security'] || {};
+                share.password = wsec.psk || wsec['wep-key0'] || '';
+                if (!share.password)
+                    share.error = "The password isn't stored on this computer.";
+            } catch (e) {
+                share.error = "Couldn't read the saved password.";
+                log(`[Adaptive Control Center] Wi-Fi secrets: ${e.message}`);
+            }
+            if (this._wifiShare === share)
+                this._syncWifiPage(true);
+        });
+    }
+
+    // ------------------------------------------------------ screen record
+
+    _record() {
+        this._closeMenu();
+        const ui = Main.screenshotUI;
+        if (!ui)
+            return;
+        try {
+            if (ui.screencast_in_progress) {
+                ui.stopScreencast();
+                return;
+            }
+            const promise = ui.open(UI_MODE_SCREENCAST);
+            if (promise && promise.catch)
+                promise.catch(e => logError(e, '[Adaptive Control Center] screen recording'));
+        } catch (e) {
+            logError(e, '[Adaptive Control Center] screen recording');
+        }
     }
 
     // --- Session

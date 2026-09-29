@@ -17,6 +17,7 @@ const Pango = imports.gi.Pango;
 const Me = ExtensionUtils.getCurrentExtension();
 const Shade = Me.imports.shade;
 const ControlCenter = Me.imports.controlCenter;
+const UsbDevices = Me.imports.usbDevices;
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
 // OLED; the ambient level is what it settles to once nobody is looking.
@@ -64,6 +65,8 @@ class AdaptiveShellV16 {
         this._shade = null;
         // Adaptive Control Center: the system menu rebuilt as quick settings.
         this._controlCenter = null;
+        // Adaptive USB panel: plugged-in devices and serial ports, top right.
+        this._usbPanel = null;
         this._projectProxy = null;
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
@@ -174,6 +177,7 @@ class AdaptiveShellV16 {
         this._restoreGNOMEClock();
         this._installShade();
         this._installControlCenter();
+        this._installUsbPanel();
         this._installRail();
 
         this._monitorChangedId = Main.layoutManager.connect(
@@ -910,6 +914,11 @@ class AdaptiveShellV16 {
             this._controlCenter = null;
         }
 
+        if (this._usbPanel) {
+            this._usbPanel.detach();
+            this._usbPanel = null;
+        }
+
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
@@ -1149,6 +1158,18 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the Control Center');
             this._controlCenter = null;
+        }
+    }
+
+    // A top-bar indicator listing USB devices and serial ports with their
+    // VID:PID, paths and drivers; live from udev.
+    _installUsbPanel() {
+        try {
+            this._usbPanel = new UsbDevices.UsbPanel();
+            this._usbPanel.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the USB panel');
+            this._usbPanel = null;
         }
     }
 
