@@ -2261,7 +2261,14 @@ class AdaptiveShellV16 {
             return;
         }
 
-        if (Main.overview && typeof Main.overview.showApps === 'function')
+        // Overview.show() returns early when the Overview is already up, so
+        // showApps() does nothing from the window picker. GNOME's own dash
+        // switches pages through its Show Applications toggle, which the
+        // Overview listens to - do the same.
+        const dash = Main.overview.dash;
+        if (Main.overview.visible && dash && dash.showAppsButton)
+            dash.showAppsButton.checked = true;
+        else if (typeof Main.overview.showApps === 'function')
             Main.overview.showApps();
         else
             Main.overview.show();
