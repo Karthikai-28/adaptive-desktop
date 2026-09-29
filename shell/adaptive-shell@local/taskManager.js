@@ -109,19 +109,36 @@ function readProcesses(uid) {
     return table;
 }
 
+const INTERPRETERS = /^(python[\d.]*|node|nodejs|gjs|bash|sh|zsh|perl|ruby|java)$/;
+
 function commandName(pid, comm) {
-    // comm is cut at 15 characters; the command line has the real name.
-    const cmdline = readText(`/proc/${pid}/cmdline`);
-    if (!cmdline)
-        return comm;
+    const cmdline = readText(`/proc/${pid}/cmdline`) || '';
     const argv = cmdline.split('\0').filter(Boolean);
-    if (!argv.length)
-        return comm;
-    let name = GLib.path_get_basename(argv[0]);
-    // Interpreters: say which script they run.
-    if (/^(python[\d.]*|node|bash|sh|zsh|perl|ruby|java)$/.test(name) && argv[1] && !argv[1].startsWith('-'))
-        name = `${GLib.path_get_basename(argv[1])} (${name})`;
-    return name || comm;
+
+    // A script: name it by the script, not the interpreter running it.
+    if (INTERPRETERS.test(comm)) {
+        const rest = argv.slice(1);
+        const module = rest.indexOf('-m');
+        if (module >= 0 && rest[module + 1])
+            return `${rest[module + 1]} (${comm} -m)`;
+        // Inline code (-c) has no name worth showing.
+        if (rest.includes('-c'))
+            return `${comm} -c`;
+        const script = rest.find(arg => !arg.startsWith('-'));
+        return script ? `${GLib.path_get_basename(script)} (${comm})` : comm;
+    }
+
+    // comm is the kernel's name for the process and is cut at 15 characters;
+    // only then is the command line worth reading. Electron and Chromium
+    // rewrite theirs into one space-separated string, so take its first word.
+    // Some programs rename their process (Files becomes "org.gnome.Nauti"),
+    // and there the program's own file name reads better too.
+    if (comm.length >= 15 && argv.length) {
+        const first = GLib.path_get_basename(argv[0].split(' ')[0]);
+        if (first)
+            return first;
+    }
+    return comm;
 }
 
 var TaskPanel = class TaskPanel {
@@ -508,8 +525,21 @@ var TaskPanel = class TaskPanel {
     }
 
     _updateRows() {
-        for (const entry of [...this._apps, ...this._others])
+        const live = new Set();
+        for (const entry of [...this._apps, ...this._others]) {
+            live.add(entry.key);
             this._fill(entry);
+        }
+        // Rows kept only because the pointer is over the list: say they are
+        // gone rather than showing their last figures.
+        for (const [key, row] of this._rows) {
+            if (live.has(key))
+                continue;
+            row.subtitle.text = 'Ended';
+            row.cpu.text = '';
+            row.end.visible = false;
+            row.subtitle.get_parent().get_parent().opacity = 110;
+        }
     }
 
     _fill(entry) {
