@@ -31,4 +31,4 @@ verification/live-readiness-latest.txt
 verification/live-verification-*.json
 verification/live-verification-latest.json
 shell-memory-soak-*.txt
-*.pyc
+*.pyccodebase_digest.md
