@@ -23,6 +23,7 @@ const UsbDevices = Me.imports.usbDevices;
 const ShellActions = Me.imports.shellActions;
 const TaskManager = Me.imports.taskManager;
 const NetworkPanel = Me.imports.networkPanel;
+const MinimizeEffect = Me.imports.minimizeEffect;
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
 // OLED; the ambient level is what it settles to once nobody is looking.
@@ -269,6 +270,8 @@ class AdaptiveShellV16 {
         this._installNetworkPanel();
         this._installShellActions();
         this._installRail();
+        this._minimizeFx = new MinimizeEffect.GenieMinimize(w => this._dockIconRect(w));
+        this._minimizeFx.attach();
 
         this._monitorChangedId = Main.layoutManager.connect(
             'monitors-changed',
@@ -1022,6 +1025,11 @@ class AdaptiveShellV16 {
             this._overviewHiddenId = 0;
         }
 
+        if (this._minimizeFx) {
+            this._minimizeFx.detach();
+            this._minimizeFx = null;
+        }
+
         this._removeDockDnd();
 
         if (this._windowCreatedId) {
@@ -1298,6 +1306,26 @@ class AdaptiveShellV16 {
             logError(e, '[Adaptive Shell] installing the USB panel');
             this._usbPanel = null;
         }
+    }
+
+    // Where a window minimises to: its app's icon on the dock of the screen it
+    // is on, or that dock's middle if the app has no icon there.
+    _dockIconRect(window) {
+        const docks = this._docks || [];
+        const dock = docks.find(d => d.index === window.get_monitor()) || docks[0];
+        if (!dock || !dock.rail)
+            return null;
+
+        const app = Shell.WindowTracker.get_default().get_window_app(window);
+        const button = app && dock.appsBox.get_children().find(
+            c => c._adaptiveDockApp && c._adaptiveDockApp.get_id() === app.get_id());
+        const target = button || dock.rail;
+
+        const [x, y] = target.get_transformed_position();
+        const [width, height] = target.get_transformed_size();
+        if (button)
+            return { x, y, width, height };
+        return { x: x + width / 2 - 24, y, width: 48, height };
     }
 
     _installRail() {
