@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # Rotate the Adaptive desktop and lock-screen wallpaper.
 #
-# Cycles through the astrophotography set in design/backgrounds/astro (kept in
-# the repo), one image per run, remembering its place in a state file. The
-# systemd user timer adaptive-wallpaper.timer runs it hourly; run it by hand
-# to advance now, or with --set <file> to pin one image.
+# Cycles through every image in design/backgrounds/astro, one per run,
+# remembering its place in a state file. The systemd user timer
+# adaptive-wallpaper.timer runs it hourly; run it by hand to advance now, or
+# with --set <file> to pin one image.
 #
-# Extra images (F1, films) live in ~/Pictures/adaptive-wallpapers, outside the
-# repo because they are not public domain. Everything is mixed in a fixed
-# pseudo-random order so the themes alternate rather than run in blocks.
+# The folder holds the public-domain space set (tracked in git) and the F1 and
+# film images (f1-*, bvs-*; git-ignored, as they are not public domain).
+# Everything is mixed in a fixed pseudo-random order so the themes alternate
+# rather than run in blocks.
 #
 # Both the desktop and the lock screen are set, under the Adaptive dconf
 # profile only, so the normal Ubuntu session is untouched.
 set -Eeuo pipefail
 
 REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
-DIRS=("$REPO/design/backgrounds/astro" "${ADAPTIVE_EXTRA_WALLPAPERS:-$HOME/Pictures/adaptive-wallpapers}")
+DIRS=("$REPO/design/backgrounds/astro")
 STATE_DIR="$HOME/.local/state/adaptive-desktop"
 INDEX_FILE="$STATE_DIR/wallpaper-index"
 mkdir -p "$STATE_DIR"
