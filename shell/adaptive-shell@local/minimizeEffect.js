@@ -7,15 +7,10 @@
 // replaces it: the window texture is bent by a Clutter.DeformEffect so its
 // bottom narrows into the icon and the body follows, tip first.
 
-const { Clutter, GObject, Meta } = imports.gi;
+const { Clutter, GObject, Graphene, Meta } = imports.gi;
 const Main = imports.ui.main;
 
-const DURATION_MS = 480;
-// How much later the top of the window sets off than its bottom (0 = the
-// whole window moves as one, larger = a longer, thinner neck).
-const STAGGER = 0.7;
-// How sharply the neck flares out to the full window width.
-const FLARE = 2.2;
+const DURATION_MS = 520;
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const smooth = v => {
@@ -23,6 +18,10 @@ const smooth = v => {
     return t * t * (3 - 2 * t);
 };
 
+// The window slides down its own length into the icon, so its rows keep their
+// spacing and the text stays legible. Only its width is bent: the sides run in
+// an S-curve from the window's full width, far from the icon, to the icon's
+// width at the dock. Rows that reach the icon pile up there.
 const GenieEffect = GObject.registerClass(
 class AdaptiveGenieEffect extends Clutter.DeformEffect {
     _init(origin, size, icon) {
@@ -32,15 +31,31 @@ class AdaptiveGenieEffect extends Clutter.DeformEffect {
         this._w = size.width;
         this._h = size.height;
         this._ix = icon.x + icon.width / 2;
-        this._iy = icon.y + icon.height / 2;
-        this._iw = Math.max(8, Math.min(icon.width, this._w));
+        this._iy = Math.max(icon.y + icon.height / 2, this._ay + this._h);
+        this._iw = clamp(icon.width, 8, this._w);
+        // From the window's top edge to the icon: how far the whole window
+        // has to travel, and the length of the neck.
+        this._reach = Math.max(this._iy - this._ay, 1);
         this._t = 0;
-        this.set_n_tiles(6, 48);
+        this.set_n_tiles(4, 64);
     }
 
     setProgress(t) {
         this._t = clamp(t, 0, 1);
         this.invalidate();
+    }
+
+    // The deformed window strays far outside its own box; without this the
+    // parts outside it are clipped and never repainted.
+    vfunc_modify_paint_volume(volume) {
+        const half = this._iw / 2;
+        const minX = Math.min(0, this._ix - half - this._ax);
+        const maxX = Math.max(this._w, this._ix + half - this._ax);
+        const maxY = Math.max(this._h, this._iy - this._ay + 2);
+        volume.set_origin(new Graphene.Point3D({ x: minX, y: 0, z: 0 }));
+        volume.set_width(maxX - minX);
+        volume.set_height(maxY);
+        return true;
     }
 
     vfunc_deform_vertex(width, height, vertex) {
@@ -51,33 +66,23 @@ class AdaptiveGenieEffect extends Clutter.DeformEffect {
         const u = vertex.x / width;
         const v = vertex.y / height;
 
-        const x0 = this._ax;
+        const travel = this._reach * smooth((t - 0.08) / 0.92);
+        const y = Math.min(this._ay + v * this._h + travel, this._iy);
+
+        // 0 at the icon, 1 at the far end of the neck.
+        const x = clamp((this._iy - y) / this._reach, 0, 1);
+        const curve = smooth(x);
+        // The bend eases in over the first part of the animation so the
+        // first frame is the untouched window.
+        const bend = smooth(t / 0.3);
+
         const cx = this._ax + this._w / 2;
-
-        const rowY = row => {
-            const y = this._ay + row * this._h;
-            const s = smooth(clamp(t * (1 + STAGGER) - (1 - row) * STAGGER, 0, 1));
-            return y + (this._iy - y) * s;
-        };
-
-        const yTop = rowY(0);
-        const y1 = rowY(v);
-
         const g = this._iw / this._w;
-        const pinch = smooth(t / 0.55);
-        const slide = smooth((t - 0.45) / 0.55);
+        const width_ = this._w * (1 - bend * (1 - g) * (1 - curve));
+        const centre = cx + (this._ix - cx) * bend * (1 - curve);
 
-        // 0 at the icon, 1 at the top of the window.
-        const f = clamp((this._iy - y1) / Math.max(this._iy - yTop, 1), 0, 1);
-        const flare = 1 - Math.pow(1 - f, FLARE);
-
-        const widthTop = this._w * (1 - (1 - g) * slide);
-        const rowWidth = widthTop * (1 - pinch * (1 - g) * (1 - flare));
-        const centreTop = cx + (this._ix - cx) * slide;
-        const rowCentre = centreTop + (this._ix - centreTop) * pinch * (1 - flare);
-
-        vertex.x = rowCentre - x0 + (u - 0.5) * rowWidth;
-        vertex.y = y1 - this._ay;
+        vertex.x = centre - this._ax + (u - 0.5) * width_;
+        vertex.y = y - this._ay;
     }
 });
 
