@@ -413,7 +413,7 @@
  *
  * OLED treatment: once the screen blanks the panel is true black so unlit
  * pixels stay unlit, and only the clock, date and activity line carry white.
- * The password screen itself shows the blurred wallpaper. Presentation only:
+ * The password screen itself shows the wallpaper unblurred. Presentation only:
  * authentication and the unlock path remain GNOME's own.
  */
 
@@ -422,8 +422,8 @@
     background-image: none;
 }
 
-/* The password screen shows the desktop wallpaper, blurred and dimmed by
-   GNOME. Black remains only behind it and once the screen blanks. */
+/* The password screen shows the desktop wallpaper, left sharp (the extension
+   removes the blur). Black remains only behind it and once the screen blanks. */
 .screen-shield-background,
 .unlock-dialog,
 #lockDialogGroup .screen-shield-background {
@@ -2525,6 +2525,16 @@
 
 .adaptive-network-show {
     margin: 2px 0;
+}
+
+.adaptive-network-ssh {
+    padding: 2px 12px 8px 44px;
+    spacing: 6px;
+}
+
+.adaptive-network-ssh-error {
+    color: #FF453A;
+    font-size: 11px;
 }
 
 .adaptive-network-note {

@@ -471,6 +471,23 @@ class AdaptiveShellV16 {
         } catch (e) {
         }
 
+        // GNOME blurs and dims the wallpaper behind the password prompt. Show
+        // it as it is instead: the effect stays attached but does nothing.
+        // GNOME re-runs _updateBackgroundEffects on scale and monitor changes,
+        // so it is replaced rather than applied once.
+        try {
+            dialog._updateBackgroundEffects = () => {
+                for (const widget of dialog._backgroundGroup) {
+                    const effect = widget.get_effect('blur');
+                    if (effect)
+                        effect.set({ brightness: 1.0, sigma: 0 });
+                }
+            };
+            dialog._updateBackgroundEffects();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] lock wallpaper');
+        }
+
         const activity = new St.Label({
             style_class: 'adaptive-lock-activity',
             x_align: Clutter.ActorAlign.CENTER,

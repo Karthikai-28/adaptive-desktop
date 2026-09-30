@@ -21,6 +21,7 @@ const Me = imports.misc.extensionUtils.getCurrentExtension();
 const CC = Me.imports.controlCenter;
 
 const HELPER = Me.dir.get_child('tools').get_child('network_info.py').get_path();
+const SSH_HELPER = Me.dir.get_child('tools').get_child('ssh_connect.py').get_path();
 const RESCAN_AFTER_S = 60;
 const LIST_MAX_HEIGHT = 640;
 const COPIED_MS = 1100;
@@ -59,6 +60,8 @@ var NetworkPanel = class NetworkPanel {
         this._scanning = false;
         this._publicIp = null;
         this._publicBusy = false;
+        // The device being logged in to: { ip, user, password, busy, form, error }.
+        this._ssh = null;
     }
 
     attach() {
@@ -185,6 +188,106 @@ var NetworkPanel = class NetworkPanel {
         });
     }
 
+    // Logs in to a device and, when that works, opens a terminal on it. The
+    // helper remembers the password once it has been proved right, so the
+    // second time this is one click; errors are shown under the device.
+    _sshConnect(device, typed = null) {
+        const prior = this._ssh && this._ssh.ip === device.ip ? this._ssh : {};
+        this._ssh = { ip: device.ip, user: prior.user || '', password: '', busy: true, form: false, error: '' };
+        this._render();
+        const input = JSON.stringify(typed || {});
+        let proc;
+        try {
+            proc = Gio.Subprocess.new(['/usr/bin/python3', SSH_HELPER, 'connect', device.ip],
+                Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE |
+                Gio.SubprocessFlags.STDERR_SILENCE);
+        } catch (e) {
+            logError(e, '[Adaptive Network] ssh');
+            this._ssh = { ip: device.ip, user: '', password: '', busy: false, form: false, error: 'Could not start ssh helper' };
+            this._render();
+            return;
+        }
+        proc.communicate_utf8_async(input, null, (p, result) => {
+            if (!this._button)
+                return;
+            let reply = { ok: false, error: 'SSH helper failed' };
+            try {
+                const [, stdout] = p.communicate_utf8_finish(result);
+                reply = JSON.parse(stdout);
+            } catch (e) {
+                logError(e, '[Adaptive Network] ssh');
+            }
+            if (reply.ok) {
+                this._ssh = null;
+                this._button.menu.close();
+                return;
+            }
+            this._ssh = {
+                ip: device.ip,
+                user: reply.user || '',
+                password: '',
+                busy: false,
+                form: !!reply.need_password,
+                error: reply.error || 'SSH failed',
+            };
+            this._render();
+        });
+    }
+
+    _sshForm(device) {
+        const ssh = this._ssh;
+        const box = new St.BoxLayout({ style_class: 'adaptive-network-ssh', vertical: true, x_expand: true });
+        if (ssh.error) {
+            box.add_child(new St.Label({
+                text: ssh.error,
+                style_class: 'adaptive-network-ssh-error',
+            }));
+        }
+        if (!ssh.form || ssh.busy)
+            return box;
+
+        const field = (hint, password, key) => {
+            const entry = new St.Entry({
+                style_class: 'adaptive-cc-entry',
+                hint_text: hint,
+                text: ssh[key],
+                can_focus: true,
+                x_expand: true,
+            });
+            if (password) {
+                entry.clutter_text.set_password_char('●');
+                entry.input_purpose = Clutter.InputContentPurpose.PASSWORD;
+            }
+            entry.clutter_text.connect('text-changed', () => {
+                ssh[key] = entry.get_text();
+            });
+            box.add_child(entry);
+            return entry;
+        };
+        const user = field('Username', false, 'user');
+        const pass = field('Password (remembered after it works)', true, 'password');
+        const go = () => {
+            if (!ssh.user || !ssh.password)
+                return;
+            this._sshConnect(device, { user: ssh.user, password: ssh.password });
+        };
+        user.clutter_text.connect('activate', () => pass.grab_key_focus());
+        pass.clutter_text.connect('activate', go);
+        const connect = new St.Button({
+            style_class: 'adaptive-cc-pill-button',
+            label: 'Connect',
+            can_focus: true,
+            x_align: Clutter.ActorAlign.END,
+        });
+        connect.connect('clicked', go);
+        box.add_child(connect);
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            (ssh.user ? pass : user).grab_key_focus();
+            return GLib.SOURCE_REMOVE;
+        });
+        return box;
+    }
+
     _loadPublic() {
         if (this._publicBusy)
             return;
@@ -233,13 +336,16 @@ var NetworkPanel = class NetworkPanel {
                 subtitle: 'Asking every address on this network who is there',
             }));
         }
-        for (const device of devices)
+        for (const device of devices) {
             this._list.add_child(this._deviceRow(device));
+            if (this._ssh && this._ssh.ip === device.ip)
+                this._list.add_child(this._sshForm(device));
+        }
         if (this._scan) {
             const age = GLib.get_monotonic_time() / 1e6 - this._scannedAt;
             this._list.add_child(new St.Label({
                 text: `${this._scanning ? 'Scanning…' : `Scanned ${ago(age)}`} · ` +
-                    `${this._scan.network || ''} · click a device to copy its address`,
+                    `${this._scan.network || ''} · SSH to open a terminal, click a device to copy its address`,
                 style_class: 'adaptive-network-note',
             }));
         }
@@ -400,6 +506,14 @@ var NetworkPanel = class NetworkPanel {
             title,
             subtitle: details.join(' · '),
             active: device.self,
+            action: device.self ? null : {
+                label: this._ssh && this._ssh.ip === device.ip && this._ssh.busy ? 'Connecting…' : 'SSH',
+                quiet: true,
+                onClick: () => {
+                    if (!(this._ssh && this._ssh.busy))
+                        this._sshConnect(device);
+                },
+            },
             onActivate: () => {
                 copy(device.ip);
                 const label = row.get_child().get_children()[1].get_children()[0];

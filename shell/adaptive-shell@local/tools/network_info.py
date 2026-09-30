@@ -223,6 +223,13 @@ def nudge(hosts):
     sock.close()
 
 
+def knock(address):
+    try:
+        socket.create_connection((address, 22), timeout=0.6).close()
+    except OSError:
+        pass
+
+
 def name_for(address):
     out = run(["avahi-resolve-address", address], timeout=2)
     parts = out.split()
@@ -280,8 +287,17 @@ def scan():
     started = time.monotonic()
     nudge(hosts)
     time.sleep(1.2)
-    nudge([h for h in hosts if str(h) not in neighbours(dev)])
-    time.sleep(1.3)
+    # A device that is busy or dozing can miss the first ARP request, and a
+    # burst of 250 can overflow the kernel's queue. Ask the silent ones again,
+    # and finally knock on SSH: a TCP connect forces ARP too, and it is the
+    # port people scan for here.
+    for _ in range(2):
+        nudge([h for h in hosts if str(h) not in neighbours(dev)])
+        time.sleep(1.0)
+    silent = [str(h) for h in hosts if str(h) not in neighbours(dev)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+        list(pool.map(knock, silent))
+    time.sleep(0.3)
 
     table = neighbours(dev)
     table[own] = (mac_of(dev) or "").lower()
