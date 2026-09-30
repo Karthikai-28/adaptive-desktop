@@ -6,12 +6,16 @@
 # systemd user timer adaptive-wallpaper.timer runs it hourly; run it by hand
 # to advance now, or with --set <file> to pin one image.
 #
+# Extra images (F1, films) live in ~/Pictures/adaptive-wallpapers, outside the
+# repo because they are not public domain. Everything is mixed in a fixed
+# pseudo-random order so the themes alternate rather than run in blocks.
+#
 # Both the desktop and the lock screen are set, under the Adaptive dconf
 # profile only, so the normal Ubuntu session is untouched.
 set -Eeuo pipefail
 
 REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
-DIR="$REPO/design/backgrounds/astro"
+DIRS=("$REPO/design/backgrounds/astro" "${ADAPTIVE_EXTRA_WALLPAPERS:-$HOME/Pictures/adaptive-wallpapers}")
 STATE_DIR="$HOME/.local/state/adaptive-desktop"
 INDEX_FILE="$STATE_DIR/wallpaper-index"
 mkdir -p "$STATE_DIR"
@@ -21,10 +25,15 @@ export DCONF_PROFILE=adaptive
 [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] || \
     export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 
-mapfile -t IMAGES < <(find "$DIR" -maxdepth 1 -type f \
-    \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) | sort)
+mapfile -t IMAGES < <(
+    for d in "${DIRS[@]}"; do
+        [ -d "$d" ] && find "$d" -maxdepth 1 -type f \
+            \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \)
+    done | while IFS= read -r f; do
+        printf '%s %s\n' "$(basename "$f" | md5sum | cut -c1-8)" "$f"
+    done | sort | cut -d' ' -f2-)
 if [ "${#IMAGES[@]}" -eq 0 ]; then
-    echo "No wallpapers in $DIR" >&2
+    echo "No wallpapers in ${DIRS[*]}" >&2
     exit 1
 fi
 

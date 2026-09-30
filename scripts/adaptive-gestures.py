@@ -41,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -103,6 +104,7 @@ ACTIONS = {
     "back": "Back (browser, Files)",
     "forward": "Forward (browser, Files)",
     "screenshot": "Screenshot",
+    "next-wallpaper": "Next wallpaper",
     "custom": "Custom shortcut",
 }
 
@@ -113,7 +115,8 @@ DEFAULTS = {
     "4": {"preset": "switch-desktops", "custom": {}, "shortcut": {}, "tap": "notifications"},
     # Press and release Ctrl twice, on its own, to minimise every window
     # (again, on an empty desktop, to bring them back).
-    "keyboard": {"double_ctrl": "show-desktop"},
+    # Press and release Alt twice, on its own, to change the wallpaper.
+    "keyboard": {"double_ctrl": "show-desktop", "double_alt": "next-wallpaper"},
 }
 
 # Distance a swipe must travel, in libinput's unaccelerated units.
@@ -122,8 +125,8 @@ SENSITIVITY = {"low": 180.0, "medium": 120.0, "high": 70.0}
 # A four-finger touch that lifts within this long, without swiping, is a tap.
 TAP_SECONDS = 0.35
 
-# Double Ctrl: a press and release of Ctrl alone counts as a tap when short;
-# a second tap soon after the first is the double press.
+# Double Ctrl / Alt: a press and release of the key alone counts as a tap when
+# short; a second tap soon after the first is the double press.
 CTRL_TAP_SECONDS = 0.30
 CTRL_GAP_SECONDS = 0.40
 
@@ -133,6 +136,9 @@ CTRL_GAP_SECONDS = 0.40
 KEY = re.compile(r"KEYBOARD_KEY\s+\+?([\d.]+)s\s+(\S+) \((-?\d+)\) (pressed|released)")
 POINTER_BUTTON = re.compile(r"POINTER_(BUTTON|SCROLL|AXIS)")
 CTRL_KEYS = {"KEY_LEFTCTRL", "KEY_RIGHTCTRL"}
+ALT_KEYS = {"KEY_LEFTALT", "KEY_RIGHTALT"}
+
+WALLPAPER_SCRIPT = Path(__file__).resolve().parent / "adaptive-wallpaper.sh"
 
 # libinput prints:  event10  GESTURE_SWIPE_UPDATE  +1.234s   3  -12.34/  0.56 ...
 EVENT = re.compile(
@@ -311,6 +317,7 @@ HANDLERS = {
     "back": lambda: keys("alt+Left"),
     "forward": lambda: keys("alt+Right"),
     "screenshot": lambda: keys("Print"),
+    "next-wallpaper": lambda: subprocess.run([str(WALLPAPER_SCRIPT)], capture_output=True, timeout=20),
 }
 
 
@@ -348,15 +355,16 @@ def perform(action, group, gesture, dry_run=False):
 # ------------------------------------------------------------------
 
 
-class DoubleCtrl:
-    """Recognises Ctrl pressed and released twice on its own.
+class DoubleTap:
+    """Recognises a modifier (Ctrl or Alt) pressed and released twice on its own.
 
-    Anything else between the presses - another key (Ctrl+C), a click
-    (Ctrl+click) or a scroll (Ctrl+scroll zoom) - means Ctrl was used as a
-    modifier, and the count starts over.
+    Anything else between the presses - another key (Ctrl+C, Alt+Tab), a click
+    or a scroll - means the key was used as a modifier, and the count starts
+    over.
     """
 
-    def __init__(self):
+    def __init__(self, names):
+        self.names = names
         self.down_at = None
         self.clean = False
         self.last_tap = None
@@ -372,7 +380,7 @@ class DoubleCtrl:
             return False
 
         stamp, name, pressed = float(key.group(1)), key.group(2), key.group(4) == "pressed"
-        if name not in CTRL_KEYS:
+        if name not in self.names:
             self.other_down += 1 if pressed else -1
             self.other_down = max(0, self.other_down)
             if pressed:
@@ -403,15 +411,20 @@ def run(stream, settings, dry_run=False):
     swiping = False
     hold_started = None
     hold_fingers = 0
-    ctrl = DoubleCtrl()
+    taps = (
+        (DoubleTap(CTRL_KEYS), "double_ctrl", "double Ctrl"),
+        (DoubleTap(ALT_KEYS), "double_alt", "double Alt"),
+    )
 
     for line in stream:
         if "KEYBOARD_KEY" in line or "POINTER_" in line:
-            if ctrl.feed(line):
-                data = settings.current()
-                if data.get("enabled", True):
-                    group = data.get("keyboard") or {}
-                    perform(group.get("double_ctrl", "none"), group, "double Ctrl", dry_run)
+            for detector, setting, label in taps:
+                if detector.feed(line):
+                    data = settings.current()
+                    if data.get("enabled", True):
+                        group = data.get("keyboard") or {}
+                        threading.Thread(target=perform, daemon=True,
+                                         args=(group.get(setting, "none"), group, label, dry_run)).start()
             continue
 
         match = EVENT.search(line)
@@ -549,7 +562,9 @@ def main():
         return 0
 
     try:
-        proc = subprocess.Popen(["libinput", "debug-events", "--show-keycodes"],
+        # libinput block-buffers stdout when it is a pipe, which holds every key
+        # event back until ~4 KB have piled up; stdbuf makes it line-buffered.
+        proc = subprocess.Popen(["stdbuf", "-oL", "libinput", "debug-events", "--show-keycodes"],
                                 stdout=subprocess.PIPE, text=True, bufsize=1)
     except FileNotFoundError:
         log("libinput not installed - run: sudo apt install -y libinput-tools")
@@ -564,7 +579,7 @@ def main():
     import signal
     signal.signal(signal.SIGTERM, lambda *_args: sys.exit(0))
 
-    log("gesture daemon started (3 and 4 fingers, double Ctrl)")
+    log("gesture daemon started (3 and 4 fingers, double Ctrl, double Alt)")
     try:
         run(proc.stdout, settings, args.dry_run)
     except KeyboardInterrupt:

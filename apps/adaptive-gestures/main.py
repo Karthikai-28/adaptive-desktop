@@ -371,7 +371,18 @@ class GestureWindow(Gtk.ApplicationWindow):
                            self._set_double_ctrl),
             hint="Ctrl on its own, twice quickly. Show desktop minimises every window; "
                  "do it again to bring them back."))
+        alt = (self.settings.get("keyboard") or {}).get("double_alt", "next-wallpaper")
+        card.append(self._row(
+            "Press Alt twice",
+            self._dropdown(ACTION_LABELS, ACTION_IDS.index(alt) if alt in ACTION_IDS else 0,
+                           self._set_double_alt),
+            hint="Alt on its own, twice quickly. Next wallpaper moves on to the next "
+                 "astrophotography image."))
         return card
+
+    def _set_double_alt(self, index):
+        self.settings.setdefault("keyboard", {})["double_alt"] = ACTION_IDS[index]
+        self._save()
 
     def _set_double_ctrl(self, index):
         self.settings.setdefault("keyboard", {})["double_ctrl"] = ACTION_IDS[index]

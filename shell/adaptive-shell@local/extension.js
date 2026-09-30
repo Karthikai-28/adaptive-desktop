@@ -104,6 +104,8 @@ class AdaptiveShellV16 {
         this._dockScrollTime = 0;
         this._dockEntries = [];
         this._lockedOnly = false;
+        this._lockedOnlyModeId = 0;
+        this._lockedOnlyPollId = 0;
         this._lockClock = null;
         this._lockActivity = null;
         this._lockAttachId = 0;
@@ -114,7 +116,6 @@ class AdaptiveShellV16 {
         this._aodBox = null;
         this._aodTime = null;
         this._aodDate = null;
-        this._lockBackgroundGroup = null;
 
         this._commandLauncher = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -200,9 +201,61 @@ class AdaptiveShellV16 {
             this._lockedOnly = true;
             log('[Adaptive Shell] locked session: lock screen only');
             this._lockScreenStart();
+
+            // GNOME can re-run enable() while the session is locked, and it
+            // does not run it again on unlock. Without this the desktop
+            // (dock, panels, shade) is never built after unlocking.
+            this._lockedOnlyModeId = Main.sessionMode.connect(
+                'updated',
+                () => this._onLockedOnlyModeChanged()
+            );
+
+            // The 'updated' signal has not been seen on unlock in every path
+            // (logind unlock, for one), so a slow poll backs it up.
+            this._lockedOnlyPollId = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT,
+                1,
+                () => {
+                    this._onLockedOnlyModeChanged();
+                    return this._lockedOnly ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
+                }
+            );
             return;
         }
 
+        this._enableDesktop();
+    }
+
+    _onLockedOnlyModeChanged() {
+        if (!this._lockedOnly)
+            return;
+
+        if (Main.sessionMode.currentMode === 'unlock-dialog' ||
+            Main.sessionMode.isLocked)
+            return;
+
+        this._lockedOnly = false;
+        this._lockedOnlyCleanup();
+        this._lockScreenStop();
+        log('[Adaptive Shell] session unlocked: building desktop');
+        this._enableDesktop();
+    }
+
+    _lockedOnlyCleanup() {
+        if (this._lockedOnlyModeId) {
+            Main.sessionMode.disconnect(this._lockedOnlyModeId);
+            this._lockedOnlyModeId = 0;
+        }
+
+        // Returning SOURCE_REMOVE from the callback also removes it; removing
+        // here covers the disable() path.
+        if (this._lockedOnlyPollId) {
+            GLib.Source.remove(this._lockedOnlyPollId);
+            this._lockedOnlyPollId = 0;
+        }
+    }
+
+    _enableDesktop() {
         this._lockedOnly = false;
 
         this._hideLegacyPanelItems();
@@ -404,19 +457,6 @@ class AdaptiveShellV16 {
 
         if (clock._adaptiveLock)
             return true;
-
-        // GNOME 40+ paints the desktop wallpaper, blurred, behind the lock
-        // screen - which is why org.gnome.desktop.screensaver's picture-uri
-        // had no effect on it; that key is legacy. Hiding the background group
-        // leaves the shield's own black showing, which is what the OLED
-        // treatment needs. Restored when the session unlocks.
-        try {
-            if (dialog._backgroundGroup) {
-                dialog._backgroundGroup.hide();
-                this._lockBackgroundGroup = dialog._backgroundGroup;
-            }
-        } catch (e) {
-        }
 
         clock._adaptiveLock = true;
 
@@ -654,7 +694,6 @@ class AdaptiveShellV16 {
 
     _aodRemove() {
         this._lockRestoreDialogParts();
-        this._lockRestoreBackground();
 
         try {
             const dialog = Main.screenShield ? Main.screenShield._dialog : null;
@@ -758,21 +797,7 @@ class AdaptiveShellV16 {
         }
     }
 
-    _lockRestoreBackground() {
-        if (!this._lockBackgroundGroup)
-            return;
-
-        try {
-            this._lockBackgroundGroup.show();
-        } catch (e) {
-        }
-
-        this._lockBackgroundGroup = null;
-    }
-
     _lockDetachDialog() {
-        this._lockRestoreBackground();
-
         if (this._lockClock && this._lockClock._adaptiveUpdateClock) {
             try {
                 this._lockClock._updateClock =
@@ -935,6 +960,7 @@ class AdaptiveShellV16 {
         // that were never created.
         if (this._lockedOnly) {
             this._lockedOnly = false;
+            this._lockedOnlyCleanup();
             this._lockScreenStop();
             return;
         }

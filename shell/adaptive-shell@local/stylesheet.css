@@ -411,16 +411,23 @@
  * session-modes in metadata.json - GNOME otherwise disables user extensions
  * while locked and the lock screen falls back to stock Yaru.
  *
- * OLED treatment: the panel is driven to true black so unlit pixels stay
- * unlit, and only the clock, date and activity line carry white. Presentation
- * only - authentication and the unlock path remain GNOME's own.
+ * OLED treatment: once the screen blanks the panel is true black so unlit
+ * pixels stay unlit, and only the clock, date and activity line carry white.
+ * The password screen itself shows the blurred wallpaper. Presentation only:
+ * authentication and the unlock path remain GNOME's own.
  */
 
-#lockDialogGroup,
+#lockDialogGroup {
+    background-color: #000000;
+    background-image: none;
+}
+
+/* The password screen shows the desktop wallpaper, blurred and dimmed by
+   GNOME. Black remains only behind it and once the screen blanks. */
 .screen-shield-background,
 .unlock-dialog,
 #lockDialogGroup .screen-shield-background {
-    background-color: #000000;
+    background-color: transparent;
     background-image: none;
 }
 
