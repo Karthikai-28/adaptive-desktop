@@ -22,7 +22,7 @@ const Util = imports.misc.util;
 const ShellMountOperation = imports.ui.shellMountOperation;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
-const CC = Me.imports.controlCenter;
+const CC = Me.imports.ccUtil;
 
 const REFRESH_DEBOUNCE_MS = 300;
 

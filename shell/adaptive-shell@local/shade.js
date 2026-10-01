@@ -1166,9 +1166,10 @@ var Shade = class Shade {
 
         // A powered-down render engine clocks at zero. Say so, rather than
         // printing "0 MHz" and looking like a dead sensor.
-        const clock = Number.isFinite(gpu.freqMhz) && gpu.freqMhz > 0
-            ? mhz(gpu.freqMhz)
-            : 'Idle';
+        // A GPU that publishes no clock at all (AMD) gets no clock line.
+        let clock = '';
+        if (Number.isFinite(gpu.freqMhz))
+            clock = gpu.freqMhz > 0 ? mhz(gpu.freqMhz) : 'Idle';
         const max = Number.isFinite(gpu.maxFreqMhz)
             ? `\nmax ${mhz(gpu.maxFreqMhz)}`
             : '';

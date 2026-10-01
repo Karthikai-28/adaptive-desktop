@@ -45,12 +45,25 @@ def _spawn(argv):
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def desktop_app(desktop_id):
+    """The installed app with that desktop id, or None.
+
+    PyGObject raises TypeError ("constructor returned NULL") for an app that
+    is not installed instead of returning None, and an uncaught one here took
+    the whole Share and Tags menu down with it wherever Slack was missing.
+    """
+    try:
+        return Gio.DesktopAppInfo.new(desktop_id)
+    except TypeError:
+        return None
+
+
 def available():
     """Which targets can work on this machine, in menu order."""
     targets = []
     if os.path.exists(LOCALSEND):
         targets.append("localsend")
-    if Gio.DesktopAppInfo.new(SLACK_DESKTOP) is not None:
+    if desktop_app(SLACK_DESKTOP) is not None:
         targets.append("slack")
     if shutil.which("bluetooth-sendto"):
         targets.append("bluetooth")
@@ -223,7 +236,7 @@ def slack(paths, notify):
             copy_image(files[0])
         else:
             copy_files(files)
-        info = Gio.DesktopAppInfo.new(SLACK_DESKTOP)
+        info = desktop_app(SLACK_DESKTOP)
         if info is not None:
             info.launch([], None)
         notify("Copied for Slack",

@@ -8,7 +8,11 @@
 
 /* exported parseGitStatus, formatGitStatus, watchdogVerdict, WATCHDOG,
    batteryHealth, verificationSummary, classifyApp, clipboardPush,
-   isSecretClipboard, CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS */
+   clipboardPushImage, clipboardPin, clipboardClear, clipboardTrim, pngSize,
+   formatBytes, isSecretClipboard, CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS,
+   CLIPBOARD_MAX_PINS, CLIPBOARD_MAX_IMAGES, CLIPBOARD_MAX_IMAGE_BYTES,
+   DROPDOWN_ROLE, dropdownTerminalKind, dropdownArgv, dropdownRect,
+   isDropdownWindow */
 
 // ----------------------------------------------------------------- git
 
@@ -166,6 +170,10 @@ function classifyApp(appId, categories) {
 
 var CLIPBOARD_MAX_ITEMS = 50;
 var CLIPBOARD_MAX_CHARS = 20000;
+var CLIPBOARD_MAX_PINS = 20;
+// Images are held as the bytes that were copied, so they are few and bounded.
+var CLIPBOARD_MAX_IMAGES = 5;
+var CLIPBOARD_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 // Password managers mark what they copy so clipboard tools leave it alone.
 const SECRET_MIMES = ['x-kde-passwordManagerHint', 'application/x-nspasteboard-concealed-type'];
@@ -174,10 +182,142 @@ function isSecretClipboard(mimetypes) {
     return (mimetypes || []).some(m => SECRET_MIMES.includes(m));
 }
 
-// Newest first, no duplicates, bounded. Returns a new array.
-function clipboardPush(items, text, at) {
+// Drop the oldest unpinned entries until the list fits. A pinned entry is
+// never dropped to make room.
+function clipboardTrim(items) {
+    const kept = items.slice();
+    for (let i = kept.length - 1; i >= 0 && kept.length > CLIPBOARD_MAX_ITEMS; i--) {
+        if (!kept[i].pinned)
+            kept.splice(i, 1);
+    }
+    let images = kept.filter(item => item.kind === 'image').length;
+    for (let i = kept.length - 1; i >= 0 && images > CLIPBOARD_MAX_IMAGES; i--) {
+        if (kept[i].kind === 'image' && !kept[i].pinned) {
+            kept.splice(i, 1);
+            images--;
+        }
+    }
+    return kept;
+}
+
+// Newest first, no duplicates, bounded. Returns a new array. Copying a text
+// that is already there moves it to the top and keeps its pin.
+function clipboardPush(items, text, at, id = 0) {
     if (typeof text !== 'string' || !text.trim() || text.length > CLIPBOARD_MAX_CHARS)
         return items.slice();
-    const rest = items.filter(item => item.text !== text);
-    return [{ text, at }, ...rest].slice(0, CLIPBOARD_MAX_ITEMS);
+    const earlier = items.find(item => item.kind !== 'image' && item.text === text);
+    const rest = items.filter(item => item !== earlier);
+    const entry = { text, at };
+    if (id)
+        entry.id = id;
+    if (earlier && earlier.pinned)
+        entry.pinned = true;
+    return clipboardTrim([entry, ...rest]);
+}
+
+// An image entry: { kind: 'image', id, at, mime, size, width, height, hash }.
+// The bytes themselves stay with the caller, keyed by id. A copy of the same
+// image again (same hash and size) moves it to the top.
+function clipboardPushImage(items, image) {
+    if (!image || !image.size || image.size > CLIPBOARD_MAX_IMAGE_BYTES)
+        return items.slice();
+    const earlier = items.find(item => item.kind === 'image' &&
+        item.hash === image.hash && item.size === image.size);
+    const rest = items.filter(item => item !== earlier);
+    const entry = { ...image, kind: 'image', text: '' };
+    if (earlier && earlier.pinned)
+        entry.pinned = true;
+    return clipboardTrim([entry, ...rest]);
+}
+
+// Pin or unpin the entry with that id. Returns a new array, unchanged if the
+// id is unknown or the pins are full.
+function clipboardPin(items, id, pinned) {
+    const target = items.find(item => item.id === id);
+    if (!target || !!target.pinned === !!pinned)
+        return items.slice();
+    if (pinned && items.filter(item => item.pinned).length >= CLIPBOARD_MAX_PINS)
+        return items.slice();
+    return items.map(item => {
+        if (item !== target)
+            return item;
+        const copy = { ...item };
+        if (pinned)
+            copy.pinned = true;
+        else
+            delete copy.pinned;
+        return copy;
+    });
+}
+
+// "Clear history" forgets what was copied; what you pinned on purpose stays.
+function clipboardClear(items) {
+    return items.filter(item => item.pinned);
+}
+
+// Width and height from a PNG's header, or null if the bytes are not a PNG.
+// bytes: anything indexable holding the first 24 bytes of the file.
+function pngSize(bytes) {
+    const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    if (!bytes || bytes.length < 24 || signature.some((b, i) => bytes[i] !== b))
+        return null;
+    const u32 = at => ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0;
+    return { width: u32(16), height: u32(20) };
+}
+
+// "1.2 MB", "340 KB", "912 B"
+function formatBytes(size) {
+    if (size >= 1024 * 1024)
+        return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    if (size >= 1024)
+        return `${Math.round(size / 1024)} KB`;
+    return `${size} B`;
+}
+
+// ------------------------------------------------------ drop-down terminal
+
+var DROPDOWN_ROLE = 'adaptive-dropdown';
+const DROPDOWN_DEFAULT_HEIGHT = 0.45;
+
+// Which terminal to use: the one asked for if it is installed, otherwise
+// Terminator, otherwise GNOME Terminal. '' if there is none.
+function dropdownTerminalKind(wanted, isInstalled) {
+    const known = ['terminator', 'gnome-terminal'];
+    if (known.includes(wanted) && isInstalled(wanted))
+        return wanted;
+    return known.find(isInstalled) || '';
+}
+
+// The command that opens the terminal in folder, carrying our window role
+// (X11) so it can be found again after the shell restarts.
+function dropdownArgv(kind, folder) {
+    if (kind === 'terminator') {
+        return ['terminator', '--borderless', `--role=${DROPDOWN_ROLE}`,
+            `--working-directory=${folder}`];
+    }
+    return ['gnome-terminal', `--role=${DROPDOWN_ROLE}`, `--working-directory=${folder}`];
+}
+
+// Whether a window that has just appeared is the terminal we started. The
+// role says so on X11; on Wayland there is no role, and the class has to do.
+function isDropdownWindow(kind, wmClass, role) {
+    if (role === DROPDOWN_ROLE)
+        return true;
+    if (role)
+        return false;
+    const name = String(wmClass || '').toLowerCase();
+    return kind === 'terminator' ? name.includes('terminator') : name.includes('gnome-terminal');
+}
+
+// Across the top of the work area: full width, a fraction of its height.
+function dropdownRect(area, fraction) {
+    let share = Number(fraction);
+    if (!Number.isFinite(share) || share < 0.2 || share > 1)
+        share = DROPDOWN_DEFAULT_HEIGHT;
+    return {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: Math.max(120, Math.round(area.height * share)),
+    };
 }

@@ -1,0 +1,9 @@
+{
+  "description": "Writing project: drafts and references, notifications held",
+  "folders": ["drafts", "references"],
+  "files": {
+    "README.md": "# {name}\n"
+  },
+  "pinned": ["drafts"],
+  "focus": "on"
+}

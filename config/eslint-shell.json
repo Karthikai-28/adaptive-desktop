@@ -1,0 +1,10 @@
+{
+  "root": true,
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
+  "env": { "es2022": true },
+  "globals": { "imports": "readonly", "global": "readonly", "log": "readonly", "logError": "readonly",
+               "print": "readonly", "printerr": "readonly", "TextDecoder": "readonly", "TextEncoder": "readonly",
+               "ARGV": "readonly", "window": "readonly", "globalThis": "readonly", "console": "readonly" },
+  "rules": { "no-undef": "error", "no-unused-vars": ["warn", { "vars": "local", "args": "none", "varsIgnorePattern": "^(init|enable|disable)$" }],
+             "no-dupe-class-members": "error", "no-dupe-keys": "error", "no-redeclare": "error" }
+}

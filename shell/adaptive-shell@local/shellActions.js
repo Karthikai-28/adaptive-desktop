@@ -54,6 +54,15 @@ const XML = `
     <method name="ClipboardClear">
       <arg type="b" name="handled" direction="out"/>
     </method>
+    <method name="ClipboardCopyItem">
+      <arg type="u" name="id" direction="in"/>
+      <arg type="b" name="handled" direction="out"/>
+    </method>
+    <method name="ClipboardPin">
+      <arg type="u" name="id" direction="in"/>
+      <arg type="b" name="pinned" direction="in"/>
+      <arg type="b" name="handled" direction="out"/>
+    </method>
     <method name="ParkProject">
       <arg type="s" name="id" direction="in"/>
       <arg type="s" name="json" direction="out"/>
@@ -69,13 +78,14 @@ const XML = `
 </node>`;
 
 var ShellActions = class ShellActions {
-    // services: { clipboard, snapshots, screenText }, any of which may be null
+    // services: { clipboard, snapshots, screenText, dropdown }, any of which may be null
     // if it failed to start; its methods then answer as unavailable.
     constructor(services = {}) {
         this._export = null;
         this._clipboard = services.clipboard || null;
         this._snapshots = services.snapshots || null;
         this._screenText = services.screenText || null;
+        this._dropdown = services.dropdown || null;
     }
 
     attach() {
@@ -101,6 +111,7 @@ var ShellActions = class ShellActions {
             'workspace-right': () => this._workspace(Meta.MotionDirection.RIGHT, false),
             'window-to-workspace-left': () => this._workspace(Meta.MotionDirection.LEFT, true),
             'window-to-workspace-right': () => this._workspace(Meta.MotionDirection.RIGHT, true),
+            'dropdown-terminal': () => this._dropdown && this._dropdown.toggle(),
         }[action];
 
         if (!handler)
@@ -172,6 +183,14 @@ var ShellActions = class ShellActions {
             return false;
         this._clipboard.clear();
         return true;
+    }
+
+    ClipboardCopyItem(id) {
+        return this._clipboard ? this._clipboard.copyItem(id) : false;
+    }
+
+    ClipboardPin(id, pinned) {
+        return this._clipboard ? this._clipboard.pin(id, pinned) : false;
     }
 
     ParkProjectAsync([id], invocation) {

@@ -1,0 +1,45 @@
+name: Checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  # Syntax, method names, pure logic: no display, a few seconds.
+  quick:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install what the checks import
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi python3-cairo gir1.2-glib-2.0 ripgrep shellcheck git
+      - name: Checks that need no display
+        run: scripts/verify-all.sh --quick
+
+  # The palette and Annotate windows and the extension itself, run for real
+  # on a virtual display. Ubuntu 22.04 ships GNOME Shell 42, the version the
+  # extension targets.
+  sandboxes:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install GNOME Shell 42 and the GTK the apps use
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gnome-shell gnome-shell-extension-prefs gnome-terminal gedit \
+            python3-gi python3-gi-cairo python3-cairo gir1.2-gtk-4.0 gir1.2-gtk-3.0 \
+            xvfb dbus-x11 libglib2.0-bin ripgrep shellcheck git
+      - name: The scripts live in ~/adaptive-desktop
+        run: ln -s "$GITHUB_WORKSPACE" "$HOME/adaptive-desktop"
+      - name: All checks, including the sandboxes
+        run: scripts/verify-all.sh

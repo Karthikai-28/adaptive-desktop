@@ -1,0 +1,12 @@
+[Unit]
+Description=Adaptive: switch power profile when the charger is plugged in or pulled out
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/adaptive-desktop/scripts/adaptive-power-auto.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

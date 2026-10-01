@@ -1,0 +1,13 @@
+{
+  "uuid": "adaptive-probe@local",
+  "name": "Adaptive Nested Probe",
+  "description": "Test-only. Lets scripts/verify-shell-nested.sh look inside the sandboxed nested shell. Never install this in a real session: it refuses to start outside the sandbox.",
+  "shell-version": [
+    "42"
+  ],
+  "version": 1,
+  "session-modes": [
+    "user",
+    "unlock-dialog"
+  ]
+}

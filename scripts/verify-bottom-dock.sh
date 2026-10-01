@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
-EXT="$REPO/shell/adaptive-shell@local/extension.js"
+# The shell's one class lives in extension.js and the shell*.js files beside it.
+EXT=("$REPO/shell/adaptive-shell@local/extension.js" "$REPO/shell/adaptive-shell@local/"shell[A-Z]*.js)
 CSS="$REPO/shell/adaptive-shell@local/stylesheet.css"
 
-node --check "$EXT"
+for module in "${EXT[@]}"; do
+    node --check "$module"
+done
 python3 -m py_compile "$REPO/scripts/window-cli.py"
 python3 -m json.tool "$REPO/tokens/adaptive.tokens.json" >/dev/null
 
-grep -q 'const AppFavorites = imports.ui.appFavorites' "$EXT"
-grep -q 'Keep in Dock' "$EXT"
-grep -q 'Remove from Dock' "$EXT"
-grep -q '_magnifyDock' "$EXT"
+grep -q 'const AppFavorites = imports.ui.appFavorites' "${EXT[@]}"
+grep -q 'Keep in Dock' "${EXT[@]}"
+grep -q 'Remove from Dock' "${EXT[@]}"
+grep -q '_magnifyDock' "${EXT[@]}"
 grep -q 'adaptive-running-dot' "$CSS"
-grep -q 'monitor.y + monitor.height - height - 12' "$EXT"
+grep -q 'monitor.y + monitor.height - height - 12' "${EXT[@]}"
 
-if grep -q "'Command'.*=> this._openCommand" "$EXT"; then
+if grep -q "'Command'.*=> this._openCommand" "${EXT[@]}"; then
     echo "FAIL: permanent Command dock button still found" >&2
     exit 1
 fi

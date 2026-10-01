@@ -33,7 +33,8 @@ first.
 | File manager | Forked Nautilus in `.local/adaptive-nautilus/`, skinned |
 | Settings | `gnome-control-center` 41.7 (GTK3), skinned; Adaptive-only sections in `apps/adaptive-settings/` |
 | Project context | `services/project-context/` over D-Bus |
-| Command palette | Shell menu + `apps/adaptive-command/` |
+| Command palette | `apps/adaptive-command/` (`providers.py` answers, `modes.py` modes), the shell bridge `shellActions.js` |
+| Screenshot annotation | `apps/adaptive-annotate/` |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/` |
 
 ### Canonical paths
@@ -48,6 +49,18 @@ files routing  scripts/adaptive-files-dispatch.sh
 Only one Adaptive shell extension exists. The retired `adaptive-shell-v16@local`
 duplicate and the v1.x/v2.x one-off scripts were deleted; git history holds them
 if a rollback is ever needed.
+
+## Install
+
+```sh
+./install.sh --status     # what is installed and what is out of date
+./install.sh              # everything that needs no sudo
+./install.sh --session    # also the login session (sudo)
+./uninstall.sh --dry-run  # the other direction; your data is left alone
+```
+
+`install.sh` runs the per-part scripts in `scripts/` in order; each still works
+on its own. It never restarts your shell.
 
 ## Development workflow
 
@@ -85,11 +98,47 @@ recovery) installs into the app grid with:
 
 Day to day: Alt+Space opens the Command palette, which also calculates
 (`12*7`), converts (`5 km to mi`), finds emoji (`:rocket`), open windows and
-clipboard history (`clip`). The active project and its git status sit at the
-top left; its menu parks and resumes the project. Super+Alt+N takes a quick
-note. See Milestone 15 in `docs/BACKLOG.md`.
+clipboard history (`clip`, Ctrl+P pins an entry). A word in front asks for one
+thing:
+
+| Type | For |
+| --- | --- |
+| `snip`, `snip save <name>` | saved snippets |
+| `todo` | the project's quick-note inbox as tasks; Enter ticks one |
+| `git` | every project's branch and uncommitted or unpushed work |
+| `time` | time per project, today and this week |
+| `/text` or `grep text` | search inside the active project's files |
+| `branch` | switch the active project's git branch |
+| `timer 10m tea` | a notification after that long |
+| `keys` | every Adaptive keyboard shortcut (also Super+/) |
+| `kill <name>` | ask one of your processes to quit |
+| `ssh <host>` | hosts from `~/.ssh/config`, in a terminal |
+| `new <template> <folder>` | a project from a template |
+
+Executables in `~/.config/adaptive-desktop/commands/` show up as actions.
+
+The active project and its git status sit at the top left; its menu parks and
+resumes the project, running its startup commands when it comes back.
+Super+Alt+N takes a quick note, Super+Return drops a terminal from the top of
+the screen, Super+Shift+S annotates a screenshot. See Milestones 15 and 16 in
+`docs/BACKLOG.md`.
 
 ## Verification
+
+Everything that needs no physical machine, in one run:
+
+```sh
+./scripts/verify-all.sh           # about two minutes
+./scripts/verify-all.sh --quick   # skip the sandboxes: a few seconds
+```
+
+The sandboxes run the real things - the extension in a nested GNOME Shell, the
+palette and Annotate windows, Files with the inspector - on a virtual display
+with a throwaway HOME and session bus, so they cannot touch the desktop you are
+using. Run them before `sync-shell.sh`: they are how a change to the shell is
+tried without restarting it.
+
+The checks specific to this machine and session:
 
 ```sh
 ./scripts/verify-environment.sh
@@ -112,11 +161,14 @@ monitor, long-running memory — cannot be proven from code. Record them with:
 ```
 
 Source present, automated test passed, live GUI verified, and physically
-verified are four different things. `docs/BACKLOG.md` keeps them apart.
+verified are four different things. `docs/BACKLOG.md` keeps them apart. A pass
+in a sandbox is the second of those, not the third.
 
 ## Current work
 
-Milestone 14 — one visual system over Ubuntu's apps. See `docs/BACKLOG.md`,
+Milestone 16 is built and passes its checks; what is open is installing it
+into the live session and the physical checks. Milestone 14 — one visual system
+over Ubuntu's apps — is still waiting on the Figma exports. See `docs/BACKLOG.md`,
 which is the status source of truth; older status claims in
 `docs/MASTER_PROMPT.md` lose to it.
 
@@ -141,4 +193,5 @@ Full procedures: `docs/RECOVERY_RUNBOOK.md`, `docs/UNINSTALL_AND_RECOVERY.md`.
 | `docs/UBUNTU_FILES_PARITY.md` | File manager architecture rule |
 | `docs/COMMAND_PERMISSION_MODEL.md` | Command surface safety model |
 | `docs/RECOVERY_RUNBOOK.md` | Getting back to a working desktop |
+| `docs/GNOME_PORT.md` | What a move to GNOME 45+ and Wayland would take |
 | `docs/REPO_DOCUMENTATION_MAP.md` | Everything else |

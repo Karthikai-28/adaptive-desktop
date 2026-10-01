@@ -9,6 +9,9 @@ handler means the first time the user opens the popup.
 That is a bad way to find out. This is a cheap static pass over the same class
 bodies: collect the method definitions, collect the `this._x(` call sites, and
 report anything called but never defined.
+
+  verify-shell-methods.py a.js b.js          each file on its own
+  verify-shell-methods.py --class a.js b.js  the files are parts of one class
 """
 import re
 import sys
@@ -33,8 +36,18 @@ INHERITED = {
 
 failed = False
 
-for path in sys.argv[1:]:
-    source = Path(path).read_text()
+# --class a.js b.js ...: the files are parts of one class (extension.js and
+# the shell*.js files whose methods are copied onto it), so a method defined
+# in any of them may be called from any other. Checked as one body.
+arguments = sys.argv[1:]
+if arguments and arguments[0] == "--class":
+    parts = arguments[1:]
+    sources = [(str(Path(parts[0]).with_name("+".join(Path(p).stem for p in parts))),
+                "\n".join(Path(p).read_text() for p in parts))]
+else:
+    sources = [(path, Path(path).read_text()) for path in arguments]
+
+for path, source in sources:
 
     # Method definitions: `name(args) {` at class-body indentation, plus the
     # `var X = class ... { name() {` forms these modules use.
@@ -43,6 +56,9 @@ for path in sys.argv[1:]:
     defined |= set(re.findall(r"^\s{4}(?:get|set)\s+([A-Za-z_]\w*)\s*\(",
                               source, re.M))
     defined |= {"constructor"}
+    # A callback kept on the object (`this._onDone = onDone;`) is called like a
+    # method and is not one; an assignment defines it.
+    defined |= set(re.findall(r"this\.(_[A-Za-z]\w*)\s*=(?!=)", source))
 
     called = set(re.findall(r"this\.(_[A-Za-z]\w*)\s*\(", source))
 

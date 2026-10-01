@@ -1,0 +1,13 @@
+{
+  "description": "Python project: src, tests, a virtual environment on resume",
+  "folders": ["src", "tests", "docs"],
+  "files": {
+    "README.md": "# {name}\n",
+    ".gitignore": "__pycache__/\n*.pyc\n.venv/\n"
+  },
+  "pinned": ["src", "tests"],
+  "git": true,
+  "startup": [
+    {"command": "test -d .venv || python3 -m venv .venv; source .venv/bin/activate", "terminal": true}
+  ]
+}

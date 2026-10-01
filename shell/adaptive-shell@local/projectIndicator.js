@@ -154,6 +154,9 @@ var ProjectIndicator = class ProjectIndicator {
             this._git = null;
         this._button.container.visible = !!project;
         this._render();
+        // PopupMenu.open() returns early on an empty menu, so a menu that is
+        // only filled as it opens never opens at all. Keep it filled.
+        this._buildMenu();
         if (project && changed)
             this._refreshGit();
     }
@@ -232,6 +235,16 @@ var ProjectIndicator = class ProjectIndicator {
             }
         });
         menu.addAction('Quick Note…', () => spawn([script('adaptive-quick-note.py')]));
+        // These open the Command palette already in the mode, where the list
+        // lives; the menu stays a list of doors, not a second copy of it.
+        menu.addAction('Tasks…', () => spawn([script('adaptive-command-launch.sh'), '--query', 'todo ']));
+        menu.addAction('Search in Project…', () => spawn([script('adaptive-command-launch.sh'), '--query', '/']));
+        menu.addAction('Switch Branch…', () => spawn([script('adaptive-command-launch.sh'), '--query', 'branch ']));
+        const startup = project.metadata && project.metadata.startup;
+        if (Array.isArray(startup) && startup.length) {
+            menu.addAction(`Run Startup Command${startup.length === 1 ? '' : 's'}`, () =>
+                spawn([script('project-cli.py'), 'startup', 'run', '--target', project.id]));
+        }
         menu.addAction('All Projects…', () => spawn([script('adaptive-projects-launch.sh')]));
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 

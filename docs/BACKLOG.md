@@ -379,29 +379,45 @@ Code complete and checked here without a display (`verify-shell-helpers.js`,
 `verify-feature-logic.py`, `verify-adaptive-settings.py`, all in the stability
 suite). The GTK parts (palette, quick note, Settings) were also driven under
 Xvfb, and the palette against a stand-in that exports the shell's exact D-Bus
-interface. GNOME Shell 42 itself cannot run in that environment, so every
-shell-side item is 🔬 until clicked through live; each has a check in
-`record-live-verification.py` (and so in Settings and the Shade).
+interface.
+
+When this milestone was written GNOME Shell 42 could not be run where it was
+built, so every shell-side item was marked 🔬. That has since changed:
+`scripts/verify-shell-nested.sh` (Milestone 16) loads the extension into a
+real nested GNOME Shell and exercises these items. Where an item below says
+**runs in a real shell**, that is what it means: the code has run, on a
+virtual display, in a sandbox. It is not the same as you using it in the live
+session, so the 🔬 stays until the matching check in
+`record-live-verification.py` is recorded.
+
+The first nested run found that the top-bar project menu **could never
+open**: `PopupMenu.open()` returns early on an empty menu, and the menu was
+only filled as it opened. Fixed in `projectIndicator.js` (the menu is kept
+filled). It had never run before, which is the point of the paragraph above.
 
 - 🔬 **Shell bridge.** `org.adaptive.Shell` (shellActions.js), which already
   served the gesture daemon, now also lists and activates windows, switches
   workspace, serves and sets the clipboard history, parks and resumes
   projects, and starts screen text. Results are JSON; nothing passed in is
-  evaluated.
+  evaluated. Runs in a real shell: every method, including refusing unknown
+  actions, windows and workspaces.
 - 🔬 **Clipboard history** (`clipboardHistory.js`). Text only, newest first,
   50 entries, memory only: never written to disk, gone at logout. Skips what
   password managers mark secret and anything copied while locked. Palette:
-  type `clip` or `clip <text>`; "Clear Clipboard History" forgets it.
+  type `clip` or `clip <text>`; "Clear Clipboard History" forgets it. Runs in
+  a real shell.
 - 🔬 **Project park / resume** (`projectSnapshots.js`). Parks every window on
   the project's workspace to `~/.config/adaptive-desktop/snapshots/<id>.json`
   and closes them politely. Windows with no app to relaunch are left open, never
   lost. Resume relaunches terminals in the project folder, Files and editors
   on the folder, everything else plain, and puts each window back. From the
-  top-bar project menu or the palette.
+  top-bar project menu or the palette. Runs in a real shell: a real window is
+  parked, closed, relaunched and the snapshot cleared.
 - 🔬 **Project in the top bar** (`projectIndicator.js`). The active project
   with live git status (`main ±3 ↑1 ↓2`), and a menu: terminal, Files, quick
   note, all projects, park/resume, project settings. The backlog's old
-  `PROJECT · NONE` label no longer existed in code; this replaces it.
+  `PROJECT · NONE` label no longer existed in code; this replaces it. Runs in
+  a real shell, against a real repository, after the menu fix above.
 - ✅ **Quick note** (`scripts/adaptive-quick-note.py`, Super+Alt+N). One line
   into `notes/<project>/Inbox.md`, the Projects app's notes folder.
 - ✅ **Palette answers** (`apps/adaptive-command/providers.py`). Calculator
@@ -420,7 +436,9 @@ shell-side item is 🔬 until clicked through live; each has a check in
 - 🔬 **Crash watchdog** (`watchdog.js`). Three desktop starts in ten minutes
   without five minutes of uptime and the extension stands down to stock GNOME
   with a notification. Clean disables and `reload-adaptive-shell.sh` restarts
-  never count. Settings → Updates & Recovery shows it and re-arms it.
+  never count. Settings → Updates & Recovery shows it and re-arms it. Runs in
+  a real shell: a clean disable clears the record, a tripped state leaves
+  stock GNOME in place, and re-arming brings the desktop back.
 - ✅ **Physical checks in the Shade.** A status line, not a control:
   "N of M physical checks done", hidden once all pass.
 - ✅ Per-app volume was proposed but already existed (Control Center → Sound
@@ -429,7 +447,149 @@ shell-side item is 🔬 until clicked through live; each has a check in
   every module, so it had failed since the Control Center landed. It now
   scans the shade's own modules, which is what it protects.
 
+## Milestone 16 — Verification you can run, structure, and the next daily-use features
+
+### Verification
+
+- ✅ **The extension in a real GNOME Shell** (`scripts/verify-shell-nested.sh`).
+  A nested `gnome-shell` on a virtual X display with its own session bus,
+  HOME, runtime directory and dconf, so it cannot reach the session you are
+  in. It enables the extension, opens every panel menu and every Control
+  Center dropdown, drives the bridge, the clipboard, the project indicator,
+  park and resume with a real window, the drop-down terminal, lock and unlock,
+  and the watchdog, disables and re-enables it, and fails on any JS error in
+  the shell's log. A sandbox-only probe extension (`scripts/nested-probe/`)
+  lets the check look inside the shell; it refuses to start anywhere else.
+- ✅ **The palette and Annotate windows** on a virtual display
+  (`verify-palette.py`, `verify-annotate.py`): the real GTK windows, typed
+  into and read back, against the Project Context Service on a private bus.
+- ✅ **Files with the inspector** (`verify-files-inspector.py`): the real
+  Nautilus fork, the inspector loaded from the repository, the selection
+  walked across one file of each kind. Its first run found the Share and Tags
+  context menu **failed entirely on any machine without Slack**:
+  `Gio.DesktopAppInfo.new()` raises for a missing app in Python rather than
+  returning None. Fixed in `adaptive_files/share.py`.
+- ✅ **Static checks for what a GJS module cannot tell you until it runs**:
+  `verify-shell-methods.py --class` (a method called across the files of one
+  class), `verify-shell-imports.py` (a helper taken from another module that
+  no longer exports it - which is what moving a function breaks, and no
+  linter sees), and ESLint `no-undef` (`config/eslint-shell.json`).
+- ✅ **One command**: `scripts/verify-all.sh` (`--quick` skips the
+  sandboxes). `.github/workflows/checks.yml` runs it on every push.
+  🔬 The workflow has not run on GitHub yet; the script it calls passes here.
+- ⬜ What still needs a person at the machine is unchanged and is listed by
+  `record-live-verification.py status`: TTY recovery, GDM fallback, reboot,
+  suspend/resume, external monitor, audio output switching, a paired phone,
+  and screen text (needs `tesseract-ocr`).
+
+### Structure
+
+No behaviour changed in these; each was a move of whole methods, checked by
+comparing the set of methods before and after and by the sandboxes above.
+
+- ✅ `extension.js` (4,557 lines, one class) is now `extension.js` (the
+  object and its lifecycle) plus `shellLock.js`, `shellDock.js`,
+  `shellDockFeatures.js`, `shellDockDnd.js`, `shellDockAutohide.js` and
+  `shellDisplays.js`. Their methods are copied onto the one class, so `this`
+  is the same object everywhere.
+- ✅ `controlCenter.js` (4,138 lines) is now `controlCenter.js` plus
+  `ccNetwork.js`, `ccBluetooth.js`, `ccMedia.js`, `ccSystem.js`, with the
+  shared helpers in `ccUtil.js`. Three panels were taking `makeRow` and
+  `makeHeading` from `controlCenter.js`; the nested shell caught that when
+  their menus opened, and `verify-shell-imports.py` exists because of it.
+- ✅ `adaptive_preview.py` (4,566 lines) is now the extension classes and the
+  controller's lifecycle, with its methods in
+  `adaptive_files/inspector_{host,folder,file,info,widgets}.py` as mixins and
+  the shared pieces in `adaptive_files/common.py`.
+- ✅ `./install.sh` runs the per-part installers in order; `--status` says
+  what is installed and what is out of date, changing nothing. `./uninstall.sh`
+  is the other direction (`--dry-run` first) and leaves your data alone.
+- ✅ Repository: bytecode and the `.before-*` backup copies are no longer
+  tracked; `scripts/adaptive-backup.py dconf-snapshot` makes a full dconf dump
+  with accounts, calendars, contacts and any value holding an address removed,
+  for `backups/`.
+- ⬜ The two KTERM installers under `terminal/` differ by three lines but are
+  self-contained on purpose (each is run on its own on a new machine), so
+  they were left as they are.
+
+### Projects
+
+- ✅ **Git status of every project.** `project-cli.py git`, and `git` in the
+  palette: work to commit, push or pull first.
+- 🔬 **Time per project.** The Project Context Service counts a minute
+  towards the active project while you are at the machine (not idle five
+  minutes, not locked). `project-cli.py time`, `time` in the palette. Needs
+  the service restarted to start counting.
+- ✅ **Startup commands.** `project-cli.py startup add [--background] <cmd>`;
+  run when the project is resumed, or from its menu. Runs in a real shell.
+- ✅ **Inbox as tasks.** Every quick note is a task; `todo` in the palette
+  lists the open ones and Enter ticks one (`- [x]` in the same file).
+  `project-cli.py tasks`.
+- ✅ **Templates.** `project-cli.py new <folder> --template python|web|writing`
+  or `new` in the palette; your own go in
+  `~/.config/adaptive-desktop/project-templates/`. Nothing existing is
+  overwritten and nothing is created outside the folder.
+
+### Command palette
+
+- ✅ **Modes** (`apps/adaptive-command/modes.py`): `snip`, `todo`, `git`,
+  `time`, `/text` or `grep`, `kill`, `ssh`, `branch`, `timer`, `keys`, `new`.
+  A mode word has to stand alone, so `github` is still an ordinary search.
+  Each is also offered by name ("Snippets", "Keyboard Shortcuts").
+- ✅ **Your own commands**: executables in
+  `~/.config/adaptive-desktop/commands/` (see `COMMAND_PERMISSION_MODEL.md`).
+- ✅ **Fresh file search.** `scripts/adaptive-index.sh` keeps a private
+  plocate database of your home folder, rebuilt every fifteen minutes by a
+  user timer (`install-file-index.sh`); the palette searches it as well as
+  the system one. Not installed until you run the installer.
+- 🔬 **Clipboard pins and images.** Ctrl+P pins the selected entry: it is kept
+  when the history fills up and when it is cleared. The last five copied
+  images are kept and copied back by id. Still memory only. Runs in a real
+  shell; pasting an image into another app is the live part.
+
+### Desktop
+
+- 🔬 **Drop-down terminal** (`dropdownTerminal.js`, Super+Return). Terminator
+  if installed, otherwise GNOME Terminal, in the active project's folder.
+  Runs in a real shell with GNOME Terminal on Wayland; Terminator on X11, and
+  finding the window again by role after a shell restart, are the live part.
+- 🔬 **Annotate a screenshot** (`apps/adaptive-annotate`, Super+Shift+S).
+  Arrow, box, pen, highlight, redact, text; copy or save. The window is
+  driven in a sandbox; the area capture (`gnome-screenshot --area`) is live.
+- ✅ **Keyboard shortcuts** (`keys` in the palette, Super+/), read from
+  gsettings so an edited shortcut shows as it is.
+- 🔬 **Power profile follows the charger** (`adaptive-power-auto.py`). Off
+  until `--enable`. Touches no suspend, lid or blanking setting. Not run
+  through a plug/unplug.
+- 🔬 **Send clipboard to phone** (Network panel, palette). Needs a paired
+  phone to try.
+- ✅ **Settings export / import** (`adaptive-backup.py export|import|show`).
+  A named list of files and GNOME keys, not a dump; import keeps what it
+  replaces.
+- ✅ **AMD sensors** in the Shade: `k10temp`/`zenpower` CPU temperature,
+  `amdgpu` busy percentage and temperature. 🔬 Untested: this machine is
+  Intel. An NVIDIA-only machine still shows no GPU row (it needs
+  `nvidia-smi`).
+
+### Looked at and not built
+
+- **Display profiles.** Mutter already remembers a layout per set of
+  connected monitors (`~/.config/monitors.xml`) and Super+P switches mirror /
+  extend / single. A second copy would be a second thing to keep in sync.
+- **Battery charge limit control.** This machine's firmware exposes no
+  `charge_control_end_threshold`, so there is nothing to set. The Control
+  Center still shows a limit where the firmware has one.
+- **Continuous clipboard sync and notification mirroring to a phone.** Both
+  are settings of KDE Connect and GSConnect themselves.
+- **GNOME 45+ and Wayland.** Assessed, not started: `docs/GNOME_PORT.md`.
+
 ## Immediate next work
+
+0. `./install.sh --status`, then `./install.sh`, then
+   `./scripts/reload-adaptive-shell.sh --restart-shell`. As of Milestone 16
+   the live extension is two milestones behind the repository, four
+   shortcuts are missing and the file index is not installed. Then work
+   through `record-live-verification.py status`.
 
 1. Reinstall the session wrapper so `XDG_DATA_DIRS` takes effect:
    `./scripts/install-adaptive-session.sh` (asks for sudo), then log out and in.
@@ -451,6 +611,24 @@ shell-side item is 🔬 until clicked through live; each has a check in
 
 ## Known live-only traps
 
+- **A helper moved to another file is `undefined` where it used to be found,
+  and nothing says so until that code runs.** `CC.makeRow` kept parsing,
+  linting and loading after `makeRow` left `controlCenter.js`; it threw when a
+  menu opened. `verify-shell-imports.py` checks every `Module.name` and every
+  destructured import against what the module really exports.
+- **`PopupMenu.open()` does nothing on an empty menu.** A panel button whose
+  menu is built in its `open-state-changed` handler therefore never opens.
+  Fill the menu before it can be asked to open.
+- **PyGObject raises where C returns NULL.** `Gio.DesktopAppInfo.new(id)` for
+  an app that is not installed is a `TypeError`, not `None`.
+- **A nested shell's children need to be told where it is.** Apps the shell
+  launches, and services D-Bus activates, inherit no `WAYLAND_DISPLAY` in a
+  nested session and open on the X display behind it. `verify-shell-nested.sh`
+  sets it in the shell process and in the bus's activation environment.
+- **argparse: a positional named like the subparser's `dest` replaces it.**
+  `startup add <command>` stored its words in `args.command`, which is also
+  where the chosen subcommand lives, so no branch matched and the CLI printed
+  nothing and exited 0.
 - Only one Adaptive rail extension may be enabled. `adaptive-shell-v16@local`
   is a retired duplicate kept for rollback; when both it and
   `adaptive-shell@local` are enabled, two rails stack and every dock label

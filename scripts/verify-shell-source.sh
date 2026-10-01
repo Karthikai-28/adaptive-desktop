@@ -5,7 +5,9 @@ REPO="${HOME}/adaptive-desktop"
 SOURCE="${REPO}/shell/adaptive-shell@local"
 LIVE="${HOME}/.local/share/gnome-shell/extensions/adaptive-shell@local"
 
-node --check "${SOURCE}/extension.js"
+for module in "${SOURCE}/"*.js; do
+  node --check "${module}"
+done
 
 test -f "${SOURCE}/metadata.json"
 test -f "${SOURCE}/stylesheet.css"
@@ -16,8 +18,12 @@ for icon in overview files apps workspaces search settings; do
 done
 
 if [ -d "$LIVE" ]; then
-  cmp -s "${SOURCE}/extension.js" "${LIVE}/extension.js"
-  cmp -s "${SOURCE}/stylesheet.css" "${LIVE}/stylesheet.css"
+  for module in "${SOURCE}/"*.js "${SOURCE}/stylesheet.css"; do
+    cmp -s "${module}" "${LIVE}/$(basename "${module}")" || {
+      echo "Live extension differs from the repo ($(basename "${module}")): run scripts/sync-shell.sh"
+      exit 1
+    }
+  done
 fi
 
 echo "Adaptive Shell source verified."

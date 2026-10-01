@@ -21,7 +21,7 @@ const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
-const CC = Me.imports.controlCenter;
+const CC = Me.imports.ccUtil;
 
 const HELPER = Me.dir.get_child('tools').get_child('network_info.py').get_path();
 const SSH_HELPER = Me.dir.get_child('tools').get_child('ssh_connect.py').get_path();
@@ -189,7 +189,9 @@ var NetworkPanel = class NetworkPanel {
     }
 
     _phoneAction(command, phone) {
-        this._phoneNote[phone.id] = command === 'ring' ? 'Ringing…' : 'Choosing a file…';
+        this._phoneNote[phone.id] = {
+            ring: 'Ringing…', send: 'Choosing a file…', clipboard: 'Sending the clipboard…',
+        }[command];
         if (command === 'send')
             this._button.menu.close();
         this._render();
@@ -222,6 +224,7 @@ var NetworkPanel = class NetworkPanel {
                 actions: phone.reachable ? [
                     { label: 'Ring', quiet: true, onClick: () => this._phoneAction('ring', phone) },
                     { label: 'Send file', quiet: true, onClick: () => this._phoneAction('send', phone) },
+                    { label: 'Send clipboard', quiet: true, onClick: () => this._phoneAction('clipboard', phone) },
                 ] : null,
             }));
         }

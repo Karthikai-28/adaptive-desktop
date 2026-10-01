@@ -16,7 +16,10 @@ const U = {};
 vm.runInNewContext(`${fs.readFileSync(file, 'utf8')}
 ;Object.assign(exportsTo, { parseGitStatus, formatGitStatus, watchdogVerdict, WATCHDOG,
   batteryHealth, verificationSummary, classifyApp, clipboardPush, isSecretClipboard,
-  CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS });`, { exportsTo: U });
+  clipboardPushImage, clipboardPin, clipboardClear, pngSize, formatBytes,
+  CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_PINS, CLIPBOARD_MAX_IMAGES,
+  CLIPBOARD_MAX_IMAGE_BYTES, DROPDOWN_ROLE, dropdownTerminalKind, dropdownArgv, dropdownRect,
+  isDropdownWindow });`, { exportsTo: U });
 
 let failures = 0;
 function check(ok, message) {
@@ -90,6 +93,64 @@ for (let i = 0; i < U.CLIPBOARD_MAX_ITEMS + 10; i++)
 check(many.length === U.CLIPBOARD_MAX_ITEMS, 'clipboard: bounded');
 check(U.isSecretClipboard(['text/plain', 'x-kde-passwordManagerHint']), 'clipboard: password manager copies skipped');
 check(!U.isSecretClipboard(['text/plain']), 'clipboard: ordinary text kept');
+
+// clipboard: pins
+let pins = [];
+pins = U.clipboardPush(pins, 'keep', 1, 1);
+pins = U.clipboardPush(pins, 'other', 2, 2);
+pins = U.clipboardPin(pins, 1, true);
+check(pins.find(i => i.id === 1).pinned === true && !pins.find(i => i.id === 2).pinned, 'clipboard: an entry can be pinned');
+check(same(U.clipboardPin(pins, 99, true), pins), 'clipboard: pinning an unknown id changes nothing');
+for (let i = 0; i < U.CLIPBOARD_MAX_ITEMS + 10; i++)
+    pins = U.clipboardPush(pins, `fill${i}`, 10 + i, 100 + i);
+check(pins.length === U.CLIPBOARD_MAX_ITEMS && pins.some(i => i.text === 'keep'),
+    'clipboard: a pinned entry survives the history filling up');
+pins = U.clipboardPush(pins, 'keep', 999, 500);
+check(pins[0].text === 'keep' && pins[0].pinned === true, 'clipboard: copying a pinned text again keeps its pin');
+check(same(U.clipboardClear(pins).map(i => i.text), ['keep']), 'clipboard: clear keeps only what is pinned');
+pins = U.clipboardPin(pins, 500, false);
+check(U.clipboardClear(pins).length === 0, 'clipboard: unpinned, it is cleared like the rest');
+let full = [];
+for (let i = 1; i <= U.CLIPBOARD_MAX_PINS + 1; i++) {
+    full = U.clipboardPush(full, `p${i}`, i, i);
+    full = U.clipboardPin(full, i, true);
+}
+check(full.filter(i => i.pinned).length === U.CLIPBOARD_MAX_PINS, 'clipboard: pins are bounded');
+
+// clipboard: images
+let pics = U.clipboardPush([], 'text', 1, 1);
+for (let i = 0; i < U.CLIPBOARD_MAX_IMAGES + 3; i++)
+    pics = U.clipboardPushImage(pics, { id: 10 + i, at: 2 + i, mime: 'image/png', size: 100 + i, hash: i, width: 4, height: 3 });
+check(pics.filter(i => i.kind === 'image').length === U.CLIPBOARD_MAX_IMAGES && pics.some(i => i.text === 'text'),
+    'clipboard: images are bounded on their own, text is untouched');
+const again = U.clipboardPushImage(pics, { id: 99, at: 50, mime: 'image/png', size: pics[1].size, hash: pics[1].hash });
+check(again.filter(i => i.kind === 'image').length === U.CLIPBOARD_MAX_IMAGES && again[0].id === 99,
+    'clipboard: the same image again moves to the top, not a second copy');
+check(U.clipboardPushImage(pics, { id: 1, size: U.CLIPBOARD_MAX_IMAGE_BYTES + 1, hash: 1 }).length === pics.length,
+    'clipboard: an oversized image is ignored');
+check(U.clipboardPushImage(pics, null).length === pics.length, 'clipboard: no image, no entry');
+const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 7, 0x80, 0, 0, 4, 0xb0];
+check(same(U.pngSize(png), { width: 1920, height: 1200 }), 'clipboard: PNG dimensions from the header');
+check(U.pngSize([1, 2, 3]) === null && U.pngSize(new Array(24).fill(0)) === null, 'clipboard: not a PNG gives null');
+check(U.formatBytes(912) === '912 B' && U.formatBytes(348160) === '340 KB' && U.formatBytes(1258291) === '1.2 MB',
+    'clipboard: sizes read naturally');
+
+// drop-down terminal
+check(U.dropdownTerminalKind('gnome-terminal', () => true) === 'gnome-terminal', 'dropdown: the terminal asked for, if installed');
+check(U.dropdownTerminalKind('gnome-terminal', n => n === 'terminator') === 'terminator', 'dropdown: falls back to what is installed');
+check(U.dropdownTerminalKind('xterm; rm -rf', () => true) === 'terminator', 'dropdown: an unknown terminal name is never run');
+check(U.dropdownTerminalKind(undefined, () => false) === '', 'dropdown: no terminal installed gives none');
+check(same(U.dropdownArgv('gnome-terminal', '/p'), ['gnome-terminal', '--role=adaptive-dropdown', '--working-directory=/p']),
+    'dropdown: GNOME Terminal command');
+check(U.dropdownArgv('terminator', '/p').includes('--role=adaptive-dropdown'), 'dropdown: Terminator carries the role too');
+check(U.isDropdownWindow('gnome-terminal', 'Gnome-terminal', 'adaptive-dropdown'), 'dropdown: found by role on X11');
+check(!U.isDropdownWindow('gnome-terminal', 'Gnome-terminal', 'gnome-terminal-window-1'), 'dropdown: another terminal window is not ours');
+check(U.isDropdownWindow('gnome-terminal', 'gnome-terminal-server', null), 'dropdown: with no role, by class');
+check(!U.isDropdownWindow('gnome-terminal', 'firefox', null), 'dropdown: some other app is never adopted');
+check(same(U.dropdownRect({ x: 0, y: 32, width: 1920, height: 1100 }, 0.5), { x: 0, y: 32, width: 1920, height: 550 }),
+    'dropdown: across the top of the work area');
+check(U.dropdownRect({ x: 0, y: 0, width: 100, height: 1000 }, 'junk').height === 450 &&
+    U.dropdownRect({ x: 0, y: 0, width: 100, height: 1000 }, 5).height === 450, 'dropdown: a bad height falls back to the default');
 
 console.log();
 if (failures) {

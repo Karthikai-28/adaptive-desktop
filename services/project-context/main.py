@@ -12,6 +12,9 @@ gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
 from gi.repository import Gio, GLib
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import extras  # noqa: E402 - the GTK-free half: git, time, startup, tasks, templates
+
 BUS_NAME = "org.adaptive.ProjectContext"
 OBJECT_PATH = "/org/adaptive/ProjectContext"
 SCHEMA_VERSION = 1
@@ -87,6 +90,9 @@ INTERFACE_XML = """
     <method name="ListProjects">
       <arg type="s" name="json_data" direction="out"/>
     </method>
+    <method name="GetTimeReport">
+      <arg type="s" name="json_data" direction="out"/>
+    </method>
     <signal name="ActiveProjectChanged">
       <arg type="s" name="id"/>
       <arg type="s" name="name"/>
@@ -132,6 +138,16 @@ class ProjectContextService:
 
         self._load_state()
         self._sync_workspace_names()
+
+        # Time per project: one tick a minute, counted only while someone is
+        # at the machine (see extras.should_count). The tick can be shortened
+        # for the nested-shell check, which cannot wait a minute.
+        self._time_tick_s = extras.TIME_TICK_S
+        try:
+            self._time_tick_s = max(1, int(os.environ.get("ADAPTIVE_TIME_TICK_S", "")))
+        except ValueError:
+            pass
+        GLib.timeout_add_seconds(self._time_tick_s, self._tick_time)
 
         self.dbus_node_info = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML)
         self.dbus_connection = None
@@ -242,6 +258,39 @@ class ProjectContextService:
             settings.set_boolean("show-banners", preference == "off")
         except Exception as e:
             print(f"Error applying focus preference: {e}")
+
+    def _session_call(self, name, path, interface, method):
+        """One quick call to the session; None if nobody answers."""
+        try:
+            bus = self.dbus_connection or Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            reply = bus.call_sync(name, path, interface, method, None, None,
+                                  Gio.DBusCallFlags.NO_AUTO_START, 500, None)
+            return reply.unpack()[0]
+        except Exception:
+            return None
+
+    def _tick_time(self):
+        """Count this tick towards the active project, if you are here."""
+        try:
+            if not self.active_id:
+                return True
+            idle_ms = self._session_call(
+                "org.gnome.Mutter.IdleMonitor", "/org/gnome/Mutter/IdleMonitor/Core",
+                "org.gnome.Mutter.IdleMonitor", "GetIdletime")
+            # No idle monitor means no way to know anyone is here: count nothing
+            # rather than every minute the machine is on.
+            if idle_ms is None:
+                return True
+            locked = bool(self._session_call(
+                "org.gnome.ScreenSaver", "/org/gnome/ScreenSaver",
+                "org.gnome.ScreenSaver", "GetActive"))
+            if extras.should_count(self.active_id, idle_ms, locked):
+                data = extras.load_time()
+                day = time.strftime("%Y-%m-%d")
+                extras.save_time(extras.add_time(data, day, self.active_id, self._time_tick_s))
+        except Exception as e:
+            print(f"Error recording project time: {e}")
+        return True
 
     def _wanted_workspace_names(self):
         wanted = {}
@@ -475,6 +524,11 @@ class ProjectContextService:
                 data = json.dumps(ordered)
                 invocation.return_value(GLib.Variant("(s)", (data,)))
                 
+            elif method_name == "GetTimeReport":
+                rows = extras.time_report(extras.load_time(), self.projects,
+                                          time.strftime("%Y-%m-%d"))
+                invocation.return_value(GLib.Variant("(s)", (json.dumps(rows),)))
+
             elif method_name == "GetInitialResultSet":
                 terms = parameters.unpack()[0]
                 query = " ".join(terms).lower()

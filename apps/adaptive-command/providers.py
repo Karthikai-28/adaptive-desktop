@@ -242,3 +242,40 @@ def clipboard_query(query):
     """The filter text for "clip ..." / "clipboard ...", or None."""
     match = re.match(r"^\s*(clip|clipboard|cb)(?:\s+(.*))?$", query or "", re.I)
     return (match.group(2) or "").strip() if match else None
+
+
+def format_bytes(size):
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    if size >= 1024:
+        return f"{round(size / 1024)} KB"
+    return f"{size} B"
+
+
+def clipboard_entries(history, wanted, limit=10):
+    """The history as the palette lists it: pinned first, then newest first.
+
+    Each entry is the shell's item plus "title" (one line to show) and
+    "detail". Images have no text to match, so a filter keeps only the ones
+    asked for by the word "image".
+    """
+    folded = (wanted or "").casefold()
+    entries = []
+    for item in history or []:
+        if item.get("kind") == "image":
+            if folded and folded not in "image picture screenshot png":
+                continue
+            width, height = item.get("width", 0), item.get("height", 0)
+            shape = f"{width}×{height}  ·  " if width and height else ""
+            entry = dict(item, title="Image", detail=f"{shape}{format_bytes(item.get('size', 0))}")
+        else:
+            text = item.get("text", "")
+            if folded not in text.casefold():
+                continue
+            line = " ".join(text.split())
+            entry = dict(item, title=line[:120] + ("…" if len(line) > 120 else ""),
+                         detail=f"{len(text)} characters" if len(text) > 120 else "")
+        entries.append(entry)
+    # Stable: the shell already has them newest first.
+    entries.sort(key=lambda e: not e.get("pinned"))
+    return entries[:limit]

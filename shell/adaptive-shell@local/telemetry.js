@@ -253,11 +253,22 @@ var Telemetry = class Telemetry {
             }
 
             // Fall back to coretemp only when the package zone is missing,
-            // otherwise the same reading would appear twice.
-            if (hwName === 'coretemp' && !this._cpuTempPath) {
+            // otherwise the same reading would appear twice. AMD has no
+            // x86_pkg_temp zone at all: its CPU sensor is k10temp (or the
+            // out-of-tree zenpower), and its GPU's is amdgpu.
+            if (['coretemp', 'k10temp', 'zenpower'].includes(hwName) && !this._cpuTempPath) {
+                const path = `${base}/temp1_input`;
+                if (!Number.isNaN(readNumber(path))) {
+                    this._cpuTempPath = path;
+                    if (hwName !== 'coretemp')
+                        this._zones.push({ label: 'CPU', type: hwName, path });
+                }
+            }
+
+            if (hwName === 'amdgpu') {
                 const path = `${base}/temp1_input`;
                 if (!Number.isNaN(readNumber(path)))
-                    this._cpuTempPath = path;
+                    this._zones.push({ label: 'GPU', type: hwName, path });
             }
         }
     }
@@ -325,6 +336,24 @@ var Telemetry = class Telemetry {
                 maxPath: `${base}/gt_max_freq_mhz`,
                 rc6Path: Number.isNaN(readNumber(rc6Path)) ? null : rc6Path,
             };
+            break;
+        }
+
+        if (this._gpu)
+            return;
+
+        // AMD (amdgpu) publishes how busy the GPU is directly, and no clock.
+        // NVIDIA's driver publishes neither in sysfs - it needs nvidia-smi -
+        // so an NVIDIA-only machine shows the GPU row as unavailable.
+        for (const name of listDir('/sys/class/drm')) {
+            if (!/^card\d+$/.test(name))
+                continue;
+
+            const busyPath = `/sys/class/drm/${name}/device/gpu_busy_percent`;
+            if (Number.isNaN(readNumber(busyPath)))
+                continue;
+
+            this._gpu = { busyPath };
             break;
         }
     }
@@ -528,6 +557,13 @@ var Telemetry = class Telemetry {
         }
 
         this.snapshot.gpu.available = true;
+
+        if (this._gpu.busyPath) {
+            const busy = readNumber(this._gpu.busyPath);
+            this.snapshot.gpu.percent = Number.isNaN(busy) ? NaN : Math.max(0, Math.min(100, busy));
+            return;
+        }
+
         // Actual clock, which is 0 whenever the engine is asleep, and the clock
         // the driver is asking for, which stays meaningful either way.
         this.snapshot.gpu.freqMhz = readNumber(this._gpu.actPath);

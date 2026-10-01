@@ -4,6 +4,9 @@
     phone_info.py list                 paired phones from KDE Connect or GSConnect
     phone_info.py ring <backend> <id>  make the phone ring
     phone_info.py send <backend> <id>  pick a file and send it to the phone
+    phone_info.py clipboard <backend> <id>
+                                       put this computer's clipboard on the phone
+    phone_info.py clipboard-first      the same, to the first phone in reach
 
 Two backends, whichever is running: the KDE Connect daemon
 (`sudo apt install kdeconnect`) or the GSConnect GNOME extension, which speaks
@@ -152,20 +155,65 @@ def send(backend, device_id):
     return {"ok": ok, "sent": len(files)}
 
 
+def clipboard(backend, device_id):
+    """Push this computer's clipboard to the phone, once.
+
+    Continuous two-way sync is a setting of KDE Connect and GSConnect
+    themselves; this is the one-off "send what I just copied".
+    """
+    if backend == "gsconnect":
+        return {"ok": gsconnect_action(device_id, "clipboardPush")}
+    ok = subprocess.run(["kdeconnect-cli", "-d", device_id, "--send-clipboard"],
+                        capture_output=True, timeout=10).returncode == 0
+    return {"ok": ok}
+
+
+def first_reachable(listing):
+    """(backend, id, name) of the first phone in reach, or None."""
+    for device in listing.get("devices", []):
+        if device.get("reachable") and listing.get("backend"):
+            return listing["backend"], device["id"], device["name"]
+    return None
+
+
+ACTIONS = {"ring": ring, "send": send, "clipboard": clipboard}
+
+
 def main(argv):
     command = argv[1] if len(argv) > 1 else "list"
     if command == "list":
         return list_devices()
-    if command in ("ring", "send") and len(argv) == 4:
+    if command == "clipboard-first":
+        target = first_reachable(list_devices())
+        if not target:
+            return {"ok": False, "error": "no phone in reach"}
+        try:
+            return dict(clipboard(target[0], target[1]), name=target[2])
+        except (OSError, subprocess.SubprocessError) as error:
+            return {"ok": False, "error": str(error)}
+    if command in ACTIONS and len(argv) == 4:
         backend, device_id = argv[2], argv[3]
         if backend not in ("kdeconnect", "gsconnect") or not DEVICE_ID.match(device_id):
             return {"ok": False, "error": "bad device"}
         try:
-            return (ring if command == "ring" else send)(backend, device_id)
+            return ACTIONS[command](backend, device_id)
         except (OSError, subprocess.SubprocessError) as error:
             return {"ok": False, "error": str(error)}
     return {"ok": False, "error": f"unknown command {command}"}
 
 
+def describe(result):
+    """One line a person can read, for --notify."""
+    if result.get("ok"):
+        return f"Clipboard sent to {result['name']}" if result.get("name") else "Done"
+    return {"no phone in reach": "No paired phone is in reach",
+            "bad device": "That phone is not known"}.get(result.get("error"), "The phone did not take it")
+
+
 if __name__ == "__main__":
-    print(json.dumps(main(sys.argv)))
+    notify = "--notify" in sys.argv
+    outcome = main([a for a in sys.argv if a != "--notify"])
+    print(json.dumps(outcome))
+    if notify:
+        subprocess.run(["notify-send", "--app-name=Adaptive Command", "--icon=phone-symbolic",
+                        "Phone", describe(outcome)], check=False)

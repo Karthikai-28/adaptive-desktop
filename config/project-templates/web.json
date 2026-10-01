@@ -1,0 +1,13 @@
+{
+  "description": "Web project: src, public, and the dev server on resume",
+  "folders": ["src", "public"],
+  "files": {
+    "README.md": "# {name}\n",
+    ".gitignore": "node_modules/\ndist/\n"
+  },
+  "pinned": ["src"],
+  "git": true,
+  "startup": [
+    {"command": "test -f package.json && npm run dev", "terminal": true}
+  ]
+}

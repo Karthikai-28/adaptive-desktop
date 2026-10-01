@@ -26,7 +26,7 @@ const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
-const CC = Me.imports.controlCenter;
+const CC = Me.imports.ccUtil;
 
 const REFRESH_MS = 2000;
 const TERM_GRACE_MS = 3000;

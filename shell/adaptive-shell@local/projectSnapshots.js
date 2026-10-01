@@ -15,7 +15,8 @@
 // (Meta.Window.delete), so an app with unsaved work still gets to ask.
 //
 // Apps relaunch fresh: a browser comes back as a new window, with its tabs only
-// if the browser restores its own session.
+// if the browser restores its own session. A project's startup commands, if it
+// has any, are run once its windows are on their way back.
 
 /* exported ProjectSnapshots */
 
@@ -211,6 +212,20 @@ var ProjectSnapshots = class ProjectSnapshots {
                 Gio.File.new_for_path(path).delete(null);
         } catch (e) {
             logError(e, '[Adaptive Snapshots] updating snapshot');
+        }
+
+        // The project's startup commands (project-cli.py startup add ...): its
+        // environment comes back with its windows.
+        const startup = project.metadata && project.metadata.startup;
+        if (launched && Array.isArray(startup) && startup.length) {
+            try {
+                GLib.spawn_async(null, [
+                    GLib.build_filenamev([GLib.get_home_dir(), 'adaptive-desktop', 'scripts', 'project-cli.py']),
+                    'startup', 'run', '--target', project.id,
+                ], null, GLib.SpawnFlags.SEARCH_PATH, null);
+            } catch (e) {
+                logError(e, '[Adaptive Snapshots] running startup commands');
+            }
         }
 
         let message = `Reopening ${launched} window${launched === 1 ? '' : 's'} of ${project.name}`;

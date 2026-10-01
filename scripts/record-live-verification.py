@@ -111,6 +111,26 @@ CHECKS = [
         "prompt": "After a normal day of use, does Adaptive Settings show the watchdog as Armed (never stood down by accident)?",
     },
     {
+        "id": "dropdown_terminal",
+        "backlog": "Drop-down terminal.",
+        "prompt": "Does Super+Return drop a terminal from the top of the screen in the project folder, and hide it again?",
+    },
+    {
+        "id": "annotate",
+        "backlog": "Annotate a screenshot.",
+        "prompt": "Does Super+Shift+S let you select an area, draw on it, and paste the result (Ctrl+C) into another app?",
+    },
+    {
+        "id": "palette_modes",
+        "backlog": "Command palette modes.",
+        "prompt": "In the palette, do \"git\", \"todo\", \"/some text\" and \"keys\" each list what they should for your real projects?",
+    },
+    {
+        "id": "clipboard_pins_images",
+        "backlog": "Clipboard pins and images.",
+        "prompt": "In \"clip\", does Ctrl+P pin an entry so it survives Clear Clipboard History, and is a copied image listed and pasted back?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",

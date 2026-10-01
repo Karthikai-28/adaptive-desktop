@@ -28,9 +28,12 @@ fail() {
 
 has_source() {
   local pattern="$1"
-  local file="$2"
-  rg -q "$pattern" "$file" || fail "missing source evidence: ${pattern} in ${file}"
+  shift
+  rg -q "$pattern" "$@" || fail "missing source evidence: ${pattern} in $*"
 }
+
+# The shell's one class lives in extension.js and the shell*.js files beside it.
+SHELL_SOURCES=("${REPO}/shell/adaptive-shell@local/extension.js" "${REPO}/shell/adaptive-shell@local/"shell[A-Z]*.js)
 
 {
   echo "Adaptive Desktop live readiness"
@@ -52,9 +55,9 @@ has_source() {
   echo
   echo "== Shell rail and reload =="
   "${REPO}/scripts/verify-shell-source.sh"
-  has_source "affectsStruts: true" "${REPO}/shell/adaptive-shell@local/extension.js"
-  has_source "trackFullscreen: true" "${REPO}/shell/adaptive-shell@local/extension.js"
-  has_source "_layoutRail" "${REPO}/shell/adaptive-shell@local/extension.js"
+  has_source "affectsStruts: true" "${SHELL_SOURCES[@]}"
+  has_source "trackFullscreen: true" "${SHELL_SOURCES[@]}"
+  has_source "_layoutRail" "${SHELL_SOURCES[@]}"
   pass "Rail source reserves application struts and tracks fullscreen"
   if [[ -n "${DISPLAY:-}" ]]; then
     if gnome-extensions info adaptive-shell@local | sed -n '1,30p'; then
@@ -147,13 +150,13 @@ PY
     "_refreshBluetoothStatus" \
     "_refreshPowerStatus"
   do
-    if rg -q "$pattern" "${REPO}/shell/adaptive-shell@local/extension.js"; then
+    if rg -q "$pattern" "${SHELL_SOURCES[@]}"; then
       fail "the shell reimplements a system control GNOME already owns: ${pattern}"
     fi
   done
   pass "System controls are GNOME's own; the shell does not reimplement them"
 
-  has_source "_restoreGNOMEClock" "${REPO}/shell/adaptive-shell@local/extension.js"
+  has_source "_restoreGNOMEClock" "${SHELL_SOURCES[@]}"
   pass "GNOME clock and calendar are restored into the panel"
   verify "Audio output switching needs a live multi-device check"
   verify "Restart and shut down confirmations need a live click-through check"
@@ -290,8 +293,8 @@ PY
   pass "Window helper includes monitor-aware tiling, snapping, and fullscreen commands"
 
   python3 -m py_compile "${REPO}/scripts/adaptive-display-guard.py"
-  has_source "_rescueStrandedWindows" "${REPO}/shell/adaptive-shell@local/extension.js"
-  has_source "_runDisplayGuard" "${REPO}/shell/adaptive-shell@local/extension.js"
+  has_source "_rescueStrandedWindows" "${SHELL_SOURCES[@]}"
+  has_source "_runDisplayGuard" "${SHELL_SOURCES[@]}"
   pass "Displays changing triggers the ghost-output guard and the window rescue"
 
   if command -v node >/dev/null 2>&1; then

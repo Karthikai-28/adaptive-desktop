@@ -32,6 +32,9 @@ for name in [
     "adaptive-window-save-project",
     "adaptive-window-restore-project",
     "adaptive-quick-note",
+    "adaptive-dropdown-terminal",
+    "adaptive-shortcuts",
+    "adaptive-annotate",
 ]:
     key = f"{base}/{name}/"
     if key not in values:
@@ -65,6 +68,11 @@ set_binding "adaptive-window-fullscreen" "Adaptive Toggle Fullscreen" "${REPO}/s
 set_binding "adaptive-window-save-project" "Adaptive Save Project Window Placement" "${REPO}/scripts/window-cli.py save-project" "<Super><Alt>s"
 set_binding "adaptive-window-restore-project" "Adaptive Restore Project Window Placement" "${REPO}/scripts/window-cli.py restore-project" "<Super><Alt>r"
 set_binding "adaptive-quick-note" "Adaptive Quick Note" "${REPO}/scripts/adaptive-quick-note.py" "<Super><Alt>n"
+# The drop-down terminal lives in the shell (dropdownTerminal.js), which is
+# the only thing that can place and toggle a window reliably.
+set_binding "adaptive-dropdown-terminal" "Adaptive Drop-down Terminal" "gdbus call --session -d org.gnome.Shell -o /org/adaptive/Shell -m org.adaptive.Shell.Run dropdown-terminal" "<Super>Return"
+set_binding "adaptive-shortcuts" "Adaptive Keyboard Shortcuts" "${REPO}/scripts/adaptive-command-launch.sh --query 'keys '" "<Super>slash"
+set_binding "adaptive-annotate" "Adaptive Annotate Screenshot" "${REPO}/apps/adaptive-annotate/main.py" "<Super><Shift>s"
 
 #
 # GNOME's own switch-to-workspace-left/right also list Super+Alt+Left/Right.
@@ -174,4 +182,8 @@ Installed Adaptive Desktop shortcuts:
   Super+Alt+F        Toggle fullscreen
   Super+Alt+S        Save active project window placement
   Super+Alt+R        Restore active project window placement
+  Super+Alt+N        Quick note
+  Super+Return       Drop-down terminal
+  Super+/            Keyboard shortcuts (this list, searchable)
+  Super+Shift+S      Annotate a screenshot
 EOF

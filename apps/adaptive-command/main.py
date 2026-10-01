@@ -30,6 +30,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import providers as P  # noqa: E402
+import modes as M  # noqa: E402
 
 APP_ID = "com.karthi.AdaptiveCommand"
 HERE = Path(__file__).resolve().parent
@@ -75,6 +76,17 @@ GROUPS = [
     ("Calculator", "accent"),
     ("Clipboard", "violet"),
     ("Emoji", "accent"),
+    ("Snippets", "accent"),
+    ("Tasks", "accent"),
+    ("In Files", "cyan"),
+    ("Git", "violet"),
+    ("Time", "muted"),
+    ("Processes", "accent"),
+    ("SSH", "cyan"),
+    ("Branches", "violet"),
+    ("Timer", "accent"),
+    ("Shortcuts", "muted"),
+    ("New Project", "violet"),
     ("Windows", "cyan"),
     ("Applications", "accent"),
     ("Files & Folders", "cyan"),
@@ -96,6 +108,12 @@ class Result:
     action: Optional[Callable] = None
     score: int = 0
     key_hint: str = ""
+    # Text to put in the field instead of running anything: how a mode is entered.
+    fill: str = ""
+    # A second thing to do with the row, on Ctrl+P, that keeps the palette
+    # open (pinning a clipboard entry), and the footer hint that says so.
+    alt: Optional[Callable] = None
+    alt_hint: str = ""
 
 
 @dataclass
@@ -153,6 +171,7 @@ class Palette(Gtk.ApplicationWindow):
         self._debounce = 0
         self._search_serial = 0
         self._file_results = []
+        self._mode_results = []
         self._apps = []
         self._was_active = False
         self._opened_at = time.monotonic()
@@ -275,6 +294,11 @@ class Palette(Gtk.ApplicationWindow):
         spacer.set_hexpand(True)
         footer.append(spacer)
 
+        # What Ctrl+P does on the selected row, when it does anything.
+        self.alt_label = Gtk.Label(label="")
+        self.alt_label.add_css_class("hint")
+        footer.append(self.alt_label)
+
         self.count_label = Gtk.Label(label="")
         self.count_label.add_css_class("hint")
         footer.append(self.count_label)
@@ -290,9 +314,13 @@ class Palette(Gtk.ApplicationWindow):
 
     # -------------------------------------------------------------- keyboard
 
-    def _on_key(self, _controller, keyval, _keycode, _state):
+    def _on_key(self, _controller, keyval, _keycode, state):
         if keyval == Gdk.KEY_Escape:
             self.close()
+            return True
+
+        if keyval in (Gdk.KEY_p, Gdk.KEY_P) and state & Gdk.ModifierType.CONTROL_MASK:
+            self._alt_selected()
             return True
 
         if keyval in (Gdk.KEY_Down, Gdk.KEY_Tab):
@@ -310,6 +338,19 @@ class Palette(Gtk.ApplicationWindow):
             return
 
         self.selected = (self.selected + delta) % len(self.results)
+        self._paint_selection()
+
+    def _alt_selected(self):
+        """Ctrl+P: the selected row's second action, keeping the palette open."""
+        if not self.results or self.results[self.selected].alt is None:
+            return
+        keep = self.selected
+        try:
+            self.results[keep].alt()
+        except Exception as error:  # noqa: BLE001 - surface, never crash the palette
+            print(f"adaptive-command: {self.results[keep].title} failed: {error}")
+        self._refresh()
+        self.selected = min(keep, max(0, len(self.results) - 1))
         self._paint_selection()
 
     def _on_active_changed(self, *_):
@@ -348,6 +389,7 @@ class Palette(Gtk.ApplicationWindow):
         results.extend(self._provide_answers(query))
         results.extend(self._provide_clipboard(query))
         results.extend(self._provide_emoji(query))
+        results.extend(self._provide_modes(query))
         results.extend(self._provide_windows(query))
         results.extend(self._provide_workspaces(query))
         results.extend(self._provide_apps(query))
@@ -357,9 +399,11 @@ class Palette(Gtk.ApplicationWindow):
 
         if query.folded:
             results.extend(self._file_results)
+            results.extend(self._mode_results)
             self._start_file_search(query)
         else:
             self._file_results = []
+            self._mode_results = []
 
         self.results = self._rank(results)
         self.selected = 0
@@ -371,17 +415,41 @@ class Palette(Gtk.ApplicationWindow):
         return results[:MAX_ROWS]
 
     def _start_file_search(self, query):
-        if len(query.folded) < 2 or not shutil.which("plocate"):
+        """Everything too slow for the UI thread: files, and the modes that
+        run git or ripgrep. One worker per keystroke; a stale one is ignored."""
+        if len(query.folded) < 2:
             return
 
         self._search_serial += 1
         serial = self._search_serial
+        mode, rest = M.mode_of(query.raw)
 
         def work():
-            found = self._walk_home(query) + self._plocate(query)
-            GLib.idle_add(self._file_search_done, serial, self._dedupe(found))
+            found = []
+            if mode is None:
+                found = self._walk_home(query)
+                if shutil.which("plocate"):
+                    found += self._fresh_index(query) + self._plocate(query)
+            slow = self._slow_mode_rows(mode, rest)
+            GLib.idle_add(self._file_search_done, serial, self._dedupe(found), slow)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _slow_mode_rows(self, mode, rest):
+        if mode == "git":
+            return M.git_rows(self._projects())
+        if mode == "grep":
+            _pid, _name, root = self._active_project()
+            if not root:
+                return [M.row("No active project", "Searching inside files works on the active project",
+                              "In Files", "text-x-generic-symbolic", score=WEIGHT_ANSWER)]
+            if len(rest) < M.CONTENT_MIN_CHARS:
+                return [M.row("Search inside the project", f"Type at least {M.CONTENT_MIN_CHARS} characters",
+                              "In Files", "text-x-generic-symbolic", score=WEIGHT_ANSWER)]
+            rows = M.content_rows(M.content_search(root, rest), root)
+            return rows or [M.row("Nothing in the project's files matches", root.replace(str(Path.home()), "~"),
+                                  "In Files", "text-x-generic-symbolic", score=WEIGHT_ANSWER)]
+        return []
 
     def _dedupe(self, results):
         """Merge the live and indexed sources, keeping the best score for each
@@ -466,13 +534,20 @@ class Palette(Gtk.ApplicationWindow):
 
         return found
 
-    def _plocate(self, query):
+    def _fresh_index(self, query):
+        """The home index kept fresh by scripts/adaptive-index.sh, if it is
+        there: plocate's system database is rebuilt once a day at best."""
+        database = Path.home() / ".cache/adaptive-desktop/home.plocate.db"
+        return self._plocate(query, database) if database.exists() else []
+
+    def _plocate(self, query, database=None):
         try:
             # Ask for far more than is shown. plocate answers in tens of
             # milliseconds, and a small raw limit would let one crowded folder
             # use up the whole budget before ranking ever runs.
             out = subprocess.run(
-                ["plocate", "-i", "-l", "400", "-b", query.raw],
+                ["plocate", "-i", "-l", "400", "-b"]
+                + (["-d", str(database)] if database else []) + [query.raw],
                 capture_output=True,
                 text=True,
                 timeout=2,
@@ -522,12 +597,16 @@ class Palette(Gtk.ApplicationWindow):
         found.sort(key=lambda r: -r.score)
         return found[: FILE_RESULTS * 4]
 
-    def _file_search_done(self, serial, found):
+    def _file_search_done(self, serial, found, slow_rows=()):
         if serial != self._search_serial:
             return GLib.SOURCE_REMOVE
 
         self._file_results = found
-        merged = [r for r in self.results if r.group != "Files & Folders"] + found
+        self._mode_results = [self._as_result(r) for r in slow_rows]
+        slow_groups = {"Git", "In Files"}
+        merged = [r for r in self.results
+                  if r.group != "Files & Folders" and r.group not in slow_groups]
+        merged += found + self._mode_results
         self.results = self._rank(merged)
         self.selected = min(self.selected, max(0, len(self.results) - 1))
         self._render()
@@ -568,21 +647,31 @@ class Palette(Gtk.ApplicationWindow):
             return [Result(title="Clipboard history is unavailable",
                            subtitle="It lives in the Adaptive shell, which is not answering",
                            group="Clipboard", icon="edit-paste-symbolic", score=WEIGHT_ANSWER)]
-        folded = wanted.casefold()
-        items = [item for item in history if folded in item["text"].casefold()]
         results = []
-        for rank, item in enumerate(items[:CLIPBOARD_RESULTS]):
-            text = item["text"]
-            line = " ".join(text.split())
-            results.append(Result(
-                title=line[:120] + ("…" if len(line) > 120 else ""),
-                subtitle=" · ".join(x for x in (self._ago(item.get("at", 0)),
-                                                 f"{len(text)} characters" if len(text) > 120 else "") if x),
-                group="Clipboard", icon="edit-paste-symbolic", badge="Copy",
-                action=lambda t=text: self._copy(t), score=WEIGHT_ANSWER - rank))
+        for rank, item in enumerate(P.clipboard_entries(history, wanted, CLIPBOARD_RESULTS)):
+            pinned = bool(item.get("pinned"))
+            is_image = item.get("kind") == "image"
+            # An image has no text to hand back, and an entry with an id is
+            # copied by it; older shells without ids still copy the text.
+            if item.get("id"):
+                copy = lambda i=item["id"], t=item.get("text", ""): (  # noqa: E731
+                    P.shell_call("ClipboardCopyItem", "(u)", (i,)) or (t and self._copy(t)))
+            else:
+                copy = lambda t=item.get("text", ""): self._copy(t)  # noqa: E731
+            result = Result(
+                title=item["title"],
+                subtitle=" · ".join(x for x in ("Pinned" if pinned else "", self._ago(item.get("at", 0)),
+                                                 item["detail"]) if x),
+                group="Clipboard",
+                icon="image-x-generic-symbolic" if is_image else "edit-paste-symbolic",
+                badge="Copy", action=copy, score=WEIGHT_ANSWER - rank)
+            if item.get("id"):
+                result.alt = lambda i=item["id"], p=pinned: P.shell_call("ClipboardPin", "(ub)", (i, not p))
+                result.alt_hint = "Ctrl+P unpin" if pinned else "Ctrl+P pin"
+            results.append(result)
         if not results:
             results.append(Result(title="Nothing copied yet" if not wanted else "No match in the clipboard",
-                                  subtitle="Text you copy this session shows up here",
+                                  subtitle="Text and images you copy this session show up here",
                                   group="Clipboard", icon="edit-paste-symbolic", score=WEIGHT_ANSWER))
         return results
 
@@ -638,6 +727,180 @@ class Palette(Gtk.ApplicationWindow):
                     action=lambda i=index: P.shell_call("ActivateWorkspace", "(i)", (i,)),
                     score=score + WEIGHT_WORKSPACE))
         return results
+
+    # ------------------------------------------------------------------ modes
+
+    def _projects(self):
+        try:
+            path = Path.home() / ".config/adaptive-desktop/projects.json"
+            return json.loads(path.read_text(encoding="utf-8")).get("projects", {})
+        except (OSError, ValueError):
+            return {}
+
+    def _project_call(self, method):
+        """One call to the Project Context Service; None if it is not answering."""
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            reply = bus.call_sync(
+                "org.adaptive.ProjectContext", "/org/adaptive/ProjectContext",
+                "org.adaptive.ProjectContext", method, None, None,
+                Gio.DBusCallFlags.NO_AUTO_START, 1500, None)
+            return reply.unpack()
+        except GLib.Error:
+            return None
+
+    def _active_project(self):
+        """(id, name, path); empty strings when no project is active."""
+        return self._project_call("GetActiveProject") or ("", "", "")
+
+    def _as_result(self, data):
+        spec = data.get("action")
+        return Result(
+            title=data["title"], subtitle=data["subtitle"], group=data["group"],
+            icon=data["icon"], badge=data["badge"], score=data["score"],
+            action=(lambda a=spec: self._perform(a)) if spec else None)
+
+    def _provide_modes(self, query):
+        mode, rest = M.mode_of(query.raw)
+        if mode is None or mode in ("git", "grep"):
+            return []  # git and grep run on the worker thread
+        if mode == "snip":
+            rows = M.snippet_rows(rest)
+        elif mode == "todo":
+            rows = M.task_rows(rest, self._active_project()[1])
+        elif mode == "time":
+            reply = self._project_call("GetTimeReport")
+            try:
+                report = json.loads(reply[0]) if reply else None
+            except ValueError:
+                report = None
+            rows = M.time_rows(report)
+        elif mode == "kill":
+            rows = M.process_rows(rest, M.list_processes() if len(rest) >= 2 else [])
+        elif mode == "ssh":
+            try:
+                config = (Path.home() / ".ssh" / "config").read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                config = ""
+            rows = M.ssh_rows(rest, M.parse_ssh_hosts(config))
+        elif mode == "branch":
+            _pid, _name, root = self._active_project()
+            branches, current = M.list_branches(root) if root else ([], "")
+            rows = M.branch_rows(rest, root, branches, current)
+        elif mode == "timer":
+            rows = M.timer_rows(rest)
+        elif mode == "keys":
+            rows = M.shortcut_rows(rest, self._shortcuts())
+        elif mode == "new":
+            rows = M.new_project_rows(rest, M.extras.load_templates(
+                (REPO / "config" / "project-templates", M.extras.USER_TEMPLATES)))
+        else:
+            rows = []
+        return [self._as_result(r) for r in rows]
+
+    def _shortcuts(self):
+        """[(title, accelerator)]: Adaptive's own, then the GNOME ones worth
+        knowing. Read from gsettings, so an edited shortcut shows as it is."""
+        found = []
+        source = Gio.SettingsSchemaSource.get_default()
+
+        def settings(schema):
+            return Gio.Settings.new(schema) if source and source.lookup(schema, True) else None
+
+        media = settings("org.gnome.settings-daemon.plugins.media-keys")
+        if media:
+            for path in media.get_strv("custom-keybindings"):
+                if "/adaptive-" not in path:
+                    continue
+                custom = Gio.Settings.new_with_path(
+                    "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding", path)
+                found.append((custom.get_string("name").replace("Adaptive ", "", 1),
+                              custom.get_string("binding")))
+
+        gnome = (
+            ("org.gnome.shell.keybindings", "toggle-overview", "Overview"),
+            ("org.gnome.shell.keybindings", "toggle-application-view", "Applications"),
+            ("org.gnome.shell.keybindings", "toggle-message-tray", "Notifications (Shade)"),
+            ("org.gnome.shell.keybindings", "show-screenshot-ui", "Screenshot and screen recording"),
+            ("org.gnome.desktop.wm.keybindings", "switch-applications", "Switch applications"),
+            ("org.gnome.desktop.wm.keybindings", "switch-windows", "Switch windows"),
+            ("org.gnome.desktop.wm.keybindings", "close", "Close window"),
+            ("org.gnome.desktop.wm.keybindings", "minimize", "Minimize window"),
+            ("org.gnome.desktop.wm.keybindings", "toggle-maximized", "Maximize or restore window"),
+            ("org.gnome.desktop.wm.keybindings", "activate-window-menu", "Window menu"),
+            ("org.gnome.desktop.wm.keybindings", "switch-to-workspace-left", "Workspace to the left"),
+            ("org.gnome.desktop.wm.keybindings", "switch-to-workspace-right", "Workspace to the right"),
+            ("org.gnome.desktop.wm.keybindings", "move-to-workspace-left", "Move window one workspace left"),
+            ("org.gnome.desktop.wm.keybindings", "move-to-workspace-right", "Move window one workspace right"),
+            ("org.gnome.mutter.keybindings", "switch-monitor", "Switch display mode"),
+            ("org.gnome.settings-daemon.plugins.media-keys", "screensaver", "Lock screen"),
+        )
+        for schema, key, title in gnome:
+            group = settings(schema)
+            if group and group.props.settings_schema.has_key(key):
+                for accel in group.get_strv(key)[:1]:
+                    found.append((title, accel))
+
+        found.append(("Open the dock app in that position", "<Super>1"))
+        return found
+
+    def _perform(self, spec):
+        """Carry out a mode row's action (see modes.py for the forms)."""
+        kind = spec[0]
+        if kind == "copy":
+            self._copy(spec[1])
+        elif kind == "run":
+            subprocess.Popen(spec[1], cwd=spec[2] or str(REPO), start_new_session=True)
+        elif kind == "run-notify":
+            self._run_notify(spec[1], spec[2], spec[3])
+        elif kind == "open":
+            argv = M.editor_argv(spec[1], spec[2])
+            if argv:
+                subprocess.Popen(argv, start_new_session=True)
+            else:
+                self._open_path(spec[1])
+        elif kind == "signal":
+            ok = M.end_process(spec[1], spec[2])
+            self._notify("Asked the process to quit" if ok else "That process had already gone")
+        elif kind == "task-done":
+            M.complete_task(spec[1], spec[2])
+        elif kind == "snippet-save":
+            self._save_snippet(spec[1])
+        elif kind == "snippet-delete":
+            M.delete_snippet(spec[1])
+        elif kind == "timer":
+            subprocess.Popen(M.timer_argv(spec[1], spec[2]), start_new_session=True)
+
+    def _run_notify(self, title, argv, cwd=None):
+        subprocess.Popen([str(REPO / "scripts" / "adaptive-run-notify.py"), title, "--", *argv],
+                         cwd=cwd or str(REPO), start_new_session=True)
+
+    def _notify(self, body):
+        subprocess.Popen(["notify-send", "--app-name=Adaptive Command", "Command", body],
+                         start_new_session=True)
+
+    def _save_snippet(self, name):
+        # The newest clipboard entry, from the shell's history when it is
+        # there, otherwise from the clipboard itself.
+        history = P.shell_json("ClipboardHistory", default=None)
+        if history:
+            error = M.add_snippet(name, history[0].get("text", ""))
+            self._notify(error or f"Saved snippet “{name}”")
+            return
+
+        app = self.get_application()
+        app.hold()  # the window is closing; stay alive for the read
+
+        def done(clipboard, result):
+            try:
+                text = clipboard.read_text_finish(result) or ""
+            except GLib.Error:
+                text = ""
+            error = M.add_snippet(name, text)
+            self._notify(error or f"Saved snippet “{name}”")
+            app.release()
+
+        Gdk.Display.get_default().get_clipboard().read_text_async(None, done)
 
     def _copy(self, text):
         # Through the shell, which owns the clipboard after the palette closes.
@@ -814,13 +1077,51 @@ class Palette(Gtk.ApplicationWindow):
              lambda: self._run(["./scripts/adaptive-quick-note.py"])),
             ("Copy Text from Screen", "Select an area and copy the words in it", "insert-text-symbolic", "",
              lambda: self._in_background("CopyScreenText")),
-            ("Clear Clipboard History", "Forget everything copied this session", "edit-clear-all-symbolic", "",
+            ("Clear Clipboard History", "Forget what was copied, except what is pinned", "edit-clear-all-symbolic", "",
              lambda: self._in_background("ClipboardClear")),
+            ("Annotate a Screenshot", "Select an area, then draw on it", "applets-screenshooter-symbolic", "",
+             lambda: self._run(["./apps/adaptive-annotate/main.py"])),
+            ("Drop-down Terminal", "Show or hide the terminal at the top of the screen", "utilities-terminal-symbolic", "",
+             lambda: self._in_background("Run", "(s)", ("dropdown-terminal",))),
+            ("Send Clipboard to Phone", "To the first paired phone in reach", "phone-symbolic", "",
+             lambda: self._run(["python3", "./shell/adaptive-shell@local/tools/phone_info.py", "clipboard-first", "--notify"])),
+            ("Export Adaptive Settings", "One archive, to move to another machine", "document-send-symbolic", "",
+             lambda: self._run_notify("Export Adaptive settings", ["./scripts/adaptive-backup.py", "export"])),
+            ("Rebuild File Index", "Refresh the index of your home folder now", "view-refresh-symbolic", "",
+             lambda: self._run_notify("File index", ["bash", "-c",
+                                      "./scripts/adaptive-index.sh && ./scripts/adaptive-index.sh --status"])),
             ("Return to Ubuntu", "Log out of the Adaptive session", "system-log-out-symbolic", "",
              lambda: self._run(["gnome-session-quit", "--logout"])),
         ]
 
+        for command in M.user_commands():
+            actions.append((command["title"], command["description"], "system-run-symbolic", "",
+                            lambda c=command: self._run_notify(c["title"], [c["path"]], str(Path.home()))))
+
+        modes = [
+            ("Snippets", "snip ", "Saved text: snip, snip save <name>", "edit-paste-symbolic"),
+            ("Tasks", "todo ", "The project's quick-note inbox as tasks", "checkbox-checked-symbolic"),
+            ("Git Status of All Projects", "git ", "Branches and uncommitted or unpushed work", "emblem-important-symbolic"),
+            ("Project Time", "time ", "Time per project, today and this week", "preferences-system-time-symbolic"),
+            ("Search Inside Project Files", "grep ", "Type /text or grep text", "text-x-generic-symbolic"),
+            ("Switch Git Branch", "branch ", "Branches of the active project", "media-playlist-shuffle-symbolic"),
+            ("Start a Timer", "timer ", "timer 10m tea", "alarm-symbolic"),
+            ("Keyboard Shortcuts", "keys ", "Every Adaptive shortcut", "input-keyboard-symbolic"),
+            ("End a Process", "kill ", "kill <name>", "process-stop-symbolic"),
+            ("SSH to a Host", "ssh ", "Hosts from ~/.ssh/config", "network-server-symbolic"),
+            ("New Project from Template", "new ", "new <template> <folder>", "folder-new-symbolic"),
+        ]
+
         results = []
+        in_mode = M.mode_of(query.raw)[0] is not None
+        for title, prefix, subtitle, icon in modes:
+            # A mode is entered, not run: Enter types its word into the field.
+            score = score_match(query, title, subtitle) if query.folded and not in_mode else 0
+            if score:
+                results.append(Result(
+                    title=title, subtitle=subtitle, group="Actions", icon=icon, badge="Mode",
+                    score=score + WEIGHT_ACTION - 1, key_hint=prefix.strip(), fill=prefix))
+
         for title, subtitle, icon, key, action in actions:
             # With an empty field the palette shows what it can do, like the
             # ACTIONS list in the design.
@@ -860,6 +1161,7 @@ class Palette(Gtk.ApplicationWindow):
             empty.add_css_class("empty")
             self.results_box.append(empty)
             self.count_label.set_text("")
+            self.alt_label.set_text("")
             return
 
         accents = dict(GROUPS)
@@ -945,6 +1247,9 @@ class Palette(Gtk.ApplicationWindow):
         if selected_row is not None:
             self._scroll_into_view(selected_row)
 
+        chosen = self.results[self.selected] if self.selected < len(self.results) else None
+        self.alt_label.set_text(chosen.alt_hint if chosen else "")
+
     def _scroll_into_view(self, row):
         adjustment = self.scroll.get_vadjustment()
         if adjustment is None:
@@ -971,6 +1276,12 @@ class Palette(Gtk.ApplicationWindow):
             self._activate(self.results[self.selected])
 
     def _activate(self, result):
+        if result.fill:
+            self.entry.set_text(result.fill)
+            self.entry.set_position(-1)
+            self.entry.grab_focus_without_selecting()
+            return
+
         self.close()
 
         if result.action is None:
@@ -987,33 +1298,51 @@ class Palette(Gtk.ApplicationWindow):
     def _open_path(self, path):
         Gio.AppInfo.launch_default_for_uri(Path(path).as_uri(), None)
 
-    def reset(self):
-        self.entry.set_text("")
+    def reset(self, query=None):
+        self.entry.set_text(query or "")
         self._file_results = []
+        self._mode_results = []
         self._refresh()
-        self.entry.grab_focus()
+        self.entry.grab_focus_without_selecting()
+        self.entry.set_position(-1)
 
 
 class CommandApp(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+
+    def do_command_line(self, command_line):
+        # "--query todo" opens the palette already in a mode, for the menus
+        # that lead into one (the project menu's Tasks, for instance).
+        arguments = command_line.get_arguments()[1:]
+        query = None
+        if "--query" in arguments and arguments.index("--query") + 1 < len(arguments):
+            query = arguments[arguments.index("--query") + 1]
+        self._open(query)
+        return 0
 
     def do_activate(self):
+        self._open(None)
+
+    def _open(self, query):
         window = self.props.active_window
 
         # Re-triggering the shortcut while it is open should toggle it away,
-        # the way Spotlight does.
+        # the way Spotlight does. Asked for a mode, it switches to it instead.
         if window and window.is_visible():
-            window.close()
+            if query is None:
+                window.close()
+                return
+            window.reset(query)
             return
 
         window = Palette(self)
         window.present()
-        window.reset()
+        window.reset(query)
 
 
 if __name__ == "__main__":
     # Without this the palette reports WM_CLASS "python3", which loses it its
     # icon and makes it invisible to window rules and scripted lookups.
     GLib.set_prgname(APP_ID)
-    CommandApp().run()
+    CommandApp().run(sys.argv)
