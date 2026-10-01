@@ -16,6 +16,39 @@ BUS_NAME = "org.adaptive.ProjectContext"
 OBJECT_PATH = "/org/adaptive/ProjectContext"
 SCHEMA_VERSION = 1
 
+WM_PREFERENCES = "org.gnome.desktop.wm.preferences"
+
+
+def merge_workspace_names(current, owned, wanted):
+    """Name workspaces after the projects on them, without trampling yours.
+
+    current: the workspace-names list as it is now.
+    owned:   {index: name} this service wrote last time.
+    wanted:  {index: name} the projects ask for now.
+
+    A name is only written over an empty slot or one this service wrote
+    itself; a name you typed in Settings (or anywhere else) is left alone, and
+    from then on that slot is yours. A slot whose project has gone is emptied
+    only if it still holds what this service put there. Returns
+    (names, owned) to store.
+    """
+    names = list(current)
+    for index, name in owned.items():
+        if index not in wanted and index < len(names) and names[index] == name:
+            names[index] = ""
+
+    new_owned = {}
+    for index, name in sorted(wanted.items()):
+        while len(names) <= index:
+            names.append("")
+        if names[index] in ("", owned.get(index)):
+            names[index] = name
+            new_owned[index] = name
+
+    while names and not names[-1]:
+        names.pop()
+    return names, new_owned
+
 INTERFACE_XML = """
 <node>
   <interface name="org.adaptive.ProjectContext">
@@ -98,6 +131,7 @@ class ProjectContextService:
         self.projects = {}
 
         self._load_state()
+        self._sync_workspace_names()
 
         self.dbus_node_info = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML)
         self.dbus_connection = None
@@ -209,6 +243,40 @@ class ProjectContextService:
         except Exception as e:
             print(f"Error applying focus preference: {e}")
 
+    def _wanted_workspace_names(self):
+        wanted = {}
+        for project in sorted(self.projects.values(), key=lambda p: p["name"].casefold()):
+            index = project.get("workspace_index", -1)
+            if isinstance(index, int) and index >= 0:
+                wanted[index] = f"{wanted[index]} / {project['name']}" if index in wanted else project["name"]
+        return wanted
+
+    def _sync_workspace_names(self):
+        """Keep GNOME's workspace-names in step with project workspaces."""
+        # Gio.Settings.new() aborts on an unknown schema; look it up first.
+        source = Gio.SettingsSchemaSource.get_default()
+        if not source or not source.lookup(WM_PREFERENCES, True):
+            return
+
+        owned_file = self.config_dir / "workspace-names.json"
+        try:
+            owned = {int(k): v for k, v in json.loads(owned_file.read_text(encoding="utf-8")).items()}
+        except (OSError, ValueError, AttributeError):
+            owned = {}
+
+        try:
+            settings = Gio.Settings.new(WM_PREFERENCES)
+            current = list(settings.get_strv("workspace-names"))
+            names, new_owned = merge_workspace_names(current, owned, self._wanted_workspace_names())
+            if names != current:
+                settings.set_strv("workspace-names", names)
+            if new_owned != owned:
+                self.config_dir.mkdir(parents=True, exist_ok=True)
+                owned_file.write_text(json.dumps({str(k): v for k, v in new_owned.items()}) + "\n",
+                                      encoding="utf-8")
+        except Exception as e:
+            print(f"Error naming workspaces: {e}")
+
     def _save_state(self):
         self.config_dir.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -232,6 +300,7 @@ class ProjectContextService:
                 json.dump(payload, f, indent=2, sort_keys=True)
                 f.write("\n")
             os.replace(tmp_path, self.config_file)
+            self._sync_workspace_names()
         except Exception as e:
             print(f"Error saving projects: {e}")
             if fd is not None:

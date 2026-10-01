@@ -31,6 +31,7 @@ for name in [
     "adaptive-window-fullscreen",
     "adaptive-window-save-project",
     "adaptive-window-restore-project",
+    "adaptive-quick-note",
 ]:
     key = f"{base}/{name}/"
     if key not in values:
@@ -63,6 +64,7 @@ set_binding "adaptive-window-maximize" "Adaptive Maximize Around Dock" "${REPO}/
 set_binding "adaptive-window-fullscreen" "Adaptive Toggle Fullscreen" "${REPO}/scripts/window-cli.py fullscreen" "<Super><Alt>f"
 set_binding "adaptive-window-save-project" "Adaptive Save Project Window Placement" "${REPO}/scripts/window-cli.py save-project" "<Super><Alt>s"
 set_binding "adaptive-window-restore-project" "Adaptive Restore Project Window Placement" "${REPO}/scripts/window-cli.py restore-project" "<Super><Alt>r"
+set_binding "adaptive-quick-note" "Adaptive Quick Note" "${REPO}/scripts/adaptive-quick-note.py" "<Super><Alt>n"
 
 #
 # GNOME's own switch-to-workspace-left/right also list Super+Alt+Left/Right.

@@ -209,7 +209,9 @@ PY
     "wireless_enabled" \
     "set_boolean"
   do
-    if rg -q "$control" "${REPO}/shell/adaptive-shell@local/"*.js; then
+    # The shade's own modules only. The Control Center (controlCenter.js) is
+    # the aggregate menu rebuilt, so these are rightly its business.
+    if rg -q "$control" "${REPO}/shell/adaptive-shell@local/"{shade,telemetry,notifications,sparkline}.js; then
       fail "the shade grew a control GNOME's aggregate menu already owns: ${control}"
     fi
   done

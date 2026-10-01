@@ -124,6 +124,22 @@ def main():
 
         check(B.projects_from_file() == ({}, ""), "missing registry reads as empty")
 
+        check(not B.watchdog_tripped(), "watchdog: no record reads as armed")
+        B.WATCHDOG_STATE.parent.mkdir(parents=True, exist_ok=True)
+        B.WATCHDOG_STATE.write_text('{"starts": [], "tripped": true}', encoding="utf-8")
+        check(B.watchdog_tripped(), "watchdog: a tripped record is shown")
+        B.rearm_watchdog()
+        check(not B.watchdog_tripped(), "watchdog: re-arm clears it")
+        B.WATCHDOG_STATE.write_text("junk", encoding="utf-8")
+        check(not B.watchdog_tripped(), "watchdog: a corrupt record reads as armed")
+
+        check(B.workspace_name_rows(["A"], 3) == [(0, "A"), (1, ""), (2, "")],
+              "workspace names: one row per workspace")
+        check(B.set_workspace_name(["A"], 2, " Mail ") == ["A", "", "Mail"],
+              "workspace names: set pads and trims")
+        check(B.set_workspace_name(["A", "", "Mail"], 2, "") == ["A"],
+              "workspace names: clearing drops trailing blanks")
+
         facts = B.session_facts()
         check("ubuntu_session_entry" in facts, "session-cli.py exposes facts()")
         check(B.recovery_steps() and "gnome-extensions" in B.recovery_steps()[0],

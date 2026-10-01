@@ -318,6 +318,18 @@ class SettingsWindow(Gtk.ApplicationWindow):
             workspaces.row("Workspaces on the primary display only",
                            "Other displays stay put when you switch.", primary)
 
+        if self.wm_prefs:
+            self.names_card = Card(
+                "Workspace names",
+                "A project's workspace is named after it automatically. A name "
+                "typed here is yours and is never replaced.")
+            # Deferred: a save from an entry's own focus-out would otherwise
+            # rebuild the list, destroying that entry mid-signal.
+            for key in ("workspace-names", "num-workspaces"):
+                self.wm_prefs.connect(f"changed::{key}", lambda *_: GLib.idle_add(
+                    lambda: self._refresh_workspace_names() and False))
+            self._refresh_workspace_names()
+
         if not (self.mutter or self.wm_prefs):
             workspaces.row("Workspace settings are unavailable",
                            "GNOME's mutter schemas are not installed.")
@@ -333,7 +345,38 @@ class SettingsWindow(Gtk.ApplicationWindow):
                       "Hides notification banners. They still collect in the Shade.",
                       focus_switch)
 
-        return [self.projects_card, workspaces, focus]
+        cards = [self.projects_card, workspaces]
+        if self.wm_prefs:
+            cards.append(self.names_card)
+        return cards + [focus]
+
+    def _refresh_workspace_names(self):
+        card = self.names_card
+        if any(isinstance(w, Gtk.Entry) and w.has_focus() for w in self._name_entries()):
+            return  # do not rebuild under the user's typing
+        card.clear()
+        names = list(self.wm_prefs.get_strv("workspace-names"))
+        for index, name in B.workspace_name_rows(names, self.wm_prefs.get_int("num-workspaces")):
+            entry = Gtk.Entry(text=name, valign=Gtk.Align.CENTER)
+            entry.set_placeholder_text(f"Workspace {index + 1}")
+            entry.set_width_chars(24)
+            entry.connect("activate", self._save_workspace_name, index)
+            focus = Gtk.EventControllerFocus()
+            focus.connect("leave", lambda _c, e=entry, i=index: self._save_workspace_name(e, i))
+            entry.add_controller(focus)
+            card.row(f"Workspace {index + 1}", "", entry)
+
+    def _name_entries(self):
+        row = self.names_card.body.get_first_child()
+        while row is not None:
+            yield row.get_last_child()
+            row = row.get_next_sibling()
+
+    def _save_workspace_name(self, entry, index):
+        names = list(self.wm_prefs.get_strv("workspace-names"))
+        updated = B.set_workspace_name(names, index, entry.get_text())
+        if updated != names:
+            self.wm_prefs.set_strv("workspace-names", updated)
 
     def _connect_projects(self):
         try:
@@ -625,7 +668,36 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
         self.verify_card = Card("Live verification")
 
-        return [self.repo_card, ubuntu, self.session_card, self.verify_card]
+        self.watchdog_card = Card(
+            "Crash watchdog",
+            "If the Adaptive shell crashes three times within ten minutes, it "
+            "stands down and leaves stock GNOME running until re-enabled here.")
+        self.watchdog_row = self.watchdog_card.row("", "")
+        self.watchdog_button = button("Re-enable", self._rearm_watchdog, "accent")
+        self.watchdog_row.append(self.watchdog_button)
+        self._refresh_watchdog()
+
+        return [self.repo_card, ubuntu, self.session_card, self.watchdog_card, self.verify_card]
+
+    def _refresh_watchdog(self):
+        tripped = B.watchdog_tripped()
+        self.watchdog_row.title.set_text("Stood down" if tripped else "Armed")
+        set_hint(self.watchdog_row,
+                 "The shell is off after repeated crashes. Re-enable, then restart "
+                 "GNOME Shell or log out and in." if tripped
+                 else "The shell is running normally.",
+                 "warn" if tripped else "good")
+        self.watchdog_button.set_visible(tripped)
+
+    def _rearm_watchdog(self):
+        try:
+            B.rearm_watchdog()
+        except OSError as error:
+            self.notify(f"Could not re-enable: {error}")
+            return
+        self._refresh_watchdog()
+        self.watchdog_row.append(button("Restart shell", lambda: run_async(
+            [str(B.REPO / "scripts" / "reload-adaptive-shell.sh"), "--restart-shell"])))
 
     def _refresh_repo(self):
         self.repo = B.repo_state()

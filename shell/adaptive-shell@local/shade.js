@@ -28,6 +28,11 @@ const Me = imports.misc.extensionUtils.getCurrentExtension();
 const Telemetry = Me.imports.telemetry;
 const Sparkline = Me.imports.sparkline;
 const Notifications = Me.imports.notifications;
+const AdaptiveUtil = Me.imports.adaptiveUtil;
+
+// Written by scripts/record-live-verification.py (and Adaptive Settings).
+const VERIFICATION_PATH = GLib.build_filenamev(
+    [GLib.get_home_dir(), 'adaptive-desktop', 'verification', 'live-verification-latest.json']);
 
 // Layout bounds for _fitToMonitor().
 const NOTIFICATION_MIN_HEIGHT = 220;
@@ -762,7 +767,34 @@ var Shade = class Shade {
         this._uptimeChip.add_child(this._uptimeLabel);
         header.add_child(this._uptimeChip);
 
+        // How many of the physical checks have been recorded. A status line,
+        // not a control: they are recorded in Adaptive Settings. Hidden once
+        // every one has passed.
+        this._checksLabel = new St.Label({
+            style_class: 'adaptive-shade-checks',
+            x_expand: true,
+            visible: false,
+        });
+        this._container.add_child(this._checksLabel);
+
         this._updateClock();
+    }
+
+    _updateChecks() {
+        let report = null;
+        try {
+            const [ok, contents] = GLib.file_get_contents(VERIFICATION_PATH);
+            report = ok ? JSON.parse(new TextDecoder().decode(contents)) : null;
+        } catch (e) {
+            report = null;
+        }
+        const summary = AdaptiveUtil.verificationSummary(report);
+        this._checksLabel.text = `${summary.text} · record them in Adaptive Settings`;
+        this._checksLabel.visible = !summary.complete;
+        if (summary.failed)
+            this._checksLabel.add_style_class_name('adaptive-shade-checks-failing');
+        else
+            this._checksLabel.remove_style_class_name('adaptive-shade-checks-failing');
     }
 
     _updateClock() {
@@ -1002,6 +1034,7 @@ var Shade = class Shade {
 
         if (isOpen) {
             this._updateClock();
+            this._updateChecks();
             this._fitToMonitor();
             // Charts start blank rather than resuming a trace from whenever the
             // shade was last open, which would read as history it is not.

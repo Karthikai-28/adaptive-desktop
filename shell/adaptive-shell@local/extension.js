@@ -24,6 +24,11 @@ const ShellActions = Me.imports.shellActions;
 const TaskManager = Me.imports.taskManager;
 const NetworkPanel = Me.imports.networkPanel;
 const MinimizeEffect = Me.imports.minimizeEffect;
+const ClipboardHistory = Me.imports.clipboardHistory;
+const ProjectSnapshots = Me.imports.projectSnapshots;
+const ProjectIndicator = Me.imports.projectIndicator;
+const ScreenText = Me.imports.screenText;
+const Watchdog = Me.imports.watchdog;
 
 // Always-on-display tuning. The drift keeps a static clock from ghosting an
 // OLED; the ambient level is what it settles to once nobody is looking.
@@ -76,6 +81,14 @@ class AdaptiveShellV16 {
         // Adaptive USB panel: plugged-in devices and serial ports, top right.
         this._usbPanel = null;
         this._shellActions = null;
+        // Palette bridge services and the top-bar project hub.
+        this._clipboardHistory = null;
+        this._snapshots = null;
+        this._screenText = null;
+        this._projectIndicator = null;
+        // Crash watchdog: set when this start stood down instead of building.
+        this._watchdogTripped = false;
+        this._healthyId = 0;
         this._taskPanel = null;
         this._networkPanel = null;
         this._projectProxy = null;
@@ -259,6 +272,19 @@ class AdaptiveShellV16 {
     _enableDesktop() {
         this._lockedOnly = false;
 
+        // A desktop that keeps taking the shell down is not built again.
+        // See watchdog.js; Adaptive Settings re-arms it.
+        if (Watchdog.recordStart()) {
+            this._standDown();
+            return;
+        }
+        this._healthyId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_LOW, Watchdog.healthyAfterSeconds(), () => {
+                this._healthyId = 0;
+                Watchdog.markHealthy();
+                return GLib.SOURCE_REMOVE;
+            });
+
         this._hideLegacyPanelItems();
         this._restoreGNOMEClock();
         this._dockConfig = DockExtras.readDockConfig();
@@ -268,7 +294,9 @@ class AdaptiveShellV16 {
         this._installUsbPanel();
         this._installTaskPanel();
         this._installNetworkPanel();
+        this._installPaletteServices();
         this._installShellActions();
+        this._installProjectIndicator();
         this._installRail();
         this._minimizeFx = new MinimizeEffect.GenieMinimize(w => this._dockIconRect(w));
         this._minimizeFx.attach();
@@ -985,6 +1013,19 @@ class AdaptiveShellV16 {
             return;
         }
 
+        // Stood down by the watchdog: nothing was built either.
+        if (this._watchdogTripped) {
+            this._watchdogTripped = false;
+            return;
+        }
+
+        // A clean disable (logout, extension turned off) is not a crash.
+        if (this._healthyId) {
+            GLib.source_remove(this._healthyId);
+            this._healthyId = 0;
+        }
+        Watchdog.markHealthy();
+
         if (this._sessionModeId) {
             Main.sessionMode.disconnect(this._sessionModeId);
             this._sessionModeId = 0;
@@ -1012,9 +1053,21 @@ class AdaptiveShellV16 {
             this._usbPanel = null;
         }
 
+        if (this._projectIndicator) {
+            this._projectIndicator.detach();
+            this._projectIndicator = null;
+        }
+
         if (this._shellActions) {
             this._shellActions.detach();
             this._shellActions = null;
+        }
+
+        for (const name of ['_clipboardHistory', '_snapshots', '_screenText']) {
+            if (this[name]) {
+                this[name].detach();
+                this[name] = null;
+            }
         }
 
         if (this._taskPanel) {
@@ -1303,9 +1356,59 @@ class AdaptiveShellV16 {
 
     // Shell-only actions (app grid, search, Shade, Control Center, workspaces)
     // for the touchpad gesture daemon; see shellActions.js.
+    // What the Command palette reaches through org.adaptive.Shell: clipboard
+    // history, project park/resume, text from the screen. Each is optional;
+    // one failing to start leaves the others working.
+    _installPaletteServices() {
+        const make = (name, build) => {
+            try {
+                const service = build();
+                if (service.attach)
+                    service.attach();
+                return service;
+            } catch (e) {
+                logError(e, `[Adaptive Shell] starting ${name}`);
+                return null;
+            }
+        };
+        this._clipboardHistory = make('clipboard history', () => new ClipboardHistory.ClipboardHistory());
+        this._snapshots = make('project snapshots', () => new ProjectSnapshots.ProjectSnapshots());
+        this._screenText = make('screen text', () => new ScreenText.ScreenText());
+        if (this._controlCenter)
+            this._controlCenter.screenText = this._screenText;
+    }
+
+    // The active project, its git status and its menu, left of the top bar.
+    _installProjectIndicator() {
+        try {
+            this._projectIndicator = new ProjectIndicator.ProjectIndicator(this._snapshots);
+            this._projectIndicator.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the project indicator');
+            this._projectIndicator = null;
+        }
+    }
+
+    // The watchdog tripped: leave stock GNOME in place and say why, once the
+    // message tray is up to show it.
+    _standDown() {
+        this._watchdogTripped = true;
+        log('[Adaptive Shell] watchdog: desktop not built after repeated crashes');
+        GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
+            Main.notify('Adaptive Desktop stood down',
+                'The Adaptive shell crashed several times in a row, so it is off for now. ' +
+                'Re-enable it in Adaptive Settings → Updates & Recovery.');
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     _installShellActions() {
         try {
-            this._shellActions = new ShellActions.ShellActions();
+            this._shellActions = new ShellActions.ShellActions({
+                clipboard: this._clipboardHistory,
+                snapshots: this._snapshots,
+                screenText: this._screenText,
+            });
             this._shellActions.attach();
         } catch (e) {
             logError(e, '[Adaptive Shell] exporting gesture actions');

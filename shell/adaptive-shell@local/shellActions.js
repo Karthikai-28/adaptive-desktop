@@ -15,8 +15,14 @@
 //       -m org.adaptive.Shell.Run app-grid
 //
 // Only the fixed action names below are accepted; nothing is evaluated.
+//
+// The same object is the Command palette's way into the shell, for what only
+// the shell can do or hold: the open windows, switching workspace, the
+// clipboard history (and owning the clipboard after the palette has closed),
+// parking and resuming projects, and reading text off the screen. Results
+// come back as JSON strings.
 
-const { Gio, GLib, Meta } = imports.gi;
+const { Gio, GLib, Meta, Shell } = imports.gi;
 const Main = imports.ui.main;
 
 const PATH = '/org/adaptive/Shell';
@@ -27,12 +33,49 @@ const XML = `
       <arg type="s" name="action" direction="in"/>
       <arg type="b" name="handled" direction="out"/>
     </method>
+    <method name="ListWindows">
+      <arg type="s" name="json" direction="out"/>
+    </method>
+    <method name="ActivateWindow">
+      <arg type="u" name="id" direction="in"/>
+      <arg type="b" name="handled" direction="out"/>
+    </method>
+    <method name="ActivateWorkspace">
+      <arg type="i" name="index" direction="in"/>
+      <arg type="b" name="handled" direction="out"/>
+    </method>
+    <method name="ClipboardHistory">
+      <arg type="s" name="json" direction="out"/>
+    </method>
+    <method name="ClipboardCopy">
+      <arg type="s" name="text" direction="in"/>
+      <arg type="b" name="handled" direction="out"/>
+    </method>
+    <method name="ClipboardClear">
+      <arg type="b" name="handled" direction="out"/>
+    </method>
+    <method name="ParkProject">
+      <arg type="s" name="id" direction="in"/>
+      <arg type="s" name="json" direction="out"/>
+    </method>
+    <method name="ResumeProject">
+      <arg type="s" name="id" direction="in"/>
+      <arg type="s" name="json" direction="out"/>
+    </method>
+    <method name="CopyScreenText">
+      <arg type="b" name="handled" direction="out"/>
+    </method>
   </interface>
 </node>`;
 
 var ShellActions = class ShellActions {
-    constructor() {
+    // services: { clipboard, snapshots, screenText }, any of which may be null
+    // if it failed to start; its methods then answer as unavailable.
+    constructor(services = {}) {
         this._export = null;
+        this._clipboard = services.clipboard || null;
+        this._snapshots = services.snapshots || null;
+        this._screenText = services.screenText || null;
     }
 
     attach() {
@@ -71,6 +114,89 @@ var ShellActions = class ShellActions {
         }
         return true;
     }
+
+    // ------------------------------------------------------ palette bridge
+
+    ListWindows() {
+        const tracker = Shell.WindowTracker.get_default();
+        const focused = global.display.focus_window;
+        const windows = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null)
+            .filter(w => !w.is_skip_taskbar())
+            .map(w => {
+                const app = tracker.get_window_app(w);
+                const workspace = w.get_workspace();
+                const index = workspace ? workspace.index() : -1;
+                return {
+                    id: w.get_stable_sequence(),
+                    title: w.get_title() || '',
+                    app: app ? app.get_id() : '',
+                    appName: app ? app.get_name() : (w.get_wm_class() || ''),
+                    workspace: index,
+                    workspaceName: index >= 0 ? Meta.prefs_get_workspace_name(index) : '',
+                    focused: w === focused,
+                    minimized: w.minimized,
+                };
+            });
+        return JSON.stringify(windows);
+    }
+
+    ActivateWindow(id) {
+        const window = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null)
+            .find(w => w.get_stable_sequence() === id);
+        if (!window)
+            return false;
+        Main.activateWindow(window);
+        return true;
+    }
+
+    ActivateWorkspace(index) {
+        const workspace = global.workspace_manager.get_workspace_by_index(index);
+        if (!workspace)
+            return false;
+        workspace.activate(global.get_current_time());
+        return true;
+    }
+
+    ClipboardHistory() {
+        return JSON.stringify(this._clipboard ? this._clipboard.history() : []);
+    }
+
+    ClipboardCopy(text) {
+        if (this._clipboard)
+            return this._clipboard.copy(text);
+        return false;
+    }
+
+    ClipboardClear() {
+        if (!this._clipboard)
+            return false;
+        this._clipboard.clear();
+        return true;
+    }
+
+    ParkProjectAsync([id], invocation) {
+        this._snapshotCall(this._snapshots ? this._snapshots.park(id) : null, invocation);
+    }
+
+    ResumeProjectAsync([id], invocation) {
+        this._snapshotCall(this._snapshots ? this._snapshots.resume(id) : null, invocation);
+    }
+
+    _snapshotCall(promise, invocation) {
+        const reply = result => invocation.return_value(
+            new GLib.Variant('(s)', [JSON.stringify(result)]));
+        if (!promise) {
+            reply({ ok: false, message: 'Project snapshots are unavailable' });
+            return;
+        }
+        promise.then(reply, e => reply({ ok: false, message: e.message }));
+    }
+
+    CopyScreenText() {
+        return this._screenText ? this._screenText.start() : false;
+    }
+
+    // --------------------------------------------------------- gestures
 
     _closeMenus() {
         Main.panel.statusArea.dateMenu?.menu.close();

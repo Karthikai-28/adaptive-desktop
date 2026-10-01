@@ -35,6 +35,12 @@ if [[ -n "$newest_source" ]]; then
 
     if [[ "$RESTART_SHELL" -eq 1 && "${XDG_SESSION_TYPE:-}" == "x11" ]]; then
         echo "Restarting GNOME Shell (X11, windows survive) ..."
+        # A planned restart is not a crash: clear the watchdog's record so
+        # development restarts never count towards standing the shell down.
+        watchdog="${XDG_CACHE_HOME:-$HOME/.cache}/adaptive-desktop/shell-watchdog.json"
+        if [[ -f "$watchdog" ]] && ! grep -q '"tripped":true' "$watchdog"; then
+            printf '{"starts":[],"tripped":false}\n' > "$watchdog"
+        fi
         killall -3 gnome-shell
         sleep 8
         gnome-extensions info "$UUID" | sed -n '1,30p'

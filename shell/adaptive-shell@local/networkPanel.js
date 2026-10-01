@@ -10,6 +10,9 @@
 // few seconds. The public IP is the one thing that asks an outside service,
 // so it is only fetched when its button is pressed. Clicking any value or
 // device copies its address.
+//
+// Paired phones (KDE Connect or GSConnect) are listed too, with their battery
+// and Ring / Send file; tools/phone_info.py asks the session bus.
 
 /* exported NetworkPanel */
 
@@ -22,6 +25,7 @@ const CC = Me.imports.controlCenter;
 
 const HELPER = Me.dir.get_child('tools').get_child('network_info.py').get_path();
 const SSH_HELPER = Me.dir.get_child('tools').get_child('ssh_connect.py').get_path();
+const PHONE_HELPER = Me.dir.get_child('tools').get_child('phone_info.py').get_path();
 const RESCAN_AFTER_S = 60;
 const LIST_MAX_HEIGHT = 640;
 const COPIED_MS = 1100;
@@ -62,6 +66,9 @@ var NetworkPanel = class NetworkPanel {
         this._publicBusy = false;
         // The device being logged in to: { ip, user, password, busy, form, error }.
         this._ssh = null;
+        // { backend, devices } from phone_info.py, and a per-phone status line.
+        this._phones = null;
+        this._phoneNote = {};
     }
 
     attach() {
@@ -118,6 +125,7 @@ var NetworkPanel = class NetworkPanel {
             if (!open)
                 return;
             this._loadInfo();
+            this._loadPhones();
             if (GLib.get_monotonic_time() / 1e6 - this._scannedAt > RESCAN_AFTER_S)
                 this._runScan();
             this._render();
@@ -145,9 +153,9 @@ var NetworkPanel = class NetworkPanel {
 
     // --------------------------------------------------------------- data
 
-    _helper(command, done) {
+    _helper(command, done, script = HELPER, extra = []) {
         try {
-            const proc = Gio.Subprocess.new(['/usr/bin/python3', HELPER, command],
+            const proc = Gio.Subprocess.new(['/usr/bin/python3', script, command, ...extra],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
             proc.communicate_utf8_async(null, null, (p, result) => {
                 let data = null;
@@ -171,6 +179,53 @@ var NetworkPanel = class NetworkPanel {
             this._info = data;
             this._render();
         });
+    }
+
+    _loadPhones() {
+        this._helper('list', data => {
+            this._phones = data;
+            this._render();
+        }, PHONE_HELPER);
+    }
+
+    _phoneAction(command, phone) {
+        this._phoneNote[phone.id] = command === 'ring' ? 'Ringing…' : 'Choosing a file…';
+        if (command === 'send')
+            this._button.menu.close();
+        this._render();
+        this._helper(command, reply => {
+            const ok = reply && reply.ok;
+            this._phoneNote[phone.id] = ok
+                ? (command === 'ring' ? 'Rang' : `Sent ${reply.sent || ''}`.trim())
+                : (reply && reply.error === 'cancelled' ? '' : 'Did not work');
+            this._render();
+        }, PHONE_HELPER, [this._phones.backend, phone.id]);
+    }
+
+    _phoneRows() {
+        const phones = this._phones;
+        if (!phones || !phones.backend || !phones.devices.length)
+            return [];
+        const rows = [CC.makeHeading(
+            `Phones · ${phones.backend === 'kdeconnect' ? 'KDE Connect' : 'GSConnect'}`)];
+        for (const phone of phones.devices) {
+            const details = [phone.reachable ? 'Connected' : 'Not in reach'];
+            if (phone.battery !== null)
+                details.push(`${phone.battery}%${phone.charging ? ' charging' : ''}`);
+            if (this._phoneNote[phone.id])
+                details.push(this._phoneNote[phone.id]);
+            rows.push(CC.makeRow({
+                icon: phone.type === 'tablet' ? 'computer-apple-ipad-symbolic' : 'phone-symbolic',
+                title: phone.name,
+                subtitle: details.join(' · '),
+                active: phone.reachable,
+                actions: phone.reachable ? [
+                    { label: 'Ring', quiet: true, onClick: () => this._phoneAction('ring', phone) },
+                    { label: 'Send file', quiet: true, onClick: () => this._phoneAction('send', phone) },
+                ] : null,
+            }));
+        }
+        return rows;
     }
 
     _runScan() {
@@ -327,6 +382,9 @@ var NetworkPanel = class NetworkPanel {
         } else {
             this._list.add_child(this._facts(info));
         }
+
+        for (const row of this._phoneRows())
+            this._list.add_child(row);
 
         this._list.add_child(this._devicesHeading(network, devices.length));
         if (!this._scan && this._scanning) {

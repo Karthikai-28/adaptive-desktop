@@ -81,6 +81,36 @@ CHECKS = [
         "prompt": "After attach/detach of an external monitor, does the desktop remain usable?",
     },
     {
+        "id": "clipboard_history",
+        "backlog": "Clipboard history in the Command palette.",
+        "prompt": "Copy two snippets, type \"clip\" in the palette (Alt+Space): are both listed, and does Enter copy one back?",
+    },
+    {
+        "id": "project_park_resume",
+        "backlog": "Project snapshots: park and resume.",
+        "prompt": "From the project menu in the top bar, Park then Resume: do the windows close and come back in place?",
+    },
+    {
+        "id": "project_indicator",
+        "backlog": "Active project and git status in the top bar.",
+        "prompt": "Is the active project shown top left with its branch, and does the ± count change after editing a file?",
+    },
+    {
+        "id": "screen_text",
+        "backlog": "Copy text from screen.",
+        "prompt": "With tesseract-ocr installed, does Control Center > Copy Text from Screen put the selected words on the clipboard?",
+    },
+    {
+        "id": "phone_link",
+        "backlog": "Phones in the Network panel.",
+        "prompt": "With KDE Connect or GSConnect paired, does the Network panel list the phone, and do Ring and Send file work?",
+    },
+    {
+        "id": "watchdog",
+        "backlog": "Crash watchdog.",
+        "prompt": "After a normal day of use, does Adaptive Settings show the watchdog as Armed (never stood down by accident)?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",
@@ -144,6 +174,8 @@ def record_result(check_id, result, note=""):
         "backlog": known[check_id]["backlog"],
     }
     report["updated_at"] = int(time.time())
+    # The Shade shows "N of total"; it cannot read CHECKS itself.
+    report["total"] = len(CHECKS)
     return write_report(report)
 
 

@@ -38,7 +38,7 @@ for path in sys.argv[1:]:
 
     # Method definitions: `name(args) {` at class-body indentation, plus the
     # `var X = class ... { name() {` forms these modules use.
-    defined = set(re.findall(r"^\s{4}(?:\*\s*)?([A-Za-z_]\w*)\s*\([^)]*\)\s*\{",
+    defined = set(re.findall(r"^\s{4}(?:async\s+)?(?:\*\s*)?([A-Za-z_]\w*)\s*\([^)]*\)\s*\{",
                              source, re.M))
     defined |= set(re.findall(r"^\s{4}(?:get|set)\s+([A-Za-z_]\w*)\s*\(",
                               source, re.M))

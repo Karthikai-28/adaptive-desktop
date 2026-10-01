@@ -2542,3 +2542,44 @@
     color: #8E8E93;
     font-size: 11px;
 }
+
+/* ------------------------------------------------------------------
+ * Project indicator (projectIndicator.js): the active project, left of
+ * the top bar, with its branch and uncommitted count.
+ * ------------------------------------------------------------------ */
+.adaptive-project-box {
+    spacing: 0;
+}
+
+.adaptive-project-name {
+    font-weight: 600;
+}
+
+.adaptive-project-git {
+    color: rgba(245, 245, 247, 0.62);
+    font-feature-settings: "tnum";
+}
+
+.adaptive-project-git-dirty {
+    color: #FF9F0A;
+}
+
+.adaptive-project-path {
+    color: rgba(245, 245, 247, 0.62);
+    font-size: 12px;
+}
+
+/* Shade: physical checks still to record (verification summary). */
+.adaptive-shade-checks {
+    margin: 2px 0 8px 0;
+    padding: 6px 11px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.05);
+    color: rgba(245, 245, 247, 0.72);
+    font-size: 12px;
+}
+
+.adaptive-shade-checks-failing {
+    background-color: rgba(255, 69, 58, 0.12);
+    color: #FF453A;
+}

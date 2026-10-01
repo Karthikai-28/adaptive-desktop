@@ -373,19 +373,80 @@ The token-driven baseline is built and applied. Exact frame matching is blocked
 on `design/figma-exports/`, which still contains only its README — see §12 of
 the handoff: do not mark the Figma-skin items complete without the exports.
 
+## Milestone 15 — Daily-use features
+
+Code complete and checked here without a display (`verify-shell-helpers.js`,
+`verify-feature-logic.py`, `verify-adaptive-settings.py`, all in the stability
+suite). The GTK parts (palette, quick note, Settings) were also driven under
+Xvfb, and the palette against a stand-in that exports the shell's exact D-Bus
+interface. GNOME Shell 42 itself cannot run in that environment, so every
+shell-side item is 🔬 until clicked through live; each has a check in
+`record-live-verification.py` (and so in Settings and the Shade).
+
+- 🔬 **Shell bridge.** `org.adaptive.Shell` (shellActions.js), which already
+  served the gesture daemon, now also lists and activates windows, switches
+  workspace, serves and sets the clipboard history, parks and resumes
+  projects, and starts screen text. Results are JSON; nothing passed in is
+  evaluated.
+- 🔬 **Clipboard history** (`clipboardHistory.js`). Text only, newest first,
+  50 entries, memory only: never written to disk, gone at logout. Skips what
+  password managers mark secret and anything copied while locked. Palette:
+  type `clip` or `clip <text>`; "Clear Clipboard History" forgets it.
+- 🔬 **Project park / resume** (`projectSnapshots.js`). Parks every window on
+  the project's workspace to `~/.config/adaptive-desktop/snapshots/<id>.json`
+  and closes them politely. Windows with no app to relaunch are left open, never
+  lost. Resume relaunches terminals in the project folder, Files and editors
+  on the folder, everything else plain, and puts each window back. From the
+  top-bar project menu or the palette.
+- 🔬 **Project in the top bar** (`projectIndicator.js`). The active project
+  with live git status (`main ±3 ↑1 ↓2`), and a menu: terminal, Files, quick
+  note, all projects, park/resume, project settings. The backlog's old
+  `PROJECT · NONE` label no longer existed in code; this replaces it.
+- ✅ **Quick note** (`scripts/adaptive-quick-note.py`, Super+Alt+N). One line
+  into `notes/<project>/Inbox.md`, the Projects app's notes folder.
+- ✅ **Palette answers** (`apps/adaptive-command/providers.py`). Calculator
+  (parsed, never `eval`'d, exponents bounded), unit conversion, `:emoji`,
+  open windows by title, named workspaces, plus actions for park/resume,
+  quick note, screen text and clearing the clipboard.
+- ✅ **Named workspaces.** The Project Context Service names a project's
+  workspace after it; a name you type (Settings → Workspace names) is never
+  replaced, and a slot is emptied only if it still holds the service's name.
+- 🔬 **Battery health** in the Control Center's power dropdown: wear %,
+  cycles, and the charge limit if the firmware sets one.
+- 🔬 **Copy text from screen** (`screenText.js`): area select, the shell's
+  own screenshot, `tesseract` locally. Needs `sudo apt install tesseract-ocr`.
+- 🔬 **Phones** in the Network panel (`tools/phone_info.py`): KDE Connect or
+  GSConnect devices, battery (KDE Connect), Ring and Send file.
+- 🔬 **Crash watchdog** (`watchdog.js`). Three desktop starts in ten minutes
+  without five minutes of uptime and the extension stands down to stock GNOME
+  with a notification. Clean disables and `reload-adaptive-shell.sh` restarts
+  never count. Settings → Updates & Recovery shows it and re-arms it.
+- ✅ **Physical checks in the Shade.** A status line, not a control:
+  "N of M physical checks done", hidden once all pass.
+- ✅ Per-app volume was proposed but already existed (Control Center → Sound
+  → Apps); nothing was added.
+- ✅ `verify-live-readiness.sh`'s "the shade holds no controls" check scanned
+  every module, so it had failed since the Control Center landed. It now
+  scans the shade's own modules, which is what it protects.
+
 ## Immediate next work
 
 1. Reinstall the session wrapper so `XDG_DATA_DIRS` takes effect:
    `./scripts/install-adaptive-session.sh` (asks for sudo), then log out and in.
 2. Export the Figma frames into `design/figma-exports/`, then build
    `theme/Adaptive`.
-3. `./scripts/install-adaptive-settings.sh`, restart the Project Context
+3. `./scripts/sync-shell.sh && ./scripts/reload-adaptive-shell.sh --restart-shell`
+   and `./scripts/install-keybindings.sh` (Super+Alt+N), then work through
+   the six new checks in Settings → Live verification. Optional extras:
+   `sudo apt install tesseract-ocr` (screen text), KDE Connect or GSConnect
+   (phones).
+4. `./scripts/install-adaptive-settings.sh`, restart the Project Context
    Service (or log out and in) so it applies project focus profiles, then click
    through all three Adaptive Settings sections. Record the physical checks
    from its Live verification list as you do the rest of this list.
-4. Type a project name in the overview and confirm results appear; the
+5. Type a project name in the overview and confirm results appear; the
    provider itself answers `GetInitialResultSet` and passes `should_show()`.
-5. Verify audio output switching — five sinks are present on this machine,
+6. Verify audio output switching — five sinks are present on this machine,
    so the submenu can finally be exercised.
 
 ## Known live-only traps

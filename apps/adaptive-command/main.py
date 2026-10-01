@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -26,6 +27,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import providers as P  # noqa: E402
 
 APP_ID = "com.karthi.AdaptiveCommand"
 HERE = Path(__file__).resolve().parent
@@ -50,6 +54,14 @@ WEIGHT_SETTINGS = 40
 WEIGHT_PROJECT = 35
 WEIGHT_ACTION = 30
 FILE_SCALE = 0.6
+# An answer to the question typed (a sum, a conversion) or an explicit mode
+# (":" for emoji, "clip" for the clipboard) is what was asked for, so it
+# outranks every ordinary match.
+WEIGHT_ANSWER = 300
+WEIGHT_WINDOW = 42
+WEIGHT_WORKSPACE = 25
+WINDOW_RESULTS = 6
+CLIPBOARD_RESULTS = 10
 
 # Machine-owned trees. Matches here are real, but they are almost never what
 # someone typing into a desktop search is reaching for.
@@ -60,11 +72,16 @@ SYSTEM_TREES = (
 
 # Section order, and the accent each one carries on its left edge.
 GROUPS = [
+    ("Calculator", "accent"),
+    ("Clipboard", "violet"),
+    ("Emoji", "accent"),
+    ("Windows", "cyan"),
     ("Applications", "accent"),
     ("Files & Folders", "cyan"),
     ("Projects", "violet"),
     ("Settings", "muted"),
     ("Actions", "accent"),
+    ("Workspaces", "muted"),
 ]
 
 
@@ -328,6 +345,11 @@ class Palette(Gtk.ApplicationWindow):
         query = Query.make(self.entry.get_text() if hasattr(self, "entry") else "")
 
         results = []
+        results.extend(self._provide_answers(query))
+        results.extend(self._provide_clipboard(query))
+        results.extend(self._provide_emoji(query))
+        results.extend(self._provide_windows(query))
+        results.extend(self._provide_workspaces(query))
         results.extend(self._provide_apps(query))
         results.extend(self._provide_projects(query))
         results.extend(self._provide_settings(query))
@@ -518,6 +540,125 @@ class Palette(Gtk.ApplicationWindow):
             if app.should_show():
                 self._apps.append(app)
 
+    # ----------------------------------------- answers, shell-backed results
+
+    def _provide_answers(self, query):
+        results = []
+        value = P.calculate(query.raw)
+        if value is not None:
+            results.append(Result(
+                title=f"= {value}", subtitle="Enter copies the result", group="Calculator",
+                icon="accessories-calculator-symbolic", badge="Copy",
+                action=lambda v=value: self._copy(v), score=WEIGHT_ANSWER))
+        converted = P.convert(query.raw)
+        if converted is not None:
+            answer = converted.split(" = ", 1)[1].split(" ")[0]
+            results.append(Result(
+                title=converted, subtitle="Enter copies the number", group="Calculator",
+                icon="accessories-calculator-symbolic", badge="Copy",
+                action=lambda v=answer: self._copy(v), score=WEIGHT_ANSWER))
+        return results
+
+    def _provide_clipboard(self, query):
+        wanted = P.clipboard_query(query.raw)
+        if wanted is None:
+            return []
+        history = P.shell_json("ClipboardHistory", default=None)
+        if history is None:
+            return [Result(title="Clipboard history is unavailable",
+                           subtitle="It lives in the Adaptive shell, which is not answering",
+                           group="Clipboard", icon="edit-paste-symbolic", score=WEIGHT_ANSWER)]
+        folded = wanted.casefold()
+        items = [item for item in history if folded in item["text"].casefold()]
+        results = []
+        for rank, item in enumerate(items[:CLIPBOARD_RESULTS]):
+            text = item["text"]
+            line = " ".join(text.split())
+            results.append(Result(
+                title=line[:120] + ("…" if len(line) > 120 else ""),
+                subtitle=" · ".join(x for x in (self._ago(item.get("at", 0)),
+                                                 f"{len(text)} characters" if len(text) > 120 else "") if x),
+                group="Clipboard", icon="edit-paste-symbolic", badge="Copy",
+                action=lambda t=text: self._copy(t), score=WEIGHT_ANSWER - rank))
+        if not results:
+            results.append(Result(title="Nothing copied yet" if not wanted else "No match in the clipboard",
+                                  subtitle="Text you copy this session shows up here",
+                                  group="Clipboard", icon="edit-paste-symbolic", score=WEIGHT_ANSWER))
+        return results
+
+    def _provide_emoji(self, query):
+        return [
+            Result(title=f"{char}  {name}", subtitle="Enter copies it", group="Emoji",
+                   icon="face-smile-symbolic", badge="Copy",
+                   action=lambda c=char: self._copy(c), score=WEIGHT_ANSWER - rank)
+            for rank, (char, name) in enumerate(P.emoji(query.raw))
+        ]
+
+    def _provide_windows(self, query):
+        if len(query.folded) < 2 or P.clipboard_query(query.raw) is not None or query.raw.startswith(":"):
+            return []
+        windows = P.match_windows(P.shell_json("ListWindows", default=[]), query.raw)
+        results = []
+        for window in windows[:WINDOW_RESULTS]:
+            where = window.get("workspaceName") or (
+                f"Workspace {window['workspace'] + 1}" if window.get("workspace", -1) >= 0 else "")
+            subtitle = " · ".join(x for x in (window.get("appName", ""), where,
+                                               "minimized" if window.get("minimized") else "") if x)
+            gicon = None
+            if window.get("app"):
+                try:
+                    info = Gio.DesktopAppInfo.new(window["app"])
+                    gicon = info.get_icon() if info else None
+                except TypeError:
+                    gicon = None
+            results.append(Result(
+                title=window.get("title") or window.get("appName", "Window"), subtitle=subtitle,
+                group="Windows", gicon=gicon, icon="focus-windows-symbolic", badge="Window",
+                action=lambda i=window["id"]: P.shell_call("ActivateWindow", "(u)", (i,)),
+                score=score_match(query, window.get("title", ""), window.get("appName", "")) + WEIGHT_WINDOW))
+        return results
+
+    def _provide_workspaces(self, query):
+        if len(query.folded) < 2:
+            return []
+        try:
+            source = Gio.SettingsSchemaSource.get_default()
+            if not source or not source.lookup("org.gnome.desktop.wm.preferences", True):
+                return []
+            names = Gio.Settings.new("org.gnome.desktop.wm.preferences").get_strv("workspace-names")
+        except GLib.Error:
+            return []
+        results = []
+        for index, name in enumerate(names):
+            score = score_match(query, name, "workspace") if name else 0
+            if score:
+                results.append(Result(
+                    title=f"Go to {name}", subtitle=f"Workspace {index + 1}", group="Workspaces",
+                    icon="view-grid-symbolic", badge="Workspace",
+                    action=lambda i=index: P.shell_call("ActivateWorkspace", "(i)", (i,)),
+                    score=score + WEIGHT_WORKSPACE))
+        return results
+
+    def _copy(self, text):
+        # Through the shell, which owns the clipboard after the palette closes.
+        if P.shell_call("ClipboardCopy", "(s)", (text,)) is None:
+            clipboard = Gdk.Display.get_default().get_clipboard()
+            clipboard.set_content(Gdk.ContentProvider.new_for_value(text))
+
+    def _in_background(self, method, signature=None, args=None):
+        threading.Thread(target=P.shell_call, args=(method, signature, args, 15000),
+                         daemon=True).start()
+
+    @staticmethod
+    def _ago(stamp):
+        if not stamp:
+            return ""
+        delta = max(0, int(time.time()) - int(stamp))
+        for size, unit in ((86400, "d"), (3600, "h"), (60, "min")):
+            if delta >= size:
+                return f"{delta // size} {unit} ago"
+        return "just now"
+
     def _provide_apps(self, query):
         if not query.folded:
             return []
@@ -665,6 +806,16 @@ class Palette(Gtk.ApplicationWindow):
              lambda: self._run(["./scripts/window-cli.py", "save-project"])),
             ("Restore Window Placement", "Restore this project's layout", "view-restore-symbolic", "",
              lambda: self._run(["./scripts/window-cli.py", "restore-project"])),
+            ("Park Project", "Save and close the active project's windows", "media-playback-pause-symbolic", "",
+             lambda: self._in_background("ParkProject", "(s)", ("",))),
+            ("Resume Project", "Reopen the active project's parked windows", "media-playback-start-symbolic", "",
+             lambda: self._in_background("ResumeProject", "(s)", ("",))),
+            ("Quick Note", "One line into the project's inbox", "document-edit-symbolic", "",
+             lambda: self._run(["./scripts/adaptive-quick-note.py"])),
+            ("Copy Text from Screen", "Select an area and copy the words in it", "insert-text-symbolic", "",
+             lambda: self._in_background("CopyScreenText")),
+            ("Clear Clipboard History", "Forget everything copied this session", "edit-clear-all-symbolic", "",
+             lambda: self._in_background("ClipboardClear")),
             ("Return to Ubuntu", "Log out of the Adaptive session", "system-log-out-symbolic", "",
              lambda: self._run(["gnome-session-quit", "--logout"])),
         ]

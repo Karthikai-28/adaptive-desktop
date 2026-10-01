@@ -30,6 +30,43 @@ const Rfkill = imports.ui.status.rfkill;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const QrCode = Me.imports.qrcode;
+const AdaptiveUtil = Me.imports.adaptiveUtil;
+
+const BATTERY_ATTRS = [
+    'energy_full', 'energy_full_design', 'charge_full', 'charge_full_design',
+    'cycle_count', 'charge_control_end_threshold',
+];
+
+// The first battery's health attributes as strings; {} without a battery.
+// Small sysfs reads, made only when the power dropdown syncs.
+function readBattery() {
+    const values = {};
+    try {
+        const dir = Gio.File.new_for_path('/sys/class/power_supply');
+        const children = dir.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+        let info;
+        let battery = null;
+        while (!battery && (info = children.next_file(null))) {
+            if (/^BAT/.test(info.get_name()))
+                battery = dir.get_child(info.get_name());
+        }
+        children.close(null);
+        if (!battery)
+            return values;
+        for (const attr of BATTERY_ATTRS) {
+            try {
+                const [ok, bytes] = GLib.file_get_contents(battery.get_child(attr).get_path());
+                if (ok)
+                    values[attr] = new TextDecoder().decode(bytes).trim();
+            } catch (e) {
+                // Not every battery reports every attribute.
+            }
+        }
+    } catch (e) {
+        logError(e, '[Adaptive Control Center] reading battery health');
+    }
+    return values;
+}
 
 // NetworkManager is optional at build time in GNOME; without it the Wi-Fi
 // tile just reports itself unavailable.
@@ -595,6 +632,8 @@ var ControlCenter = class ControlCenter {
         this._btScan = { timer: 0, active: false };
         this._btTimers = new Set();
         this._attached = false;
+        // screenText.js, handed over by the extension after it starts.
+        this.screenText = null;
     }
 
     // ------------------------------------------------------------- attach
@@ -835,6 +874,8 @@ var ControlCenter = class ControlCenter {
 
         header.add_child(makeRoundButton('camera-photo-symbolic', 'Screenshot',
             () => this._screenshot()));
+        header.add_child(makeRoundButton('insert-text-symbolic', 'Copy Text from Screen',
+            () => this._copyScreenText()));
         this._recordButton = makeRoundButton('media-record-symbolic', 'Record Screen',
             () => this._record(), 'adaptive-cc-record-button');
         header.add_child(this._recordButton);
@@ -1477,6 +1518,15 @@ var ControlCenter = class ControlCenter {
         } catch (e) {
             logError(e, '[Adaptive Control Center] screenshot');
         }
+    }
+
+    // Set by the extension once the screen text service is up (screenText.js).
+    _copyScreenText() {
+        this._closeMenu();
+        if (this.screenText)
+            this.screenText.start();
+        else
+            Main.notify('Copy text from screen', 'Text recognition is not available');
     }
 
     _launchSettingsApp() {
@@ -2844,16 +2894,18 @@ var ControlCenter = class ControlCenter {
     _syncPowerPage() {
         const page = this._pages.power;
         const proxy = this._profilesProxy();
+        const health = AdaptiveUtil.batteryHealth(readBattery());
 
-        if (!proxy) {
+        if (!proxy && !health) {
             this._fillPage(page, [], 'Power profiles are not available on this machine.');
             return;
         }
 
-        const available = (proxy.Profiles || [])
+        const available = proxy ? (proxy.Profiles || [])
             .map(p => p.Profile.unpack())
-            .filter(p => PROFILES[p]);
-        if (this._unchanged(page, `${available.join(',')}|${proxy.ActiveProfile}`, false))
+            .filter(p => PROFILES[p]) : [];
+        const active = proxy ? proxy.ActiveProfile : '';
+        if (this._unchanged(page, `${available.join(',')}|${active}|${JSON.stringify(health)}`, false))
             return;
         const order = ['performance', 'balanced', 'power-saver'];
         available.sort((a, b) => order.indexOf(a) - order.indexOf(b));
@@ -2871,7 +2923,27 @@ var ControlCenter = class ControlCenter {
             });
         });
 
-        this._fillPage(page, rows);
+        if (health) {
+            rows.push(makeHeading('Battery'));
+            let detail = `Holds ${health.full.toFixed(1)} of ${health.design.toFixed(1)} ${health.unit} when full`;
+            if (health.cycles)
+                detail += ` · ${health.cycles} cycles`;
+            rows.push(makeRow({
+                icon: health.healthPct < 80 ? 'battery-caution-symbolic' : 'battery-good-symbolic',
+                title: `Battery health ${health.healthPct}%`,
+                subtitle: detail,
+                alert: health.healthPct < 80,
+            }));
+            if (health.limit) {
+                rows.push(makeRow({
+                    icon: 'battery-full-charging-symbolic',
+                    title: 'Charge limit',
+                    subtitle: `Stops charging at ${health.limit}% to slow wear`,
+                }));
+            }
+        }
+
+        this._fillPage(page, rows, proxy ? '' : 'Power profiles are not available on this machine.');
     }
 
     // --- Sound output

@@ -83,6 +83,12 @@ recovery) installs into the app grid with:
 ./scripts/install-adaptive-settings.sh
 ```
 
+Day to day: Alt+Space opens the Command palette, which also calculates
+(`12*7`), converts (`5 km to mi`), finds emoji (`:rocket`), open windows and
+clipboard history (`clip`). The active project and its git status sit at the
+top left; its menu parks and resumes the project. Super+Alt+N takes a quick
+note. See Milestone 15 in `docs/BACKLOG.md`.
+
 ## Verification
 
 ```sh
@@ -93,6 +99,8 @@ recovery) installs into the app grid with:
 ./scripts/verify-project-context-service.sh
 ./scripts/verify-stability-suite.sh
 ./scripts/verify-adaptive-settings.py   # no display needed
+./scripts/verify-feature-logic.py       # palette, quick notes, workspace names
+./scripts/verify-shell-helpers.js       # shell decisions, under Node
 ./scripts/verify-live-readiness.sh      # from inside the Adaptive session
 ```
 

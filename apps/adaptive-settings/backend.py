@@ -312,6 +312,42 @@ def set_clamshell(enabled):
             pass
 
 
+# ----------------------------------------------------------- watchdog
+
+WATCHDOG_STATE = Path.home() / ".cache" / "adaptive-desktop" / "shell-watchdog.json"
+
+
+def watchdog_tripped():
+    """Whether the shell's crash watchdog has stood the desktop down."""
+    try:
+        return bool(json.loads(WATCHDOG_STATE.read_text(encoding="utf-8")).get("tripped"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def rearm_watchdog():
+    """Clear the record; the shell builds the desktop on its next start."""
+    WATCHDOG_STATE.parent.mkdir(parents=True, exist_ok=True)
+    WATCHDOG_STATE.write_text('{"starts": [], "tripped": false}\n', encoding="utf-8")
+
+
+def workspace_name_rows(names, count):
+    """(index, name) for each workspace, padded to how many there are."""
+    names = list(names)
+    return [(i, names[i] if i < len(names) else "") for i in range(max(count, len(names)))]
+
+
+def set_workspace_name(names, index, name):
+    """The workspace-names list with one slot changed, trailing blanks dropped."""
+    names = list(names)
+    while len(names) <= index:
+        names.append("")
+    names[index] = name.strip()
+    while names and not names[-1]:
+        names.pop()
+    return names
+
+
 # ------------------------------------------------------- live verification
 
 def verification():

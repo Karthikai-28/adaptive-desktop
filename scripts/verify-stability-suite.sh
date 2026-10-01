@@ -48,19 +48,27 @@ PYCHECK
 
 # Every shell module, not just extension.js: they all load at gnome-shell start,
 # so a syntax error in any one of them is a broken desktop.
-for module in extension shade telemetry notifications sparkline; do
+for module in extension shade telemetry notifications sparkline controlCenter networkPanel \
+    shellActions adaptiveUtil clipboardHistory projectSnapshots projectIndicator screenText watchdog; do
     node --check "${REPO}/shell/adaptive-shell@local/${module}.js"
 done
 
 # Syntax is not the only way a module breaks: GJS resolves method names at call
 # time, so a deleted method loads fine and fails on first use.
 python3 "${REPO}/scripts/verify-shell-methods.py" \
-    "${REPO}/shell/adaptive-shell@local/"{shade,telemetry,notifications,sparkline}.js
+    "${REPO}/shell/adaptive-shell@local/"{shade,telemetry,notifications,sparkline,shellActions,clipboardHistory,projectSnapshots,projectIndicator,screenText,watchdog}.js
+# The decisions inside the new shell modules (git status, the watchdog rule,
+# battery health, clipboard bounds), checked on the shipped file under Node.
+node "${REPO}/scripts/verify-shell-helpers.js"
 python3 "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
 
 echo
 echo "== Adaptive Settings =="
 python3 "${REPO}/scripts/verify-adaptive-settings.py"
+
+echo
+echo "== Palette, quick notes, workspace names, phones =="
+python3 "${REPO}/scripts/verify-feature-logic.py"
 
 echo
 echo "Stability suite complete."
