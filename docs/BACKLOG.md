@@ -219,16 +219,38 @@ so the marks are restated against what is actually true.
 - ✅ 18-section information architecture defined.
 - ✅ Panels reachable from the rail and Command menu.
 - ⬜ Settings skinned to the Figma frames.
-- ⬜ Adaptive-only sections (Projects & Workspaces, Search & Commands,
-  Updates/Recovery/Session) still need a home; `gnome-control-center` has no
-  panel for them.
+- ✅ Adaptive-only sections have a home: **Adaptive Settings**
+  (`apps/adaptive-settings`, installed by `install-adaptive-settings.sh`).
+  `gnome-control-center` has no panel for them, so they sit beside it, not in
+  it. Like the Shade it reimplements nothing; every control is a view onto a
+  backend that already exists:
+  - *Projects & Workspaces*: the registry over the Project Context Service's
+    D-Bus API (add, rename, remove, make active, workspace, focus profile),
+    plus mutter's workspace count/dynamic/primary-only keys and Focus now.
+  - *Search & Commands*: the `adaptive-*` shortcuts from
+    `install-keybindings.sh`, editable, refusing any accelerator a
+    window-manager or shell keybinding already grabs (the "Failed to grab
+    accelerator" trap below); plocate index age with a rebuild; the overview's
+    project search provider on/off.
+  - *Updates & Recovery*: this checkout's branch and a fast-forward-only update
+    that refuses a dirty or diverged tree; Ubuntu's pending update count;
+    session facts from `session-cli.py`, Return to Ubuntu, the TTY recovery
+    steps; the clamshell opt-in `adaptive-lid-watch.sh` reads; and the
+    `record-live-verification.py` checks, recordable from a dropdown.
+  - The Command palette lists all three sections.
+    `verify-adaptive-settings.py` (in the stability suite) covers what needs
+    no display; the window was exercised end to end under Xvfb against the real
+    service. 🔬 Still to be clicked through in the live session.
 
 ## Milestone 9 — Notifications and Focus
 
 - ✅ Notification center.
 - ✅ Critical/normal policy.
 - ✅ Focus profiles.
-- ✅ Project focus profile.
+- ✅ Project focus profile. The preference was stored but nothing applied it;
+  the Project Context Service now applies `metadata.focus` on every switch
+  (same key as `focus-cli.py`), and a project with no preference leaves a
+  hand-started focus session alone.
 - ✅ Focus timer.
 - ✅ Quiet/fullscreen behavior.
 - ✅ Adaptive Shade. The notification center is now an Adaptive surface rather
@@ -340,8 +362,10 @@ Files, Settings, and the top-right system panel alike.
 - ✅ theme/Adaptive imports Yaru-blue-dark through a gtk.gresource symlink,
   so widgets without an Adaptive rule look like Yaru, not raw GTK.
 - ✅ Session font is Inter, the shell's typeface.
-- ⬜ Top-right panel restyled in shell CSS; rail System button removed once it
-  lands, so system controls live in one place.
+- ✅ Top-right panel restyled in shell CSS: the aggregate menu is the Adaptive
+  Control Center (`controlCenter.js`, `.adaptive-cc*`), and the rail with its
+  System button was replaced by the bottom dock, which has none - system
+  controls live in one place.
 - ⬜ Session wrapper reinstall (needs sudo) to pick up `XDG_DATA_DIRS`.
 - ⬜ Frame-exact match to the Figma screens.
 
@@ -355,8 +379,10 @@ the handoff: do not mark the Figma-skin items complete without the exports.
    `./scripts/install-adaptive-session.sh` (asks for sudo), then log out and in.
 2. Export the Figma frames into `design/figma-exports/`, then build
    `theme/Adaptive`.
-3. Click through the restored Workspaces and Command rail menus (System
-   Center is confirmed opening to the right of the rail).
+3. `./scripts/install-adaptive-settings.sh`, restart the Project Context
+   Service (or log out and in) so it applies project focus profiles, then click
+   through all three Adaptive Settings sections. Record the physical checks
+   from its Live verification list as you do the rest of this list.
 4. Type a project name in the overview and confirm results appear; the
    provider itself answers `GetInitialResultSet` and passes `should_show()`.
 5. Verify audio output switching — five sinks are present on this machine,

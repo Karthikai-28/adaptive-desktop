@@ -184,6 +184,31 @@ class ProjectContextService:
         self.recent_ids.insert(0, pid)
         self.recent_ids = self.recent_ids[:12]
 
+    def _apply_focus_preference(self):
+        """Apply the active project's focus profile, if it has one.
+
+        metadata.focus is "on" (hide banners), "off" (show them) or absent,
+        which leaves notifications as they are - switching to a project with
+        no opinion must not undo a focus session the user started by hand.
+        Same key as scripts/focus-cli.py.
+        """
+        project = self.projects.get(self.active_id or "", {})
+        preference = project.get("metadata", {}).get("focus")
+        if preference not in ("on", "off"):
+            return
+
+        # Gio.Settings.new() aborts the process on an unknown schema rather
+        # than raising, so look it up first.
+        source = Gio.SettingsSchemaSource.get_default()
+        if not source or not source.lookup("org.gnome.desktop.notifications", True):
+            return
+
+        try:
+            settings = Gio.Settings.new("org.gnome.desktop.notifications")
+            settings.set_boolean("show-banners", preference == "off")
+        except Exception as e:
+            print(f"Error applying focus preference: {e}")
+
     def _save_state(self):
         self.config_dir.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -292,6 +317,7 @@ class ProjectContextService:
                     self._touch_recent(self.active_id)
                     self._save_state()
                     self.emit_active_changed()
+                    self._apply_focus_preference()
                     invocation.return_value(GLib.Variant("(b)", (True,)))
                 else:
                     invocation.return_value(GLib.Variant("(b)", (False,)))

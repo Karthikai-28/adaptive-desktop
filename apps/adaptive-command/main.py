@@ -617,6 +617,32 @@ class Palette(Gtk.ApplicationWindow):
                 )
             )
 
+        # The Adaptive-only sections live in apps/adaptive-settings, because
+        # gnome-control-center has no panel for them. Keywords cover what each
+        # section holds, so "shortcut" or "verification" finds the right one.
+        adaptive = [
+            ("Projects & Workspaces", "projects", "project workspace focus"),
+            ("Search & Commands", "search", "shortcut keybinding index plocate palette"),
+            ("Updates & Recovery", "system", "update session recovery ubuntu verification lid"),
+        ]
+        for title, section, keywords in adaptive:
+            score = score_match(query, title, "settings", keywords)
+            if not score:
+                continue
+
+            results.append(
+                Result(
+                    title=title,
+                    subtitle="Adaptive settings",
+                    group="Settings",
+                    icon="preferences-desktop-symbolic",
+                    badge="Settings",
+                    action=lambda s=section: self._run(
+                        ["./scripts/adaptive-settings-launch.sh", "--section", s]),
+                    score=score + WEIGHT_SETTINGS,
+                )
+            )
+
         return results
 
     def _provide_actions(self, query):

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Adaptive Settings
+GenericName=Desktop Settings
+Comment=Projects and workspaces, search and shortcuts, updates and recovery
+Keywords=adaptive;project;projects;workspace;workspaces;shortcut;shortcuts;keybinding;search;index;update;updates;recovery;session;ubuntu;verification;
+Exec=/home/karthi/adaptive-desktop/scripts/adaptive-settings-launch.sh
+Icon=preferences-desktop
+Terminal=false
+Categories=Settings;DesktopSettings;
+StartupNotify=true
+StartupWMClass=com.karthi.AdaptiveSettings

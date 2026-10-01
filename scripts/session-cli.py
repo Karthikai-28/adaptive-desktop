@@ -11,8 +11,8 @@ STATE_DIR = Path(os.environ.get("ADAPTIVE_STATE_DIR", Path.home() / ".config" / 
 SESSION_STATE = STATE_DIR / "session-state.json"
 
 
-def status(_args):
-    facts = {
+def facts():
+    return {
         "desktop": os.environ.get("XDG_CURRENT_DESKTOP", ""),
         "session_desktop": os.environ.get("XDG_SESSION_DESKTOP", ""),
         "session_type": os.environ.get("XDG_SESSION_TYPE", ""),
@@ -21,7 +21,10 @@ def status(_args):
         "ubuntu_session_entry": Path("/usr/share/xsessions/ubuntu.desktop").exists(),
         "adaptive_shell_installed": (Path.home() / ".local/share/gnome-shell/extensions/adaptive-shell@local").exists(),
     }
-    print(json.dumps(facts, indent=2, sort_keys=True))
+
+
+def status(_args):
+    print(json.dumps(facts(), indent=2, sort_keys=True))
     return 0
 
 
@@ -38,13 +41,15 @@ def save(_args):
     return 0
 
 
+RECOVERY_STEPS = [
+    "gnome-extensions disable adaptive-shell@local",
+    "cd ~/adaptive-desktop && ./scripts/remove-adaptive-session.sh",
+    "Choose Ubuntu from the GDM gear menu",
+]
+
+
 def recover(_args):
-    commands = [
-        "gnome-extensions disable adaptive-shell@local",
-        "cd ~/adaptive-desktop && ./scripts/remove-adaptive-session.sh",
-        "Choose Ubuntu from the GDM gear menu",
-    ]
-    for command in commands:
+    for command in RECOVERY_STEPS:
         print(command)
     return 0
 

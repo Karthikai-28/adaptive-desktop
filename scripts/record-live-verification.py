@@ -129,22 +129,30 @@ def status(_args):
     return 0
 
 
-def record(args):
+def record_result(check_id, result, note=""):
+    """Record one result and return the report path; None for an unknown id."""
     known = {check["id"]: check for check in CHECKS}
-    if args.check_id not in known:
-        print(f"Unknown check id: {args.check_id}", file=sys.stderr)
-        return 1
+    if check_id not in known:
+        return None
 
     report = latest_report()
     report.setdefault("checks", {})
-    report["checks"][args.check_id] = {
-        "result": args.result,
-        "note": args.note,
+    report["checks"][check_id] = {
+        "result": result,
+        "note": note,
         "recorded_at": int(time.time()),
-        "backlog": known[args.check_id]["backlog"],
+        "backlog": known[check_id]["backlog"],
     }
     report["updated_at"] = int(time.time())
-    path = write_report(report)
+    return write_report(report)
+
+
+def record(args):
+    path = record_result(args.check_id, args.result, args.note)
+    if path is None:
+        print(f"Unknown check id: {args.check_id}", file=sys.stderr)
+        return 1
+
     print(f"Recorded {args.check_id}: {args.result}")
     print(f"Report: {path}")
     return 0

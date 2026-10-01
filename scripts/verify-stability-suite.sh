@@ -38,6 +38,8 @@ for name in [
     "services/project-context/main.py",
     "scripts/project-cli.py",
     "scripts/focus-cli.py",
+    "scripts/session-cli.py",
+    "scripts/record-live-verification.py",
 ]:
     path = repo / name
     compile(path.read_text(), str(path), "exec")
@@ -55,6 +57,10 @@ done
 python3 "${REPO}/scripts/verify-shell-methods.py" \
     "${REPO}/shell/adaptive-shell@local/"{shade,telemetry,notifications,sparkline}.js
 python3 "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
+
+echo
+echo "== Adaptive Settings =="
+python3 "${REPO}/scripts/verify-adaptive-settings.py"
 
 echo
 echo "Stability suite complete."

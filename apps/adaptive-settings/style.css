@@ -1,0 +1,212 @@
+/* Adaptive Settings - the palette table from the shell stylesheet, laid out
+   like Touchpad Gestures so the two read as one Settings. */
+
+@define-color ad_bg        #1C1C1E;
+@define-color ad_bg_deep   #141416;
+@define-color ad_surface   #2C2C2E;
+@define-color ad_text      #F5F5F7;
+@define-color ad_muted     #98989D;
+@define-color ad_accent    #0A84FF;
+@define-color ad_success   #30D158;
+@define-color ad_warning   #FF9F0A;
+@define-color ad_danger    #FF453A;
+
+window.adaptive-settings {
+    background-color: @ad_bg;
+    color: @ad_text;
+    font-family: Inter, sans-serif;
+}
+
+/* Sections */
+stacksidebar.sidebar {
+    min-width: 220px;
+    background-color: @ad_bg_deep;
+    border-right: 1px solid alpha(white, 0.06);
+}
+
+stacksidebar.sidebar list {
+    background-color: transparent;
+    padding: 18px 10px;
+}
+
+stacksidebar.sidebar row {
+    min-height: 36px;
+    margin-bottom: 2px;
+    padding: 0 12px;
+    border-radius: 8px;
+    color: @ad_muted;
+}
+
+stacksidebar.sidebar row:hover {
+    background-color: alpha(white, 0.05);
+}
+
+stacksidebar.sidebar row:selected {
+    background-color: alpha(@ad_accent, 0.18);
+    color: @ad_text;
+}
+
+stacksidebar.sidebar row label {
+    font-size: 13.5px;
+}
+
+.page {
+    padding: 28px 32px 40px 32px;
+}
+
+.title {
+    margin-bottom: 4px;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+/* Cards and rows */
+.card {
+    border-radius: 14px;
+    border: 1px solid alpha(white, 0.09);
+    background-color: alpha(white, 0.045);
+}
+
+.card-head {
+    padding: 14px 16px 8px 16px;
+}
+
+.card-title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.card-subtitle {
+    color: @ad_muted;
+    font-size: 12px;
+}
+
+.card-actions {
+    padding: 10px 16px 12px 16px;
+    border-top: 1px solid alpha(white, 0.08);
+}
+
+.row {
+    min-height: 48px;
+    padding: 6px 16px;
+    border-top: 1px solid alpha(white, 0.08);
+}
+
+.row.active {
+    box-shadow: inset 3px 0 0 @ad_accent;
+}
+
+.row.failed {
+    box-shadow: inset 3px 0 0 @ad_danger;
+}
+
+.row-title {
+    font-size: 13.5px;
+}
+
+.row-hint {
+    color: @ad_muted;
+    font-size: 11.5px;
+}
+
+.row-hint.warn,
+.row-title.warn {
+    color: @ad_warning;
+}
+
+.row-hint.good,
+.row-title.good {
+    color: @ad_success;
+}
+
+/* Controls */
+dropdown.choice > button {
+    min-width: 150px;
+    border: none;
+    border-radius: 8px;
+    background-image: none;
+    background-color: alpha(white, 0.08);
+    box-shadow: none;
+    color: @ad_text;
+}
+
+dropdown.choice > button:hover {
+    background-color: alpha(white, 0.12);
+}
+
+popover.menu contents,
+popover contents,
+dropdown popover contents {
+    background-color: #1E1E20;
+    border-radius: 10px;
+}
+
+.popover-body {
+    padding: 6px;
+}
+
+entry {
+    border-radius: 8px;
+    background-color: @ad_bg_deep;
+    color: @ad_text;
+}
+
+entry.accel {
+    font-family: monospace;
+    font-size: 12.5px;
+}
+
+spinbutton {
+    border-radius: 8px;
+    background-color: @ad_bg_deep;
+    color: @ad_text;
+}
+
+switch:checked {
+    background-color: @ad_accent;
+}
+
+button.quiet,
+menubutton.quiet > button {
+    border-radius: 8px;
+    background-image: none;
+    background-color: alpha(white, 0.08);
+    box-shadow: none;
+    color: @ad_text;
+}
+
+button.quiet:hover,
+menubutton.quiet > button:hover {
+    background-color: alpha(white, 0.13);
+}
+
+button.accent {
+    border-radius: 8px;
+    background-image: none;
+    background-color: @ad_accent;
+    box-shadow: none;
+    color: white;
+}
+
+button.accent:disabled {
+    background-color: alpha(@ad_accent, 0.3);
+    color: alpha(white, 0.5);
+}
+
+button.destructive {
+    border-radius: 8px;
+    background-image: none;
+    background-color: alpha(@ad_danger, 0.16);
+    box-shadow: none;
+    color: @ad_danger;
+}
+
+/* Transient confirmation at the foot of the window */
+.toast {
+    margin-bottom: 22px;
+    padding: 9px 16px;
+    border-radius: 10px;
+    background-color: #2C2C2E;
+    border: 1px solid alpha(white, 0.1);
+    font-size: 13px;
+}

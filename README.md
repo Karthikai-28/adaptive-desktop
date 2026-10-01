@@ -31,7 +31,7 @@ first.
 | --- | --- |
 | Shell (rail, top bar, overview, system panel) | `shell/adaptive-shell@local/` |
 | File manager | Forked Nautilus in `.local/adaptive-nautilus/`, skinned |
-| Settings | `gnome-control-center` 41.7 (GTK3), skinned |
+| Settings | `gnome-control-center` 41.7 (GTK3), skinned; Adaptive-only sections in `apps/adaptive-settings/` |
 | Project context | `services/project-context/` over D-Bus |
 | Command palette | Shell menu + `apps/adaptive-command/` |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/` |
@@ -76,6 +76,13 @@ runs as part of `install-nautilus-fork-local.sh`, or on its own:
 ./scripts/install-nautilus-fork-extensions.sh
 ```
 
+Adaptive Settings (projects and workspaces, shortcuts and search, updates and
+recovery) installs into the app grid with:
+
+```sh
+./scripts/install-adaptive-settings.sh
+```
+
 ## Verification
 
 ```sh
@@ -85,6 +92,7 @@ runs as part of `install-nautilus-fork-local.sh`, or on its own:
 ./scripts/verify-adaptive-files-stack.sh
 ./scripts/verify-project-context-service.sh
 ./scripts/verify-stability-suite.sh
+./scripts/verify-adaptive-settings.py   # no display needed
 ./scripts/verify-live-readiness.sh      # from inside the Adaptive session
 ```
 
