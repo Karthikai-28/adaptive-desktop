@@ -26,6 +26,10 @@ import java.util.concurrent.TimeUnit
  * scripts/verify-link-android.py starts the daemon, opens pairing, passes the
  * offer in as an argument and presses "Pair" on the computer's side when this
  * test asks. Run on its own, with no offer, the test is skipped.
+ *
+ * It also passes in a stand-in for Google (scripts/fake_cloud.py), which the
+ * computer is signed in to, so that the account and the direct connection
+ * are exercised with no real account and no internet.
  */
 @RunWith(AndroidJUnit4::class)
 class LinkInstrumentedTest {
@@ -35,6 +39,21 @@ class LinkInstrumentedTest {
         InstrumentationRegistry.getArguments().getString("offer")
             ?.let { String(Base64.decode(it, Base64.URL_SAFE)) }
             ?.let { PairingOffer.parse(it) }
+
+    private fun standIn(): JSONObject? =
+        InstrumentationRegistry.getArguments().getString("cloud")
+            ?.let { JSONObject(String(Base64.decode(it, Base64.URL_SAFE))) }
+
+    /**
+     * Not a check: points the installed app at the stand-in for Google, for
+     * the part of the script that then uses the app's own screens.
+     */
+    @Test
+    fun pointAtStandIn() {
+        val standIn = standIn()
+        assumeTrue("no stand-in was passed in", standIn != null)
+        Cloud.override(context, standIn)
+    }
 
     @Test
     fun pairThenUseTheLink() = runBlocking {
@@ -111,6 +130,8 @@ class LinkInstrumentedTest {
         assertNotNull(client.get("/v1/files?path=~")?.optJSONArray("entries"))
         assertNotNull(client.post("/v1/notify", JSONObject().put("key", "k").put("app", "Test").put("title", "Hi").put("text", "x")))
 
+        standIn()?.let { awayThroughTheAccount(it, offer.computer) }
+
         if (InstrumentationRegistry.getArguments().getString("stay") != null) {
             // Leave the app paired, as scanning the code would have, so the
             // screens can be opened and looked at afterwards.
@@ -128,5 +149,58 @@ class LinkInstrumentedTest {
         // pairing is to this key, not to this app or this address.
         LinkIdentity.delete()
         assertNull("a new key must not get in", LinkClient(context, offer.computer).connect())
+    }
+
+    /**
+     * Away from the computer's network: none of its addresses answers, and
+     * the phone reaches it through a direct connection set up by way of the
+     * account both are signed in to.
+     */
+    private suspend fun awayThroughTheAccount(standIn: JSONObject, paired: Computer) {
+        Cloud.override(context, standIn)
+        val cloud = Cloud(context)
+        cloud.signOut()
+        assertEquals("me@example.com", cloud.signInWith("google:me@example.com"))
+
+        val listed = cloud.computers().firstOrNull { it.second.fingerprint == paired.fingerprint }
+        assertNotNull("the account does not list the computer", listed)
+        assertEquals(Cloud.deviceId(paired.fingerprint), listed!!.first)
+
+        // An address nothing answers on, as when the phone is somewhere else.
+        val elsewhere = listed.second.copy(hosts = listOf("192.0.2.1"))
+        val away = LinkClient(context, elsewhere)
+        val status = away.connect()
+        assertNotNull("no direct connection: ${away.awayProblem}", status)
+        assertTrue(away.tunnelled)
+        assertEquals("direct", status!!.optString("via"))
+        assertNotNull(away.get("/v1/files?path=~")?.optJSONArray("entries"))
+
+        // Something bigger than one message, both ways: a screen frame back.
+        val frame = CountDownLatch(1)
+        var size = 0
+        val screen = away.socket("/v1/screen?preset=high", object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                size = bytes.size
+                frame.countDown()
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = frame.countDown()
+        })
+        assertTrue("no screen frame arrived through the direct connection", frame.await(20, TimeUnit.SECONDS))
+        screen.close(1000, null)
+        assertTrue("the frame through the direct connection is empty", size > 1000)
+        away.close()
+
+        // Another account's space does not have the computer in it, and
+        // asking through it reaches nobody.
+        cloud.signOut()
+        assertEquals("someone-else@example.com", cloud.signInWith("google:someone-else@example.com"))
+        assertTrue(cloud.computers().isEmpty())
+        val stranger = LinkClient(context, elsewhere)
+        assertNull("another account must not reach the computer", stranger.connect())
+        stranger.close()
+
+        cloud.signOut()
+        Cloud.override(context, null)
     }
 }

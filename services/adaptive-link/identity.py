@@ -41,7 +41,7 @@ MAX_CERT_BYTES = 8192
 DEFAULT_CONFIG = {
     "enabled": True,
     "port": DEFAULT_PORT,
-    # Connections are taken only from private and Tailscale addresses. A
+    # Connections are taken only from private addresses. A
     # router port-forward straight from the internet is refused unless this
     # is turned on by hand.
     "allow_public": False,
@@ -53,9 +53,9 @@ DEFAULT_CONFIG = {
     "allow_files": True,
     "allow_power": True,
     "notify_on_connect": True,
-    # A device signed in to the same account as this computer (on the link's
-    # Tailscale network) may ask to connect without a pairing code. It still
-    # has to be approved here, once, unless auto_approve_account is on.
+    # A device signed in to the same Google account as this computer may ask
+    # to connect without a pairing code. It still has to be approved here,
+    # once, unless auto_approve_account is on.
     "account_enroll": True,
     "auto_approve_account": False,
 }
@@ -297,17 +297,17 @@ def link_context(key_path, cert_path, phone_cert_pem):
 
 _ALLOWED_NETWORKS = [ipaddress.ip_network(n) for n in (
     "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
-    "100.64.0.0/10",              # carrier-grade NAT range: Tailscale's addresses
-    "::1/128", "fe80::/10", "fc00::/7",   # loopback, link-local, unique local (Tailscale's fd7a:)
+    "::1/128", "fe80::/10", "fc00::/7",   # loopback, link-local, unique local
 )]
 
 
 def peer_allowed(address, allow_public=False):
     """Whether a connection from this address is taken at all.
 
-    Home and office networks and Tailscale, by default. Mutual TLS would
-    refuse a stranger anyway; this keeps the port from even answering the
-    internet if a router ever forwards it by mistake.
+    Home and office networks, and this machine itself (which is where the
+    direct tunnel from the phone arrives). Mutual TLS would refuse a stranger
+    anyway; this keeps the port from even answering the internet if a router
+    ever forwards it by mistake.
     """
     try:
         ip = ipaddress.ip_address(str(address).split("%")[0])
@@ -320,167 +320,16 @@ def peer_allowed(address, allow_public=False):
     return any(ip in network for network in _ALLOWED_NETWORKS)
 
 
-def is_tailscale(address):
+def is_loopback(address):
     try:
-        ip = ipaddress.ip_address(str(address).split("%")[0])
+        return ipaddress.ip_address(str(address).split("%")[0]).is_loopback
     except ValueError:
         return False
-    return ip in ipaddress.ip_network("100.64.0.0/10") or ip in ipaddress.ip_network("fd7a:115c:a1e0::/48")
-
-
-def tailnet_socket():
-    """The socket of the link's own Tailscale node (scripts/install-link-tailnet.sh)."""
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    return Path(runtime) / "adaptive-tailnet.sock"
-
-
-def parse_tailnet_status(text):
-    """(name, address) from `tailscale status --json`, or None unless it is
-    signed in and running. The name is the stable one: it stays the same
-    whatever network either device is on."""
-    try:
-        status = json.loads(text)
-    except ValueError:
-        return None
-    if not isinstance(status, dict) or status.get("BackendState") != "Running":
-        return None
-    me = status.get("Self") or {}
-    name = str(me.get("DNSName") or "").rstrip(".")
-    addresses = [a for a in me.get("TailscaleIPs") or [] if ":" not in str(a)]
-    if not name and not addresses:
-        return None
-    return name, (addresses[0] if addresses else "")
-
-
-def tailnet():
-    """(name, address) of the link's own Tailscale node, or None."""
-    socket_path = tailnet_socket()
-    if not socket_path.exists():
-        return None
-    try:
-        import subprocess
-        out = subprocess.run(["tailscale", f"--socket={socket_path}", "status", "--json"],
-                             capture_output=True, text=True, timeout=4).stdout
-    except (OSError, ValueError):
-        return None
-    return parse_tailnet_status(out)
-
-
-# For verify-link.py only: a file naming the account this computer and its
-# peers are signed in with, in place of asking Tailscale. Whoever can set the
-# daemon's environment already is the user, so this opens nothing.
-_TEST_ACCOUNTS = "ADAPTIVE_LINK_TEST_ACCOUNTS"
-
-
-def _test_accounts():
-    path = os.environ.get(_TEST_ACCOUNTS)
-    if not path:
-        return None
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def _tailscale_json(*args):
-    socket_path = tailnet_socket()
-    if not socket_path.exists():
-        return None
-    try:
-        import subprocess
-        done = subprocess.run(["tailscale", f"--socket={socket_path}", *args],
-                              capture_output=True, text=True, timeout=4)
-        return json.loads(done.stdout) if done.returncode == 0 else None
-    except (OSError, ValueError):
-        return None
-
-
-def own_account():
-    """The account this computer is signed in with (an email address), or ""."""
-    fake = _test_accounts()
-    if fake is not None:
-        return str(fake.get("own", ""))
-    status = _tailscale_json("status", "--json")
-    if not isinstance(status, dict) or status.get("BackendState") != "Running":
-        return ""
-    user = (status.get("User") or {}).get(str((status.get("Self") or {}).get("UserID")), {})
-    return str(user.get("LoginName") or "")
-
-
-def parse_whois(data):
-    """{"account", "device"} from `tailscale whois --json`, or None."""
-    if not isinstance(data, dict):
-        return None
-    account = str((data.get("UserProfile") or {}).get("LoginName") or "")
-    node = data.get("Node") or {}
-    device = str(node.get("ComputedName") or node.get("Name") or "").split(".")[0]
-    return {"account": account, "device": clean_name(device)} if account else None
-
-
-def whois(address, port):
-    """Who is on the other end of a connection: {"account", "device"} if it
-    is a device on this computer's Tailscale network, otherwise None.
-
-    This is Tailscale's own answer, tied to the keys that device signed in
-    with, not anything the device says about itself. The link's node hands
-    connections on from this machine, so they are looked up by the local
-    address and port they arrived from.
-    """
-    fake = _test_accounts()
-    if fake is not None:
-        account = str(fake.get("peer", ""))
-        return {"account": account, "device": str(fake.get("device", "Test device"))} if account else None
-    return parse_whois(_tailscale_json("whois", "--json", f"{address}:{port}")) or \
-        (parse_whois(_tailscale_json("whois", "--json", str(address))) if is_tailscale(address) else None)
-
-
-def same_account(peer, own):
-    """Whether a peer is signed in to this computer's own account."""
-    return bool(own) and bool(peer) and peer.get("account", "").casefold() == own.casefold()
-
-
-LINK_PORTS = (DEFAULT_PORT, PAIRING_PORT)
-
-
-def exposed_ports(netmap, ports=LINK_PORTS):
-    """Whether the Tailscale policy lets other devices reach more of this
-    computer than the link's own ports. Returns a description, or "".
-
-    It matters because the link's node runs in userspace: a connection to any
-    port it is allowed to receive is handed to that port on this machine's
-    loopback - including services that listen on localhost only and were
-    never meant to be reachable from another device.
-    """
-    if not isinstance(netmap, dict):
-        return ""
-    low, high = min(ports), max(ports)
-    for rule in netmap.get("PacketFilter") or []:
-        for dst in rule.get("Dsts") or rule.get("DstPorts") or []:
-            span = dst.get("Ports") or {}
-            first, last = span.get("First", 0), span.get("Last", 65535)
-            if first < low or last > high:
-                return "every port" if (first, last) == (0, 65535) else f"ports {first}-{last}"
-    return ""
-
-
-def tailnet_exposure():
-    """What else of this computer the Tailscale policy exposes, or ""."""
-    if _test_accounts() is not None:
-        return ""
-    return exposed_ports(_tailscale_json("debug", "netmap"))
 
 
 def local_addresses():
-    """[(address, kind)] this machine can be reached at: "lan" or "tailscale".
-
-    The Tailscale name comes first. It identifies this computer rather than
-    where it is, so it keeps working when either device changes network; the
-    numeric addresses after it are the fallbacks.
-    """
+    """[(address, kind)] this machine can be reached at on its own network."""
     found = []
-    own = tailnet()
-    if own:
-        found.extend((value, "tailscale") for value in own if value)
     try:
         import subprocess
         out = subprocess.run(["ip", "-o", "-4", "addr", "show", "scope", "global"],
@@ -493,18 +342,8 @@ def local_addresses():
             continue
         interface = parts[1]
         address = parts[parts.index("inet") + 1].split("/")[0]
-        if interface.startswith(("docker", "br-", "veth", "virbr")):
+        # Bridges and tunnels of other software are not where a phone finds us.
+        if interface.startswith(("docker", "br-", "veth", "virbr", "tailscale", "tun", "wg")):
             continue
-        if not any(address == known for known, _kind in found):
-            found.append((address, "tailscale" if is_tailscale(address) else "lan"))
-    # Tailscale first: it is the address that works from anywhere.
-    found.sort(key=lambda item: item[1] != "tailscale")
+        found.append((address, "lan"))
     return found
-
-
-def came_by_tailnet(host_header, peer):
-    """Whether a request arrived over Tailscale: by the address it was sent
-    to (the link's own node hands connections on from this machine, so the
-    peer address alone does not say) or by where it came from."""
-    host = str(host_header or "").rsplit(":", 1)[0].strip("[]").lower()
-    return host.endswith(".ts.net") or is_tailscale(host) or is_tailscale(peer)

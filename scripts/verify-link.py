@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -29,7 +30,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(LINK))
 import sandbox_display  # noqa: E402
 
-PORT, PAIRING_PORT = 47923, 47924
+PORT, PAIRING_PORT, CLOUD_PORT = 47923, 47924, 47950
 
 
 def pure_checks(check):
@@ -90,13 +91,14 @@ def pure_checks(check):
     check(payload == {"v": 1, "n": "laptop", "h": ["192.168.1.5"], "p": 1, "pp": 2, "f": "f" * 64, "t": token},
           "pairing: the QR code holds the addresses, ports, fingerprint and code")
 
-    allowed = {a: I.peer_allowed(a) for a in ("192.168.1.5", "10.1.2.3", "172.20.0.9", "100.101.102.103",
-                                               "127.0.0.1", "::1", "fd7a:115c:a1e0::5", "::ffff:192.168.1.5")}
-    refused = {a: I.peer_allowed(a) for a in ("8.8.8.8", "172.32.0.1", "100.128.0.1", "2001:db8::1", "junk", "")}
-    check(all(allowed.values()), "network: home, office and Tailscale addresses are taken")
-    check(not any(refused.values()), "network: public addresses are refused by default")
+    allowed = {a: I.peer_allowed(a) for a in ("192.168.1.5", "10.1.2.3", "172.20.0.9",
+                                               "127.0.0.1", "::1", "fd00::5", "::ffff:192.168.1.5")}
+    refused = {a: I.peer_allowed(a) for a in ("8.8.8.8", "172.32.0.1", "100.101.102.103", "2001:db8::1", "junk", "")}
+    check(all(allowed.values()), "network: home and office addresses, and this machine itself, are taken")
+    check(not any(refused.values()), "network: public and carrier addresses are refused by default")
     check(I.peer_allowed("8.8.8.8", allow_public=True), "network: unless the owner turns that on")
-    check(I.is_tailscale("100.101.102.103") and not I.is_tailscale("192.168.1.5"), "network: Tailscale is recognised")
+    check(I.is_loopback("127.0.0.1") and I.is_loopback("::1") and not I.is_loopback("192.168.1.5"),
+          "network: a connection from this machine itself (the direct tunnel) is recognised")
 
     # ---- input
     size = (1920, 1200)
@@ -143,10 +145,22 @@ def pure_checks(check):
         size = (Path(folder) / "link.log").stat().st_size
         check(size < 40_000 and audit.tail(1)[0]["detail"] == "attempt 2999",
               f"audit: the record is bounded and keeps the newest entries ({size} bytes)")
-    allow_all = {"PacketFilter": [{"Dsts": [{"Ports": {"First": 0, "Last": 65535}}]}]}
-    link_only = {"PacketFilter": [{"Dsts": [{"Ports": {"First": 47823, "Last": 47824}}]}]}
-    check(I.exposed_ports(allow_all) == "every port" and I.exposed_ports(link_only) == "" and I.exposed_ports(None) == "",
-          "tailscale: a policy that exposes more than the link's ports is noticed")
+    import cloud
+    with tempfile.TemporaryDirectory() as folder:
+        folder = Path(folder)
+        check(cloud.load_project(folder) is None, "account: no project until the owner sets one up")
+        values = {"api_key": "k", "database_url": "https://x-default-rtdb.firebaseio.com/", "web_client_id": "w",
+                  "device_client_id": "d", "device_client_secret": "s"}
+        cloud.save_project(values, folder)
+        project = cloud.load_project(folder)
+        check(project["database_url"] == "https://x-default-rtdb.firebaseio.com"
+              and stat.S_IMODE((folder / "cloud.json").stat().st_mode) == 0o600,
+              "account: the project is kept in a private file")
+        cloud.save_project(dict(values, database_url="http://evil.example/"), folder)
+        check(cloud.load_project(folder) is None, "account: a database that is not https is refused")
+        cloud.save_project(dict(values, api_key=""), folder)
+        check(cloud.load_project(folder) is None, "account: an incomplete project is no project")
+    check(cloud.device_id("ab" * 32) == "ab" * 10, "account: a device is named by the start of its fingerprint")
     check(desktop.parse_volume("Volume: front-left: 32768 /  50% / -18.06 dB") == 50, "sound: volume is read")
     check(set(desktop.POWER_ACTIONS) == {"lock", "unlock", "screen-off", "suspend", "reboot", "poweroff"},
           "power: a fixed list of actions")
@@ -158,9 +172,11 @@ async def daemon_checks(sandbox, check):
 
     home = Path.home()
     link_dir = home / ".config/adaptive-desktop/link"
-    accounts = sandbox / "accounts.json"
-    env = dict(os.environ, ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT),
-               ADAPTIVE_LINK_TEST_ACCOUNTS=str(accounts))
+    env = dict(os.environ, ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT))
+    # Google, as far as these checks go (scripts/fake_cloud.py).
+    google = subprocess.Popen([sys.executable, str(REPO / "scripts/fake_cloud.py"), str(CLOUD_PORT)],
+                              stdout=subprocess.DEVNULL, stderr=open(sandbox / "cloud.log", "w"))
+    cloud_url = f"http://127.0.0.1:{CLOUD_PORT}"
     log = open(sandbox / "daemon.log", "w")
     daemon = subprocess.Popen([sys.executable, str(LINK / "server.py")], env=env, stdout=log, stderr=subprocess.STDOUT)
     sys.path.insert(0, str(LINK))
@@ -255,16 +271,16 @@ async def daemon_checks(sandbox, check):
         check(not tcp_open(PAIRING_PORT), "pairing: the pairing port closes again")
 
         # ---------------------------------------------------------- who gets in
-        async def try_status(context):
+        async def try_status(context, base=None):
             try:
                 async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=context)) as http:
-                    async with http.get(f"{link_url}/v1/status", timeout=aiohttp.ClientTimeout(total=5)) as reply:
+                    async with http.get(f"{base or link_url}/v1/status", timeout=aiohttp.ClientTimeout(total=8)) as reply:
                         return reply.status, await reply.json()
             except (aiohttp.ClientError, ssl.SSLError, OSError, asyncio.TimeoutError) as error:
                 return type(error).__name__, None
 
         code, info = await try_status(pinned(phone_crt, phone_key))
-        check(code == 200 and info["via"] == "lan" and info["version"] == 1, "link: the paired phone gets in")
+        check(code == 200 and info["version"] == 1, "link: the paired phone gets in")
         code, _ = await try_status(pinned(stranger_crt, stranger_key))
         check(code != 200, f"link: another device's certificate is refused in the handshake ({code})")
         code, _ = await try_status(pinned())
@@ -489,74 +505,143 @@ async def daemon_checks(sandbox, check):
         async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
             codes = []
             for _ in range(90):
-                async with http.get(f"{pair_url}/hello") as reply:
+                async with http.get(f"{pair_url}/pair/wait", params={"t": "guess"}) as reply:
                     codes.append(reply.status)
         check(429 in codes, "pairing port: too many requests from one address are turned away")
         control.call("POST", "/pair/cancel")
-        refusals = [e for e in control.call("GET", "/log")["entries"] if e["action"] == "account-refused"]
-        check(len(refusals) < 10, f"audit: repeated refusals do not flood the record ({len(refusals)})")
+        check(set(codes) <= {403, 429}, "pairing port: and none of them is told anything")
         await asyncio.sleep(61)   # let the allowance refill before the checks that follow
 
-        # ------------------------------------------------ sign-in, no code
-        # This computer signed in to an account. A device Tailscale vouches
-        # for as the same account may ask to connect without a code; anyone
-        # else is told nothing. (The accounts file stands in for Tailscale.)
-        def signed_in(own, peer):
-            accounts.write_text(json.dumps({"own": own, "peer": peer, "device": "pixel-9"}))
-            control.call("POST", "/configure", {})
+        # ---------------------------------------- the owner's Google account
+        import cloud
+        import fake_cloud
+        import rtc
 
-        signed_in("me@example.com", "someone-else@example.com")
-        check(tcp_open(PAIRING_PORT) and control.status()["account"] == "me@example.com",
-              "account: signed in, the computer keeps a door open for its own account")
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
-            async with http.get(f"{pair_url}/hello") as reply:
-                body = await reply.text()
-                check(reply.status == 403 and "fingerprint" not in body,
-                      "account: a device of another account learns nothing about this computer")
-            async with http.post(f"{pair_url}/pair", json={"cert": phone_cert, "name": "Other"}) as reply:
-                check(reply.status == 403, "account: and cannot ask to connect")
-            check(control.call("GET", "/pair/state")["state"] != "pending", "account: no request reached the owner")
+        async def approve_at_google(email):
+            async with aiohttp.ClientSession() as http:
+                async with http.post(f"{cloud_url}/_test/approve", json={"email": email}) as reply:
+                    await reply.read()
 
-            signed_in("me@example.com", "")
-            async with http.get(f"{pair_url}/hello") as reply:
-                check(reply.status == 403, "account: a device not on the account's network at all is refused too")
+        def state():
+            return control.status()
 
-            signed_in("me@example.com", "ME@example.com")
-            async with http.get(f"{pair_url}/hello") as reply:
-                hello = await reply.json()
-            check(hello.get("account") == "me@example.com" and hello.get("fingerprint") == qr["f"],
-                  "account: a device of the same account finds the computer and its fingerprint")
-            async with http.post(f"{pair_url}/pair", json={"cert": phone_cert, "name": "Pixel 9"}) as reply:
-                answer = await reply.json()
-            state = control.call("GET", "/pair/state")
-            check(reply.status == 200 and state["state"] == "pending" and state["account"] == "ME@example.com"
-                  and state["code"] == answer["code"],
-                  "account: it can ask to connect with no code, and the owner sees which account it is")
-            check(control.status()["phone"] is None, "account: asking is not being trusted; the owner still decides")
-            waiting = asyncio.ensure_future(http.get(f"{pair_url}/pair/wait"))
-            await asyncio.sleep(0.3)
-            control.call("POST", "/pair/decide", {"accept": True})
-            check((await (await waiting).json())["state"] == "paired", "account: approved on the computer, it is paired")
+        async def until(condition, seconds=15):
+            for _ in range(int(seconds / 0.2)):
+                if condition():
+                    return True
+                await asyncio.sleep(0.2)
+            return False
+
+        check(state()["cloud"] == "not set up" and state()["account"] == "",
+              "account: nothing happens until the owner sets up their project")
+        check(control.call("POST", "/cloud/setup", fake_cloud.project(cloud_url))["ok"] and state()["cloud"] == "signed out",
+              "account: the project is set up; nobody is signed in yet")
+
+        started = control.call("POST", "/cloud/signin")
+        check(started.get("ok") and started["code"].startswith("ABCD-") and "google.com/device" in started["url"],
+              "sign-in: the computer shows a code to enter at Google, and no password is typed here")
+        check(state()["account"] == "", "sign-in: nothing is signed in until the code is approved")
+        await approve_at_google("me@example.com")
+        check(await until(lambda: state()["cloud"] == "connected") and state()["account"] == "me@example.com",
+              "sign-in: approved at Google, the computer is signed in to the account")
+        check(stat.S_IMODE((link_dir / "session.json").stat().st_mode) == 0o600, "sign-in: the session is kept in a private file")
+
+        # The phone, signed in to the same account, sees the computer.
+        async def sign_in(email, folder):
+            (sandbox / folder).mkdir(exist_ok=True)
+            account = cloud.Account(fake_cloud.project(cloud_url), sandbox / folder)
+            begun = await account.begin_sign_in()
+            await approve_at_google(email)
+            await account.finish_sign_in(begun)
+            return account
+
+        me = await sign_in("me@example.com", "phone-account")
+        computers = await me.get("computers") or {}
+        cid = cloud.device_id(qr["f"])
+        check(list(computers) == [cid] and computers[cid]["fingerprint"] == qr["f"] and computers[cid]["port"] == PORT,
+              "account: a device signed in to the same account finds the computer, with its fingerprint")
+
+        stranger = await sign_in("someone-else@example.com", "stranger-account")
+        check(await stranger.get("computers") is None, "account: another account's space holds nothing of this computer")
+        stranger.session["uid"] = me.uid   # reach for the owner's space with someone else's sign-in
+        try:
+            await stranger.get("computers")
+            check(False, "account: another account cannot read the owner's space")
+        except cloud.CloudError:
+            check(True, "account: another account cannot read the owner's space")
+        await stranger.close()
+
+        # Asking to connect, through the account: no code, the owner still decides.
+        pid = cloud.device_id(digest)
+        await me.put(f"phones/{cloud.device_id('0' * 64)}", {"name": "Liar", "cert": phone_cert, "want": cid, "at": time.time()})
+        await me.put(f"phones/{pid}", {"name": "Old", "cert": phone_cert, "want": cid, "at": time.time() - 3600})
+        await me.put("phones/elsewhere", {"name": "Other", "cert": phone_cert, "want": "another-computer", "at": time.time()})
         await asyncio.sleep(1.5)
-        check((await try_status(pinned(phone_crt, phone_key)))[0] == 200 and tcp_open(PAIRING_PORT),
-              "account: the device connects, and the door stays open for the account's other devices")
+        check(control.call("GET", "/pair/state")["state"] != "pending",
+              "account: a request under the wrong name, an old one, and one for another computer are ignored")
 
+        await me.put(f"phones/{pid}", {"name": "Pixel 9", "cert": phone_cert, "want": cid, "at": time.time()})
+        check(await until(lambda: control.call("GET", "/pair/state")["state"] == "pending"),
+              "account: a fresh request from the account reaches the owner")
+        pending = control.call("GET", "/pair/state")
+        check(pending["account"] == "me@example.com" and pending["code"] == I.pairing_code(qr["f"], digest)
+              and pending["name"] == "Pixel 9", "account: the owner sees the device, the account and the six digits")
+        check(state()["phone"] is None, "account: being signed in is permission to ask, not to enter")
+        control.call("POST", "/pair/decide", {"accept": True})
+        check(await until(lambda: tcp_open(PORT)) and (await try_status(pinned(phone_crt, phone_key)))[0] == 200,
+              "account: approved on the computer, the phone connects")
+        check(await me.get(f"computers/{cid}/accepted/{pid}") is True, "account: and is told so through the account")
+
+        # ------------------------------------------- away: a direct tunnel
+        tunnel = rtc.TunnelClient(stun="")
+        session = "s1"
+        await me.put(f"signals/{cid}/{session}", {"offer": await tunnel.offer(), "at": time.time()})
+        answer = None
+        for _ in range(100):
+            answer = await me.get(f"signals/{cid}/{session}/answer")
+            if answer:
+                break
+            await asyncio.sleep(0.2)
+        check(bool(answer), "tunnel: the computer answers the phone's offer through the account")
+        local = await tunnel.accept(answer) if answer else 0
+        tunnel_url = f"https://127.0.0.1:{local}"
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned(phone_crt, phone_key))) as http:
+            async with http.get(f"{tunnel_url}/v1/status") as reply:
+                info = await reply.json()
+            check(reply.status == 200 and info["via"] == "direct", "tunnel: the link works through the direct connection")
+            async with http.ws_connect(f"{tunnel_url}/v1/screen?preset=low") as ws:
+                message = await asyncio.wait_for(ws.receive(), 15)
+                check(message.type == aiohttp.WSMsgType.BINARY and message.data.startswith(b"\xff\xd8"),
+                      "tunnel: the screen arrives through it")
+        check((await try_status(pinned(stranger_crt, stranger_key), tunnel_url))[0] != 200
+              and (await try_status(pinned(), tunnel_url))[0] != 200,
+              "tunnel: it is only a path; the link behind it still takes the paired phone's certificate alone")
+        check(await until(lambda: state()["direct"] == 1, 5), "tunnel: the computer knows a direct connection is up")
+        await tunnel.close()
+
+        await me.put(f"signals/{cid}/old", {"offer": "v=0", "at": time.time() - 9999})
+        await asyncio.sleep(1.5)
+        check(await me.get(f"signals/{cid}/old") is None, "tunnel: a stale request is cleared away, not answered")
+
+        # ------------------------------------------- auto-approve, sign-out
         control.call("POST", "/configure", {"auto_approve_account": True})
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
-            async with http.post(f"{pair_url}/pair", json={"cert": new_cert, "name": "Tablet"}) as reply:
-                answer = await reply.json()
-        await asyncio.sleep(1.5)
-        check(answer.get("state") == "paired" and (await try_status(pinned(new_crt, new_key)))[0] == 200,
+        new_pid = cloud.device_id(I.check_phone_certificate(new_cert)[2])
+        await me.put(f"phones/{new_pid}", {"name": "Tablet", "cert": new_cert, "want": cid, "at": time.time()})
+        check(await until(lambda: (state()["phone"] or {}).get("name") == "Tablet") and
+              await until(lambda: tcp_open(PORT)) and (await try_status(pinned(new_crt, new_key)))[0] == 200,
               "account: with auto-approve on, a device of the account is accepted without asking")
-        signed_in("me@example.com", "someone-else@example.com")
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
-            async with http.post(f"{pair_url}/pair", json={"cert": phone_cert, "name": "Other"}) as reply:
-                check(reply.status == 403, "account: auto-approve still accepts nobody from another account")
-        control.call("POST", "/configure", {"auto_approve_account": False, "account_enroll": False})
-        check(not tcp_open(PAIRING_PORT) and control.status()["account"] == "",
-              "account: turned off, the door closes")
-        accounts.unlink()
+        control.call("POST", "/configure", {"auto_approve_account": False})
+
+        control.call("POST", "/configure", {"account_enroll": False})
+        check(state()["cloud"] == "off", "account: turned off, the computer leaves the account's space alone")
         control.call("POST", "/configure", {"account_enroll": True})
+        check(await until(lambda: state()["cloud"] == "connected"), "account: and comes back when turned on")
+
+        check(control.call("POST", "/cloud/signout")["ok"] and state()["account"] == "" and state()["cloud"] == "signed out",
+              "sign-out: the computer is signed out")
+        check(await me.get(f"computers/{cid}") is None and not (link_dir / "session.json").exists(),
+              "sign-out: it removes itself from the account and forgets the session")
+        await me.close()
         control.call("POST", "/unpair")
 
         # ------------------------------------------------- the pairing window
@@ -583,6 +668,7 @@ async def daemon_checks(sandbox, check):
         check(control.call("GET", "/pair/state")["state"] == "idle" and not tcp_open(PAIRING_PORT),
               "pair window: cancelling closes the pairing port")
     finally:
+        google.terminate()
         daemon.terminate()
         try:
             daemon.wait(timeout=10)

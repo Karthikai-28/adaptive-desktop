@@ -25,6 +25,7 @@ object Link {
     }
 
     fun forget() {
+        cached?.close()
         cached = null
     }
 }

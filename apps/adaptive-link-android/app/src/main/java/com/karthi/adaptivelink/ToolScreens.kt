@@ -426,6 +426,11 @@ fun MorePage(
             }
             Spacer(Modifier.height(4.dp))
             Muted("Paired with ${client.computer.name}. This phone's key is held in its secure hardware and cannot be copied to another device.")
+            val account = remember { Cloud(activity).email }
+            if (account.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Muted("Signed in as $account, which is how the computer is found away from its network. The account cannot connect by itself: only this phone's key can.")
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { unpair = true }) { Text("Unpair this phone", color = MaterialTheme.colorScheme.error) }
         }
@@ -449,6 +454,7 @@ fun MorePage(
                 TextButton(onClick = {
                     unpair = false
                     LinkIdentity.delete()
+                    Cloud(activity).signOut()
                     store.computer = null
                     store.relayNotifications = false
                     Link.forget()

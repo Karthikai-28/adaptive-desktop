@@ -127,14 +127,10 @@ class PairWindow(Gtk.ApplicationWindow):
     def _show_request(self, name, code, account="", device=""):
         self._clear()
         self.box.append(self._label(f"{name} wants to pair", "pair-title"))
-        if device:
-            # The name above is what the device calls itself; this one is the
-            # name it has on your Tailscale network.
-            self.box.append(self._label(f"On your network as \u201c{device}\u201d.", "pair-muted"))
         if account:
-            # Tailscale's word for who this device is signed in as, not the
-            # device's own claim.
-            self.box.append(self._label(f"Signed in as {account}, the same account as this computer.",
+            # The request came through the account's own space, which only a
+            # device signed in to that account can write to.
+            self.box.append(self._label(f"Signed in as {account}, the same Google account as this computer.",
                                         "pair-muted"))
         self.box.append(self._label("Check that the phone shows the same six digits.", "pair-muted"))
         self.box.append(self._label(f"{code[:3]} {code[3:]}", "pair-code", wrap=False))

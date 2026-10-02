@@ -42,7 +42,10 @@ jobs:
             xdotool xclip curl python3-pip gir1.2-gstreamer-1.0 \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-x
       - name: What Adaptive Link imports
-        run: pip install --user aiohttp cryptography pillow
+        run: |
+          pip install --user aiohttp cryptography pillow
+          # The direct connection, kept apart as on the machine it runs on.
+          pip install --target "$GITHUB_WORKSPACE/.local/link-pydeps" aiortc
       - name: The scripts live in ~/adaptive-desktop
         run: ln -s "$GITHUB_WORKSPACE" "$HOME/adaptive-desktop"
       - name: All checks, including the sandboxes

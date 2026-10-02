@@ -42,3 +42,5 @@ apps/adaptive-link-android/build/
 apps/adaptive-link-android/app/build/
 apps/adaptive-link-android/local.properties
 dist/
+.local/link-pydeps/
+apps/adaptive-link-android/cloud.properties

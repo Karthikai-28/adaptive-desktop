@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Adaptive Link on Android, for real: an emulator, the app's own client and
-this device's keystore, against the real daemon.
+this device's keystore, against the real daemon and a stand-in for Google.
 
 verify-link.py plays the phone in Python. This runs the Android code itself:
 it starts the daemon in a sandbox, opens pairing, and runs the app's
@@ -29,7 +29,7 @@ REPO = Path(__file__).resolve().parent.parent
 SDK = REPO / ".local" / "android-sdk"
 APP = REPO / "apps" / "adaptive-link-android"
 LINK = REPO / "services" / "adaptive-link"
-PORT, PAIRING_PORT = 47933, 47934
+PORT, PAIRING_PORT, CLOUD_PORT = 47933, 47934, 47953
 PIN = "2580"
 # How an Android emulator reaches the machine it runs on.
 EMULATOR_HOST = "10.0.2.2"
@@ -69,6 +69,18 @@ def stop_sandbox(daemon, sandbox):
                    capture_output=True, check=False)
 
 
+ABIS = "-Pabi=arm64-v8a,x86_64"   # the app is built for phones; the emulator is x86_64
+
+
+def stand_in(email="me@example.com"):
+    """What tells the app where the stand-in for Google is, as the emulator sees it."""
+    base = f"http://{EMULATOR_HOST}:{CLOUD_PORT}"
+    return base64.urlsafe_b64encode(json.dumps({
+        "api_key": "test-key", "database_url": base, "web_client_id": "web-client",
+        "sign_in": f"{base}/signin", "refresh": f"{base}/refresh",
+        "test_identity": f"google:{email}", "stun": ""}).encode()).decode()
+
+
 def screens(check, adb, device, control, build_env, sandbox):
     """Use the app itself, the way its owner does: every button.
 
@@ -86,7 +98,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     def sh(*args, timeout=60):
         return subprocess.run([str(adb), "-s", device, *args], capture_output=True, text=True, timeout=timeout).stdout
 
-    built = subprocess.run([gradle(), "--no-daemon", "-q", "assembleDebug"],
+    built = subprocess.run([gradle(), "--no-daemon", "-q", "assembleDebug", "assembleDebugAndroidTest", ABIS],
                            cwd=APP, env=build_env, capture_output=True, text=True, timeout=1500)
     if built.returncode != 0:
         check(False, "the app builds")
@@ -95,6 +107,17 @@ def screens(check, adb, device, control, build_env, sandbox):
     sh("uninstall", "com.karthi.adaptivelink")
     # Installed as a person installs it: no permissions granted in advance.
     sh("install", "-r", str(APP / "app/build/outputs/apk/debug/app-debug.apk"), timeout=180)
+    on_emulator = device.startswith("emulator-")
+    if on_emulator:
+        # Beside it, the test's own package: it is what tells the app to use
+        # the stand-in for Google. Nothing outside the app can tell it that.
+        sh("install", "-r", "-t", str(APP / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"), timeout=180)
+
+    def signed_in_as(email):
+        """Whose Google account the phone's account picker will hand the app."""
+        sh("shell", "am", "instrument", "-w", "-e", "class",
+           "com.karthi.adaptivelink.LinkInstrumentedTest#pointAtStandIn",
+           "-e", "cloud", stand_in(email), "com.karthi.adaptivelink.test/androidx.test.runner.AndroidJUnitRunner")
 
     def nodes():
         """[(label, x, y)] for every piece of text or described control on screen."""
@@ -177,16 +200,10 @@ def screens(check, adb, device, control, build_env, sandbox):
     def unlock_app():
         """Answer the app's unlock prompt with the PIN, if it is showing."""
         time.sleep(2)
-        if not has("Find my computer") and not has("Connected") and not has("Not connected"):
+        if not has("airing code") and not has("Connected") and not has("Not connected"):
             sh("shell", "input", "text", PIN)
             sh("shell", "input", "keyevent", "KEYCODE_ENTER")
             time.sleep(3)
-
-    sh("logcat", "-c")
-    sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
-    unlock_app()
-    step(has("Find my computer", "Use a pairing code instead"),
-         "first run: unlocked with the screen lock, then sign-in first and a pairing code as the other way")
 
     # The computer's owner, pressing Pair when the phone asks.
     def approve():
@@ -203,13 +220,6 @@ def screens(check, adb, device, control, build_env, sandbox):
             time.sleep(0.5)
         return False, ""
 
-    def signed_in(own, peer):
-        """Stand in for Tailscale: which account the computer and the phone are on."""
-        (sandbox / "accounts.json").write_text(json.dumps({"own": own, "peer": peer, "device": "test-phone"}))
-        control.call("POST", "/configure", {})
-
-    here = f"{EMULATOR_HOST if device.startswith('emulator-') else '127.0.0.1'}:{PAIRING_PORT}"
-
     def type_into(placeholder, text):
         tap(placeholder, wait=1)
         for start in range(0, len(text), 120):   # in pieces: adb drops long input
@@ -217,23 +227,56 @@ def screens(check, adb, device, control, build_env, sandbox):
         sh("shell", "input", "keyevent", "KEYCODE_BACK")   # hide the keyboard
         time.sleep(1)
 
-    # ------------------------------------------------ by account, no code
-    signed_in("me@example.com", "someone-else@example.com")
-    type_into("Computer name (optional)", here)
-    tap("Find my computer", wait=6)
-    step(has("same account"), "sign-in: a phone on another account is told so, and gets no further")
-    step(control.call("GET", "/pair/state").get("state") != "pending", "sign-in: and the computer's owner is not asked")
+    def pair_by_code():
+        control.call("POST", "/unpair")
+        started = control.call("POST", "/pair/start")
+        offer = json.loads(started["payload"])
+        if on_emulator:
+            offer["h"] = [EMULATOR_HOST]
+        text_code = "ALINK1." + base64.urlsafe_b64encode(json.dumps(offer).encode()).decode().rstrip("=")
+        type_into("ALINK1\u2026", text_code)
+        tap("Pair with this code", wait=1)
+        matched, _account = approve()
+        for _ in range(40):
+            if has("Connected"):
+                break
+            time.sleep(1)
+        return matched and has("Connected")
 
-    signed_in("me@example.com", "me@example.com")
-    tap("Look again", wait=1)
-    matched, account = approve()
-    for _ in range(40):
-        if has("Connected"):
-            break
-        time.sleep(1)
-    step(matched and account == "me@example.com",
-         "sign-in: with the same account the phone asks without a code, and shows the same six digits")
-    step(has("Connected", "Screen", "Trackpad", "Presenter", "Webcam"), "sign-in: approved on the computer, connected")
+    def open_app():
+        sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
+        unlock_app()
+
+    sh("logcat", "-c")
+    if on_emulator:
+        # ------------------------------------------ by account, no code
+        signed_in_as("someone-else@example.com")
+        open_app()
+        step(has("Sign in with Google", "Use a pairing code instead"),
+             "first run: unlocked with the screen lock, then sign-in first and a pairing code as the other way")
+        tap("Sign in with Google", wait=6)
+        step(has("No computer is signed in as someone-else@example.com"),
+             "sign-in: a phone on another account finds no computer there, and gets no further")
+        step(control.call("GET", "/pair/state").get("state") != "pending", "sign-in: and the computer's owner is not asked")
+
+        signed_in_as("me@example.com")
+        open_app()
+        step(tap("Sign out of", exact=False, wait=2) and has("Sign in with Google"),
+             "sign-in: the phone signs out of that account")
+        tap("Sign in with Google", wait=1)
+        matched, account = approve()
+        for _ in range(40):
+            if has("Connected"):
+                break
+            time.sleep(1)
+        step(matched and account == "me@example.com",
+             "sign-in: with the computer's account the phone asks without a code, and shows the same six digits")
+        step(has("Connected", "Screen", "Trackpad", "Presenter", "Webcam"), "sign-in: approved on the computer, connected")
+    else:
+        open_app()
+        step(has("Use a pairing code instead") or has("Scan pairing code"), "first run: unlocked with the screen lock")
+        tap("Use a pairing code instead")
+        step(pair_by_code(), "code: a typed pairing code pairs the phone")
 
     # Power buttons are pressed below. With power turned off on the computer
     # they are refused, which is what is checked - a real lock or suspend
@@ -337,10 +380,12 @@ def screens(check, adb, device, control, build_env, sandbox):
     time.sleep(1)
     step(tap("Unpair this phone", wait=1.5) and has("Unpair this phone?"), "more: unpairing asks first")
     tap("Unpair", wait=3)
-    step(has("Find my computer"), "more: unpaired, the app is back at pairing")
+    step(has("airing code") and not has("Sign out of"),
+         "more: unpaired, the app is back at pairing and signed out of the account")
 
     # ------------------------------------------------- by pairing code
-    step(tap("Use a pairing code instead"), "code: the other way to pair is offered")
+    if has("Use a pairing code instead"):
+        step(tap("Use a pairing code instead"), "code: the other way to pair is offered")
     tap("Scan pairing code", wait=3)
     if "permission" in focused().lower():
         allow_permission()
@@ -353,22 +398,8 @@ def screens(check, adb, device, control, build_env, sandbox):
     step("MainActivity" in focused() and has("Scan pairing code"),
          "code: coming back from the scanner, the app is still open where it was (not locked, nothing lost)")
 
-    # A phone that is not on the account can still pair by code.
-    signed_in("me@example.com", "")
-    control.call("POST", "/unpair")
-    started = control.call("POST", "/pair/start")
-    offer = json.loads(started["payload"])
-    if device.startswith("emulator-"):
-        offer["h"] = [EMULATOR_HOST]
-    text_code = "ALINK1." + base64.urlsafe_b64encode(json.dumps(offer).encode()).decode().rstrip("=")
-    type_into("ALINK1\u2026", text_code)
-    tap("Pair with this code", wait=1)
-    matched, _account = approve()
-    for _ in range(40):
-        if has("Connected"):
-            break
-        time.sleep(1)
-    step(matched and has("Connected"), "code: a typed pairing code pairs a phone that is not on the account")
+    # A phone that is not signed in to the account can still pair by code.
+    step(pair_by_code(), "code: a typed pairing code pairs a phone that is not on the account")
 
     # ------------------------------------------------------ the app lock
     # Left for longer than the grace period, the app asks for the screen
@@ -409,9 +440,7 @@ def main():
     (sandbox / "run").mkdir(mode=0o700)
     (sandbox / "home" / "Downloads").mkdir(parents=True)
     (sandbox / "home" / "Downloads" / "movie.mkv").write_bytes(b"x" * 2048)
-    accounts = sandbox / "accounts.json"
     env = dict(os.environ, HOME=str(sandbox / "home"), XDG_RUNTIME_DIR=str(sandbox / "run"),
-               ADAPTIVE_LINK_TEST_ACCOUNTS=str(accounts),
                ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT),
                PYTHONPATH=site.getusersitepackages())
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
@@ -423,9 +452,16 @@ def main():
         # xvfb-run and dbus-run-session, not just the outermost wrapper.
         start_new_session=True)
 
+    # Google, as far as this goes (scripts/fake_cloud.py). The emulator
+    # reaches it, like the daemon, on the machine's own loopback.
+    subprocess.Popen([sys.executable, str(REPO / "scripts/fake_cloud.py"), str(CLOUD_PORT)],
+                     env=env, stdout=subprocess.DEVNULL, stderr=open(sandbox / "cloud.log", "w"))
+
     os.environ["XDG_RUNTIME_DIR"] = str(sandbox / "run")
     sys.path.insert(0, str(LINK))
+    sys.path.insert(0, str(REPO / "scripts"))
     import control
+    import fake_cloud
     try:
         for _ in range(100):
             try:
@@ -433,6 +469,21 @@ def main():
                 break
             except control.NotRunning:
                 time.sleep(0.2)
+        # The computer signs in to its owner's account.
+        on_emulator = devices[0].startswith("emulator-")
+        cloud_url = f"http://127.0.0.1:{CLOUD_PORT}"
+        control.call("POST", "/cloud/setup", fake_cloud.project(cloud_url))
+        control.call("POST", "/cloud/signin")
+        import urllib.request
+        urllib.request.urlopen(urllib.request.Request(
+            f"{cloud_url}/_test/approve", data=json.dumps({"email": "me@example.com"}).encode(),
+            headers={"Content-Type": "application/json"}), timeout=10).read()
+        for _ in range(100):
+            if control.status().get("cloud") == "connected":
+                break
+            time.sleep(0.2)
+        check(control.status().get("account") == "me@example.com", "the computer is signed in to its owner's account")
+
         offer = json.loads(control.call("POST", "/pair/start")["payload"])
         offer["h"] = [EMULATOR_HOST] if devices[0].startswith("emulator-") else offer["h"]
         encoded = base64.urlsafe_b64encode(json.dumps(offer).encode()).decode()
@@ -454,20 +505,27 @@ def main():
         build_env = dict(os.environ, ANDROID_HOME=str(SDK), ANDROID_SERIAL=devices[0])
         build_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
         done = subprocess.run(
-            [gradle(), "--no-daemon", "-q", "connectedDebugAndroidTest",
-             f"-Pandroid.testInstrumentationRunnerArguments.offer={encoded}"],
+            [gradle(), "--no-daemon", "-q", "connectedDebugAndroidTest", ABIS,
+             "-Pandroid.testInstrumentationRunnerArguments.class="
+             "com.karthi.adaptivelink.LinkInstrumentedTest#pairThenUseTheLink",
+             f"-Pandroid.testInstrumentationRunnerArguments.offer={encoded}"]
+            + ([f"-Pandroid.testInstrumentationRunnerArguments.cloud={stand_in()}"] if on_emulator else []),
             cwd=APP, env=build_env, capture_output=True, text=True, timeout=1500)
 
         check(seen.get("name") == "Test Phone", f"the phone asked to pair, by name ({seen.get('name')})")
         check(done.returncode == 0, "the app paired with its keystore key, connected over mutual TLS, "
-              "received the screen, ran a command, and refused an impostor - on Android")
+              "received the screen, ran a command, reached the computer through a direct connection "
+              "set up by the account, and refused an impostor - on Android")
         if done.returncode != 0:
             print((done.stdout + done.stderr)[-3000:])
+            print((sandbox / "daemon.log").read_text()[-3000:])
         state = control.status()
         check(state["phone"] is not None and state["phone"]["name"] == "Test Phone", "the computer holds the phone's certificate")
         log = control.call("GET", "/log")["entries"]
         actions = [entry["action"] for entry in log]
         check("exec" in actions and "screen" in actions, "the computer's audit log shows what the phone did")
+        if on_emulator:
+            check("tunnel" in actions, "the computer's audit log shows the direct connection being set up")
         check(daemon.poll() is None, "the daemon stayed up throughout")
 
         screens(check, adb, devices[0], control, build_env, sandbox)

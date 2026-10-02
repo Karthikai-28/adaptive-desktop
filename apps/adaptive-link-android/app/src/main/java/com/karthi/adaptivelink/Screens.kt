@@ -102,9 +102,11 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
 
     var typed by remember { mutableStateOf("") }
 
+    val cloud = remember { Cloud(activity) }
     var account by remember { mutableStateOf("") }
-    var withCode by remember { mutableStateOf(false) }
-    var named by remember { mutableStateOf("") }
+    var signedIn by remember { mutableStateOf(cloud.signedIn) }
+    var withCode by remember { mutableStateOf(!cloud.available) }
+    var choices by remember { mutableStateOf(listOf<Pair<String, Computer>>()) }
 
     /** By code or by account, asking the computer is the same from here. */
     fun ask(offer: PairingOffer) {
@@ -163,17 +165,71 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
         ask(offer)
     }
 
-    /** No code: find the computer on the account's own network and ask it. */
-    fun signIn() {
+    /**
+     * No code: ask the computer through the account both are signed in to.
+     * The request, and the answer, go through the account's space; what the
+     * owner checks is the same six digits, on the same two screens.
+     */
+    fun askByAccount(id: String, computer: Computer) {
         stage = "asking"
         scope.launch {
-            val (found, why) = Discovery.find(activity, named)
-            if (found == null) {
-                problem = why
+            try {
+                val mine = Cloud.deviceId(LinkIdentity.fingerprint(activity))
+                // An answer left from an earlier request is not this one's.
+                cloud.delete("computers/$id/accepted/$mine")
+                cloud.put("phones/$mine", org.json.JSONObject()
+                    .put("name", activity.phoneName()).put("want", id)
+                    .put("cert", Protocol.pem(LinkIdentity.certificate(activity).encoded))
+                    .put("at", System.currentTimeMillis() / 1000.0))
+                code = Protocol.pairingCode(computer.fingerprint, LinkIdentity.fingerprint(activity))
+                computerName = computer.name
+                stage = "confirm"
+                var answer: Any? = null
+                val until = System.currentTimeMillis() + 10 * 60_000
+                while (answer !is Boolean && System.currentTimeMillis() < until) {
+                    delay(1500)
+                    answer = runCatching { cloud.get("computers/$id/accepted/$mine") }.getOrNull()
+                }
+                when (answer) {
+                    true -> {
+                        Store(activity).computer = computer
+                        Link.forget()
+                        onPaired()
+                    }
+                    false -> { problem = "The pairing was rejected on the computer."; stage = "failed" }
+                    else -> { problem = "Nobody answered on $computerName. Is it on?"; stage = "failed" }
+                }
+            } catch (e: Exception) {
+                problem = "Pairing failed: ${e.message ?: e.javaClass.simpleName}"
                 stage = "failed"
-            } else {
-                account = found.account
-                ask(PairingOffer(found.computer, ""))
+            }
+        }
+    }
+
+    fun signIn() {
+        stage = "asking"
+        activity.awayOnPurpose = true
+        scope.launch {
+            try {
+                account = if (cloud.signedIn) cloud.email else cloud.signIn(activity)
+                signedIn = true
+                val found = cloud.computers()
+                when (found.size) {
+                    0 -> {
+                        problem = "No computer is signed in as $account.\nOn the computer, run: link-cli.py signin"
+                        stage = "failed"
+                    }
+                    1 -> askByAccount(found[0].first, found[0].second)
+                    else -> { choices = found; stage = "choose" }
+                }
+            } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
+                stage = "start"
+            } catch (e: androidx.credentials.exceptions.NoCredentialException) {
+                problem = "This phone has no Google account to sign in with. Add one in Settings, or use a pairing code."
+                stage = "failed"
+            } catch (e: Exception) {
+                problem = "Sign-in failed: ${e.message ?: e.javaClass.simpleName}"
+                stage = "failed"
             }
         }
     }
@@ -194,6 +250,15 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
                 Muted("Contacting the computer…")
             }
+            "choose" -> {
+                Muted("Signed in as $account. Which computer?", Modifier.padding(bottom = 12.dp))
+                choices.forEach { (id, computer) ->
+                    OutlinedButton(onClick = { askByAccount(id, computer) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(computer.name)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
             "confirm" -> {
                 if (account.isNotEmpty()) Muted("Signed in as $account", Modifier.padding(bottom = 4.dp))
                 Muted("Check that $computerName shows the same digits, then press Pair there.", Modifier.padding(8.dp))
@@ -205,19 +270,23 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
             else -> {
                 Text(
                     if (stage == "failed") problem
-                    else "Connect to your computer with your account. Tailscale has to be on, on this phone and the computer, signed in with the same account.",
+                    else if (cloud.available) "Sign in with the Google account your computer is signed in to. The computer then asks you to confirm this phone."
+                    else "Pair this phone with your computer using the code it shows.",
                     textAlign = TextAlign.Center,
                     color = if (stage == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(24.dp))
-                Button(onClick = { signIn() }) { Text(if (stage == "failed") "Look again" else "Find my computer") }
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = named, onValueChange = { named = it },
-                    placeholder = { Text("Computer name (optional)") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
+                if (cloud.available) {
+                    Button(onClick = { signIn() }) {
+                        Text(if (signedIn) "Find my computer" else "Sign in with Google")
+                    }
+                    if (signedIn) {
+                        TextButton(onClick = { cloud.signOut(); signedIn = false; account = ""; stage = "start" }) {
+                            Text("Sign out of ${cloud.email}")
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
                 if (!withCode) {
                     TextButton(onClick = { withCode = true }) { Text("Use a pairing code instead") }
                 } else {
@@ -292,7 +361,7 @@ fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
             Column {
                 when {
                     status != null -> {
-                        val via = if (status.optString("via") == "tailscale") "Tailscale" else "Local network"
+                        val via = if (client.tunnelled) "Direct, away" else "Local network"
                         Text("Connected · $via", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.height(6.dp))
                         val parts = mutableListOf<String>()
@@ -315,7 +384,9 @@ fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
                     else -> {
                         Text("Not connected", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
                         Spacer(Modifier.height(6.dp))
-                        Muted("At home the phone needs the same Wi-Fi. Away, both need Tailscale running. The computer must be on with Adaptive Link started.")
+                        Muted(client.awayProblem.ifBlank {
+                            "The computer must be on with Adaptive Link started. Away from its network, this phone and the computer both need to be signed in to the same Google account."
+                        })
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = { scope.launch { refresh() } }) { Text("Try again") }
                     }

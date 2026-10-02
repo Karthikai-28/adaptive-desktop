@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -39,8 +41,25 @@ import javax.net.ssl.X509TrustManager
 class LinkClient(context: Context, val computer: Computer) {
     private val appContext = context.applicationContext
 
-    /** The address that answered last: Wi-Fi at home, Tailscale away. */
+    /** The address that answered last: the computer's own on its network, this phone's when tunnelled. */
     @Volatile var host: String? = null
+        private set
+
+    /** The port that goes with it: the computer's, or the tunnel's on this phone. */
+    @Volatile private var port: Int = computer.port
+
+    /** The direct connection used away from the computer's network. */
+    private val cloud = Cloud(appContext)
+    private var tunnel: Tunnel? = null
+    private val tunnelLock = Mutex()
+
+    /** Whether the link is going through the direct connection just now. */
+    val tunnelled get() = host == LOCAL
+
+    @Volatile private var tunnelProblem = ""
+
+    /** Why the computer could not be reached away from its network, for the screen. */
+    @Volatile var awayProblem: String = ""
         private set
 
     /** Every address the computer is known by; it tells the phone when they change. */
@@ -62,22 +81,80 @@ class LinkClient(context: Context, val computer: Computer) {
             .build()
     }
 
-    private fun base(host: String, port: Int = computer.port): String {
+    private fun base(host: String, port: Int = this.port): String {
         val literal = if (host.contains(':')) "[$host]" else host
         return "https://$literal:$port"
     }
 
     /**
-     * Find an address the computer answers on. All are tried at once and the
-     * first to answer wins, so being away from home costs no waiting on the
-     * home address.
+     * Find a way to the computer. On its own network it is asked directly;
+     * anywhere else, the two set up a direct connection through the account
+     * (Tunnel) and the same requests go through that.
      */
-    suspend fun connect(): JSONObject? = coroutineScope {
-        val quick = http.newBuilder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).build()
+    suspend fun connect(): JSONObject? {
+        if (tunnelled) {
+            // Already tunnelled: keep using it while it works, and look for
+            // the computer's own network again only when it stops.
+            askThroughTunnel()?.let { return it }
+        }
+        askOnNetwork()?.let { return it }
+        return openTunnel()
+    }
+
+    private val quick by lazy {
+        http.newBuilder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).build()
+    }
+
+    private suspend fun askThroughTunnel(): JSONObject? = withContext(Dispatchers.IO) {
+        val through = tunnel?.takeIf { it.alive } ?: return@withContext null
+        runCatching {
+            quick.newCall(Request.Builder().url("${base(LOCAL, through.port)}/v1/status").build()).execute().use {
+                if (it.isSuccessful) JSONObject(it.body!!.string()) else null.also { _ -> tunnelProblem = "it answered ${it.code}" }
+            }
+        }.onFailure { tunnelProblem = describe(it as? Exception ?: RuntimeException(it)) }.getOrNull()?.also { learn(it) }
+    }
+
+    private suspend fun openTunnel(): JSONObject? = tunnelLock.withLock {
+        if (!cloud.available || !cloud.signedIn) {
+            awayProblem = ""
+            return null
+        }
+        try {
+            val through = tunnel?.takeIf { it.alive }
+                ?: Tunnel(appContext, cloud, Cloud.deviceId(computer.fingerprint)).also {
+                    tunnel?.close()
+                    tunnel = it
+                    it.open()
+                }
+            host = LOCAL
+            port = through.port
+            awayProblem = ""
+            askThroughTunnel() ?: run {
+                through.close()
+                host = null
+                port = computer.port
+                awayProblem = "The direct connection was made, but the computer did not answer on it ($tunnelProblem)."
+                null
+            }
+        } catch (e: Exception) {
+            tunnel?.close()
+            tunnel = null
+            host = null
+            port = computer.port
+            awayProblem = e.message ?: e.javaClass.simpleName
+            null
+        }
+    }
+
+    /**
+     * Every address the computer has on its network is tried at once and the
+     * first to answer wins.
+     */
+    private suspend fun askOnNetwork(): JSONObject? = coroutineScope {
         val attempts = hosts.map { candidate ->
             async(Dispatchers.IO) {
                 runCatching {
-                    quick.newCall(Request.Builder().url("${base(candidate)}/v1/status").build()).execute().use {
+                    quick.newCall(Request.Builder().url("${base(candidate, computer.port)}/v1/status").build()).execute().use {
                         if (it.isSuccessful) candidate to JSONObject(it.body!!.string()) else null
                     }
                 }.getOrNull()
@@ -92,15 +169,27 @@ class LinkClient(context: Context, val computer: Computer) {
             found = result
         }
         attempts.forEach { it.cancel() }
-        host = found?.first
-        found?.second?.let { learn(it) }
+        if (found != null) {
+            host = found.first
+            port = computer.port
+            // On the computer's own network again: the tunnel is not needed.
+            tunnel?.close()
+            tunnel = null
+            learn(found.second)
+        } else if (!tunnelled) host = null
         found?.second
     }
 
+    /** Let go of the direct connection (unpairing, signing out). */
+    fun close() {
+        tunnel?.close()
+        tunnel = null
+        if (tunnelled) host = null
+    }
+
     /**
-     * The computer says where it can be reached now (its Tailscale name, its
-     * current addresses). This came over the authenticated link, so it is the
-     * paired computer saying it. The phone remembers them, newest first, which
+     * The computer says which addresses it has on its network now. This came
+     * over the authenticated link, so it is the paired computer saying it. The phone remembers them, newest first, which
      * is what lets it find the computer again after an address changes.
      */
     private fun learn(status: JSONObject) {
@@ -137,7 +226,7 @@ class LinkClient(context: Context, val computer: Computer) {
 
     suspend fun upload(name: String, body: RequestBody): JSONObject? {
         val target = okhttp3.HttpUrl.Builder().scheme("https").host(host ?: hosts.first())
-            .port(computer.port).addPathSegments("v1/upload").addQueryParameter("name", name).build()
+            .port(port).addPathSegments("v1/upload").addQueryParameter("name", name).build()
         val long = http.newBuilder().writeTimeout(0, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
         return withContext(Dispatchers.IO) {
             runCatching {
@@ -212,6 +301,9 @@ class LinkClient(context: Context, val computer: Computer) {
 
     companion object {
         val JSON = "application/json".toMediaType()
+
+        /** Where the tunnel listens: on this phone, for this app. */
+        const val LOCAL = "127.0.0.1"
     }
 }
 

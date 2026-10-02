@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// The owner's Google project (docs/ADAPTIVE_LINK.md). The three values are
+// identifiers, not secrets, but they are the owner's, so they come from a
+// file that is not tracked: cloud.properties, beside this build.
+//   api_key=...   database_url=https://...   web_client_id=...apps.googleusercontent.com
+// Without the file the app is built with account sign-in switched off and
+// pairs by code only.
+val cloud = Properties().apply {
+    val file = rootProject.file("cloud.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun cloudValue(name: String): String = "\"" + (cloud.getProperty(name) ?: "").trim().replace("\"", "") + "\""
 
 android {
     namespace = "com.karthi.adaptivelink"
@@ -17,6 +31,15 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // The direct connection is native code, about 12 MB per kind of
+        // processor. Phones are arm64; the test emulator is x86_64 and asks
+        // for that as well (-Pabi=arm64-v8a,x86_64).
+        ndk {
+            abiFilters += ((project.findProperty("abi") as String?) ?: "arm64-v8a").split(",")
+        }
+        buildConfigField("String", "CLOUD_API_KEY", cloudValue("api_key"))
+        buildConfigField("String", "CLOUD_DATABASE_URL", cloudValue("database_url"))
+        buildConfigField("String", "CLOUD_WEB_CLIENT_ID", cloudValue("web_client_id"))
     }
 
     buildTypes {
@@ -40,8 +63,14 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    packaging {
+        // Stored compressed: the direct connection's native library is 12 MB
+        // as it is and under 5 MB packed, and the app is sent to the phone.
+        jniLibs.useLegacyPackaging = true
+    }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -70,6 +99,12 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Sign in with Google, through Android's own account picker.
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    // The direct, peer-to-peer connection used away from the computer's network.
+    implementation("io.getstream:stream-webrtc-android:1.3.8")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

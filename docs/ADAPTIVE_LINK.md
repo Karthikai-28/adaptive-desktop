@@ -29,9 +29,10 @@ One phone. Nothing else.
   unpairing closes the port and ends whatever the phone is doing at that
   moment.
 - **The internet is refused.** Connections are taken only from private
-  network addresses and Tailscale's. If a router ever forwarded the port by
-  mistake, it would not answer. (`allow_public` in the config turns this off;
-  there is no reason to.)
+  network addresses. If a router ever forwarded the port by mistake, it would
+  not answer. (`allow_public` in the config turns this off; there is no
+  reason to.) Away from home the phone does not come in through a port at
+  all: see *Local and away*.
 - **The app locks itself.** It asks for your fingerprint or screen lock each
   time it is opened, hides its contents from screenshots and the recent-apps
   list, and is excluded from Android backups.
@@ -46,9 +47,11 @@ What this does not protect against:
 - With `allow power` on, the phone can unlock the computer's screen. That is
   what "complete control" means, and it is also what someone holding your
   open phone would have.
-- Sign-in trusts your Tailscale network. Anyone you share a device into that
-  network with, or who gets into the account it is signed in with, can ask to
-  connect; with auto-approve on they would be accepted.
+- Sign-in trusts your Google account to say which devices are yours. Someone
+  who gets into that account can ask to connect, and can see the computer's
+  name and addresses; they cannot connect without you pressing Pair on the
+  computer - unless auto-approve is on, in which case they would be accepted.
+  Keep two-step verification on.
 - Everything rests on the computer's user account. Another program running
   as you on the computer can pair a device or read the link's key, as it
   could already read anything else of yours. Unpair from the computer
@@ -57,85 +60,116 @@ What this does not protect against:
 ## Signing in, instead of pairing
 
 The way Apple's devices find each other through an iCloud account, these find
-each other through the account both are signed in to on Tailscale - which can
-be a Google account, so in practice: your Gmail.
+each other through a Google account: your Gmail. There is no private network
+to join and nothing else to install on the phone.
 
-1. On the computer, once: `scripts/install-link-tailnet.sh`, and sign in.
-2. On the phone, once: install Tailscale, sign in with the same account.
-3. In Adaptive Link on the phone: **Find my computer**.
+1. Once: make your own free Google project (*Your Google project*, below).
+2. On the computer, once: `scripts/link-cli.py signin`. It shows a short code;
+   enter it at google.com/device on anything you are signed in on. No
+   password is typed on the computer.
+3. In Adaptive Link on the phone: **Sign in with Google**, and pick the same
+   account in Android's own account picker.
 
-No code is scanned or typed. The phone looks the computer up by its name on
-your private network (`adaptive-link`), the computer asks Tailscale who is
-calling, and if it is a device signed in to the computer's own account it may
-ask to connect. The first time, a window on the computer shows the device,
-the account and six digits, and you press **Pair**; after that it just
-connects.
+No code is scanned or typed. The first time, a window on the computer shows
+the phone, the account and six digits, the phone shows the same six, and you
+press **Pair**; after that it just connects, from anywhere.
 
-What makes this trustworthy:
+What the account is, and is not:
 
-- **The account is Tailscale's word, not the phone's.** The computer never
-  believes what a device says about itself. It asks its own Tailscale node
-  who is on the other end of the connection, and Tailscale answers from the
-  keys that device signed in with.
-- **Another account gets nothing.** A device on someone else's account, or
-  not on Tailscale at all, is refused before it learns the computer's name or
-  certificate, and no request ever reaches you.
-- **Being on your account is permission to ask, not to enter.** You still
-  approve each new device once, on the computer. If you want devices of your
-  own account accepted without asking - closer to how Apple's behave once you
-  are signed in - turn it on:
-  `scripts/link-cli.py allow auto-approve on`. Then your Google account's
-  security (its password and two-step verification) is what stands between
-  anyone and this computer, so only do that with two-step verification on.
-- **The phone only asks inside Tailscale.** The one question the app asks a
-  computer it does not know yet ("who are you?") is only ever sent to an
-  address in Tailscale's own range, so an ordinary network can never answer
-  in the computer's place.
-- **After that, nothing changes.** The phone's hardware key and mutual TLS
-  are exactly as before; the account only replaces the pairing code.
+- **A place for your devices to find each other.** Signed in, the computer
+  writes its name, certificate fingerprint and addresses to a small database
+  in your project, under your account's id. A rule on that database lets only
+  someone signed in as you read or write there. The phone reads the computer
+  from it and leaves its request to connect.
+- **Not the key to the computer.** Being signed in is permission to ask, not
+  to enter. The computer shows the request and you approve it there. What it
+  then trusts is the phone's hardware key, exactly as with a pairing code -
+  the account only replaces the code. Signing in on another phone later gets
+  that phone a request window on the computer, not a connection.
+- **Checked by the six digits.** They are computed from both certificates.
+  If the account's space had been tampered with - a different computer put
+  in place of yours, or a different phone's certificate in the request - the
+  two screens would show different digits.
+- **Not on the path.** What you do on the computer never passes through
+  Google. It goes directly between the two devices, inside the same mutual
+  TLS as at home. Google carries only the few lines the two exchange to find
+  each other.
+- **Another account gets nothing.** A phone signed in to a different account
+  has a different space: it does not see the computer, and nothing it writes
+  reaches it.
 
-`scripts/link-cli.py allow account off` turns sign-in off and leaves pairing
-codes as the only way in.
+If you want devices of your own account accepted without asking - closer to
+how Apple's behave once you are signed in - turn it on:
+`scripts/link-cli.py allow auto-approve on`. Then your Google account's
+security is all that stands between anyone and this computer, and the six
+digits are no longer compared by anybody, so only do that with two-step
+verification on.
 
-The difference from Apple that remains: Apple runs the account, the network
-and the devices. Here the account is Google's, the private network is
-Tailscale's, and the trust between your devices is this project's.
+`scripts/link-cli.py signout` signs the computer out and removes it from the
+account. `scripts/link-cli.py allow account off` leaves it signed in but
+stops it listening to the account; pairing codes are then the only way in.
 
-## Closing the rest of the computer
+The difference from Apple that remains: Apple runs the account, the servers
+and the devices. Here the account is Google's, the meeting place is a project
+you own, and the trust between your devices is this project's.
 
-**Do this once after signing the computer in.** The link's Tailscale node runs
-in userspace, which is why it needs no root - and the consequence is that any
-connection it is allowed to receive is handed to that port on this machine's
-own loopback. Tailscale's default policy allows every port between your
-devices. Together that means every service listening on this computer,
-*including ones bound to localhost only* (a development database, a local AI
-server, a print service), can be reached from your other devices on the
-account - and so by any app on your phone.
+## Your Google project
 
-`scripts/link-cli.py status` warns while that is so. Close it by telling
-Tailscale that only the link's two ports are reachable on this computer. In
-the admin console, **Access controls** (https://login.tailscale.com/admin/acls),
-replace the policy with:
+The meeting place is a Firebase project of your own, on the free plan: no
+card, and this use is far inside its limits. It takes about ten minutes, once.
 
-```json
-{
-  "hosts": { "adaptive-link": "100.x.y.z" },
-  "acls": [
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["adaptive-link:47823-47824"] }
-  ]
-}
+1. https://console.firebase.google.com → **Add project**. Analytics is not
+   needed.
+2. **Build → Authentication → Get started → Sign-in method → Google →
+   Enable.**
+3. **Build → Realtime Database → Create database** (locked mode), then under
+   **Rules**:
+
+   ```json
+   {
+     "rules": {
+       "users": {
+         "$uid": { ".read": "auth != null && auth.uid === $uid",
+                   ".write": "auth != null && auth.uid === $uid" }
+       }
+     }
+   }
+   ```
+
+   This is the whole of who may see what: each signed-in person, their own
+   part, and nothing else. Anybody may sign in to the project with a Google
+   account; all it gets them is an empty space of their own.
+4. **Project settings → Your apps → Android**: package
+   `com.karthi.adaptivelink`, and the SHA-1 of the key the app is built with
+   (`keytool -list -v -keystore ~/.android/debug.keystore -storepass android`).
+5. https://console.cloud.google.com/apis/credentials (the same project) →
+   **Create credentials → OAuth client ID → TVs and Limited Input devices**.
+   This is what lets the computer sign in by showing a code.
+
+Five values come out of that:
+
+| Value | Where |
+| --- | --- |
+| Web API key | Project settings → General |
+| Database URL | Realtime Database, at the top of the Data tab |
+| Web client ID | Credentials → "Web client (auto created by Google Service)" |
+| Device client ID and secret | the "TVs and Limited Input devices" client |
+
+Give them to the computer with `scripts/link-cli.py setup` (kept in
+`~/.config/adaptive-desktop/link/cloud.json`, readable by you only), and the
+first three to the app in `apps/adaptive-link-android/cloud.properties` before
+building it:
+
+```
+api_key=...
+database_url=https://...firebasedatabase.app
+web_client_id=...apps.googleusercontent.com
 ```
 
-with the computer's Tailscale address from `link-cli.py status` in place of
-`100.x.y.z`. Your devices can then reach Adaptive Link on this computer and
-nothing else on it. (This policy also stops your devices reaching each other
-on other ports; add rules for anything else you use Tailscale for.) The
-warning goes away within a minute of saving.
-
-The alternative that needs no policy is the system Tailscale
-(`sudo tailscale up`), which does not hand connections to loopback; services
-bound to localhost stay private, though ones bound to every interface are
-reachable as they already are on your Wi-Fi.
+Neither file is tracked. Without them everything still works by pairing
+code, on the local network only. None of the values is a password - they
+identify the project, and the rule above is what protects it - but they are
+yours, which is why they are not in the repository.
 
 ## Pairing by code
 
@@ -153,27 +187,34 @@ replaces the first.
 
 ## Local and away
 
-At home the phone reaches the computer directly over Wi-Fi. Away, it comes
-through **Tailscale**: a private network between your own devices, so the
-computer is never exposed to the internet and nothing on your router changes.
-The app tries every address at once and uses whichever answers.
+At home the phone reaches the computer directly over Wi-Fi.
 
-The link has its own Tailscale node on the computer, which needs no root:
+Away, with both signed in to the account, the two connect **directly to each
+other** across the internet. Each tells the other, through the account's
+space, the addresses it can be reached at; they then open a connection
+straight between them (WebRTC, the way a video call does), and the link runs
+inside it unchanged: the same pinned certificate, the same hardware key, the
+same mutual TLS. The app tries the home addresses first and falls back to
+this by itself; the home screen says which it is using.
 
-```sh
-scripts/install-link-tailnet.sh    # prints a sign-in link the first time
-```
+What that means for the computer:
 
-Open the link, sign in (a Google account works), and install Tailscale on the
-phone with the same account. The computer then has a name on your private
-network - `<host>-link.<your-tailnet>.ts.net` - that identifies it rather than
-where it is, so the phone reaches it from any network. The pairing code
-carries that name first and the numeric addresses as fallbacks, and the
-computer tells the phone its current addresses on every connection, so a
-changed address at home never means pairing again.
+- **No port is opened to the internet**, on the computer or the router. The
+  connection is made outwards from both ends.
+- **Only the link is reachable through it.** The connection ends at the
+  link's own port and nowhere else: nothing else running on the computer can
+  be reached through it, whatever it listens on.
+- **No server in the middle.** There is no relay, so nobody else carries the
+  traffic. The cost is that a few networks make a direct connection
+  impossible (some mobile carriers and locked-down office Wi-Fi put every
+  device behind an address that changes per destination). On those the app
+  says a direct connection could not be made, and another network will work.
+- Google's public STUN server is asked one question by each end - "what
+  address do you see me at?" - and nothing else.
 
 A pairing code can also be typed instead of scanned (the pairing window can
-copy it as text), for when the phone is not in front of the computer.
+copy it as text). Pairing by code needs the phone on the computer's network;
+pairing by signing in does not.
 
 If the phone cannot connect on Wi-Fi, check the firewall: `sudo ufw status`,
 and if it is active, `sudo ufw allow 47823/tcp` and, for pairing,
@@ -186,6 +227,8 @@ and if it is active, `sudo ufw allow 47823/tcp` and, for pairing,
 scripts/build-link-app.sh         # the app: dist/adaptive-link.apk
 scripts/build-link-app.sh --install   # ...and onto the phone over USB
 scripts/install-link-camera.sh    # once, sudo: the virtual webcam
+scripts/link-cli.py setup         # once, with a Google project: its five values
+scripts/link-cli.py signin        # ...and sign in; or, with no account:
 scripts/link-cli.py pair
 ```
 
@@ -194,7 +237,11 @@ needs Developer options → USB debugging on the phone. Or copy
 `dist/adaptive-link.apk` to the phone and open it there.
 
 The daemon needs `aiohttp` and `cryptography` (`pip install --user aiohttp
-cryptography`), `xdotool` and `xclip`.
+cryptography`), `xdotool` and `xclip`. The direct connection used away from
+home needs `aiortc`, kept apart from the system's Python packages because it
+brings newer versions of some of them:
+`pip install --target .local/link-pydeps aiortc`. Without it the link works
+on the local network only.
 
 ## What the phone can do
 
@@ -231,18 +278,24 @@ notifications are always available to the paired phone.
 - `scripts/verify-link.py` — the decisions as functions, then the real daemon
   on a virtual display: a client with the paired certificate, and three
   things that are not the phone (another certificate, no certificate, the
-  wrong pairing code). It never locks, suspends or changes the volume of the
-  machine it runs on.
+  wrong pairing code). Then the account, against a stand-in for Google
+  (`scripts/fake_cloud.py`) that enforces the database's rule: signing in by
+  code, a phone of the account asking and being approved, a phone of another
+  account seeing nothing, and the link used through a direct connection. It
+  never locks, suspends or changes the volume of the machine it runs on.
 - `scripts/verify-link-android.py` — the Android code itself, on an emulator
   (`scripts/link-emulator.sh`): the keystore key, pairing, mutual TLS, a
-  screen frame, a command, an impostor computer and a replaced key, then
-  every screen of the app opened and read back, and a command typed on the
-  phone's own screen.
+  screen frame, a command, the computer reached through a direct connection
+  when none of its addresses answers, an impostor computer and a replaced
+  key; then the app itself - signing in, every screen opened and every
+  control pressed, and a command typed on the phone's own screen.
 - The app's unit tests check that the phone computes the same pairing digits
   and fingerprints as the computer's code.
 
 What that leaves for a real phone is in `record-live-verification.py`: your
-own device, Tailscale from mobile data, and the camera.
+own device, Google's real sign-in (the emulator has no Google account, so the
+checks hand the app a stand-in's answer), the direct connection from mobile
+data, and the camera.
 
 ## Known limits
 
@@ -254,6 +307,8 @@ own device, Tailscale from mobile data, and the camera.
 - No sound from the computer on the phone.
 - The computer must be awake. A suspended laptop cannot be woken from the
   phone.
+- Away from home there is no relay: on a network that forbids direct
+  connections the phone cannot reach the computer (see *Local and away*).
 - Android only.
 
 ## Building the app from scratch

@@ -590,8 +590,8 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
 - ✅ **Daemon** (`services/adaptive-link/`). Mutual TLS to one paired phone;
   nothing listens until one is paired. Screen as JPEG frames, pointer and
   keyboard, commands, files, clipboard, media (MPRIS), volume, power, phone
-  notifications, phone camera into a v4l2loopback device. Private and
-  Tailscale addresses only. An audit log. `scripts/link-cli.py`.
+  notifications, phone camera into a v4l2loopback device. Private addresses
+  only. An audit log. `scripts/link-cli.py`.
 - ✅ **Pairing**: a QR code for two minutes, six digits compared on both
   screens, the owner's confirmation on the computer.
 - ✅ **Android app** (`apps/adaptive-link-android/`, Kotlin and Compose). Key
@@ -603,23 +603,30 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   emulator: keystore, pairing, mutual TLS, every screen opened, a command
   typed on the phone).
 - 🔬 **Your own phone on Wi-Fi.** Not yet installed on a real device.
-- 🔬 **Away, over Tailscale.** Tailscale is installed on the computer but
-  signed out; it needs `sudo tailscale up` and the app on the phone.
+- 🔬 **Your own Google project.** Sign-in and away access need a free
+  Firebase project (`docs/ADAPTIVE_LINK.md`, *Your Google project*) and its
+  five values given to `link-cli.py setup` and the app's `cloud.properties`.
 - 🔬 **Phone camera as webcam.** Written, never run: the virtual camera needs
   `scripts/install-link-camera.sh` (sudo), and the emulator's camera is not a
   test of a real one. Phone notifications on the computer are in the same
   state: the request is checked, the listener service needs a real phone.
-- ✅ **Reached by name, from anywhere.** The link has its own Tailscale node
-  (userspace, no root: `install-link-tailnet.sh`), named `adaptive-link`.
-  The computer tells the phone its current addresses on every connection.
-- ✅ **Sign-in instead of pairing.** A device signed in to the computer's own
-  account may ask to connect with no code ("Find my computer"); the computer
-  takes Tailscale's word for who is calling. Approved once per device on the
-  computer, or automatically with `allow auto-approve on`. Checked with a
-  stand-in for Tailscale (same account, another account, none) in
-  `verify-link.py`, and through the app's own screens on an emulator.
-  🔬 Against real Tailscale the account lookup has been seen to work for a
-  device by its address; a live sign-in from the phone is the remaining check.
+- ✅ **Sign in with Google instead of pairing.** The computer signs in by a
+  code entered at google.com/device (`link-cli.py signin`), the phone with
+  Android's account picker. Both meet in a database in the owner's project
+  that only that account can read; the phone asks from there with no pairing
+  code, and the owner approves once on the computer (or automatically with
+  `allow auto-approve on`). The account lets a device ask; the phone's
+  hardware key is still what the computer trusts.
+- ✅ **Away, directly.** With no address of the computer answering, the phone
+  and the computer open a direct connection to each other (WebRTC, set up
+  through the account) and the link runs inside it unchanged. No open port,
+  no relay, and only the link's port is reachable through it. A private
+  network between the devices (Tailscale) was tried first and removed: run
+  without root it handed every allowed port to the computer's loopback, so
+  services bound to localhost became reachable from the other devices.
+  Checked against a stand-in for Google in `verify-link.py`, and with the
+  app's own code and screens on an emulator. 🔬 Google's real sign-in, and a
+  direct connection from mobile data, are the remaining checks.
 - ⬜ Not there: sound from the computer on the phone, waking a suspended
   computer, Wayland, iOS, and finding each other with no network at all
   (Apple's Bluetooth and peer-to-peer Wi-Fi).

@@ -17,6 +17,9 @@ if [ "${#missing[@]}" != 0 ]; then
     echo "  pip install --user ${missing[*]}" >&2
     exit 1
 fi
+# The direct connection used away from home; without it the link is local only.
+PYTHONPATH="$REPO/.local/link-pydeps" python3 -c "import aiortc" 2>/dev/null ||
+    echo "note: away access needs aiortc (pip install --target $REPO/.local/link-pydeps aiortc)"
 for tool in xdotool xclip; do
     command -v "$tool" >/dev/null || echo "note: $tool is not installed (sudo apt install $tool)"
 done

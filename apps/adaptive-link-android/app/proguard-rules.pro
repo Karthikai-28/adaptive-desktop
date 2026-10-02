@@ -19,3 +19,9 @@
 -keep class kotlinx.coroutines.** { *; }
 -keep class okhttp3.** { *; }
 -keep class okio.** { *; }
+
+# WebRTC is called from native code by name.
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
+# Google sign-in's credential types are found by reflection.
+-keep class com.google.android.libraries.identity.googleid.** { *; }

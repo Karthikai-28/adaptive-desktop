@@ -63,7 +63,7 @@ class NotificationRelay : NotificationListenerService() {
         scope.launch {
             if (client.host == null && client.connect() == null) return@launch
             if (client.post(path, body) == null) {
-                // The address may have changed (left home, joined Tailscale).
+                // The address may have changed (left home, came back).
                 if (client.connect() != null) client.post(path, body)
             }
         }

@@ -137,8 +137,8 @@ CHECKS = [
     },
     {
         "id": "link_away",
-        "backlog": "Adaptive Link over Tailscale.",
-        "prompt": "With the phone on mobile data and Tailscale on both, does Adaptive Link connect and show the screen?",
+        "backlog": "Adaptive Link away from home.",
+        "prompt": "Signed in with Google on both, with the phone on mobile data: does Adaptive Link connect (\"Direct, away\") and show the screen?",
     },
     {
         "id": "link_camera",

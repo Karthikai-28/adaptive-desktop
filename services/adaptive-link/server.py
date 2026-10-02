@@ -1,21 +1,26 @@
 """Adaptive Link - the server the owner's paired phone talks to.
 
-Three listeners, each for one kind of caller:
+Listeners, each for one kind of caller:
 
   the link     TCP, mutual TLS. Only the paired phone can finish a handshake
                (identity.link_context), so nothing below /v1 is reachable by
                anyone else. Not started at all until a phone is paired, and
-               stopped when the link is turned off.
-  pairing      TCP, TLS without a client certificate, open only for the two
-               minutes after the owner asks to pair, and good for one phone.
+               stopped when the link is turned off. The phone reaches it
+               straight over the local network, or - from elsewhere - through
+               a direct tunnel that ends at this same port (rtc.py).
+  pairing      TCP, TLS without a client certificate, open only for the
+               minutes after the owner asks to pair by code, for one phone.
   control      A Unix socket only this user can open: how the pairing window,
                link-cli and the palette talk to the daemon.
 
-What a request may do is decided in three places before any handler runs:
-the address it came from (identity.peer_allowed), the certificate it
-presented (TLS, then checked again here against the stored fingerprint), and
-the owner's switches in config.json (allow_exec, allow_files, allow_power).
-Everything the phone does is written to the audit log.
+And one thing it reaches out to: the owner's Google account (cloud.py), where
+a phone signed in to the same account can find this computer and ask to
+connect. Asking is all the account gives; the owner approves here.
+
+What a request may do is decided before any handler runs: the address it
+came from (identity.peer_allowed), the certificate it presented (TLS, then
+checked again here against the stored fingerprint), and the owner's switches
+in config.json. Everything the phone does is written to the audit log.
 """
 
 import asyncio
@@ -26,9 +31,11 @@ import socket
 import time
 from pathlib import Path
 
+import aiohttp
 from aiohttp import WSMsgType, web
 
 import camera
+import cloud
 import desktop
 import identity
 import inputs
@@ -38,6 +45,9 @@ VERSION = 1
 CONNECT_NOTICE_EVERY_S = 600
 EXEC_OUTPUT_CHUNK = 4096
 PAIR_ASKS_PER_MINUTE = 60
+# How old a request made through the account may be and still be acted on.
+SIGNAL_FRESH_S = 120
+REQUEST_FRESH_S = 600
 
 
 def control_socket_path():
@@ -75,10 +85,16 @@ class Link:
         self._pair_reached = {"hellos": 0, "alerts": []}
         self._pair_decided = asyncio.Event()
         self._pair_timer = None
-        # The account this computer is signed in with, or "" (see sync_account).
-        self.account = ""
-        # What the Tailscale policy exposes of this computer beyond the link.
-        self.exposure = ""
+        # The owner's Google account (cloud.Account), once their project is
+        # set up; what this computer does there is in restart_cloud().
+        self.account = None
+        self.cloud_state = "not set up"
+        self._cloud_task = None
+        self._tunnel = None
+        self._signin = {"state": "idle"}
+        self._signin_task = None
+        self._answered = set()   # direct-connection requests already handled
+        self._decided = {}       # requests of the account already answered: phone id -> when it asked
         self._last_notice = 0.0
         self.problem = ""
         self._sessions = 0
@@ -87,7 +103,6 @@ class Link:
         # unpairing ends what the phone is doing now, not at its next request.
         self._sockets = set()
         self._pair_asks = {}
-        self._refused_noted = {}
 
     # ------------------------------------------------------------ listeners
 
@@ -103,12 +118,15 @@ class Link:
         await self.input.start()
         await self._start_control()
         await self.restart_link()
-        self._account_watch = asyncio.ensure_future(self._watch_account())
+        await self.restart_cloud()
 
     async def stop(self):
-        watch = getattr(self, "_account_watch", None)
-        if watch is not None:
-            watch.cancel()
+        if self._cloud_task is not None:
+            self._cloud_task.cancel()
+        if self._tunnel is not None:
+            await self._tunnel.close()
+        if self.account is not None:
+            await self.account.close()
         for process in list(self._children):
             self._kill(process)
         await self.input.stop()
@@ -171,7 +189,7 @@ class Link:
         peer = request.transport.get_extra_info("peername") if request.transport else None
         address = peer[0] if peer else ""
         if not identity.peer_allowed(address, self.config["allow_public"]):
-            self.audit.write(address, "refused", "address is not on a private or Tailscale network")
+            self.audit.write(address, "refused", "address is not on a private network")
             return json_error(403, "this network is not allowed")
 
         # TLS has already required the paired certificate. Compare it again
@@ -191,7 +209,7 @@ class Link:
         now = time.monotonic()
         if now - self._last_notice > CONNECT_NOTICE_EVERY_S:
             self.audit.write(address, "connected",
-                             "tailscale" if identity.is_tailscale(address) else "local network")
+                             "direct tunnel" if identity.is_loopback(address) else "local network")
             if self.config["notify_on_connect"]:
                 desktop.notify(f"{self.phone['name']} connected",
                                "Your phone is connected to this computer.")
@@ -233,7 +251,8 @@ class Link:
         info = await asyncio.to_thread(desktop.status)
         info.update({
             "version": VERSION,
-            "via": "tailscale" if identity.came_by_tailnet(request.host, request["peer"]) else "lan",
+            # From this machine itself means through the direct tunnel.
+            "via": "direct" if identity.is_loopback(request["peer"]) else "lan",
             # Where this computer can be reached now. The phone keeps these,
             # so a changed address at home does not mean pairing again.
             "hosts": [address for address, _kind in await asyncio.to_thread(identity.local_addresses)],
@@ -513,9 +532,8 @@ class Link:
 
     def pairing_state(self):
         state = dict(self._pairing)
-        state.pop("token", None)
-        state.pop("cert_pem", None)
-        state.pop("ui", None)
+        for private in ("token", "cert_pem", "ui", "cloud_id"):
+            state.pop(private, None)
         if state.get("expires"):
             state["seconds_left"] = max(0, int(state["expires"] - time.time()))
         state["reached"] = dict(self._pair_reached)
@@ -542,11 +560,10 @@ class Link:
             pass
 
     async def _open_pair_listener(self):
-        """The port a device that is not yet trusted talks to. Idempotent."""
+        """The port a phone pairing by code talks to. Idempotent."""
         if self._pair_runner is not None:
             return
         app = web.Application(client_max_size=64 * 1024)
-        app.router.add_get("/hello", self.h_hello)
         app.router.add_post("/pair", self.h_pair)
         app.router.add_get("/pair/wait", self.h_pair_wait)
         runner = web.AppRunner(app, access_log=None, shutdown_timeout=1.0)
@@ -580,28 +597,6 @@ class Link:
             # A moment for the phone to collect the answer it is waiting on.
             await asyncio.sleep(delay)
             await runner.cleanup()
-
-    async def sync_account(self):
-        """Keep the sign-in door in step with whether this computer is signed in.
-
-        Signed in to an account (and account_enroll on), the pairing port
-        stays open: it answers devices of the same account and nobody else.
-        Otherwise it is open only during a pairing by code.
-        """
-        self.account = await asyncio.to_thread(identity.own_account) if self.config["account_enroll"] else ""
-        self.exposure = await asyncio.to_thread(identity.tailnet_exposure)
-        if self.account and self.config["enabled"]:
-            await self._open_pair_listener()
-        elif self._pairing.get("state") not in ("waiting", "pending"):
-            await self._close_pair_listener(0)
-
-    async def _watch_account(self):
-        while True:
-            try:
-                await self.sync_account()
-            except Exception as error:  # noqa: BLE001 - keep watching
-                print(f"Adaptive Link: account check failed: {error}", flush=True)
-            await asyncio.sleep(60)
 
     async def start_pairing(self, seconds=None, ui=False):
         """Start pairing by code. Returns what the QR code holds.
@@ -644,24 +639,20 @@ class Link:
         if self._pair_timer is not None:
             self._pair_timer.cancel()
             self._pair_timer = None
-        # The answer is kept for the device that asked (its code, or its
-        # place on the account), and for nobody else.
+        # The answer is kept for the phone that asked by code, and nobody else.
         self._pairing = {"state": state, "token": self._pairing.get("token", "")}
         self._pair_decided.set()
-        if not self.account:
-            await self._close_pair_listener(0.5 if state in ("idle", "expired") else 3)
+        await self._close_pair_listener(0.5 if state in ("idle", "expired") else 3)
 
     async def cancel_pairing(self):
-        if self._pairing.get("state") != "idle" or (self._pair_runner is not None and not self.account):
+        if self._pairing.get("state") != "idle" or self._pair_runner is not None:
             await self._close_pairing("idle")
 
     def _too_many(self, address):
         """Whether this address has asked the pairing port too often.
 
-        The port answers devices that are not trusted yet, and each question
-        costs a lookup and a line in the record; this bounds both. Devices on
-        the account's network all arrive from this machine's own address and
-        share one allowance, which is ample for a person and their phones.
+        The port answers devices that are not trusted yet; this bounds what
+        answering them can cost.
         """
         now = time.monotonic()
         recent = [t for t in self._pair_asks.get(address, []) if now - t < 60]
@@ -675,40 +666,34 @@ class Link:
         peer = request.transport.get_extra_info("peername") if request.transport else None
         return (peer[0], peer[1]) if peer else ("", 0)
 
-    async def _signed_in_peer(self, request):
-        """The peer's {"account", "device"} if it is signed in to this
-        computer's own account; None for anyone else."""
-        if not self.account:
-            return None
-        address, port = self._pair_peer(request)
-        peer = await asyncio.to_thread(identity.whois, address, port)
-        if identity.same_account(peer, self.account):
-            return peer
-        # On record, because "why can my own phone not find the computer" is
-        # answered here: it is not on the network, or on another account.
-        now = time.monotonic()
-        if now - self._refused_noted.get(address, 0) > 60:
-            self._refused_noted = {address: now} if len(self._refused_noted) > 200 else {**self._refused_noted, address: now}
-            self.audit.write(address, "account-refused",
-                             f"signed in as {peer['account']}" if peer else "not a device on this computer's Tailscale network")
-        return None
+    def _request_pairing(self, name, pem, digest, origin, account="", cloud_id="", token=""):
+        """A device has asked to be trusted: hold the request for the owner.
 
-    async def h_hello(self, request):
-        """Who this computer is, for a device of the same account that is
-        looking for it. Anyone else is told nothing."""
-        address, _port = self._pair_peer(request)
-        if not identity.peer_allowed(address, self.config["allow_public"]):
-            return json_error(403, "this network is not allowed")
-        if self._too_many(address):
-            return json_error(429, "too many requests; wait a minute")
-        peer = await self._signed_in_peer(request)
-        if peer is None:
-            return json_error(403, "sign in to the same account as this computer, or use a pairing code")
-        return web.json_response({
-            "ok": True, "name": socket.gethostname(), "account": self.account,
-            "fingerprint": self.fingerprint, "port": self.port, "pairing_port": self.pairing_port,
-            "hosts": [a for a, _kind in await asyncio.to_thread(identity.local_addresses)],
-        })
+        However it arrived - by a pairing code on the local network, or
+        through the owner's account - it ends up here, and the same thing
+        happens: the owner is shown the device and six digits, and decides.
+        Returns the six digits.
+        """
+        name = identity.clean_name(name)
+        code = identity.pairing_code(self.fingerprint, digest)
+        ui = self._pairing.get("ui", False) if self._pairing.get("state") == "waiting" else False
+        self._pairing = {"state": "pending", "name": name, "code": code, "ui": ui,
+                         "cert_pem": pem.decode() if isinstance(pem, bytes) else pem,
+                         "fingerprint": digest, "from": origin, "account": account,
+                         "cloud_id": cloud_id, "token": token,
+                         "expires": time.time() + identity.PAIRING_WINDOW_S}
+        self._pair_decided = asyncio.Event()
+        self._arm_pair_timer(identity.PAIRING_WINDOW_S)
+        who = f"{name} ({account})" if account else name
+        self.audit.write(origin, "pairing-requested", who)
+        return code
+
+    def _announce_request(self):
+        pending = self._pairing
+        who = f"{pending['name']} ({pending['account']})" if pending.get("account") else pending["name"]
+        code = pending["code"]
+        desktop.notify("A phone wants to connect", f"{who} - check that it shows {code[:3]} {code[3:]}")
+        self._show_pairing_request()
 
     async def h_pair(self, request):
         address, _port = self._pair_peer(request)
@@ -719,44 +704,23 @@ class Link:
         state = self._pairing.get("state")
         if state == "pending":
             return json_error(409, "another device is waiting to be answered")
+        if state != "waiting":
+            return json_error(409, "not waiting for a phone")
 
         data = await read_json(request)
-        by_code = state == "waiting" and identity.tokens_match(data.get("t"), self._pairing["token"])
-        peer = None if by_code else await self._signed_in_peer(request)
-        if not by_code and peer is None:
-            if state == "waiting" and data.get("t"):
-                self._pairing["attempts"] += 1
-                self.audit.write(address, "pairing-refused", "wrong code")
-                if self._pairing["attempts"] >= identity.PAIRING_MAX_ATTEMPTS:
-                    asyncio.ensure_future(self._close_pairing("expired"))
-                return json_error(403, "wrong pairing code")
-            if state != "waiting" and not self.account:
-                return json_error(409, "not waiting for a phone")
-            return json_error(403, "sign in to the same account as this computer, or use a pairing code")
+        if not identity.tokens_match(data.get("t"), self._pairing["token"]):
+            self._pairing["attempts"] += 1
+            self.audit.write(address, "pairing-refused", "wrong code")
+            if self._pairing["attempts"] >= identity.PAIRING_MAX_ATTEMPTS:
+                asyncio.ensure_future(self._close_pairing("expired"))
+            return json_error(403, "wrong pairing code")
         try:
             pem, _der, digest = identity.check_phone_certificate(data.get("cert", ""))
         except identity.BadCertificate as error:
             return json_error(400, str(error))
 
-        name = identity.clean_name(data.get("name"))
-        code = identity.pairing_code(self.fingerprint, digest)
-        ui = self._pairing.get("ui", False) if state == "waiting" else False
-        self._pairing = {"state": "pending", "name": name, "code": code, "ui": ui,
-                         "cert_pem": pem.decode(), "fingerprint": digest, "from": address,
-                         "account": peer["account"] if peer else "",
-                         "device": peer["device"] if peer else "",
-                         "token": self._pairing.get("token", "") if by_code else "",
-                         "expires": time.time() + identity.PAIRING_WINDOW_S}
-        self._pair_decided = asyncio.Event()
-        self._arm_pair_timer(identity.PAIRING_WINDOW_S)
-        who = f"{name} ({peer['account']})" if peer else name
-        self.audit.write(address, "pairing-requested", who)
-
-        if peer and self.config["auto_approve_account"]:
-            await self.decide_pairing(True)
-            return web.json_response({"ok": True, "code": code, "host": socket.gethostname(), "state": "paired"})
-        desktop.notify("A phone wants to connect", f"{who} - check that it shows {code[:3]} {code[3:]}")
-        self._show_pairing_request()
+        code = self._request_pairing(data.get("name"), pem, digest, address, token=self._pairing["token"])
+        self._announce_request()
         return web.json_response({"ok": True, "code": code, "host": socket.gethostname()})
 
     async def h_pair_wait(self, request):
@@ -764,8 +728,7 @@ class Link:
         address, _port = self._pair_peer(request)
         if self._too_many(address):
             return json_error(429, "too many requests; wait a minute")
-        by_code = identity.tokens_match(request.query.get("t"), self._pairing.get("token", ""))
-        if not by_code and await self._signed_in_peer(request) is None:
+        if not identity.tokens_match(request.query.get("t"), self._pairing.get("token", "")):
             return json_error(403, "wrong pairing code")
         try:
             await asyncio.wait_for(self._pair_decided.wait(), 25)
@@ -783,23 +746,232 @@ class Link:
             await self.restart_link()
         else:
             self.audit.write(pending.get("from", ""), "pairing-rejected", pending["name"])
+        if pending.get("cloud_id"):
+            # Tell the phone, through the account, what the owner decided.
+            self._decided[pending["cloud_id"]] = pending.get("cloud_at")
+            await self._cloud_try(self.account.put(f"computers/{self.cloud_id}/accepted/{pending['cloud_id']}",
+                                                   bool(accept)))
         await self._close_pairing("paired" if accept else "rejected")
         return True
 
     async def unpair(self):
         removed = identity.forget_phone(self.link_dir)
         self.phone = None
+        self._decided.clear()
         await self.restart_link()
         if removed:
             self.audit.write("", "unpaired")
+            if self.account is not None and self.account.signed_in:
+                await self._cloud_try(self.account.delete(f"computers/{self.cloud_id}/accepted"))
         return removed
 
     async def set_enabled(self, enabled):
         self.config["enabled"] = bool(enabled)
         identity.save_config(self.config, self.link_dir)
         await self.restart_link()
-        await self.sync_account()
+        await self.restart_cloud()
         self.audit.write("", "enabled" if enabled else "disabled")
+
+    # ------------------------------------------------------------ the account
+
+    @property
+    def cloud_id(self):
+        return cloud.device_id(self.fingerprint)
+
+    async def _cloud_try(self, awaitable):
+        """Something for the account's space that may fail without mattering:
+        it will be put right the next time the space is reached."""
+        try:
+            await awaitable
+        except (cloud.CloudError, aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
+            self.cloud_state = f"cannot reach the account: {error}"
+
+    async def restart_cloud(self):
+        """Start, or stop, this computer's presence in the owner's account.
+
+        Present when: the owner's project is set up, they are signed in, the
+        link is on and account_enroll is on. Then the computer keeps its name,
+        fingerprint and addresses in the account's space and listens there for
+        its own devices.
+        """
+        if self._cloud_task is not None:
+            self._cloud_task.cancel()
+            self._cloud_task = None
+        if self._tunnel is not None:
+            await self._tunnel.close()
+            self._tunnel = None
+        if self.account is not None:
+            await self.account.close()
+
+        project = cloud.load_project(self.link_dir)
+        if project is None:
+            self.account, self.cloud_state = None, "not set up"
+            return
+        self.account = cloud.Account(project, self.link_dir)
+        if not self.account.signed_in:
+            self.cloud_state = "signed out"
+        elif not self.config["enabled"] or not self.config["account_enroll"]:
+            self.cloud_state = "off"
+        else:
+            self.cloud_state = "connecting"
+            self._cloud_task = asyncio.ensure_future(self._cloud_loop())
+
+    async def _publish(self):
+        hosts = [a for a, _kind in await asyncio.to_thread(identity.local_addresses)]
+        await self.account.patch(f"computers/{self.cloud_id}", {
+            "name": socket.gethostname(), "fingerprint": self.fingerprint,
+            "hosts": hosts, "port": self.port, "at": int(time.time())})
+
+    async def _republish(self):
+        while True:
+            await asyncio.sleep(600)
+            await self._publish()
+
+    async def _cloud_loop(self):
+        wait = 2
+        while True:
+            tasks = []
+            try:
+                await self._publish()
+                self.cloud_state = "connected"
+                wait = 2
+                tasks = [asyncio.ensure_future(t) for t in (
+                    self.account.watch(f"signals/{self.cloud_id}", self._on_signals),
+                    self.account.watch("phones", self._on_phones),
+                    self._republish())]
+                # The streams end when the hourly token lapses, or on an
+                # error; either way start again from a fresh publish.
+                done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+            except asyncio.CancelledError:
+                raise
+            except cloud.CloudError as error:
+                self.cloud_state = str(error)
+                if not self.account.signed_in:
+                    return
+                wait = min(wait * 2, 120)
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
+                self.cloud_state = f"cannot reach the account: {error.__class__.__name__}"
+                wait = min(wait * 2, 120)
+            finally:
+                for task in tasks:
+                    task.cancel()
+            await asyncio.sleep(wait)
+
+    @staticmethod
+    def _entries(path, data):
+        """What a change in the space says, as {name: value} of whole
+        entries. Changes inside an entry (this computer's own answers) are
+        not entries and give nothing."""
+        parts = [part for part in path.split("/") if part]
+        if not parts:
+            return data if isinstance(data, dict) else {}
+        if len(parts) == 1:
+            return {parts[0]: data}
+        return {}
+
+    async def _on_signals(self, path, data):
+        """A phone of the account asks for a direct connection."""
+        for session, value in self._entries(path, data).items():
+            if not isinstance(value, dict) or session in self._answered:
+                continue
+            self._answered.add(session)
+            if len(self._answered) > 500:
+                self._answered = {session}
+            offer = value.get("offer")
+            stale = abs(time.time() - float(value.get("at") or 0)) > SIGNAL_FRESH_S
+            if stale or value.get("answer") or not isinstance(offer, str) or not self.listening:
+                # Old, already answered, or nothing to connect to: clear it away.
+                await self._cloud_try(self.account.delete(f"signals/{self.cloud_id}/{session}"))
+                continue
+            if self._tunnel is None:
+                import rtc
+                self._tunnel = rtc.TunnelServer(self.port)
+            try:
+                answer = await asyncio.wait_for(self._tunnel.answer(offer), 30)
+            except Exception as error:  # noqa: BLE001 - one bad offer must not stop the listener
+                self.audit.write("account", "tunnel-refused", str(error)[:120])
+                continue
+            self.audit.write("account", "tunnel", "a direct connection was set up")
+            await self._cloud_try(self.account.patch(f"signals/{self.cloud_id}/{session}", {"answer": answer}))
+
+    async def _on_phones(self, path, data):
+        """A phone signed in to the account says it wants this computer."""
+        for phone_id, value in self._entries(path, data).items():
+            if not isinstance(value, dict) or value.get("want") != self.cloud_id:
+                continue
+            try:
+                pem, _der, digest = identity.check_phone_certificate(value.get("cert", ""))
+            except identity.BadCertificate:
+                continue
+            if cloud.device_id(digest) != phone_id:
+                continue   # the entry does not belong to the certificate in it
+
+            try:
+                asked = float(value.get("at") or 0)
+            except (TypeError, ValueError):
+                continue
+            # Each request is answered once; asking again later is a new one.
+            if self._decided.get(phone_id) == asked:
+                continue
+            if self.phone and self.phone["fingerprint"] == digest:
+                # Already this computer's phone: say so.
+                self._decided[phone_id] = asked
+                await self._cloud_try(self.account.put(f"computers/{self.cloud_id}/accepted/{phone_id}", True))
+                continue
+            if abs(time.time() - asked) > REQUEST_FRESH_S or self._pairing.get("state") == "pending":
+                continue
+
+            self._request_pairing(value.get("name"), pem, digest, "account",
+                                  account=self.account.email, cloud_id=phone_id)
+            self._pairing["cloud_at"] = asked
+            if self.config["auto_approve_account"]:
+                await self.decide_pairing(True)
+            else:
+                self._announce_request()
+
+    # -- signing in (from the control socket)
+
+    async def setup_project(self, values):
+        try:
+            cloud.save_project(values, self.link_dir)
+        except (KeyError, TypeError):
+            return False
+        if cloud.load_project(self.link_dir) is None:
+            return False
+        await self.restart_cloud()
+        return True
+
+    async def begin_sign_in(self):
+        if self.account is None:
+            return {"ok": False, "error": "the Google project is not set up (link-cli.py setup)"}
+        try:
+            started = await self.account.begin_sign_in()
+        except (cloud.CloudError, aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
+            return {"ok": False, "error": str(error) or error.__class__.__name__}
+        self._signin = {"state": "waiting", "code": started["user_code"], "url": started["verification_url"]}
+
+        async def finish():
+            try:
+                email = await self.account.finish_sign_in(started)
+                self._signin = {"state": "done", "email": email}
+                self.audit.write("", "signed-in", email)
+                await self.restart_cloud()
+            except (cloud.CloudError, aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
+                self._signin = {"state": "failed", "error": str(error) or error.__class__.__name__}
+
+        self._signin_task = asyncio.ensure_future(finish())
+        return {"ok": True, "code": started["user_code"], "url": started["verification_url"]}
+
+    async def sign_out(self):
+        if self.account is None or not self.account.signed_in:
+            return False
+        await self._cloud_try(self.account.delete(f"computers/{self.cloud_id}"))
+        self.account.sign_out()
+        self.audit.write("", "signed-out")
+        await self.restart_cloud()
+        return True
 
     # -------------------------------------------------------------- control
 
@@ -813,14 +985,15 @@ class Link:
             "phone": {"name": self.phone["name"], "paired_at": self.phone["paired_at"],
                       "fingerprint": self.phone["fingerprint"]} if self.phone else None,
             "addresses": [{"address": a, "kind": k} for a, k in addresses],
-            "tailscale": any(kind == "tailscale" for _a, kind in addresses),
             "fingerprint": self.fingerprint,
             "viewing": self._sessions,
             "config": {k: self.config[k] for k in identity.DEFAULT_CONFIG},
             "camera": camera.find_device(),
             "pairing": self.pairing_state(),
-            "account": self.account,
-            "exposure": self.exposure,
+            "account": self.account.email if self.account is not None else "",
+            "cloud": self.cloud_state,
+            "signin": dict(self._signin),
+            "direct": self._tunnel.connected if self._tunnel is not None else 0,
         }
 
     async def _start_control(self):
@@ -860,8 +1033,18 @@ class Link:
                 if isinstance(data.get(key), bool):
                     self.config[key] = data[key]
             identity.save_config(self.config, self.link_dir)
-            await self.sync_account()
+            if "account_enroll" in data:
+                await self.restart_cloud()
             return web.json_response(self.describe())
+
+        async def cloud_setup(request):
+            return web.json_response({"ok": await self.setup_project(await read_json(request))})
+
+        async def cloud_signin(_request):
+            return web.json_response(await self.begin_sign_in())
+
+        async def cloud_signout(_request):
+            return web.json_response({"ok": await self.sign_out()})
 
         async def log(_request):
             return web.json_response({"entries": self.audit.tail(200)})
@@ -875,6 +1058,9 @@ class Link:
         app.router.add_post("/unpair", unpair)
         app.router.add_post("/configure", configure)
         app.router.add_get("/log", log)
+        app.router.add_post("/cloud/setup", cloud_setup)
+        app.router.add_post("/cloud/signin", cloud_signin)
+        app.router.add_post("/cloud/signout", cloud_signout)
 
         path = control_socket_path()
         try:

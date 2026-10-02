@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- No cleartext traffic at all. The computer's certificate is pinned in code
-     (LinkClient.kt), because it is self-signed and known only after pairing. -->
+<!-- No cleartext traffic. The computer's certificate is pinned in code
+     (LinkClient.kt), because it is self-signed and known only after pairing;
+     Google is reached over ordinary HTTPS. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
+    <!-- The emulator's name for the machine it runs on: the app's own test
+         talks to a stand-in for Google there. A real phone never asks it. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
 </network-security-config>
