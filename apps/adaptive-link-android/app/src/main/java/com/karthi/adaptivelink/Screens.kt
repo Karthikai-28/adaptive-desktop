@@ -24,7 +24,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.SettingsSuggest
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Window
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Wifi
@@ -339,12 +343,17 @@ private val TILES = listOf(
     Tile(Page.Devices, "Devices", "USB and drives", Icons.Filled.Usb),
     Tile(Page.Network, "Network", "Connections and traffic", Icons.Filled.Wifi),
     Tile(Page.Desktop, "Desktop", "Projects, focus, windows", Icons.Filled.Dashboard),
+    Tile(Page.Windows, "Windows", "Switch, move, close", Icons.Filled.Window),
+    Tile(Page.DisplaySound, "Display", "Screens and sound", Icons.Filled.Tune),
+    Tile(Page.Bluetooth, "Bluetooth", "Devices nearby", Icons.Filled.Bluetooth),
+    Tile(Page.Services, "Services", "Start, stop, restart", Icons.Filled.SettingsSuggest),
     Tile(Page.More, "More", "Clipboard, power, settings", Icons.Filled.MoreHoriz),
 )
 
 @Composable
 fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
     val scope = rememberCoroutineScope()
+    var woke by remember { mutableStateOf("") }
 
     suspend fun refresh() {
         state.connecting = state.status == null
@@ -396,7 +405,18 @@ fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
                             "The computer must be on with Adaptive Link started. Away from its network, this phone and the computer both need to be signed in to the same Google account."
                         })
                         Spacer(Modifier.height(8.dp))
-                        OutlinedButton(onClick = { scope.launch { refresh() } }) { Text("Try again") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { scope.launch { refresh() } }) { Text("Try again") }
+                            // Asleep, on this phone's own network: its network card can be asked to start it.
+                            if (client.canWake) OutlinedButton(onClick = {
+                                scope.launch {
+                                    woke = if (client.wake() > 0) "Asked it to wake. That takes up to a minute, and only works on its own network, if it was set to (link-cli.py wake on)."
+                                    else "This phone could not send the wake request on this network."
+                                    refresh()
+                                }
+                            }) { Text("Wake it") }
+                        }
+                        if (woke.isNotEmpty()) { Spacer(Modifier.height(6.dp)); Muted(woke) }
                     }
                 }
             }

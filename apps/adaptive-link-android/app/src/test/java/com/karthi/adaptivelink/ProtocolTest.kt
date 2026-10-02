@@ -2,6 +2,8 @@ package com.karthi.adaptivelink
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -110,5 +112,66 @@ class ProtocolTest {
         val (_, far) = zoomed(2f, point(0f, 0f), box, 1f, point(500f, 1000f), point(9000f, -9000f))
         assertEquals(500f, far.x, 0.5f)
         assertEquals(-1000f, far.y, 0.5f)
+    }
+
+    @Test
+    fun savedCommandsSurviveBeingStored() {
+        val commands = listOf(SavedCommand("Backup", "rsync -a ~/work /mnt/backup", false), SavedCommand("Player", "vlc", true))
+        assertEquals(commands, SavedCommand.listFromJson(SavedCommand.listToJson(commands)))
+        assertEquals(emptyList<SavedCommand>(), SavedCommand.listFromJson("not json"))
+        // One without a name or without a command is not a button.
+        assertEquals(1, SavedCommand.listFromJson("""[{"n":" ","c":"ls"},{"n":"ok","c":"ls"},{"n":"x","c":""}]""").size)
+        assertEquals(SavedCommand.LIMIT, SavedCommand.listFromJson(SavedCommand.listToJson(List(40) { SavedCommand("n$it", "c", false) })).size)
+    }
+
+    @Test
+    fun minutesAndProfilesReadAsWords() {
+        assertEquals("45 min", Protocol.formatMinutes(45))
+        assertEquals("2 h 5 min", Protocol.formatMinutes(125))
+        assertEquals("Power saver", Protocol.profileName("power-saver"))
+        assertEquals("Quiet mode", Protocol.profileName("quiet-mode"))
+    }
+
+    @Test
+    fun aSharedPageIsItsAddress() {
+        assertEquals("https://example.org/a?b=c", Protocol.sharedAddress("https://example.org/a?b=c"))
+        assertEquals("https://example.org/x", Protocol.sharedAddress("A page worth reading\nhttps://example.org/x "))
+        assertEquals(null, Protocol.sharedAddress("just some words"))
+        assertEquals(null, Protocol.sharedAddress("https://example.org and then more words"))
+        assertEquals(null, Protocol.sharedAddress("file:///sdcard/secret"))
+        assertEquals(null, Protocol.sharedAddress(""))
+    }
+
+    @Test
+    fun theWakePacketIsTheAddressSixteenTimes() {
+        val packet = Protocol.magicPacket("00:1a:2b:3c:4d:ff")
+        assertEquals(102, packet.size)
+        assertTrue(packet.take(6).all { it == 0xFF.toByte() })
+        val address = listOf(0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0xff).map { it.toByte() }
+        assertEquals(List(16) { address }.flatten(), packet.drop(6))
+    }
+
+    @Test
+    fun whereToWakeTheComputerIsKeptWithIt() {
+        val computer = Computer("pc", listOf("192.168.1.5"), 47823, 47824, "ab".repeat(32),
+            listOf("00:1a:2b:3c:4d:ff|192.168.1.255"))
+        assertEquals(computer, Computer.fromJson(computer.toJson()))
+        // One paired before this was known still loads, with nowhere to send the packet.
+        val old = """{"n":"pc","h":["192.168.1.5"],"p":47823,"pp":47824,"f":"${"ab".repeat(32)}"}"""
+        assertEquals(emptyList<String>(), Computer.fromJson(old)!!.wake)
+        assertTrue(Computer.isWake("00:1a:2b:3c:4d:ff|192.168.1.255"))
+        assertFalse(Computer.isWake("00:1a:2b:3c:4d:ff|evil.example"))
+        assertFalse(Computer.isWake("not-a-mac|192.168.1.255"))
+    }
+
+    @Test
+    fun onlyATurnServerIsARelay() {
+        val relay = Relay("turn:relay.example.org:3478?transport=tcp", "me", "secret")
+        assertEquals(relay, Relay.fromJson(relay.toJson()))
+        assertNull(Relay.fromJson(null))
+        assertNull(Relay.fromJson(""))
+        assertNull(Relay.fromJson("""{"url":"https://relay.example.org"}"""))
+        assertNull(Relay.fromJson("""{"url":"turn:host and more"}"""))
+        assertNull(Relay.fromJson("""{"username":"me"}"""))
     }
 }

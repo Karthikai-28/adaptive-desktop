@@ -151,6 +151,31 @@ CHECKS = [
         "prompt": "From the phone: does joining another Wi-Fi network with its password work, does Wi-Fi turned off come back on by itself within a minute, and does Safely remove release a real USB drive?",
     },
     {
+        "id": "link_video_sound",
+        "backlog": "Adaptive Link: the screen as video with sound on a real phone.",
+        "prompt": "On your phone's Screen page: does the picture arrive as video, and can you hear what the computer is playing?",
+    },
+    {
+        "id": "link_machine_real",
+        "backlog": "Adaptive Link changing real Bluetooth, displays and sound devices.",
+        "prompt": "From the phone: does connecting a Bluetooth device, changing brightness and choosing another sound output each work on the real machine?",
+    },
+    {
+        "id": "link_wake",
+        "backlog": "Adaptive Link waking the computer.",
+        "prompt": "After link-cli.py wake on, with the computer suspended and the phone on its network: does \"Wake it\" wake it?",
+    },
+    {
+        "id": "link_alerts_widget",
+        "backlog": "Adaptive Link alerts, widget and tiles on a real phone.",
+        "prompt": "With alerts on, does a notification on the computer appear on the phone - and do the home-screen widget and the quick-settings tiles lock the computer and pause what is playing?",
+    },
+    {
+        "id": "link_relay",
+        "backlog": "Adaptive Link through a relay of your own.",
+        "prompt": "With a TURN server set by link-cli.py relay, does the phone connect from a network where a direct connection fails?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",

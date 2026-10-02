@@ -24,6 +24,7 @@ in config.json. Everything the phone does is written to the audit log.
 """
 
 import asyncio
+import contextvars
 import json
 import os
 import signal
@@ -34,11 +35,13 @@ from pathlib import Path
 import aiohttp
 from aiohttp import WSMsgType, web
 
+import alerts
 import camera
 import cloud
 import desktop
 import identity
 import inputs
+import machine
 import screen
 import system
 
@@ -47,11 +50,32 @@ CONNECT_NOTICE_EVERY_S = 600
 # How long the phone has to say it can still reach the computer after a
 # change that may have cut it off.
 KEEP_S = int(os.environ.get("ADAPTIVE_LINK_KEEP_S", "45"))
+# How often the machine is looked at for something worth telling the phone.
+ALERT_EVERY_S = float(os.environ.get("ADAPTIVE_LINK_ALERT_EVERY_S", "30"))
 EXEC_OUTPUT_CHUNK = 4096
 PAIR_ASKS_PER_MINUTE = 60
 # How old a request made through the account may be and still be acted on.
 SIGNAL_FRESH_S = 120
 REQUEST_FRESH_S = 600
+
+
+# The device whose request is being handled: what it may do can be less than
+# what the others may (identity.PHONE_SWITCHES).
+CALLER = contextvars.ContextVar("caller", default=None)
+
+
+class Audit(desktop.Audit):
+    """The record, saying which device did each thing when there are several."""
+
+    def __init__(self, path, several):
+        super().__init__(path)
+        self._several = several
+
+    def write(self, peer, action, detail=""):
+        caller = CALLER.get()
+        if caller and peer and self._several():
+            peer = f"{peer} {caller['name']}"
+        super().write(peer, action, detail)
 
 
 def control_socket_path():
@@ -77,8 +101,8 @@ class Link:
         self.state_dir = Path(state_dir or identity.STATE_DIR)
         self.config = identity.load_config(self.link_dir)
         self.key_path, self.cert_path, self.fingerprint = identity.server_identity(self.link_dir)
-        self.phone = identity.load_phone(self.link_dir)
-        self.audit = desktop.Audit(self.state_dir / "link.log")
+        self.phones = identity.load_phones(self.link_dir)
+        self.audit = Audit(self.state_dir / "link.log", lambda: len(self.phones) > 1)
         self.notifications = desktop.Notifications()
         self.input = inputs.Input()
 
@@ -99,7 +123,7 @@ class Link:
         self._signin_task = None
         self._answered = set()   # direct-connection requests already handled
         self._decided = {}       # requests of the account already answered: phone id -> when it asked
-        self._last_notice = 0.0
+        self._last_notice = {}
         self.problem = ""
         self._sessions = 0
         self._children = set()
@@ -107,6 +131,12 @@ class Link:
         # unpairing ends what the phone is doing now, not at its next request.
         self._sockets = set()
         self._undo = None   # a change waiting for the phone to keep it
+        # What the computer tells the phone without being asked (alerts.py).
+        self.events = alerts.Events()
+        self._watchers = []
+        # The owner's relay, if they run one, and the screen as video (media.py).
+        self.relay = identity.load_relay(self.link_dir)
+        self._media = None
         self._pair_asks = {}
 
     # ------------------------------------------------------------ listeners
@@ -124,8 +154,14 @@ class Link:
         await self._start_control()
         await self.restart_link()
         await self.restart_cloud()
+        self._watchers = [asyncio.ensure_future(alerts.watch_notifications(self.events)),
+                          asyncio.ensure_future(alerts.watch_machine(self.events, ALERT_EVERY_S))]
 
     async def stop(self):
+        for watcher in self._watchers:
+            watcher.cancel()
+        if self._media is not None:
+            await self._media.close_all()
         if self._cloud_task is not None:
             self._cloud_task.cancel()
         if self._tunnel is not None:
@@ -143,13 +179,20 @@ class Link:
         except OSError:
             pass
 
-    async def restart_link(self):
-        """Start, or restart, the link listener for the phone paired now.
+    @property
+    def phone(self):
+        """The device paired last, for what speaks of "the phone"."""
+        return self.phones[-1] if self.phones else None
 
-        The trust store is the paired phone's certificate, fixed when the
+    async def restart_link(self):
+        """Start, or restart, the link listener for the devices paired now.
+
+        The trust store is the paired devices' certificates, fixed when the
         listener starts, so pairing, unpairing and switching the link on or
         off all come through here.
         """
+        if self._media is not None:
+            await self._media.close_all()
         if self._link_runner is not None:
             for ws in list(self._sockets):
                 try:
@@ -159,7 +202,7 @@ class Link:
             self._sockets.clear()
             await self._link_runner.cleanup()
             self._link_runner = None
-        if not self.config["enabled"] or self.phone is None:
+        if not self.config["enabled"] or not self.phones:
             return False
 
         app = web.Application(middlewares=[self._guard], client_max_size=1024 ** 2)
@@ -168,7 +211,7 @@ class Link:
         # the minute aiohttp would otherwise give lingering connections.
         runner = web.AppRunner(app, access_log=None, shutdown_timeout=1.0)
         await runner.setup()
-        context = identity.link_context(self.key_path, self.cert_path, self.phone["cert_pem"])
+        context = identity.link_context(self.key_path, self.cert_path, [phone["cert_pem"] for phone in self.phones])
         try:
             await web.TCPSite(runner, host="0.0.0.0", port=self.port, ssl_context=context).start()
         except OSError as error:
@@ -197,35 +240,43 @@ class Link:
             self.audit.write(address, "refused", "address is not on a private network")
             return json_error(403, "this network is not allowed")
 
-        # TLS has already required the paired certificate. Compare it again
+        # TLS has already required a paired certificate. Compare it again
         # with what is stored, so a mistake in building the TLS context could
-        # never by itself let a different certificate through.
+        # never by itself let a different certificate through. It is also
+        # what says which of the paired devices this is.
         ssl_object = request.transport.get_extra_info("ssl_object")
         der = ssl_object.getpeercert(binary_form=True) if ssl_object else None
-        if not der or self.phone is None or identity.fingerprint(der) != self.phone["fingerprint"]:
-            self.audit.write(address, "refused", "certificate is not the paired phone's")
-            return json_error(403, "not the paired phone")
+        digest = identity.fingerprint(der) if der else ""
+        caller = next((phone for phone in self.phones if phone["fingerprint"] == digest), None)
+        if caller is None:
+            self.audit.write(address, "refused", "certificate is not a paired phone's")
+            return json_error(403, "not a paired phone")
 
         request["peer"] = address
-        self._notice(address)
+        request["phone"] = caller
+        CALLER.set(caller)
+        self._notice(address, caller)
         return await handler(request)
 
-    def _notice(self, address):
+    def _notice(self, address, caller):
         now = time.monotonic()
-        if now - self._last_notice > CONNECT_NOTICE_EVERY_S:
+        if now - self._last_notice.get(caller["fingerprint"], -CONNECT_NOTICE_EVERY_S - 1) > CONNECT_NOTICE_EVERY_S:
             self.audit.write(address, "connected",
                              "direct tunnel" if identity.is_loopback(address) else "local network")
             if self.config["notify_on_connect"]:
-                desktop.notify(f"{self.phone['name']} connected",
+                desktop.notify(f"{caller['name']} connected",
                                "Your phone is connected to this computer.")
-        self._last_notice = now
+        self._last_notice[caller["fingerprint"]] = now
 
     def _track(self, ws):
         self._sockets = {open_ws for open_ws in self._sockets if not open_ws.closed}
         self._sockets.add(ws)
 
     def _allowed(self, switch):
-        return bool(self.config.get(switch))
+        """Whether the device asking may: the owner's switch for all of them,
+        and nothing held back from this one."""
+        caller = CALLER.get()
+        return bool(self.config.get(switch)) and not (caller and switch in caller.get("deny", ()))
 
     # --------------------------------------------------------------- routes
 
@@ -234,6 +285,8 @@ class Link:
         add.add_get("/v1/status", self.h_status)
         add.add_get("/v1/screen", self.h_screen)
         add.add_get("/v1/input", self.h_input)
+        add.add_post("/v1/rtc", self.h_rtc)
+        add.add_post("/v1/rtc/close", self.h_rtc_close)
         add.add_get("/v1/exec", self.h_exec)
         add.add_get("/v1/camera", self.h_camera)
         add.add_get("/v1/media", self.h_media_get)
@@ -250,7 +303,9 @@ class Link:
         add.add_get("/v1/file", self.h_file)
         add.add_post("/v1/upload", self.h_upload)
         add.add_post("/v1/open", self.h_open)
+        add.add_post("/v1/open-url", self.h_open_url)
         add.add_get("/v1/log", self.h_log)
+        add.add_get("/v1/events", self.h_events)
         add.add_get("/v1/tasks", self.h_tasks)
         add.add_post("/v1/tasks/signal", self.h_task_signal)
         add.add_get("/v1/devices", self.h_devices)
@@ -258,6 +313,9 @@ class Link:
         add.add_get("/v1/network", self.h_network)
         add.add_post("/v1/network", self.h_network_action)
         add.add_post("/v1/keep", self.h_keep)
+        add.add_get("/v1/machine/services/log", self.h_service_log)
+        add.add_get("/v1/machine/{what}", self.h_machine)
+        add.add_post("/v1/machine/{what}", self.h_machine_action)
         add.add_get("/v1/desktop", self.h_desktop)
         add.add_get("/v1/desktop/report", self.h_desktop_report)
         add.add_post("/v1/desktop", self.h_desktop_action)
@@ -272,6 +330,12 @@ class Link:
             # so a changed address at home does not mean pairing again.
             "hosts": [address for address, _kind in await asyncio.to_thread(identity.local_addresses)],
             "screen": list(self.input.screen),
+            # Where to send the packet that wakes this computer; kept by the
+            # phone for when the computer is asleep and cannot say.
+            "wake": await asyncio.to_thread(system.wake_addresses),
+            # The owner's relay, for a phone that cannot reach the computer
+            # directly from where it is. Said only here, to a paired phone.
+            "relay": self.relay,
             "can": {"control": self._allowed("allow_input"),
                     "exec": self._allowed("allow_exec"), "files": self._allowed("allow_files"),
                     "power": self._allowed("allow_power"), "input": self.input.available,
@@ -324,6 +388,32 @@ class Link:
             self._sessions -= 1
             await asyncio.to_thread(capture.stop)
         return ws
+
+    async def h_rtc(self, request):
+        """The screen as video, with the computer's sound: the phone's offer
+        comes in, the answer goes back, and the pictures then travel on a
+        connection of their own between the two (media.py)."""
+        if not await self._have_screen():
+            return json_error(503, "there is no screen to show")
+        body = await read_json(request)
+        try:
+            if self._media is None:
+                import media
+                self._media = media.MediaServer(
+                    relay=self.relay, report=lambda what: self.audit.write("-", "screen-video", what))
+            self._media.relay = self.relay
+            started = await asyncio.wait_for(self._media.answer(
+                body.get("offer"), self.input.screen, str(body.get("preset", "medium")), body.get("sound") is not False), 30)
+        except ImportError:
+            return json_error(503, "video is not installed on the computer (see docs/ADAPTIVE_LINK.md)")
+        except (ValueError, asyncio.TimeoutError) as error:
+            return json_error(400, str(error) or "the video could not be started")
+        self.audit.write(request["peer"], "screen", f"video {body.get('preset', 'medium')}" + (" with sound" if started["sound"] else ""))
+        return web.json_response({"ok": True, **started})
+
+    async def h_rtc_close(self, request):
+        session = (await read_json(request)).get("id")
+        return web.json_response({"ok": self._media is not None and await self._media.close(session)})
 
     async def h_input(self, request):
         """Trackpad, keyboard, remote and presenter: input with no picture."""
@@ -383,6 +473,12 @@ class Link:
                 stderr=asyncio.subprocess.DEVNULL)
             await ws.send_json({"started": process.pid})
             await ws.close()
+
+            async def finished():
+                code = await process.wait()
+                self.events.add("alert", "Finished" if code == 0 else f"Ended with an error ({code})", command[:200])
+
+            asyncio.ensure_future(finished())
             return ws
 
         process = await asyncio.create_subprocess_exec(
@@ -564,6 +660,35 @@ class Link:
         self._hold(None)
         return web.json_response({"ok": True, "kept": waiting})
 
+    # Bluetooth, displays, sound devices, services, power and the windows.
+
+    async def h_machine(self, request):
+        what = request.match_info["what"]
+        if what not in machine.READ:
+            return json_error(404, "nothing by that name")
+        switch = machine.SWITCH.get(what, (None, "allow_input"))[0]
+        if switch and not self._allowed(switch):
+            return json_error(403, "that is turned off on the computer")
+        return web.json_response(await asyncio.to_thread(machine.READ[what]))
+
+    async def h_machine_action(self, request):
+        what = request.match_info["what"]
+        if what not in machine.ACT:
+            return json_error(404, "nothing by that name")
+        if not self._allowed(machine.SWITCH.get(what, (None, "allow_input"))[1]):
+            return json_error(403, "that is turned off on the computer")
+        body = await read_json(request)
+        action, target, value = (str(body.get(key, ""))[:200] for key in ("action", "target", "value"))
+        done, text = await asyncio.to_thread(machine.ACT[what], action, target, value)
+        self.audit.write(request["peer"], what, f"{action} {target} {value}".strip() + ("" if done else f" - {text}"))
+        return web.json_response({"ok": done, "text" if done else "error": text})
+
+    async def h_service_log(self, request):
+        if not self._allowed("allow_exec"):
+            return json_error(403, "commands are turned off on the computer")
+        done, text = await asyncio.to_thread(machine.service_log, request.query.get("name", ""))
+        return web.json_response({"ok": done, "text": text})
+
     async def h_desktop(self, _request):
         return web.json_response(await asyncio.to_thread(system.desktop_state))
 
@@ -633,8 +758,58 @@ class Link:
         self.audit.write(request["peer"], "open", path)
         return web.json_response({"ok": await asyncio.to_thread(desktop.open_path, path)})
 
+    async def h_open_url(self, request):
+        """A web address shared from the phone, opened in the computer's browser."""
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
+        url = desktop.web_address((await read_json(request)).get("url"))
+        if not url:
+            return json_error(400, "not a web address")
+        self.audit.write(request["peer"], "open-url", url)
+        return web.json_response({"ok": await asyncio.to_thread(desktop.open_url, url)})
+
     async def h_log(self, _request):
         return web.json_response({"entries": self.audit.tail(100)})
+
+    async def h_events(self, request):
+        """The computer's notifications and alerts, as they happen.
+
+        ?after=<id> first sends what was said since then, so a phone that was
+        out of reach misses nothing that is still remembered. Without a
+        socket (?once=1) the same list comes back as one answer.
+        """
+        wanted = set(request.query.get("kinds", "notification,alert").split(","))
+        if not self.config["send_notifications"]:
+            wanted.discard("notification")
+        try:
+            after = int(request.query.get("after", "0"))
+        except ValueError:
+            after = 0
+        missed = [item for item in self.events.since(after) if item["kind"] in wanted]
+        if request.query.get("once"):
+            return web.json_response({"events": missed})
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=4 * 1024)
+        await ws.prepare(request)
+        self._track(ws)
+        queue = self.events.listen()
+        try:
+            for item in missed:
+                await ws.send_json(item)
+            closing = asyncio.ensure_future(ws.receive())   # nothing is expected; it ends when the phone goes
+            while not ws.closed:
+                waiting = asyncio.ensure_future(queue.get())
+                done, _pending = await asyncio.wait({waiting, closing}, return_when=asyncio.FIRST_COMPLETED)
+                if waiting not in done:
+                    waiting.cancel()
+                    break
+                item = waiting.result()
+                if item["kind"] in wanted and (item["kind"] != "notification" or self.config["send_notifications"]):
+                    await ws.send_json(item)
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        finally:
+            self.events.leave(queue)
+        return ws
 
     # -------------------------------------------------------------- pairing
 
@@ -849,9 +1024,16 @@ class Link:
             return False
         pending = self._pairing
         if accept:
-            self.phone = identity.save_phone(pending["name"], pending["cert_pem"], self.link_dir)
-            self.audit.write(pending.get("from", ""), "paired", pending["name"])
-            await self.restart_link()
+            try:
+                identity.save_phone(pending["name"], pending["cert_pem"], self.link_dir)
+            except identity.TooManyPhones as error:
+                accept = False
+                self.audit.write(pending.get("from", ""), "pairing-refused", str(error))
+                desktop.notify("The phone was not paired", str(error).capitalize() + " (link-cli.py unpair NAME).")
+            else:
+                self.phones = identity.load_phones(self.link_dir)
+                self.audit.write(pending.get("from", ""), "paired", pending["name"])
+                await self.restart_link()
         else:
             self.audit.write(pending.get("from", ""), "pairing-rejected", pending["name"])
         if pending.get("cloud_id"):
@@ -862,16 +1044,38 @@ class Link:
         await self._close_pairing("paired" if accept else "rejected")
         return True
 
-    async def unpair(self):
-        removed = identity.forget_phone(self.link_dir)
-        self.phone = None
+    async def unpair(self, which=None):
+        """Forget every paired device, or the one named (or marked by the
+        start of its fingerprint)."""
+        gone = self.phones
+        if which:
+            one = identity.find_phone(self.phones, which)
+            if one is None:
+                return False
+            gone = [one]
+        removed = identity.forget_phone(self.link_dir, gone[0]["fingerprint"] if which else None)
+        self.phones = identity.load_phones(self.link_dir)
         self._decided.clear()
         await self.restart_link()
         if removed:
-            self.audit.write("", "unpaired")
+            self.audit.write("", "unpaired", ", ".join(phone["name"] for phone in gone))
             if self.account is not None and self.account.signed_in:
-                await self._cloud_try(self.account.delete(f"computers/{self.cloud_id}/accepted"))
-        return removed
+                for phone in gone:
+                    await self._cloud_try(self.account.delete(
+                        f"computers/{self.cloud_id}/accepted/{cloud.device_id(phone['fingerprint'])}"))
+        return bool(removed)
+
+    async def set_phone_switch(self, which, switch, allowed):
+        """Let one device do something, or keep it from it."""
+        one = identity.find_phone(self.phones, which)
+        if one is None or not identity.deny_phone(one["fingerprint"], switch, not allowed, self.link_dir):
+            return False
+        # In place, so that what the device has open now follows at once.
+        fresh = {phone["fingerprint"]: phone for phone in identity.load_phones(self.link_dir)}
+        for phone in self.phones:
+            phone["deny"] = fresh.get(phone["fingerprint"], phone)["deny"]
+        self.audit.write("", "phone-allowed" if allowed else "phone-denied", f"{one['name']}: {switch}")
+        return True
 
     async def set_enabled(self, enabled):
         self.config["enabled"] = bool(enabled)
@@ -1003,7 +1207,8 @@ class Link:
             if self._tunnel is None:
                 import rtc
                 self._tunnel = rtc.TunnelServer(
-                    self.port, report=lambda what: self.audit.write("account", "tunnel-state", what))
+                    self.port, report=lambda what: self.audit.write("account", "tunnel-state", what),
+                    relay=self.relay)
             try:
                 answer = await asyncio.wait_for(self._tunnel.answer(offer), 30)
             except Exception as error:  # noqa: BLE001 - one bad offer must not stop the listener
@@ -1031,8 +1236,8 @@ class Link:
             # Each request is answered once; asking again later is a new one.
             if self._decided.get(phone_id) == asked:
                 continue
-            if self.phone and self.phone["fingerprint"] == digest:
-                # Already this computer's phone: say so.
+            if any(phone["fingerprint"] == digest for phone in self.phones):
+                # Already one of this computer's devices: say so.
                 self._decided[phone_id] = asked
                 await self._cloud_try(self.account.put(f"computers/{self.cloud_id}/accepted/{phone_id}", True))
                 continue
@@ -1100,9 +1305,12 @@ class Link:
             "port": self.port,
             "phone": {"name": self.phone["name"], "paired_at": self.phone["paired_at"],
                       "fingerprint": self.phone["fingerprint"]} if self.phone else None,
+            "phones": [{"name": phone["name"], "paired_at": phone["paired_at"], "fingerprint": phone["fingerprint"],
+                        "deny": phone["deny"]} for phone in self.phones],
             "addresses": [{"address": a, "kind": k} for a, k in addresses],
             "fingerprint": self.fingerprint,
-            "viewing": self._sessions,
+            "viewing": self._sessions + (self._media.viewers if self._media is not None else 0),
+            "relay": self.relay["url"] if self.relay else "",
             "config": {k: self.config[k] for k in identity.DEFAULT_CONFIG},
             "camera": camera.find_device(),
             "pairing": self.pairing_state(),
@@ -1139,19 +1347,44 @@ class Link:
             await self.set_enabled(bool((await read_json(request)).get("enabled")))
             return web.json_response(self.describe())
 
-        async def unpair(_request):
-            return web.json_response({"ok": await self.unpair()})
+        async def unpair(request):
+            return web.json_response({"ok": await self.unpair((await read_json(request)).get("phone"))})
+
+        async def phone(request):
+            data = await read_json(request)
+            done = await self.set_phone_switch(data.get("phone"), f"allow_{data.get('what')}", bool(data.get("allowed")))
+            return web.json_response({"ok": done, **self.describe()})
 
         async def configure(request):
             data = await read_json(request)
             for key in ("allow_input", "allow_exec", "allow_files", "allow_power", "allow_public", "notify_on_connect",
-                        "account_enroll", "auto_approve_account"):
+                        "account_enroll", "auto_approve_account", "send_notifications"):
                 if isinstance(data.get(key), bool):
                     self.config[key] = data[key]
             identity.save_config(self.config, self.link_dir)
             if "account_enroll" in data:
                 await self.restart_cloud()
             return web.json_response(self.describe())
+
+        async def wake(request):
+            data = await read_json(request)
+            if isinstance(data.get("on"), bool):
+                done, text = await asyncio.to_thread(system.wake_enable, data["on"])
+                return web.json_response({"ok": done, "text": text, **await asyncio.to_thread(system.wake_state)})
+            return web.json_response({"ok": True, "addresses": await asyncio.to_thread(system.wake_addresses),
+                                      **await asyncio.to_thread(system.wake_state)})
+
+        async def relay(request):
+            data = await read_json(request)
+            if "url" in data:
+                kept = identity.save_relay(data if data.get("url") else None, self.link_dir)
+                if data.get("url") and kept is None:
+                    return web.json_response({"ok": False, "error": "a relay is a TURN server's address: turn:host:3478"})
+                self.relay = kept
+                if self._tunnel is not None:
+                    self._tunnel.relay = kept
+                self.audit.write("", "relay", kept["url"] if kept else "none")
+            return web.json_response({"ok": True, "relay": self.relay["url"] if self.relay else ""})
 
         async def cloud_setup(request):
             return web.json_response({"ok": await self.setup_project(await read_json(request))})
@@ -1172,8 +1405,11 @@ class Link:
         app.router.add_post("/pair/cancel", pair_cancel)
         app.router.add_post("/enable", enable)
         app.router.add_post("/unpair", unpair)
+        app.router.add_post("/phone", phone)
         app.router.add_post("/configure", configure)
         app.router.add_get("/log", log)
+        app.router.add_post("/wake", wake)
+        app.router.add_post("/relay", relay)
         app.router.add_post("/cloud/setup", cloud_setup)
         app.router.add_post("/cloud/signin", cloud_signin)
         app.router.add_post("/cloud/signout", cloud_signout)

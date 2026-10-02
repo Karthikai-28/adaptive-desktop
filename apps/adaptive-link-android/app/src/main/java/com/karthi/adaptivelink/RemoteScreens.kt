@@ -1,6 +1,14 @@
 package com.karthi.adaptivelink
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.viewinterop.AndroidView
 import android.graphics.BitmapFactory
 import android.view.WindowManager
 import androidx.compose.foundation.Image
@@ -146,35 +154,91 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
     // on the computer, wherever the picture has been moved to.
     var zoom by remember { mutableStateOf(1f) }
     var shift by remember { mutableStateOf(Offset.Zero) }
+    // As video (far less data, and the computer's sound with it), or a
+    // picture at a time where video cannot be had.
+    var video by remember { mutableStateOf(store.screenVideo) }
+    var sound by remember { mutableStateOf(store.screenSound) }
+    var hearing by remember { mutableStateOf(false) }
+    var picture by remember { mutableStateOf(IntSize.Zero) }
+    var options by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val input = remember { InputSocket(client) }
+    val surface = remember { VideoView(context) }
+    DisposableEffect(Unit) { onDispose { input.close(); surface.release() } }
 
-    DisposableEffect(quality) {
-        val opened = client.socket("/v1/screen?preset=$quality", object : WebSocketListener() {
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size)?.let {
-                    frame = it
-                    note = ""
+    if (video) {
+        DisposableEffect(quality, sound) {
+            note = "Connecting…"
+            picture = IntSize.Zero
+            val watching = ScreenVideo(context, client) { said -> if (picture != IntSize.Zero || said.isNotEmpty()) note = said }
+            surface.fresh()
+            surface.onSize = { w, h -> picture = IntSize(w, h); note = "" }
+            watching.show(surface)
+            val starting = scope.launch {
+                val agreed = watching.start(quality, sound)
+                hearing = agreed && watching.sound
+                // No picture after a while: the two could not reach each
+                // other this way. The other way still works.
+                if (agreed) for (waited in 1..40) { if (picture != IntSize.Zero) break; delay(250) }
+                if (picture == IntSize.Zero) {
+                    watching.stop()
+                    video = false
+                    note = "Video could not be started; showing a picture at a time"
                 }
             }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                note = if (response?.code == 503) "The computer has no screen to show" else "Connection lost"
+            onDispose {
+                starting.cancel()
+                surface.onSize = null
+                scope.launch { watching.stop() }
             }
-        })
-        socket = opened
-        onDispose { opened.close(1000, null) }
+        }
+    } else {
+        DisposableEffect(quality) {
+            val opened = client.socket("/v1/screen?preset=$quality", object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size)?.let {
+                        frame = it
+                        picture = IntSize(it.width, it.height)
+                        note = ""
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    note = if (response?.code == 503) "The computer has no screen to show" else "Connection lost"
+                }
+            })
+            socket = opened
+            onDispose { opened.close(1000, null); socket = null }
+        }
     }
 
-    fun send(event: String) { socket?.send(event) }
+    // With video the pictures come on their own connection; the pointer and
+    // the keys go on the socket the trackpad uses.
+    fun send(event: String) { if (video) input.send(event) else socket?.send(event) }
     fun at(offset: Offset): Pair<Float, Float>? =
-        frame?.let { touchToScreen(unzoomed(offset, box, zoom, shift), box, IntSize(it.width, it.height)) }
+        picture.takeIf { it != IntSize.Zero }?.let { touchToScreen(unzoomed(offset, box, zoom, shift), box, it) }
 
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar("Screen", onBack) {
-            listOf("low", "medium", "high").forEach { name ->
-                FilterChip(
-                    selected = quality == name, onClick = { quality = name; store.screenQuality = name },
-                    label = { Text(name.take(1).uppercase()) }, modifier = Modifier.padding(end = 4.dp),
-                )
+            Box {
+                IconButton(onClick = { options = true }) { Icon(Icons.Filled.Tune, "Picture and sound") }
+                DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    listOf("low" to "Low quality", "medium" to "Medium quality", "high" to "High quality").forEach { (name, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label, color = if (quality == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) },
+                            onClick = { quality = name; store.screenQuality = name; options = false },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(if (video) "Video: on (less data)" else "Video: off (a picture at a time)") },
+                        onClick = { video = !video; store.screenVideo = video; options = false },
+                    )
+                    if (video) DropdownMenuItem(
+                        text = { Text(if (!sound) "Sound: off" else if (hearing || picture == IntSize.Zero) "Sound: on" else "Sound: on (the computer has none to send)") },
+                        onClick = { sound = !sound; store.screenSound = sound; options = false },
+                    )
+                }
             }
             IconButton(onClick = { scrolling = !scrolling }) {
                 Icon(Icons.Filled.SwapVert, "Scroll mode",
@@ -241,7 +305,19 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            frame?.let {
+            if (video) {
+                // The view is given the shape of the pictures, so that what
+                // is drawn fills it exactly and a touch lands where it looks.
+                val shape = if (picture == IntSize.Zero) 16f / 10f else picture.width / picture.height.toFloat()
+                val tall = box != IntSize.Zero && box.width / box.height.toFloat() > shape
+                AndroidView(
+                    factory = { surface },
+                    modifier = Modifier.aspectRatio(shape, matchHeightConstraintsFirst = tall).graphicsLayer {
+                        scaleX = zoom; scaleY = zoom
+                        translationX = shift.x; translationY = shift.y
+                    }.semantics { contentDescription = "The computer's screen" },
+                )
+            } else frame?.let {
                 Image(
                     it.asImageBitmap(), "The computer's screen",
                     Modifier.fillMaxSize().graphicsLayer {

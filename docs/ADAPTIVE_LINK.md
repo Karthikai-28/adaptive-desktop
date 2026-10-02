@@ -1,27 +1,33 @@
 # Adaptive Link — this computer, from your phone
 
 Your Android phone as the remote for this computer, at home and away: see and
-control the screen, trackpad and keyboard, media remote, presentation
-controller, run commands, browse and open files, send files both ways, the
-clipboard both ways, your phone's notifications on the computer, and the
-phone's camera as a webcam.
+control the screen (as video, with the computer's sound), trackpad and
+keyboard, media remote, presentation controller, run commands, browse and
+open files, send files both ways, the clipboard both ways, notifications both
+ways, the phone's camera as a webcam, and the machine itself - processes,
+drives, network, Bluetooth, displays, sound, services, windows.
 
 Two parts: a daemon on the computer (`services/adaptive-link/`) and an Android
 app (`apps/adaptive-link-android/`).
 
 ## Who can connect
 
-One phone. Nothing else.
+The devices you pair - a phone, a tablet; up to five. Nothing else.
 
 - **The phone holds a key that cannot be copied.** The app creates a key pair
   inside the phone's secure hardware (StrongBox where the phone has one, the
   TEE otherwise). The private key never exists outside it: not in the app's
   storage, not in a backup, not on another phone you restore to.
 - **The computer accepts that key and no other.** Every connection is mutual
-  TLS. The computer's trust store is the paired phone's certificate and
-  nothing else, so a device without the key cannot finish a handshake and
-  never reaches a line of the server's code. The certificate is compared with
-  the stored fingerprint a second time before any request is handled.
+  TLS. The computer's trust store is the paired devices' certificates and
+  nothing else, so a device without one of those keys cannot finish a
+  handshake and never reaches a line of the server's code. The certificate is
+  compared with the stored fingerprints a second time before any request is
+  handled, which is also how the computer knows which device is asking.
+- **Each device can be allowed less.** `link-cli.py phone NAME deny exec`
+  keeps one device from something the others may do (pointer and keyboard,
+  commands, files, power). A device is never allowed more than the switches
+  for all of them; with several paired, the record says which did what.
 - **The phone accepts this computer and no other.** The app pins the
   computer's certificate from the pairing code. No certificate authority is
   involved; a different certificate is refused.
@@ -182,8 +188,9 @@ yours, which is why they are not in the repository.
 
 The QR code carries the computer's addresses, its certificate fingerprint and
 a one-time code. The pairing port is open only during those two minutes,
-takes one phone, and closes after five wrong codes. Pairing another phone
-replaces the first.
+takes one phone, and closes after five wrong codes. Pairing another device
+adds it beside the first; `link-cli.py status` lists them, and
+`link-cli.py unpair NAME` forgets one (without a name, all of them).
 
 ## Local and away
 
@@ -204,13 +211,46 @@ What that means for the computer:
 - **Only the link is reachable through it.** The connection ends at the
   link's own port and nowhere else: nothing else running on the computer can
   be reached through it, whatever it listens on.
-- **No server in the middle.** There is no relay, so nobody else carries the
-  traffic. The cost is that a few networks make a direct connection
-  impossible (some mobile carriers and locked-down office Wi-Fi put every
-  device behind an address that changes per destination). On those the app
-  says a direct connection could not be made, and another network will work.
+- **No server in the middle, unless it is yours.** By default there is no
+  relay, so nobody else carries the traffic. The cost is that a few networks
+  make a direct connection impossible (some mobile carriers and locked-down
+  office Wi-Fi put every device behind an address that changes per
+  destination). On those the app says a direct connection could not be made.
+  If you need to get through from such a network, run a relay of your own -
+  see *A relay of your own* below.
 - Google's public STUN server is asked one question by each end - "what
   address do you see me at?" - and nothing else.
+
+### A relay of your own
+
+A relay is a small server on the internet that both devices can reach, which
+passes their packets on when they cannot reach each other (a TURN server;
+`coturn` is the usual one, on any machine with a public address). The link
+does not come with one and never uses anyone else's. If you run one:
+
+```sh
+scripts/link-cli.py relay turn:relay.example.org:3478 USER   # asks for the password
+scripts/link-cli.py relay                                    # which relay, if any
+scripts/link-cli.py relay off
+```
+
+The computer keeps the address and password in a private file and tells each
+paired phone the next time it connects (over the link, so only a paired phone
+learns it). From then on both offer the relay beside the direct way, and the
+connection uses it only where the direct way fails. What goes through it is
+the same tunnel with the same mutual TLS inside: the relay sees how much is
+sent and between which addresses, and cannot read or alter any of it.
+
+### Waking a sleeping computer
+
+A computer that is asleep cannot be reached, but its network card can be left
+listening for one particular packet (wake-on-LAN). `scripts/link-cli.py wake
+on` sets the connections in use to do that; the phone remembers where to send
+the packet, and offers **Wake it** when it cannot reach the computer.
+
+It only works on the computer's own network (the packet is a broadcast, which
+routers do not pass on), reliably only over Ethernet (few Wi-Fi cards wake
+the machine), and from a full shutdown only if the firmware allows it.
 
 A pairing code can also be typed instead of scanned (the pairing window can
 copy it as text). Pairing by code needs the phone on the computer's network;
@@ -239,27 +279,48 @@ needs Developer options → USB debugging on the phone. Or copy
 
 The daemon needs `aiohttp` and `cryptography` (`pip install --user aiohttp
 cryptography`), `xdotool` and `xclip`. The direct connection used away from
-home needs `aiortc`, kept apart from the system's Python packages because it
-brings newer versions of some of them:
+home, and the screen as video, need `aiortc`, kept apart from the system's
+Python packages because it brings newer versions of some of them:
 `pip install --target .local/link-pydeps aiortc`. Without it the link works
-on the local network only.
+on the local network only and the screen is sent a picture at a time.
 
 ## What the phone can do
 
 | In the app | On the computer |
 | --- | --- |
-| Screen | The screen as JPEG frames (three qualities); tap to click, drag to drag, long-press for right-click, a scroll mode, a keyboard |
+| Screen | The screen as video with the computer's sound (three qualities), or a picture at a time where video cannot be had; tap to click, drag to drag, long-press for right-click, pinch to zoom, a scroll mode, a keyboard |
 | Trackpad | Relative pointer, a scroll strip, both buttons, a keyboard with the keys a phone lacks |
 | Media | Whatever is playing (MPRIS): play, pause, next, previous, seek, volume |
 | Presenter | Next and previous slide (also on the phone's volume buttons), start, blank, end, a timer |
-| Run | A command, with its output; or started and left running (a player, an app) |
+| Run | A command, with its output; or started and left running (a player, an app). Commands you run often are kept as buttons |
 | Files | Browse, open a file on the computer (play a movie), download to the phone, send a file to `~/Downloads/Phone` |
 | Webcam | The phone's camera as "Phone Camera" in any app that takes a webcam |
-| Tasks | Load, memory and disks; the processes, found by name; pause, resume, end or kill one of yours, alone or with everything it started; make it less important |
+| Tasks | Load, memory and disks, the battery (time left, wear), temperatures and fans, the power profile; the processes, found by name; pause, resume, end or kill one of yours, alone or with everything it started; make it less important |
 | Devices | What is plugged in over USB, each switched off and on (as if unplugged); the drives: browse, mount, unmount, safely remove |
 | Network | Each connection with its addresses and its speed; Wi-Fi on and off, the networks in range and joining one (with its password if it is new), connecting and disconnecting, VPNs up and down |
 | Desktop | Projects, focus, window placement, reports, quick notes, appearance, saving the session |
-| More | Clipboard both ways, lock, unlock, screen off, suspend, restart, shut down, the phone's notifications on the computer, unpair |
+| Windows | The windows that are open: bring one to the front, minimise it, move it to the next display, close it |
+| Display | Brightness; each display on or off, its size, which is the main one. Where sound comes out and which microphone is used, the volume of each, mute |
+| Bluetooth | On and off; the devices the computer knows, each connected and disconnected |
+| Services | Your own services (systemd, `--user`): start, stop, restart, and what each last wrote |
+| More | Clipboard both ways, lock, unlock, screen off, suspend, restart, shut down, the phone's notifications on the computer, the computer's alerts and notifications on the phone, unpair |
+
+And without opening the app:
+
+- **Share** in any other app → *Send to computer*: a link opens in the
+  computer's browser, text goes to its clipboard or the project's notes,
+  files go to `~/Downloads/Phone`.
+- **A home-screen widget and quick-settings tiles**: lock the computer,
+  play/pause, next, mute, focus. Only what is harmless to do by accident:
+  nothing that unlocks the computer, runs a command or turns it off is
+  reachable without the app's own lock.
+- **Alerts** (More → *The computer's alerts and notifications*): a disk
+  nearly full, memory running out, a low battery, a hot processor, a device
+  plugged in or taken out, a service that failed, a command you started from
+  the phone and left running that has finished. With the second switch, the
+  computer's own notifications too. The phone keeps a connection open for
+  these and says so in its notification shade; what it missed while out of
+  reach it is given on coming back.
 
 Switches on the computer narrow that, each taking effect at once:
 
@@ -268,7 +329,9 @@ scripts/link-cli.py allow input off    # watch only: no pointer, keyboard or lau
                                        # and no change to the network, the drives, USB or the desktop
 scripts/link-cli.py allow exec off     # no Run screen and no Tasks screen
 scripts/link-cli.py allow files off    # no file access
-scripts/link-cli.py allow power off    # no lock, unlock, suspend, restart
+scripts/link-cli.py allow power off    # no lock, unlock, suspend, restart, power profile
+scripts/link-cli.py allow notifications off   # the computer's notifications stay on the computer
+scripts/link-cli.py phone NAME deny exec      # one device only; "allow" lifts it
 scripts/link-cli.py off                # nothing at all, until "on"
 ```
 
@@ -278,6 +341,21 @@ and a keyboard can type a command into a terminal or open a file, whatever
 `exec` and `files` say. To stop the phone acting on the computer, turn
 `input` off as well. The clipboard, media controls and the phone's
 notifications are always available to the paired phone.
+
+### The screen as video
+
+The screen used to be sent as one JPEG after another, each whole. It is now
+video: the phone and the computer set up a media connection (the same WebRTC
+the direct tunnel uses), the screen is encoded as H.264 or VP8 - which send
+only what changed - and what the computer is playing goes with it as Opus.
+The offer and the answer travel over the link, so only a paired device can
+set it up, and the media is encrypted between the two with keys agreed in
+that exchange. Pointer and keyboard keep their own socket.
+
+If the two cannot make that connection the app says so and falls back to
+JPEG frames by itself; *Video: off* in the screen's menu chooses that
+outright. Sound needs PulseAudio (or PipeWire's stand-in for it) on the
+computer; without it the picture is sent alone.
 
 ### Changes that could cut the phone off
 
@@ -311,9 +389,11 @@ never as part of a command line that other programs could read.
   (`scripts/fake_cloud.py`) that enforces the database's rule: signing in by
   code, a phone of the account asking and being approved, a phone of another
   account seeing nothing, and the link used through a direct connection. It
-  never locks, suspends or changes the volume of the machine it runs on, and
-  the network and drives it changes are stand-ins
-  (`scripts/fake_system_tools.py`), not the machine's own.
+  never locks, suspends or changes the volume of the machine it runs on: the
+  network, drives, Bluetooth, sound devices, services and power profiles it
+  changes are stand-ins (`scripts/fake_system_tools.py`), not the machine's
+  own. The screen as video is received by a second WebRTC peer in the check
+  itself.
 - `scripts/verify-link-android.py` — the Android code itself, on an emulator
   (`scripts/link-emulator.sh`): the keystore key, pairing, mutual TLS, a
   screen frame, a command, the computer reached through a direct connection
@@ -326,22 +406,25 @@ never as part of a command line that other programs could read.
 What that leaves for a real phone is in `record-live-verification.py`: your
 own device, Google's real sign-in (the emulator has no Google account, so the
 checks hand the app a stand-in's answer), the direct connection from mobile
-data, the camera, and the real NetworkManager and UDisks: turning Wi-Fi off
-and having it come back, joining a network with its password, and removing a
-real drive.
+data, the camera, and everything that was checked only against a stand-in:
+the real NetworkManager and UDisks (turning Wi-Fi off and having it come
+back, joining a network with its password, removing a real drive), real
+Bluetooth, displays and sound devices, waking the computer from sleep, the
+computer's sound on the phone, a relay, and the widget and tiles on a real
+home screen.
 
 ## Known limits
 
 - X11 only, like the rest of the desktop's window handling
   (`docs/GNOME_PORT.md`): screen capture is `ximagesrc`, input is `xdotool`.
-- The screen is a stream of JPEG frames, not video: simple and robust, but it
-  uses more data than a video codec would. Use the low quality away from
-  Wi-Fi.
-- No sound from the computer on the phone.
-- The computer must be awake. A suspended laptop cannot be woken from the
-  phone.
-- Away from home there is no relay: on a network that forbids direct
-  connections the phone cannot reach the computer (see *Local and away*).
+- Video is encoded in software on the computer (aiortc), up to about 3 Mbit/s:
+  good for work, not for watching a film full-screen.
+- A sleeping computer can be woken only on its own network, and in practice
+  only over Ethernet (see *Waking a sleeping computer*).
+- Away from home, on a network that forbids direct connections, the phone
+  cannot reach the computer unless you run a relay of your own.
+- The widget and the tiles act without the app's lock; they are limited to
+  what is safe for that (see above).
 - Android only.
 
 ## Building the app from scratch

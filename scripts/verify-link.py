@@ -58,19 +58,99 @@ def pure_checks(check):
             except I.BadCertificate:
                 check(True, f"identity: {why} certificate refused")
 
-        check(I.load_phone(folder) is None, "identity: no phone paired at first")
+        check(I.load_phones(folder) == [], "identity: no phone paired at first")
         I.save_phone("Pixel\n<b>8</b>" + "x" * 80, phone_cert, folder, now=5)
-        phone = I.load_phone(folder)
+        phone = I.load_phones(folder)[0]
         check(phone["fingerprint"] == phone_digest and "\n" not in phone["name"] and len(phone["name"]) <= 40,
               "identity: the paired phone is stored, its name made safe to show")
-        check(stat.S_IMODE((folder / "phone.json").stat().st_mode) == 0o600, "identity: the pairing record is private")
-        record = json.loads((folder / "phone.json").read_text())
-        record["fingerprint"] = "0" * 64
-        (folder / "phone.json").write_text(json.dumps(record))
-        check(I.load_phone(folder) is None, "identity: an edited pairing record is not trusted")
+        check(stat.S_IMODE((folder / "phones.json").stat().st_mode) == 0o600, "identity: the pairing record is private")
+        record = json.loads((folder / "phones.json").read_text())
+        record["phones"][0]["fingerprint"] = "0" * 64
+        (folder / "phones.json").write_text(json.dumps(record))
+        check(I.load_phones(folder) == [], "identity: an edited pairing record is not trusted")
         I.save_phone("Pixel", phone_cert, folder)
-        check(I.forget_phone(folder) and not I.forget_phone(folder) and I.load_phone(folder) is None,
+        check(I.forget_phone(folder) == 1 and I.forget_phone(folder) == 0 and I.load_phones(folder) == [],
               "identity: unpairing forgets the phone")
+
+        # Several devices, each with its own certificate and its own limits.
+        others = [I.make_certificate(f"Device {n}")[1] for n in range(I.MAX_PHONES)]
+        I.save_phone("Pixel", phone_cert, folder, now=1)
+        I.save_phone("Tablet", others[0], folder, now=2)
+        tablet = I.load_phones(folder)[1]["fingerprint"]
+        check([p["name"] for p in I.load_phones(folder)] == ["Pixel", "Tablet"], "identity: a second device is paired beside the first")
+        check(I.deny_phone(tablet, "allow_exec", True, folder) and I.deny_phone(tablet, "allow_power", True, folder)
+              and not I.deny_phone(tablet, "allow_public", True, folder) and not I.deny_phone("0" * 64, "allow_exec", True, folder)
+              and [p["deny"] for p in I.load_phones(folder)] == [[], ["allow_exec", "allow_power"]],
+              "identity: one device can be kept from what the other may do")
+        I.save_phone("Tablet again", others[0], folder, now=3)
+        again = I.load_phones(folder)
+        check(len(again) == 2 and again[1]["name"] == "Tablet again" and again[1]["deny"] == ["allow_exec", "allow_power"]
+              and I.deny_phone(tablet, "allow_exec", False, folder) and I.load_phones(folder)[1]["deny"] == ["allow_power"],
+              "identity: pairing a device again renames it and keeps its limits, which can be lifted")
+        check(I.find_phone(again, "pixel") == again[0] and I.find_phone(again, tablet[:8]) == again[1]
+              and I.find_phone(again, "") is None and I.find_phone(again, "nobody") is None and I.find_phone(again, tablet[:3]) is None,
+              "identity: a device is found by its name, or by the start of its fingerprint")
+        for index, cert in enumerate(others[1:I.MAX_PHONES - 1]):
+            I.save_phone(f"Extra {index}", cert, folder)
+        try:
+            I.save_phone("One too many", others[-1], folder)
+            check(False, "identity: no more than a few devices are paired")
+        except I.TooManyPhones:
+            check(len(I.load_phones(folder)) == I.MAX_PHONES, "identity: no more than a few devices are paired")
+        check(I.forget_phone(folder, tablet) == 1 and len(I.load_phones(folder)) == I.MAX_PHONES - 1
+              and all(p["fingerprint"] != tablet for p in I.load_phones(folder)) and I.forget_phone(folder, tablet) == 0,
+              "identity: one device is forgotten and the others stay")
+        check(I.forget_phone(folder) == I.MAX_PHONES - 1, "identity: or all of them at once")
+        # Phones name their certificates alike. Each paired one must still
+        # get in, and another device with the same name must not.
+        import socket
+        import threading
+        alike = [I.make_certificate("Adaptive Link Phone") for _ in range(4)]
+        server_key, server_cert, _digest = I.server_identity(folder)
+        trusting = I.link_context(server_key, server_cert, [cert.decode() for _key, cert in alike[:3]])
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(4)
+        let_in = []
+
+        def take():
+            for _ in alike:
+                connection, _address = listener.accept()
+                try:
+                    with trusting.wrap_socket(connection, server_side=True) as tls:
+                        tls.recv(1)
+                        let_in.append(I.fingerprint(tls.getpeercert(binary_form=True)))
+                except (ssl.SSLError, OSError):
+                    let_in.append(None)
+
+        taking = threading.Thread(target=take, daemon=True)
+        taking.start()
+        for index, (key_pem, cert_pem) in enumerate(alike):
+            (folder / f"alike{index}.key").write_bytes(key_pem)
+            (folder / f"alike{index}.crt").write_bytes(cert_pem)
+            offering = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            offering.check_hostname, offering.verify_mode = False, ssl.CERT_NONE
+            offering.load_cert_chain(str(folder / f"alike{index}.crt"), str(folder / f"alike{index}.key"))
+            try:
+                with offering.wrap_socket(socket.create_connection(("127.0.0.1", listener.getsockname()[1]))) as tls:
+                    tls.send(b"x")
+                    tls.settimeout(2)
+                    tls.recv(1)   # a refusal arrives here, after the handshake
+            except (ssl.SSLError, OSError):
+                pass
+        taking.join(5)
+        listener.close()
+        check(let_in == [I.check_phone_certificate(cert)[2] for _key, cert in alike[:3]] + [None],
+              "identity: several devices whose certificates are named alike each get in, and a stranger so named does not")
+
+        # A phone paired before there could be several is carried over.
+        (folder / "phones.json").unlink()
+        (folder / "phone.json").write_text(json.dumps({"name": "Old", "cert_pem": phone_cert.decode(),
+                                                       "fingerprint": phone_digest, "paired_at": 7}))
+        check([(p["name"], p["deny"]) for p in I.load_phones(folder)] == [("Old", [])], "identity: a phone paired earlier is still paired")
+        I.save_phone("Old", phone_cert, folder)
+        check(not (folder / "phone.json").exists() and len(I.load_phones(folder)) == 1, "identity: and is kept with the others from then on")
+        I.forget_phone(folder)
 
         check(I.load_config(folder) == I.DEFAULT_CONFIG and I.DEFAULT_CONFIG["allow_public"] is False,
               "config: defaults, with the public internet refused")
@@ -160,8 +240,110 @@ def pure_checks(check):
         check(cloud.load_project(folder) is None, "account: a database that is not https is refused")
         cloud.save_project(dict(values, api_key=""), folder)
         check(cloud.load_project(folder) is None, "account: an incomplete project is no project")
+    with tempfile.TemporaryDirectory() as folder:
+        folder = Path(folder)
+        check(I.load_relay(folder) is None, "relay: none unless the owner runs one")
+        kept = I.save_relay({"url": "turn:relay.example.org:3478?transport=tcp", "username": "me", "credential": "secret"}, folder)
+        check(kept == I.load_relay(folder) and kept["credential"] == "secret"
+              and stat.S_IMODE((folder / "relay.json").stat().st_mode) == 0o600,
+              "relay: the owner's relay is kept, with its password, in a private file")
+        check(all(I.clean_relay(bad) is None for bad in (
+            {"url": "https://relay.example.org"}, {"url": "turn:"}, {"url": "turn:host; rm -rf ~"}, {"url": "stun:host:3478"},
+            {"url": "turn:host", "username": "a\nb"}, {}, None, "turn:host")),
+              "relay: only a TURN server's address is taken for one")
+        check(I.save_relay(None, folder) is None and I.load_relay(folder) is None and not (folder / "relay.json").exists(),
+              "relay: and forgotten when the owner says so")
+        import rtc as R
+        servers = R.configuration(relay={"url": "turn:relay.example.org:3478", "username": "me", "credential": "secret"}).iceServers
+        check([server.urls for server in servers] == [R.STUN, "turn:relay.example.org:3478"]
+              and servers[1].username == "me" and servers[1].credential == "secret"
+              and len(R.configuration().iceServers) == 1, "relay: it is offered to a connection beside the direct way, never instead")
     check(cloud.device_id("ab" * 32) == "ab" * 10, "account: a device is named by the start of its fingerprint")
     check(desktop.parse_volume("Volume: front-left: 32768 /  50% / -18.06 dB") == 50, "sound: volume is read")
+    import media
+    check(media.frame_size(1920, 1200, "medium") == (1280, 800, 15) and media.frame_size(1366, 768, "high") == (1360, 768, 20)
+          and media.frame_size(1280, 800, "nonsense") == media.frame_size(1280, 800, "medium")
+          and all(media.frame_size(w, h, p)[0] % 16 == 0 and media.frame_size(w, h, p)[1] % 2 == 0
+                  for w, h in ((1920, 1080), (2560, 1440), (3440, 1440), (1366, 768), (801, 601)) for p in media.PRESETS),
+          "video: each quality is a size the encoder can take, never larger than the screen")
+    check(desktop.web_address("https://example.org/a?b=c#d") == "https://example.org/a?b=c#d"
+          and not any(desktop.web_address(bad) for bad in (
+              "file:///etc/passwd", "javascript:alert(1)", "https://", "http://a b", "ftp://example.org/x",
+              "https://example.org/\n--help", "-version", "", None, "x" * 3000)),
+          "share: only a web address is opened, never a file, a script or an option")
+
+    import alerts
+    quiet = {"disks": [("/", 50 << 30, 100 << 30)], "memory": (8 << 30, 16 << 30),
+             "battery": {"percent": 80, "charging": False}, "hottest": 50, "usb": {"1-1": "Mouse"}, "failed": []}
+    state, said = alerts.decide(None, dict(quiet, disks=[("/", 1 << 30, 100 << 30)], failed=["old.service"]))
+    check(said == [], "alerts: nothing is said about how things already were when the link started")
+    state, said = alerts.decide(state, dict(quiet, disks=[("/", 1 << 30, 100 << 30)], failed=["old.service"]))
+    check(said == [], "alerts: nor repeated while nothing changes")
+    state, said = alerts.decide(state, quiet)
+    state, said = alerts.decide(state, dict(
+        quiet, disks=[("/", 2 << 30, 100 << 30)], memory=(500 << 20, 16 << 30), hottest=95,
+        battery={"percent": 12, "charging": False}, usb={"1-1": "Mouse", "1-2": "Stick"}, failed=["sync.service"]))
+    check([title for title, _text in said] == ["A disk is nearly full", "Memory is running out",
+                                               "The computer's battery is low", "The computer is running hot",
+                                               "Plugged in", "A service has failed"]
+          and ("Plugged in", "Stick") in said and ("A service has failed", "sync") in said,
+          "alerts: a full disk, low memory, a low battery, heat, a new device and a failed service are each said")
+    worse = dict(quiet, disks=[("/", 2 << 30, 100 << 30)], memory=(500 << 20, 16 << 30), hottest=95,
+                 battery={"percent": 4, "charging": False}, usb={"1-1": "Mouse", "1-2": "Stick"}, failed=["sync.service"])
+    state, said = alerts.decide(state, worse)
+    check(said == [("The computer's battery is nearly empty", "4% left")],
+          "alerts: each is said once, and the battery again only when it is nearly empty")
+    state, said = alerts.decide(state, dict(quiet, battery={"percent": 4, "charging": True}))
+    check(said == [("Unplugged", "Stick")], "alerts: a device taken out is said; a battery on charge is not")
+    state, said = alerts.decide(state, dict(quiet, disks=[("/", 2 << 30, 100 << 30)]))
+    check(said == [("A disk is nearly full", "/ has 2048 MB left")], "alerts: a disk that fills again after being cleared is said again")
+
+    call = ["method call time=1.0 sender=:1.5 -> destination=:1.2 serial=7 path=/org/freedesktop/Notifications; "
+            "interface=org.freedesktop.Notifications; member=Notify",
+            '   string "Mail"', "   uint32 0", '   string "mail-unread"', '   string "From Ada"',
+            '   string "Lunch at <b>one</b>?', "Bring the &amp; notes", 'and a "pen""', "   array [", "   ]", "   array [",
+            "      dict entry(", '         string "urgency"', "         variant             byte 1", "      )", "   ]",
+            "   int32 -1"]
+    check(alerts.parse_notify(call) == ("Mail", "From Ada", 'Lunch at one?\nBring the & notes\nand a "pen"'),
+          "notifications: the app, the title and the text are read, over several lines and without markup")
+    own = [line.replace('"urgency"', '"category"').replace("byte 1", 'string "device"') for line in call]
+    check(alerts.parse_notify(own) is None and alerts.parse_notify([call[0], '   string "Adaptive Link"', '   string ""',
+                                                                    '   string "A phone wants to connect"', '   string "x"']) is None,
+          "notifications: what the phone itself sent, and the link's own, are not sent back to it")
+    log = alerts.Events(limit=3)
+    for index in range(5):
+        log.add("alert", f"title {index}")
+    kept = log.since(0)
+    check([item["title"] for item in kept] == ["title 2", "title 3", "title 4"]
+          and [item["title"] for item in log.since(kept[1]["id"])] == ["title 4"],
+          "events: the newest are kept, and a phone can ask for what came after the last it saw")
+
+    import machine
+    outputs = machine.parse_xrandr(
+        "Screen 0: minimum 320 x 200, current 3840 x 1200\n"
+        "eDP-1 connected primary 1920x1200+0+0 (normal left inverted right x axis y axis) 302mm x 189mm\n"
+        "   1920x1200     60.00*+  48.00  \n   1920x1080     60.00  \n   1920x1080     59.94  \n"
+        "HDMI-1 connected (normal left inverted right x axis y axis)\n   1024x768      60.00  \n"
+        "DP-1 disconnected (normal left inverted right x axis y axis)\n")
+    check([(o["name"], o["on"], o["primary"], o["mode"], o["modes"]) for o in outputs]
+          == [("eDP-1", True, True, "1920x1200", ["1920x1200", "1920x1080"]), ("HDMI-1", False, False, "", ["1024x768"])],
+          "display: what is plugged in, which is on, and the sizes each offers once")
+    with tempfile.TemporaryDirectory() as folder:
+        cell = Path(folder) / "BAT0"
+        cell.mkdir()
+        for name, text in (("capacity", "40"), ("status", "Discharging"), ("energy_now", "20000000"),
+                           ("energy_full", "50000000"), ("energy_full_design", "60000000"), ("power_now", "10000000")):
+            (cell / name).write_text(text + "\n")
+        cell_now = machine.battery(folder)
+        check(cell_now["percent"] == 40 and cell_now["minutes"] == 120 and cell_now["health"] == 83 and not cell_now["charging"],
+              "health: how long the battery will last, and how worn it is")
+        check(machine.battery(Path(folder) / "none") is None, "health: a machine without a battery has none")
+        sensor = Path(folder) / "hwmon0"
+        sensor.mkdir()
+        for name, text in (("name", "coretemp"), ("temp1_input", "61000"), ("temp2_input", "74500"), ("fan1_input", "2400")):
+            (sensor / name).write_text(text + "\n")
+        check(machine.temperatures(Path(folder)) == ([{"name": "Processor", "celsius": 74.5}], [{"name": "Fan", "rpm": 2400}]),
+              "health: the hottest reading of each sensor, and the fans")
 
     import system
     check(system._fields(r"*:Cafe\: Open:55") == ["*", "Cafe: Open", "55"], "network: a name with a colon in it is read whole")
@@ -211,7 +393,9 @@ async def daemon_checks(sandbox, check):
     import fake_system_tools
     tools = sandbox / "tools"
     env.update(PATH=f"{fake_system_tools.install(tools / 'bin')}:{env['PATH']}", FAKE_TOOLS_DIR=str(tools),
-               ADAPTIVE_LINK_KEEP_S="3")
+               ADAPTIVE_LINK_KEEP_S="3", ADAPTIVE_LINK_ALERT_EVERY_S="1",
+               # No sound server here, and none is to be started by asking for one.
+               PULSE_SERVER="unix:/nonexistent/pulse")
     # Google, as far as these checks go (scripts/fake_cloud.py).
     google = subprocess.Popen([sys.executable, str(REPO / "scripts/fake_cloud.py"), str(CLOUD_PORT)],
                               stdout=subprocess.DEVNULL, stderr=open(sandbox / "cloud.log", "w"))
@@ -575,6 +759,29 @@ async def daemon_checks(sandbox, check):
             await asyncio.sleep(4)
             check(down["ok"] and down["keep"] == 0 and not network_now()["vpn"],
                   "network: and down again, which settles the change before it")
+            waking = control.call("POST", "/wake", {})
+            using = network_now()["active"]
+            check(not waking["on"] and waking["connections"] == [{"name": using, "on": False}],
+                  "wake: off until the owner asks for it")
+            waking = control.call("POST", "/wake", {"on": True})
+            check(waking["ok"] and waking["on"] and network_now()["wake"] == {using: "magic"},
+                  "wake: the connection in use is set to wake the computer")
+            async with phone.get(f"{link_url}/v1/status") as reply:
+                told = (await reply.json())["wake"]
+            check(isinstance(told, list) and all(len(a["mac"]) == 17 and a["broadcast"].count(".") == 3 for a in told),
+                  "wake: the phone is told where to send the packet that wakes the computer")
+            control.call("POST", "/wake", {"on": False})
+
+            relayed = control.call("POST", "/relay", {"url": "turn:relay.example.org:3478", "username": "me", "credential": "pw"})
+            async with phone.get(f"{link_url}/v1/status") as reply:
+                told = (await reply.json())["relay"]
+            check(relayed["ok"] and told == {"url": "turn:relay.example.org:3478", "username": "me", "credential": "pw"}
+                  and control.status()["relay"] == "turn:relay.example.org:3478"
+                  and not control.call("POST", "/relay", {"url": "http://evil.example"})["ok"],
+                  "relay: a paired phone is told the owner's relay; the owner's own status shows no password")
+            check(control.call("POST", "/relay", {"url": ""})["relay"] == "" and control.status()["relay"] == "",
+                  "relay: and it is gone when the owner takes it out")
+
             control.call("POST", "/configure", {"allow_input": False})
             async with phone.post(f"{link_url}/v1/network", json={"action": "wifi", "value": "off"}) as reply:
                 refused_network = reply.status
@@ -582,6 +789,174 @@ async def daemon_checks(sandbox, check):
                 check(reply.status == 403 and refused_network == 403 and network_now()["radio"],
                       "network and devices: nothing is changed in view-only")
             control.call("POST", "/configure", {"allow_input": True})
+
+            # ------------- bluetooth, displays, sound, services, power, windows
+            async def read(what):
+                async with phone.get(f"{link_url}/v1/machine/{what}") as reply:
+                    return await reply.json()
+
+            def machine_now():
+                return json.loads((tools / "machine.json").read_text())
+
+            blue = await read("bluetooth")
+            check(blue["available"] and blue["on"] and [d["name"] for d in blue["devices"]] == ["Check Headphones", "Check Mouse"]
+                  and blue["devices"][0]["kind"] == "Headphones" and blue["devices"][0]["battery"] == 70,
+                  "bluetooth: the devices the computer knows, and what each is")
+            mouse = blue["devices"][1]["address"]
+            connected = await change("/v1/machine/bluetooth", action="connect", target=mouse)
+            check(connected["ok"] and (await read("bluetooth"))["devices"][0]["name"] == "Check Mouse"
+                  and machine_now()["connected"] == [mouse], "bluetooth: a device is connected, and listed first")
+            off = await change("/v1/machine/bluetooth", action="power", target="off")
+            failed = await change("/v1/machine/bluetooth", action="connect", target=mouse)
+            check(off["ok"] and not machine_now()["bluetooth"] and not failed["ok"],
+                  "bluetooth: turned off, and a device then cannot be connected")
+            refusals = [await change("/v1/machine/bluetooth", action="connect", target="AA:BB:CC:00:00:09"),
+                        await change("/v1/machine/bluetooth", action="power", target="on; reboot"),
+                        await change("/v1/machine/bluetooth", action="remove", target=mouse)]
+            check(not any(r["ok"] for r in refusals), "bluetooth: only a known device, and only what is offered")
+            await change("/v1/machine/bluetooth", action="power", target="on")
+
+            noise = await read("sound")
+            check([(d["label"], d["default"], d["volume"]) for d in noise["outputs"]]
+                  == [("Check Speakers", True, 50), ("Check Headset", False, 30)]
+                  and [d["label"] for d in noise["inputs"]] == ["Check Microphone"],
+                  "sound: where sound comes out and goes in, without a speaker's own echo as a microphone")
+            results = [await change("/v1/machine/sound", action="output-use", target="headset.check"),
+                       await change("/v1/machine/sound", action="output-volume", target="headset.check", value="65"),
+                       await change("/v1/machine/sound", action="input-mute", target="microphone.check", value="on")]
+            now = machine_now()
+            check(all(r["ok"] for r in results) and now["sink"] == "headset.check" and now["volume"]["headset.check"] == 65
+                  and now["muted"] == ["microphone.check"], "sound: another output chosen, its volume set, the microphone muted")
+            refusals = [await change("/v1/machine/sound", action="output-use", target="microphone.check"),
+                        await change("/v1/machine/sound", action="output-volume", target="headset.check", value="400"),
+                        await change("/v1/machine/sound", action="output-volume", target="headset.check", value="-5"),
+                        await change("/v1/machine/sound", action="input-use", target="nowhere")]
+            check(not any(r["ok"] for r in refusals), "sound: only a device that is there, and a volume that makes sense")
+
+            units = (await read("services"))["services"]
+            check([(u["name"], u["running"]) for u in units]
+                  == [("adaptive-link.service", True), ("sync.service", True), ("backup.service", False)]
+                  and units[0]["own"], "services: the owner's services, the running ones first")
+            results = [await change("/v1/machine/services", action="start", target="backup.service"),
+                       await change("/v1/machine/services", action="stop", target="sync.service")]
+            check(all(r["ok"] for r in results) and "backup.service" in machine_now()["running"]
+                  and "sync.service" not in machine_now()["running"], "services: one is started and one stopped")
+            refusals = [await change("/v1/machine/services", action="stop", target="adaptive-link.service"),
+                        await change("/v1/machine/services", action="start", target="../evil.service"),
+                        await change("/v1/machine/services", action="mask", target="sync.service")]
+            check(not any(r["ok"] for r in refusals) and "adaptive-link.service" in machine_now()["running"],
+                  "services: the link itself is not stopped from the phone, nor anything not listed")
+
+            well = await read("health")
+            check(well["profile"] == "balanced" and "power-saver" in well["profiles"]
+                  and isinstance(well["temperatures"], list), "health: the power profile, the battery and the temperatures")
+            saver = await change("/v1/machine/health", action="profile", target="power-saver")
+            check(saver["ok"] and machine_now()["profile"] == "power-saver"
+                  and not (await change("/v1/machine/health", action="profile", target="turbo"))["ok"],
+                  "health: the power profile is changed, to one that is offered")
+
+            shown = await read("display")
+            check(len(shown["outputs"]) >= 1 and shown["outputs"][0]["on"] and shown["outputs"][0]["mode"],
+                  "display: the displays and their sizes")
+            only = shown["outputs"][0]["name"]
+            refusals = [await change("/v1/machine/display", action="off", target=only),
+                        await change("/v1/machine/display", action="mode", target=only, value="99999x1"),
+                        await change("/v1/machine/display", action="mode", target="HDMI-99", value="800x600"),
+                        await change("/v1/machine/display", action="brightness", value="0")]
+            check(not any(r["ok"] for r in refusals) and (await read("display"))["outputs"][0]["on"],
+                  "display: the only display is not turned off, nor a size it does not offer chosen")
+
+            check(isinstance((await read("windows"))["windows"], list)
+                  and not (await change("/v1/machine/windows", action="close", target="1"))["ok"]
+                  and not (await change("/v1/machine/windows", action="close", target="1; reboot"))["ok"],
+                  "windows: listed, and only a window that is open can be acted on")
+
+            control.call("POST", "/configure", {"allow_input": False, "allow_exec": False, "allow_power": False})
+            statuses = []
+            for what, method in (("bluetooth", "post"), ("sound", "post"), ("display", "post"), ("windows", "get"),
+                                 ("services", "get"), ("services", "post"), ("health", "post")):
+                async with getattr(phone, method)(f"{link_url}/v1/machine/{what}") as reply:
+                    statuses.append(reply.status)
+            async with phone.get(f"{link_url}/v1/machine/health") as reply:
+                seen = reply.status
+            check(statuses == [403] * 7 and seen == 200,
+                  "machine: nothing is changed with the switches off, though the battery can still be read")
+            control.call("POST", "/configure", {"allow_input": True, "allow_exec": True, "allow_power": True})
+            async with phone.get(f"{link_url}/v1/machine/secrets") as reply:
+                check(reply.status == 404, "machine: nothing else is there to ask for")
+
+            # ------------------------------------------- the screen as video
+            import rtc
+            from aiortc import RTCPeerConnection, RTCSessionDescription
+            viewer = RTCPeerConnection(rtc.configuration(stun=None))
+            viewer.addTransceiver("video", direction="recvonly")
+            viewer.addTransceiver("audio", direction="recvonly")
+            arrived = asyncio.get_running_loop().create_future()
+
+            @viewer.on("track")
+            def on_track(track):
+                async def first():
+                    frame = await track.recv()
+                    if not arrived.done():
+                        arrived.set_result((frame.width, frame.height))
+                if track.kind == "video":
+                    asyncio.ensure_future(first())
+
+            await viewer.setLocalDescription(await viewer.createOffer())
+            video = await change("/v1/rtc", offer=viewer.localDescription.sdp, preset="low")
+            check(video.get("ok") and video["size"][0] == 960 and video["sound"] is False,
+                  "video: the computer answers the phone's offer, without sound where there is no sound server")
+            await viewer.setRemoteDescription(RTCSessionDescription(sdp=video["answer"], type="answer"))
+            try:
+                size = await asyncio.wait_for(arrived, 30)
+            except asyncio.TimeoutError:
+                size = None
+            check(size == tuple(video["size"]), f"video: the screen arrives as video ({size})")
+            check(control.status()["viewing"] == 1, "video: the computer knows someone is watching")
+            closed = await change("/v1/rtc/close", id=video["id"])
+            await viewer.close()
+            check(closed["ok"] and control.status()["viewing"] == 0 and not (await change("/v1/rtc/close", id=video["id"]))["ok"],
+                  "video: it stops when the phone says it has finished")
+            refused = [await change("/v1/rtc", offer="v=0"), await change("/v1/rtc", offer=""),
+                       await change("/v1/rtc", offer="m=video " + "x" * 70000), await change("/v1/rtc")]
+            check(not any(r.get("ok") for r in refused) and control.status()["viewing"] == 0,
+                  "video: something that is not an offer starts nothing")
+
+            # --------------------------- what the computer tells the phone
+            async def said(after=0, kinds="notification,alert"):
+                async with phone.get(f"{link_url}/v1/events?once=1&after={after}&kinds={kinds}") as reply:
+                    return (await reply.json())["events"]
+
+            async def run(command, detach=False):
+                async with phone.ws_connect(f"{link_url}/v1/exec") as ws:
+                    await ws.send_json({"cmd": command, "detach": detach})
+                    async for message in ws:
+                        if message.type != aiohttp.WSMsgType.TEXT:
+                            break
+
+            mark = max((item["id"] for item in await said()), default=0)
+            async with phone.ws_connect(f"{link_url}/v1/events?after={mark}") as listening:
+                await run("notify-send --app-name=Mail 'From Ada' 'Lunch at one?'")
+                heard = await asyncio.wait_for(listening.receive_json(), 10)
+                check((heard["kind"], heard["app"], heard["title"], heard["text"])
+                      == ("notification", "Mail", "From Ada", "Lunch at one?"),
+                      "events: a notification on the computer reaches a phone that is listening")
+                await change("/v1/machine/services", action="stop", target="sync.service")
+                (tools / "machine.json").write_text(json.dumps(dict(machine_now(), running=["adaptive-link.service"])))
+                await run("sleep 1; exit 3", detach=True)
+                heard = await asyncio.wait_for(listening.receive_json(), 10)
+                check(heard["kind"] == "alert" and heard["title"] == "Ended with an error (3)" and "sleep 1" in heard["text"],
+                      "events: a command started from the phone and left running says when it ends")
+            async with phone.post(f"{link_url}/v1/notify", json={"key": "k", "app": "Chat", "title": "Echo", "text": "x"}) as reply:
+                await reply.json()
+            await asyncio.sleep(1.5)
+            later = await said(mark)
+            check([item["title"] for item in later if item["kind"] == "notification"] == ["From Ada"],
+                  "events: what was said is kept for a phone that was away, without the phone's own notifications")
+            control.call("POST", "/configure", {"send_notifications": False})
+            check([item["kind"] for item in await said(mark)] == ["alert"] and not await said(mark, "notification"),
+                  "events: the owner can keep the computer's notifications from the phone; alerts still come")
+            control.call("POST", "/configure", {"send_notifications": True})
 
             async with phone.get(f"{link_url}/v1/desktop") as reply:
                 check(isinstance((await reply.json())["projects"], list), "desktop: the projects are listed (none here)")
@@ -649,7 +1024,7 @@ async def daemon_checks(sandbox, check):
         control.call("POST", "/enable", {"enabled": True})
         check(tcp_open(PORT) and (await try_status(pinned(phone_crt, phone_key)))[0] == 200, "switch: on brings the phone back")
 
-        # A second phone replaces the first, which is then locked out.
+        # A second device is paired beside the first, with limits of its own.
         new_cert, new_crt, new_key = write_identity("newphone")
         qr = json.loads(control.call("POST", "/pair/start")["payload"])
         async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
@@ -657,8 +1032,38 @@ async def daemon_checks(sandbox, check):
                 await reply.json()
         control.call("POST", "/pair/decide", {"accept": True})
         await asyncio.sleep(3.5)
-        check((await try_status(pinned(new_crt, new_key)))[0] == 200 and (await try_status(pinned(phone_crt, phone_key)))[0] != 200,
-              "pairing: a new phone replaces the old one, which no longer gets in")
+        check((await try_status(pinned(new_crt, new_key)))[0] == 200 and (await try_status(pinned(phone_crt, phone_key)))[0] == 200
+              and [p["name"] for p in control.status()["phones"]] == ["Pixel 8", "New"],
+              "pairing: a second device is paired, and both get in")
+        limited = control.call("POST", "/phone", {"phone": "New", "what": "exec", "allowed": False})
+        check(limited["ok"] and limited["phones"][1]["deny"] == ["allow_exec"]
+              and not control.call("POST", "/phone", {"phone": "Nobody", "what": "exec", "allowed": False})["ok"]
+              and not control.call("POST", "/phone", {"phone": "New", "what": "public", "allowed": True})["ok"],
+              "phones: one device is kept from running commands")
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned(new_crt, new_key))) as second, \
+                aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned(phone_crt, phone_key))) as first:
+            async with second.get(f"{link_url}/v1/tasks") as reply:
+                denied = reply.status
+            async with second.get(f"{link_url}/v1/status") as reply:
+                second_can = (await reply.json())["can"]
+            async with first.get(f"{link_url}/v1/tasks") as reply:
+                allowed = reply.status
+            async with first.get(f"{link_url}/v1/status") as reply:
+                first_can = (await reply.json())["can"]
+            check(denied == 403 and allowed == 200 and not second_can["exec"] and second_can["files"] and first_can["exec"],
+                  "phones: that device is refused, is told so, and the other is not affected")
+            async with second.get(f"{link_url}/v1/files") as reply:
+                await reply.json()
+            async with first.get(f"{link_url}/v1/log") as reply:
+                who = [entry["from"] for entry in (await reply.json())["entries"][-6:]]
+            check(any(name.endswith(" New") for name in who), "phones: the record says which device did what")
+        control.call("POST", "/phone", {"phone": "New", "what": "exec", "allowed": True})
+        check(not control.call("POST", "/unpair", {"phone": "Nobody"})["ok"]
+              and control.call("POST", "/unpair", {"phone": "Pixel 8"})["ok"], "phones: one device is unpaired by name")
+        await asyncio.sleep(1.5)
+        check((await try_status(pinned(new_crt, new_key)))[0] == 200 and (await try_status(pinned(phone_crt, phone_key)))[0] != 200
+              and [p["name"] for p in control.status()["phones"]] == ["New"],
+              "phones: it no longer gets in, and the other still does")
 
         # Rejecting, and guessing.
         qr = json.loads(control.call("POST", "/pair/start")["payload"])

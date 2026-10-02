@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Playing the computer's sound, sent with its screen. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Showing the computer's alerts and notifications on this phone, and
+         staying connected for them while the app is not open. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
@@ -29,6 +37,21 @@
             </intent-filter>
         </activity>
 
+        <!-- "Share" in any other app: a link, text or files, sent to the computer. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="Send to computer"
+            android:theme="@style/Theme.AdaptiveLink">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
         <!-- Portrait scanner for the pairing code. -->
         <activity
             android:name="com.journeyapps.barcodescanner.CaptureActivity"
@@ -47,5 +70,60 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Listens for the computer's alerts and notifications while the
+             owner has asked for them (More). -->
+        <service
+            android:name=".EventsService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a connection to the owner's own computer to show its alerts and notifications" />
+        </service>
+        <!-- One-tap actions without opening the app: a home-screen widget
+             and quick-settings tiles (QuickActions.kt). -->
+        <receiver android:name=".QuickReceiver" android:exported="false" />
+        <receiver android:name=".LinkWidget" android:exported="true" android:label="Adaptive Link">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
+        </receiver>
+        <service
+            android:name=".LockTile"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="Lock computer"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".PlayPauseTile"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="Computer play/pause"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".FocusTile"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="Computer focus"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

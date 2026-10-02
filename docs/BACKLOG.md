@@ -627,8 +627,32 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   Checked against a stand-in for Google in `verify-link.py`, and with the
   app's own code and screens on an emulator. 🔬 Google's real sign-in, and a
   direct connection from mobile data, are the remaining checks.
-- ⬜ Not there: sound from the computer on the phone, waking a suspended
-  computer, Wayland, iOS, and finding each other with no network at all
+- ✅ **The machine itself, from the phone.** Tasks (processes, priority,
+  battery, temperatures, power profile), Devices (USB on and off, drives
+  mounted, unmounted and safely removed), Network (Wi-Fi, joining, VPNs),
+  Bluetooth, Display and sound devices, Services, Windows, and the desktop's
+  own features. A change that could cut the phone off is undone unless the
+  phone comes back to keep it. Checked against stand-ins for NetworkManager,
+  UDisks, BlueZ, PulseAudio, systemd and the power profiles
+  (`scripts/fake_system_tools.py`). 🔬 The real ones.
+- ✅ **The screen as video, with sound.** H.264 or VP8 and Opus over a media
+  connection set up through the link (`media.py`), with JPEG frames as the
+  fallback. Checked with a second WebRTC peer in `verify-link.py`, with the
+  app's own decoder on an emulator, and by hand against this machine's real
+  screen and sound. 🔬 Sound on a real phone.
+- ✅ **Without being asked.** The computer's alerts (disk, memory, battery,
+  heat, devices, failed services, a finished command) and its notifications
+  on the phone; share to the computer from any app; a home-screen widget and
+  quick-settings tiles for lock, media and focus; commands kept as buttons.
+  🔬 The widget and tiles on a real home screen.
+- ✅ **Several devices**, up to five, each of which can be allowed less than
+  the others (`link-cli.py phone NAME deny exec`).
+- ✅ **Waking it** (`link-cli.py wake on`, wake-on-LAN, its own network only)
+  and **a relay of your own** (`link-cli.py relay`, a TURN server) for
+  networks that forbid direct connections. 🔬 Both written and checked only
+  as far as their settings go: neither a sleeping computer nor a relay was
+  available to try.
+- ⬜ Not there: Wayland, iOS, and finding each other with no network at all
   (Apple's Bluetooth and peer-to-peer Wi-Fi).
 
 ## Immediate next work

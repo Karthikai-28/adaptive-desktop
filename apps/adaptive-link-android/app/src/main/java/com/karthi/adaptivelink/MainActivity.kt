@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 
-enum class Page { Home, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop, More }
+enum class Page {
+    Home, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
+    Bluetooth, DisplaySound, Services, Windows, More,
+}
 
 /** Apple dark appearance with one accent, as on the desktop. */
 private val Colors = darkColorScheme(
@@ -72,6 +76,8 @@ class MainActivity : FragmentActivity() {
         // What is on the computer's screen should not end up in the phone's
         // recent-apps thumbnails or in a screenshot taken by another app.
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+
+        EventsService.sync(this)
 
         setContent {
             MaterialTheme(colorScheme = Colors) {
@@ -183,6 +189,8 @@ private fun App(activity: MainActivity) {
     // Where the Files screen opens: home, or a drive chosen under Devices.
     var folder by remember { mutableStateOf("~") }
 
+    LaunchedEffect(computer) { LinkWidget.refresh(activity) }
+
     val paired = computer
     if (paired == null) {
         PairScreen(activity) { computer = store.computer }
@@ -205,6 +213,10 @@ private fun App(activity: MainActivity) {
             Page.Devices -> DevicesPage(client, onBack = { page = Page.Home }, onBrowse = { folder = it; page = Page.Files })
             Page.Network -> NetworkPage(client) { page = Page.Home }
             Page.Desktop -> DesktopPage(client) { page = Page.Home }
+            Page.Bluetooth -> BluetoothPage(client) { page = Page.Home }
+            Page.DisplaySound -> DisplaySoundPage(client) { page = Page.Home }
+            Page.Services -> ServicesPage(client) { page = Page.Home }
+            Page.Windows -> WindowsPage(client) { page = Page.Home }
             Page.Camera -> CameraPage(activity, client) { page = Page.Home }
             Page.More -> MorePage(activity, client, store, state, onBack = { page = Page.Home }, onUnpaired = {
                 computer = null

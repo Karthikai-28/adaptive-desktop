@@ -586,6 +586,63 @@ def network(root=NET_ROOT):
             "networks": networks, "vpns": _tunnels(saved)}
 
 
+# -------------------------------------------------------------------- wake
+
+# The setting NetworkManager keeps for each kind of connection, and the
+# value that means "wake when the magic packet arrives".
+WAKE_SETTING = {"802-3-ethernet": ("802-3-ethernet.wake-on-lan", "magic"),
+                "802-11-wireless": ("802-11-wireless.wake-on-wlan", "magic")}
+
+
+def wake_addresses(root=NET_ROOT):
+    """Where a magic packet has to be sent to wake this computer: the
+    hardware address of each real interface that is connected, and the
+    broadcast address of its network."""
+    found = []
+    for link in _json_from("ip", "-j", "addr"):
+        name, mac = link.get("ifname", ""), link.get("address", "")
+        if _net_kind(name, root) not in ("Wi-Fi", "Ethernet") or not re.fullmatch(r"([0-9a-f]{2}:){5}[0-9a-f]{2}", mac):
+            continue
+        for address in link.get("addr_info", []):
+            if address.get("family") == "inet" and address.get("broadcast"):
+                found.append({"mac": mac, "broadcast": address["broadcast"],
+                              "kind": _net_kind(name, root)})
+    return found
+
+
+def _wake_connections():
+    """[(connection, setting, value wanted, value now)] for the connections in use."""
+    found = []
+    for name, kind, active in _saved():
+        if active != "yes" or kind not in WAKE_SETTING:
+            continue
+        setting, wanted = WAKE_SETTING[kind]
+        ok, now = _nmcli("-g", setting, "con", "show", "id", name)
+        found.append((name, setting, wanted, now.strip() if ok else ""))
+    return found
+
+
+def wake_state():
+    """Whether the connections in use are set to wake the computer."""
+    connections = _wake_connections()
+    return {"connections": [{"name": name, "on": wanted in now.split(",")} for name, _setting, wanted, now in connections],
+            "on": bool(connections) and all(wanted in now.split(",") for _n, _s, wanted, now in connections)}
+
+
+def wake_enable(on):
+    """Set the connections in use to wake the computer on a magic packet, or
+    not to. Returns (done, what to say)."""
+    connections = _wake_connections()
+    if not connections:
+        return False, "no network connection that could wake the computer is in use"
+    for name, setting, wanted, _now in connections:
+        done, text = _nmcli("con", "modify", "id", name, setting, wanted if on else "default")
+        if not done:
+            return False, _last_line(text)
+    return True, ("The computer will wake for the phone" if on else "The computer will no longer wake for the phone") \
+        + " once each connection has been made again (or after a restart)."
+
+
 # ----------------------------------------------------------------- desktop
 
 def _cli(name, *args, timeout=15):

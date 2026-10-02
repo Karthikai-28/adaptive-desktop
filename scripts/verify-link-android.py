@@ -155,6 +155,15 @@ def screens(check, adb, device, control, build_env, sandbox):
                 return True
         return False
 
+    def reach(label):
+        """Scroll down until `label` is on screen."""
+        for _ in range(6):
+            if has(label):
+                return True
+            sh("shell", "input", "swipe", "540", "1700", "540", "900", "300")
+            time.sleep(1)
+        return has(label)
+
     def back(wait=1.2):
         sh("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(wait)
@@ -288,11 +297,35 @@ def screens(check, adb, device, control, build_env, sandbox):
     control.call("POST", "/configure", {"allow_power": False})
 
     # ------------------------------------------------------------ screen
+    def audited(action):
+        return [e["detail"] for e in control.call("GET", "/log")["entries"] if e["action"] == action]
+
     tap("Screen", wait=4)
-    step(has("Screen") and not has("Connecting"), "screen: the picture arrives")
-    for label in ("Keyboard", "Scroll mode", "L", "H", "M"):
+    for _ in range(15):
+        if not has("Connecting"):
+            break
+        time.sleep(1)
+    # "Connecting" goes only when a frame of video has been decoded and drawn.
+    step(not has("Connecting") and not has("could not be started")
+         and "video connected" in audited("screen-video"), "screen: the picture arrives, as video")
+    tap("Picture and sound", wait=1.5)
+    step(has("Low quality", "High quality") and has("Video: on", "Sound: on"), "screen: quality, video and sound are chosen in one place")
+    tap("Low quality", wait=3)
+    for _ in range(10):
+        if not has("Connecting"):
+            break
+        time.sleep(1)
+    step(not has("Connecting") and not has("could not be started") and any("video low" in d for d in audited("screen")),
+         "screen: another quality starts the video again at that size")
+    tap("Picture and sound", wait=1.5)
+    tap("Video: on (less data)", wait=6)
+    step(has("The computer's screen") and not has("Connecting") and audited("screen")[-1] == "low",
+         "screen: with video off it arrives a picture at a time, as before")
+    tap("Picture and sound", wait=1.5)
+    tap("Video: off (a picture at a time)", wait=6)
+    for label in ("Keyboard", "Scroll mode", "Scroll mode", "Keyboard"):
         tap(label, wait=1.2)
-    step(has("Screen"), "screen: keyboard, scroll mode and the three qualities")
+    step(has("Screen") and not has("could not be started"), "screen: video again, with the keyboard and scroll mode")
     sh("shell", "input", "tap", "540", "900")
     sh("shell", "input", "swipe", "400", "800", "700", "1000", "300")
     time.sleep(1)
@@ -332,6 +365,19 @@ def screens(check, adb, device, control, build_env, sandbox):
         sh("shell", "input", "keyevent", "KEYCODE_ENTER")
         time.sleep(4)
     step(has("screen-check", "finished: 0"), "run: a command typed on the phone runs and its output is shown")
+    tap("Save", wait=1.5)
+    if tap("A name for its button", wait=1):
+        sh("shell", "input", "text", "Greet")
+        time.sleep(1)
+    tap("Keep", wait=1.5)
+    sh("shell", "input", "keyevent", "KEYCODE_BACK")   # the keyboard, if it is still up
+    time.sleep(1)
+    step(has("Greet") and not has("Keep"), "run: a command is kept as a button")
+    control.call("POST", "/configure", {"allow_exec": True})
+    before = len([e for e in control.call("GET", "/log")["entries"] if e["action"] == "exec"])
+    tap("Greet", wait=4)
+    after = len([e for e in control.call("GET", "/log")["entries"] if e["action"] == "exec"])
+    step(after == before + 1 and has("finished: 0"), "run: and runs again with one tap")
     home()
 
     # ------------------------------------------------------------- files
@@ -373,15 +419,6 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(has("Send a file to the computer"), "devices: a drive opens in Files")
     home()
 
-    def reach(label):
-        """Scroll down until `label` is on screen."""
-        for _ in range(6):
-            if has(label):
-                return True
-            sh("shell", "input", "swipe", "540", "1700", "540", "900", "300")
-            time.sleep(1)
-        return has(label)
-
     def network_now():
         return json.loads((sandbox / "tools/network.json").read_text())
 
@@ -404,6 +441,48 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(network_now()["active"] == "Other", "network: a network is joined with its password")
     reach("Work VPN")
     step(reach("DNS"), "network: the VPNs and the DNS servers")
+    home()
+
+    def machine_now():
+        return json.loads((sandbox / "tools/machine.json").read_text())
+
+    tap("Tasks", wait=5)
+    step(has("Balanced", "Power saver"), "tasks: the power profile, beside the load")
+    tap("Power saver", wait=4)
+    step(machine_now()["profile"] == "balanced" and has("turned off on the computer"),
+         "tasks: the power profile is not changed while the computer has power actions turned off")
+    control.call("POST", "/configure", {"allow_power": True})   # the profile only: suspend and the rest are stand-ins here
+    tap("Power saver", wait=4)
+    control.call("POST", "/configure", {"allow_power": False})
+    step(machine_now()["profile"] == "power-saver", "tasks: the power profile is changed from the phone")
+    home()
+
+    reach("Services")
+    tap("Bluetooth", wait=5)
+    step(has("Bluetooth on the computer", "Check Headphones", "Check Mouse"), "bluetooth: the devices the computer knows")
+    tap("Connect", wait=5)
+    step(len(machine_now()["connected"]) == 1 and has("Disconnect"), "bluetooth: a device is connected from the phone")
+    home()
+
+    reach("Services")
+    tap("Display", wait=5)
+    step(has("Displays", "Sound comes out of") and has("Check Speakers"), "display and sound: the displays and the sound devices")
+    reach("Check Headset")
+    tap("Use", wait=4)
+    step(machine_now()["sink"] == "headset.check", "sound: another output is chosen from the phone")
+    home()
+
+    reach("Services")
+    tap("Services", wait=5)
+    step(has("sync", "backup") and has("running", "stopped"), "services: the owner's services and whether each runs")
+    tap("backup", wait=1.5)
+    tap("Start", wait=4)
+    step("backup.service" in machine_now()["running"], "services: one is started from the phone")
+    home()
+
+    reach("Services")
+    tap("Windows", wait=5)
+    step(has("No windows are open"), "windows: says so when none are open (the checks' screen has no window manager)")
     home()
 
     tap("Desktop", wait=4)
@@ -434,7 +513,31 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(has("Webcam"), "webcam: switching cameras")
     home()
 
+    # ------------------------------------------------------------- share
+    def share(text):
+        sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.ShareActivity", "-a", "android.intent.action.SEND",
+           "-t", "text/plain", "--es", "android.intent.extra.TEXT", text)
+        time.sleep(4)
+
+    def logged(action):
+        return [e["detail"] for e in control.call("GET", "/log")["entries"] if e["action"] == action]
+
+    share("https://example.org/shared-page")
+    step(has("Send to", "Open on the computer", "Copy to its clipboard"), "share: a link shared from another app offers the computer")
+    tap("Open on the computer", wait=4)
+    step(has("Opened on the computer") and logged("open-url")[-1:] == ["https://example.org/shared-page"],
+         "share: the link is opened on the computer")
+    tap("Done", wait=1.5)
+    share("remember-the-milk")
+    step(has("Add to the project's notes") and not has("Open on the computer"), "share: plain text is not offered as a link")
+    tap("Add to the project's notes", wait=4)
+    inbox = sandbox / "home/.local/share/adaptive-desktop/notes/General/Inbox.md"
+    step(has("Added to the project's inbox") and "remember-the-milk" in inbox.read_text(), "share: text is added to the computer's notes")
+    tap("Done", wait=1.5)
+    home()
+
     # -------------------------------------------------------------- more
+    reach("More")
     tap("More", wait=2)
     tap("Get from computer", wait=2)
     tap("Send to computer", wait=2)
@@ -457,9 +560,30 @@ def screens(check, adb, device, control, build_env, sandbox):
     if "adaptivelink" not in focused():
         back(2)
     home()
+    reach("More")
     tap("More", wait=2)
-    sh("shell", "input", "swipe", "540", "1500", "540", "600", "300")
-    time.sleep(1)
+    reach("The computer's own notifications as well")
+    for label, _x, y in nodes():
+        if label.startswith("Alerts on this phone"):
+            sh("shell", "input", "tap", "980", str(y))
+            break
+    time.sleep(2)
+    allow_permission()
+    time.sleep(4)
+    step("EventsService" in sh("shell", "dumpsys", "activity", "services", "com.karthi.adaptivelink"),
+         "alerts: the phone stays listening once the owner turns them on")
+    machine = json.loads((sandbox / "tools/machine.json").read_text())
+    (sandbox / "tools/machine.json").write_text(json.dumps(dict(machine, failed=["sync.service"])))
+    for _ in range(15):
+        if "A service has failed" in sh("shell", "dumpsys", "notification", "--noredact"):
+            break
+        time.sleep(2)
+    step("A service has failed" in sh("shell", "dumpsys", "notification", "--noredact"),
+         "alerts: something going wrong on the computer is shown on the phone")
+    home()
+    reach("More")
+    tap("More", wait=2)
+    reach("Unpair this phone")
     step(tap("Unpair this phone", wait=1.5) and has("Unpair this phone?"), "more: unpairing asks first")
     tap("Unpair", wait=3)
     step(has("airing code") and not has("Sign out of"),
@@ -529,7 +653,9 @@ def main():
     import fake_system_tools
     tools = sandbox / "tools"
     env.update(PATH=f"{fake_system_tools.install(tools / 'bin')}:{env['PATH']}", FAKE_TOOLS_DIR=str(tools),
-               ADAPTIVE_LINK_KEEP_S=str(KEEP_S))
+               ADAPTIVE_LINK_KEEP_S=str(KEEP_S), ADAPTIVE_LINK_ALERT_EVERY_S="2",
+               # No sound server here, and none is to be started by asking for one.
+               PULSE_SERVER="unix:/nonexistent/pulse")
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     daemon = subprocess.Popen(
         ["xvfb-run", "-a", "-s", "-screen 0 1280x800x24", "dbus-run-session", "--",

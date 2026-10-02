@@ -1,4 +1,4 @@
-"""Adaptive Link - who the laptop is, and which one phone it trusts.
+"""Adaptive Link - who the laptop is, and which phones it trusts.
 
 No networking here, so scripts/verify-link.py checks all of it directly.
 
@@ -9,7 +9,8 @@ certificate. From then on every connection is mutual TLS: the laptop will not
 finish a handshake with anything that does not hold the paired phone's key, so
 an unpaired device never reaches a single line of the server's code.
 
-One phone at a time. Pairing another replaces it.
+A few devices can be paired - a phone and a tablet, say - each with its own
+certificate, and each can be allowed less than the others (PHONE_SWITCHES).
 """
 
 import datetime
@@ -37,6 +38,10 @@ PAIRING_WINDOW_S = 120
 PAIRING_WINDOW_MAX_S = 600
 PAIRING_MAX_ATTEMPTS = 5
 MAX_CERT_BYTES = 8192
+MAX_PHONES = 5
+# What one device can be denied while the others keep it. A device is never
+# allowed more than the owner's switches for all of them (DEFAULT_CONFIG).
+PHONE_SWITCHES = ("allow_input", "allow_exec", "allow_files", "allow_power")
 
 DEFAULT_CONFIG = {
     "enabled": True,
@@ -53,6 +58,9 @@ DEFAULT_CONFIG = {
     "allow_files": True,
     "allow_power": True,
     "notify_on_connect": True,
+    # The desktop's own notifications are told to a phone that asks for them.
+    # Alerts about the machine itself (a full disk, a low battery) always are.
+    "send_notifications": True,
     # A device signed in to the same Google account as this computer may ask
     # to connect without a pairing code. It still has to be approved here,
     # once, unless auto_approve_account is on.
@@ -98,6 +106,47 @@ def save_config(config, link_dir=None):
     known = {k: config[k] for k in DEFAULT_CONFIG if k in config}
     _write_private((link_dir or LINK_DIR) / "config.json",
                    (json.dumps(known, indent=2, sort_keys=True) + "\n").encode())
+
+
+# ------------------------------------------------------------------- relay
+
+def clean_relay(data):
+    """A relay as the owner gave it, checked: {"url", "username",
+    "credential"}, or None. Only a TURN server's address is one."""
+    if not isinstance(data, dict):
+        return None
+    url = str(data.get("url", "")).strip()
+    rest = url.split(":", 1)[1] if ":" in url else ""
+    if url.split(":", 1)[0] not in ("turn", "turns") or not rest or len(url) > 200 \
+            or not all(ch.isalnum() or ch in ".-:[]?=_" for ch in rest):
+        return None
+    username, credential = str(data.get("username", ""))[:200], str(data.get("credential", ""))[:200]
+    if any(not ch.isprintable() for ch in username + credential):
+        return None
+    return {"url": url, "username": username, "credential": credential}
+
+
+def load_relay(link_dir=None):
+    """The owner's own relay for when a direct connection cannot be made, or None."""
+    try:
+        return clean_relay(json.loads(((link_dir or LINK_DIR) / "relay.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None
+
+
+def save_relay(relay, link_dir=None):
+    """Keep the relay, or forget it (None). Returns what is kept now."""
+    path = (link_dir or LINK_DIR) / "relay.json"
+    relay = clean_relay(relay)
+    if relay is None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    # Its password is in here: private, like the keys.
+    _write_private(path, (json.dumps(relay, indent=2) + "\n").encode())
+    return relay
 
 
 # ------------------------------------------------------------ certificates
@@ -186,36 +235,106 @@ def check_phone_certificate(cert_pem):
     return cert.public_bytes(serialization.Encoding.PEM), der, fingerprint(der)
 
 
-# --------------------------------------------------------------- the phone
+# -------------------------------------------------------------- the phones
 
-def load_phone(link_dir=None):
-    """The paired phone: {name, cert_pem, fingerprint, paired_at}, or None."""
+class TooManyPhones(ValueError):
+    pass
+
+
+def _record(data):
+    """One stored device, checked: {name, cert_pem, fingerprint, paired_at,
+    deny}, or None if it is not to be trusted."""
     try:
-        data = json.loads(((link_dir or LINK_DIR) / "phone.json").read_text(encoding="utf-8"))
         _pem, _der, digest = check_phone_certificate(data["cert_pem"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
     if digest != data.get("fingerprint"):
         return None  # the file was edited; do not trust it
-    return {"name": str(data.get("name", "Phone"))[:60], "cert_pem": data["cert_pem"],
-            "fingerprint": digest, "paired_at": int(data.get("paired_at", 0))}
+    deny = data.get("deny") if isinstance(data.get("deny"), list) else []
+    try:
+        paired_at = int(data.get("paired_at", 0))
+    except (TypeError, ValueError):
+        paired_at = 0
+    return {"name": str(data.get("name", "Phone"))[:60], "cert_pem": data["cert_pem"], "fingerprint": digest,
+            "paired_at": paired_at, "deny": [switch for switch in PHONE_SWITCHES if switch in deny]}
+
+
+def load_phones(link_dir=None):
+    """The paired devices, oldest first. One paired before several could be
+    is found where it was kept then (phone.json) and carried over."""
+    link_dir = link_dir or LINK_DIR
+    try:
+        data = json.loads((link_dir / "phones.json").read_text(encoding="utf-8"))
+        listed = data["phones"] if isinstance(data, dict) else []
+    except (OSError, ValueError, KeyError):
+        try:
+            listed = [json.loads((link_dir / "phone.json").read_text(encoding="utf-8"))]
+        except (OSError, ValueError):
+            listed = []
+    found = []
+    for entry in listed if isinstance(listed, list) else []:
+        record = _record(entry) if isinstance(entry, dict) else None
+        if record and all(record["fingerprint"] != other["fingerprint"] for other in found):
+            found.append(record)
+    return found[:MAX_PHONES]
+
+
+def _save_phones(phones, link_dir):
+    _write_private(link_dir / "phones.json", (json.dumps({"phones": phones}, indent=2) + "\n").encode())
+    try:
+        (link_dir / "phone.json").unlink()   # where one phone was kept, before there could be several
+    except OSError:
+        pass
 
 
 def save_phone(name, cert_pem, link_dir=None, now=None):
+    """Trust a device. One already trusted (the same certificate) is renamed
+    and keeps what it was denied. Returns its record."""
+    link_dir = link_dir or LINK_DIR
     pem, _der, digest = check_phone_certificate(cert_pem)
+    phones = load_phones(link_dir)
+    known = next((phone for phone in phones if phone["fingerprint"] == digest), None)
+    if known is None and len(phones) >= MAX_PHONES:
+        raise TooManyPhones(f"{MAX_PHONES} devices are paired already; unpair one first")
     record = {"name": clean_name(name), "cert_pem": pem.decode(), "fingerprint": digest,
-              "paired_at": int(now if now is not None else time.time())}
-    _write_private((link_dir or LINK_DIR) / "phone.json",
-                   (json.dumps(record, indent=2) + "\n").encode())
+              "paired_at": int(now if now is not None else time.time()),
+              "deny": known["deny"] if known else []}
+    _save_phones([phone for phone in phones if phone["fingerprint"] != digest] + [record], link_dir)
     return record
 
 
-def forget_phone(link_dir=None):
-    try:
-        ((link_dir or LINK_DIR) / "phone.json").unlink()
-        return True
-    except FileNotFoundError:
+def forget_phone(link_dir=None, fingerprint=None):
+    """Stop trusting one device, or all of them. Returns how many were forgotten."""
+    link_dir = link_dir or LINK_DIR
+    phones = load_phones(link_dir)
+    kept = [phone for phone in phones if fingerprint is not None and phone["fingerprint"] != fingerprint]
+    if len(kept) != len(phones):
+        _save_phones(kept, link_dir)
+    return len(phones) - len(kept)
+
+
+def deny_phone(fingerprint, switch, denied, link_dir=None):
+    """Keep one device from something the others may do, or let it again."""
+    link_dir = link_dir or LINK_DIR
+    phones = load_phones(link_dir)
+    phone = next((phone for phone in phones if phone["fingerprint"] == fingerprint), None)
+    if phone is None or switch not in PHONE_SWITCHES:
         return False
+    phone["deny"] = [name for name in PHONE_SWITCHES if (name in phone["deny"] and name != switch) or (name == switch and denied)]
+    _save_phones(phones, link_dir)
+    return True
+
+
+def find_phone(phones, text):
+    """The device the owner means by a name, or by the start of its fingerprint."""
+    wanted = str(text or "").strip().casefold()
+    if not wanted:
+        return None
+    named = [phone for phone in phones if phone["name"].casefold() == wanted]
+    if len(named) == 1:
+        return named[0]
+    marked = [phone for phone in phones if len(wanted) >= 6 and phone["fingerprint"].startswith(wanted)]
+    return marked[0] if len(marked) == 1 else None
 
 
 def clean_name(name):
@@ -280,16 +399,23 @@ def pairing_context(key_path, cert_path):
     return _base_context(key_path, cert_path)
 
 
-def link_context(key_path, cert_path, phone_cert_pem):
-    """TLS for the link itself: a handshake completes only with the paired
-    phone's certificate, which is the whole of the trust store."""
+def link_context(key_path, cert_path, phone_certs_pem):
+    """TLS for the link itself: a handshake completes only with a paired
+    device's certificate; those are the whole of the trust store."""
     context = _base_context(key_path, cert_path)
     context.verify_mode = ssl.CERT_REQUIRED
     # The phone's certificate is self-signed and is its own trust anchor; the
     # strict profile would refuse an anchor that is not marked as a CA.
     context.verify_flags &= ~ssl.VERIFY_X509_STRICT
-    pem = phone_cert_pem.decode() if isinstance(phone_cert_pem, bytes) else phone_cert_pem
-    context.load_verify_locations(cadata=pem)
+    # Each paired certificate is trusted as itself. Phones name their
+    # certificates alike, and without this the one presented would be checked
+    # against whichever of that name comes first - and refused if it is
+    # another device's.
+    context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+    if isinstance(phone_certs_pem, (str, bytes)):
+        phone_certs_pem = [phone_certs_pem]
+    context.load_verify_locations(cadata="\n".join(
+        pem.decode() if isinstance(pem, bytes) else pem for pem in phone_certs_pem))
     return context
 
 

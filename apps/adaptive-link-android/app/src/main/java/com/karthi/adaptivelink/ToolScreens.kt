@@ -15,7 +15,13 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -84,6 +90,7 @@ import java.net.URLEncoder
 
 // --------------------------------------------------------------------- run
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RunPage(client: LinkClient, store: Store, onBack: () -> Unit) {
     var command by remember { mutableStateOf("") }
@@ -91,19 +98,23 @@ fun RunPage(client: LinkClient, store: Store, onBack: () -> Unit) {
     var running by remember { mutableStateOf<WebSocket?>(null) }
     var keep by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(store.commandHistory) }
+    var saved by remember { mutableStateOf(store.savedCommands) }
+    var naming by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var removing by remember { mutableStateOf<SavedCommand?>(null) }
     val scroll = rememberScrollState()
 
     DisposableEffect(Unit) { onDispose { running?.close(1000, null) } }
     LaunchedEffect(output) { scroll.scrollTo(scroll.maxValue) }
 
-    fun run(text: String) {
+    fun run(text: String, detach: Boolean = keep) {
         if (text.isBlank() || running != null) return
         history = (listOf(text) + history.filter { it != text }).take(30)
         store.commandHistory = history
         output = "$ $text\n"
         running = client.socket("/v1/exec", object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                webSocket.send(JSONObject().put("cmd", text).put("cwd", "~").put("detach", keep).toString())
+                webSocket.send(JSONObject().put("cmd", text).put("cwd", "~").put("detach", detach).toString())
             }
 
             override fun onMessage(webSocket: WebSocket, message: String) {
@@ -143,8 +154,25 @@ fun RunPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                 if (running != null) {
                     OutlinedButton(onClick = { running?.send("{\"kill\":true}") }) { Text("Stop") }
                 } else {
+                    if (command.isNotBlank() && saved.none { it.command == command }) {
+                        TextButton(onClick = { name = ""; naming = true }) { Text("Save") }
+                    }
                     Button(onClick = { run(command) }) { Text("Run") }
                 }
+            }
+            if (saved.isNotEmpty()) {
+                // One tap runs it; a long press offers to take it out.
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    saved.forEach { one ->
+                        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary)
+                            .combinedClickable(onClick = { command = one.command; run(one.command, one.detach) },
+                                onLongClick = { removing = one })
+                            .padding(horizontal = 14.dp, vertical = 9.dp)) {
+                            Text(one.name, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
             }
             if (history.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -164,6 +192,40 @@ fun RunPage(client: LinkClient, store: Store, onBack: () -> Unit) {
             Spacer(Modifier.height(10.dp))
         }
     }
+    if (naming) {
+        AlertDialog(
+            onDismissRequest = { naming = false },
+            title = { Text("Save this command") },
+            text = {
+                Column {
+                    Text(command, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 4)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = name, onValueChange = { name = it.take(40) }, singleLine = true,
+                        placeholder = { Text("A name for its button") }, modifier = Modifier.fillMaxWidth())
+                    if (keep) Muted("It will be started and left running.")
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = name.isNotBlank(), onClick = {
+                    saved = (saved + SavedCommand(name.trim(), command, keep)).take(SavedCommand.LIMIT)
+                    store.savedCommands = saved
+                    naming = false
+                }) { Text("Keep") }
+            },
+            dismissButton = { TextButton(onClick = { naming = false }) { Text("Cancel") } },
+        )
+    }
+    removing?.let { one ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove “${one.name}”?") },
+            text = { Text(one.command, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 6) },
+            confirmButton = {
+                TextButton(onClick = { saved = saved - one; store.savedCommands = saved; removing = null }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
+        )
+    }
 }
 
 // ------------------------------------------------------------------- files
@@ -171,14 +233,14 @@ fun RunPage(client: LinkClient, store: Store, onBack: () -> Unit) {
 private data class Entry(val name: String, val dir: Boolean, val size: Long)
 
 /** A file on the phone, streamed to the computer without loading it into memory. */
-private class UriBody(private val context: Context, private val uri: Uri) : RequestBody() {
+internal class UriBody(private val context: Context, private val uri: Uri) : RequestBody() {
     override fun contentType(): MediaType? = null
     override fun writeTo(sink: BufferedSink) {
         context.contentResolver.openInputStream(uri)!!.use { sink.writeAll(it.source()) }
     }
 }
 
-private fun displayName(context: Context, uri: Uri): String {
+internal fun displayName(context: Context, uri: Uri): String {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
         if (cursor.moveToFirst()) return cursor.getString(0) ?: "file"
     }
@@ -352,6 +414,22 @@ fun MorePage(
     var lock by remember { mutableStateOf(store.lockOnOpen) }
     var unpair by remember { mutableStateOf(false) }
     val clipboard = remember { activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+    var alerts by remember { mutableStateOf(store.computerAlerts) }
+    var computerNotes by remember { mutableStateOf(store.computerNotifications) }
+    // Android 13 and later ask before an app may show notifications at all.
+    val askToNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) note = "Without that permission the phone cannot show them."
+    }
+
+    fun listen() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && (alerts || computerNotes) &&
+            ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            activity.awayOnPurpose = true
+            askToNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        EventsService.sync(activity)
+    }
 
     fun power(action: String) = scope.launch {
         val result = client.post("/v1/power", JSONObject().put("action", action))
@@ -419,6 +497,18 @@ fun MorePage(
             }
         }
 
+        Section("The computer's alerts and notifications") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Muted("Alerts on this phone: a disk nearly full, a low battery, a command that has finished", Modifier.weight(1f))
+                Switch(checked = alerts, onCheckedChange = { alerts = it; store.computerAlerts = it; listen() })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Muted("The computer's own notifications as well", Modifier.weight(1f))
+                Switch(checked = computerNotes, onCheckedChange = { computerNotes = it; store.computerNotifications = it; listen() })
+            }
+            if (alerts || computerNotes) Muted("The phone stays connected to the computer for these, and says so in its notification shade.")
+        }
+
         Section("Security") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Muted("Ask for fingerprint or screen lock when opened", Modifier.weight(1f))
@@ -457,6 +547,9 @@ fun MorePage(
                     Cloud(activity).signOut()
                     store.computer = null
                     store.relayNotifications = false
+                    store.computerAlerts = false
+                    store.computerNotifications = false
+                    EventsService.sync(activity)
                     Link.forget()
                     onUnpaired()
                 }) { Text("Unpair") }

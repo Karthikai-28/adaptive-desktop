@@ -6,7 +6,10 @@
     link-cli.py signin         sign this computer in to your Google account
     link-cli.py signout        sign it out and remove it from the account
     link-cli.py pair           pair by code instead (opens a window with a QR)
-    link-cli.py unpair         forget the paired phone
+    link-cli.py unpair [NAME]  forget every paired device, or the one named
+    link-cli.py phone NAME allow|deny input|exec|files|power
+                               what that one device may do, of what the
+                               switches below allow all of them
     link-cli.py on | off       start or stop accepting the phone
     link-cli.py allow input|exec|files|power on|off
                                what the phone may do (input: pointer, keyboard
@@ -16,6 +19,15 @@
                                ask to connect without a pairing code
     link-cli.py allow auto-approve on|off
                                whether such a device is accepted without asking
+    link-cli.py allow notifications on|off
+                               whether this computer's notifications are told
+                               to a phone that asks for them
+    link-cli.py wake [on|off]  whether the phone can wake this computer from
+                               sleep on its own network, and turning that on
+    link-cli.py relay [turn:HOST:PORT USER | off]
+                               a relay of your own (a TURN server) for networks
+                               that forbid direct connections; asks for its
+                               password
     link-cli.py log            what the phone has done
 
 The daemon is services/adaptive-link (systemd unit adaptive-link.service).
@@ -31,6 +43,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "services" / "adaptive-link"))
 import control  # noqa: E402
+
+
+SWITCH_NAMES = {"allow_input": "pointer and keyboard", "allow_exec": "commands", "allow_files": "files",
+                "allow_power": "power"}
 
 
 def describe(state):
@@ -55,10 +71,11 @@ def describe(state):
     else:
         lines.append(f"Google account: {cloud} (link-cli.py signin).")
 
-    phone = state["phone"]
-    if phone:
+    for phone in state.get("phones", []):
         when = time.strftime("%Y-%m-%d", time.localtime(phone["paired_at"]))
-        lines.append(f"Paired phone: {phone['name']} (since {when})")
+        limits = ", ".join(SWITCH_NAMES.get(name, name) for name in phone["deny"])
+        lines.append(f"Paired: {phone['name']} (since {when}, {phone['fingerprint'][:8]})"
+                     + (f" - not allowed: {limits}" if limits else ""))
     for item in state["addresses"]:
         lines.append(f"  {item['address']:<16} this network")
     config = state["config"]
@@ -123,12 +140,23 @@ def do_signin():
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Adaptive Link")
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("status", "pair", "unpair", "on", "off", "log", "signin", "signout"):
+    for name in ("status", "pair", "on", "off", "log", "signin", "signout"):
         sub.add_parser(name)
+    unpair = sub.add_parser("unpair")
+    unpair.add_argument("name", nargs="?", help="one device, by its name or the start of its fingerprint; all of them if left out")
+    phone = sub.add_parser("phone")
+    phone.add_argument("name")
+    phone.add_argument("verb", choices=["allow", "deny"])
+    phone.add_argument("what", choices=["input", "exec", "files", "power"])
     setup = sub.add_parser("setup")
     setup.add_argument("file", nargs="?", help="a JSON file with the five values, instead of typing them")
+    relay = sub.add_parser("relay")
+    relay.add_argument("url", nargs="?", help="turn:host:3478, or off")
+    relay.add_argument("user", nargs="?", default="")
+    wake = sub.add_parser("wake")
+    wake.add_argument("state", nargs="?", choices=["on", "off"])
     allow = sub.add_parser("allow")
-    allow.add_argument("what", choices=["input", "exec", "files", "power", "account", "auto-approve"])
+    allow.add_argument("what", choices=["input", "exec", "files", "power", "account", "auto-approve", "notifications"])
     allow.add_argument("state", choices=["on", "off"])
     args = parser.parse_args(argv)
 
@@ -145,17 +173,56 @@ def main(argv=None):
         elif args.action == "pair":
             return subprocess.call([sys.executable, str(REPO / "services/adaptive-link/pair_window.py")])
         elif args.action == "unpair":
-            removed = control.call("POST", "/unpair")["ok"]
-            print("The phone is forgotten; it can no longer connect." if removed else "No phone was paired.")
+            removed = control.call("POST", "/unpair", {"phone": args.name} if args.name else None)["ok"]
+            if args.name:
+                print(f"{args.name} is forgotten; it can no longer connect." if removed
+                      else f"No paired device is called {args.name} (link-cli.py status lists them).")
+            else:
+                print("Every paired device is forgotten; none can connect." if removed else "No phone was paired.")
+            return 0 if removed else 1
+        elif args.action == "phone":
+            state = control.call("POST", "/phone", {"phone": args.name, "what": args.what, "allowed": args.verb == "allow"})
+            if not state["ok"]:
+                print(f"No paired device is called {args.name} (link-cli.py status lists them).", file=sys.stderr)
+                return 1
+            print("\n".join(describe(state)))
         elif args.action in ("on", "off"):
             state = control.call("POST", "/enable", {"enabled": args.action == "on"})
             # One line: this is also what the palette shows in a notification.
             print(describe(state)[0])
         elif args.action == "allow":
-            key = {"account": "account_enroll", "auto-approve": "auto_approve_account"}.get(
+            key = {"account": "account_enroll", "auto-approve": "auto_approve_account",
+                   "notifications": "send_notifications"}.get(
                 args.what, f"allow_{args.what}")
             state = control.call("POST", "/configure", {key: args.state == "on"})
             print("\n".join(describe(state)))
+        elif args.action == "relay":
+            body = {}
+            if args.url == "off":
+                body = {"url": ""}
+            elif args.url:
+                import getpass
+                # Asked for, not given as an argument, where other programs could read it.
+                body = {"url": args.url, "username": args.user,
+                        "credential": getpass.getpass("The relay's password: ") if args.user else ""}
+            state = control.call("POST", "/relay", body)
+            if not state["ok"]:
+                print(state["error"], file=sys.stderr)
+                return 1
+            print(f"Relay: {state['relay']}" if state["relay"]
+                  else "No relay: the phone reaches the computer directly, or not at all.")
+        elif args.action == "wake":
+            body = {} if args.state is None else {"on": args.state == "on"}
+            state = control.call("POST", "/wake", body, timeout=30)
+            if state.get("text"):
+                print(state["text"])
+            for connection in state.get("connections", []):
+                print(f"{connection['name']}: {'wakes' if connection['on'] else 'does not wake'} the computer")
+            if not state.get("connections"):
+                print("No network connection that could wake the computer is in use.")
+            for address in state.get("addresses", []):
+                print(f"  {address['kind']} {address['mac']}, packets to {address['broadcast']}")
+            return 0 if state.get("ok") else 1
         elif args.action == "log":
             for entry in control.call("GET", "/log")["entries"]:
                 print(f"{entry['at']}  {entry['from'] or '-':<16} {entry['action']:<18} {entry['detail']}")

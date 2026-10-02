@@ -15,8 +15,12 @@ none of it, and could not use the tunnel if they reached it: its far end is
 the link's port, which accepts the paired phone's certificate and nothing
 else.
 
-There is no relay. On networks that do not allow a direct connection at all
-(some mobile carriers) the tunnel cannot be made, and the phone says so.
+By default there is no relay. On networks that do not allow a direct
+connection at all (some mobile carriers) the tunnel cannot be made, and the
+phone says so - unless the owner runs a relay of their own (a TURN server)
+and tells the link about it (link-cli.py relay). Then the two meet there
+when they cannot meet directly. The relay carries the bytes and can read
+none of them: it is the same tunnel, and the same mutual TLS inside it.
 """
 
 import asyncio
@@ -42,8 +46,14 @@ MAX_PEERS = 4
 SDP_MAX = 64 * 1024
 
 
-def configuration(stun=STUN):
+def configuration(stun=STUN, relay=None):
+    """Where a connection may look for a way through: the server that tells
+    each device its own address, and the owner's relay if there is one
+    ({"url", "username", "credential"}, identity.load_relay)."""
     servers = [RTCIceServer(urls=stun)] if stun else []
+    if relay:
+        servers.append(RTCIceServer(urls=relay["url"], username=relay.get("username") or None,
+                                    credential=relay.get("credential") or None))
     return RTCConfiguration(iceServers=servers)
 
 
@@ -128,9 +138,10 @@ class TunnelServer:
     """The computer's end: answers a phone's offer, and joins each channel
     the phone opens to the link's port."""
 
-    def __init__(self, port, stun=STUN, report=None):
+    def __init__(self, port, stun=STUN, report=None, relay=None):
         self.port = port
         self.stun = stun
+        self.relay = relay
         self._peers = set()
         # Told how each connection went, for the owner's log: a direct
         # connection that cannot be made is otherwise silent on this side.
@@ -144,7 +155,7 @@ class TunnelServer:
         while len(self._peers) >= MAX_PEERS:
             await self._drop(next(iter(self._peers)))
 
-        peer = RTCPeerConnection(configuration(self.stun))
+        peer = RTCPeerConnection(configuration(self.stun, self.relay))
         self._peers.add(peer)
 
         @peer.on("datachannel")

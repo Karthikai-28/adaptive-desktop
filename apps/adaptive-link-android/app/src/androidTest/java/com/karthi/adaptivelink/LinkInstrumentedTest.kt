@@ -130,6 +130,26 @@ class LinkInstrumentedTest {
         assertNotNull(client.get("/v1/files?path=~")?.optJSONArray("entries"))
         assertNotNull(client.post("/v1/notify", JSONObject().put("key", "k").put("app", "Test").put("title", "Hi").put("text", "x")))
 
+        // The screen again, as video: the offer and answer go over the
+        // link, and the pictures arrive on a connection of their own.
+        val pictures = CountDownLatch(3)
+        val watching = ScreenVideo(context, client) {}
+        watching.show { pictures.countDown() }
+        assertTrue("the computer did not agree to send video", watching.start("low", true))
+        assertTrue("no video arrived", pictures.await(40, TimeUnit.SECONDS))
+        watching.stop()
+
+        // What the computer has said, for a phone that asks; and one of
+        // the one-tap actions, which use the pairing the app has stored.
+        assertNotNull(client.get("/v1/events?once=1")?.optJSONArray("events"))
+        assertNotNull(client.get("/v1/machine/health")?.optJSONArray("temperatures"))
+        Store(context).computer = offer.computer
+        Link.forget()
+        assertEquals("Mute", QuickActions.run(context, "mute"))
+        assertEquals("Unknown", QuickActions.run(context, "poweroff"))
+        Store(context).computer = null
+        Link.forget()
+
         standIn()?.let { awayThroughTheAccount(it, offer.computer) }
 
         if (InstrumentationRegistry.getArguments().getString("stay") != null) {

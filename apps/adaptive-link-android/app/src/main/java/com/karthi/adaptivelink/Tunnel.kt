@@ -10,7 +10,6 @@ import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
-import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
@@ -39,8 +38,11 @@ import kotlin.coroutines.resumeWithException
  * the tunnel only carries the bytes of that connection, and neither Google
  * nor anyone on the path can read them or stand in for the computer.
  *
- * There is no relay. Where the network does not allow a direct connection
- * at all (some mobile carriers), this fails and says so.
+ * By default there is no relay: where the network does not allow a direct
+ * connection at all (some mobile carriers), this fails and says so. An owner
+ * who runs a relay of their own tells the computer (link-cli.py relay), the
+ * computer tells this phone, and the two then meet there instead. The relay
+ * only carries the same encrypted bytes.
  */
 class Tunnel(private val context: Context, private val cloud: Cloud, private val computerId: String) {
     private var peer: PeerConnection? = null
@@ -54,11 +56,10 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
     suspend fun open(): Int {
         if (alive && port != 0) return port
         close()
-        val connection = factory(context).createPeerConnection(
-            PeerConnection.RTCConfiguration(
-                if (cloud.config.stun.isBlank()) emptyList()
-                else listOf(PeerConnection.IceServer.builder(cloud.config.stun).createIceServer())
-            ),
+        val connection = Rtc.factory(context).createPeerConnection(
+            // The owner's relay as well, if the computer has told this phone
+            // of one: where a direct connection is forbidden, the two meet there.
+            PeerConnection.RTCConfiguration(Rtc.iceServers(context, cloud.config.stun)),
             object : Observer() {
                 override fun onConnectionChange(state: PeerConnection.PeerConnectionState) {
                     if (state == PeerConnection.PeerConnectionState.FAILED ||
@@ -76,7 +77,7 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
         val opened = CountDownLatch(1)
         control.registerObserver(object : ChannelObserver() {
             override fun onStateChange() {
-                if (control.state() == DataChannel.State.OPEN) opened.countDown()
+                runCatching { if (control.state() == DataChannel.State.OPEN) opened.countDown() }
             }
         })
 
@@ -129,18 +130,27 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
         val opened = CountDownLatch(1)
         val out = socket.getOutputStream()
         channel.registerObserver(object : ChannelObserver() {
+            // These are called from WebRTC's own thread, where anything
+            // thrown ends the whole app, not just this connection - and a
+            // last change of state can arrive after the channel has been let
+            // go of below, when asking it anything throws.
             override fun onStateChange() {
-                when (channel.state()) {
-                    DataChannel.State.OPEN -> opened.countDown()
-                    DataChannel.State.CLOSED, DataChannel.State.CLOSING -> runCatching { socket.close() }
-                    else -> Unit
-                }
+                runCatching {
+                    when (channel.state()) {
+                        DataChannel.State.OPEN -> opened.countDown()
+                        DataChannel.State.CLOSED, DataChannel.State.CLOSING -> runCatching { socket.close() }
+                        else -> Unit
+                    }
+                }.onFailure { runCatching { socket.close() } }
             }
 
             override fun onMessage(buffer: DataChannel.Buffer) {
-                val bytes = ByteArray(buffer.data.remaining())
-                buffer.data.get(bytes)
-                runCatching { out.write(bytes); out.flush() }.onFailure { runCatching { channel.close() } }
+                runCatching {
+                    val bytes = ByteArray(buffer.data.remaining())
+                    buffer.data.get(bytes)
+                    out.write(bytes)
+                    out.flush()
+                }.onFailure { runCatching { channel.close() } }
             }
         })
         // On a connection that is already up a channel opens at once, and
@@ -162,6 +172,8 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
             // The connection ended; nothing to carry.
         } finally {
             runCatching { socket.close() }
+            // No more calls about this channel before it is let go of.
+            runCatching { channel.unregisterObserver() }
             runCatching { channel.close() }
             runCatching { channel.dispose() }
         }
@@ -220,16 +232,5 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
     companion object {
         private const val CHUNK = 16 * 1024
         private const val HIGH_WATER = 1024L * 1024
-
-        @Volatile private var shared: PeerConnectionFactory? = null
-
-        private fun factory(context: Context): PeerConnectionFactory = shared ?: synchronized(this) {
-            shared ?: run {
-                PeerConnectionFactory.initialize(
-                    PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions()
-                )
-                PeerConnectionFactory.builder().createPeerConnectionFactory().also { shared = it }
-            }
-        }
     }
 }

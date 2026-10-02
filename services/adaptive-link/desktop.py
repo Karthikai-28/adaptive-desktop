@@ -356,6 +356,30 @@ def open_path(path):
     return True
 
 
+def web_address(url):
+    """The address if it is one a browser should be given: http or https,
+    one line, with a host. Anything else - a file, a script, a command made
+    to look like an address - is not."""
+    from urllib.parse import urlsplit
+    if not isinstance(url, str) or len(url) > 2000 or any(ch.isspace() or not ch.isprintable() for ch in url):
+        return ""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    return url if parts.scheme in ("http", "https") and parts.hostname else ""
+
+
+def open_url(url):
+    """Open a web address in the computer's browser."""
+    address = web_address(url)
+    if not address or not shutil.which("xdg-open"):
+        return False
+    subprocess.Popen(["xdg-open", address], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
+
+
 # -------------------------------------------------------------------- audit
 
 class Audit:

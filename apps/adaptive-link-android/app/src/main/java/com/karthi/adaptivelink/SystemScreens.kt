@@ -57,10 +57,10 @@ import org.json.JSONObject
  * system.py.
  */
 
-private fun JSONArray?.objects(): List<JSONObject> =
+internal fun JSONArray?.objects(): List<JSONObject> =
     if (this == null) emptyList() else List(length()) { optJSONObject(it) }.filterNotNull()
 
-private fun refused(reply: JSONObject?): String? = when {
+internal fun refused(reply: JSONObject?): String? = when {
     reply == null -> "The computer did not answer."
     reply.has("error") && reply.optString("error").isNotEmpty() && !reply.optBoolean("ok", false) -> reply.optString("error")
     else -> null
@@ -87,7 +87,7 @@ private suspend fun keep(client: LinkClient, reply: JSONObject?): String? {
 }
 
 @Composable
-private fun Heading(text: String) {
+internal fun Heading(text: String) {
     Text(text, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
 }
 
@@ -101,18 +101,28 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
     var summary by remember { mutableStateOf<JSONObject?>(null) }
     var list by remember { mutableStateOf(listOf<JSONObject>()) }
     var note by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf("") }
     var chosen by remember { mutableStateOf<JSONObject?>(null) }
     var tree by remember { mutableStateOf(false) }
+    var health by remember { mutableStateOf<JSONObject?>(null) }
 
     suspend fun load() {
         val reply = client.get("/v1/tasks?sort=${if (byMemory) "memory" else "cpu"}&q=${java.net.URLEncoder.encode(query, "UTF-8")}")
-        val problem = refused(reply)
-        if (problem != null) {
-            note = problem
-        } else {
-            note = ""
+        // What went wrong reading the list, apart from what the last thing
+        // asked for said: reading again must not wipe that away.
+        problem = refused(reply).orEmpty()
+        if (problem.isEmpty()) {
             summary = reply!!.optJSONObject("summary")
             list = reply.optJSONArray("processes").objects()
+        }
+        client.get("/v1/machine/health")?.takeIf { refused(it) == null }?.let { health = it }
+    }
+
+    fun profile(name: String) {
+        scope.launch {
+            val reply = client.post("/v1/machine/health", JSONObject().put("action", "profile").put("target", name))
+            note = refused(reply) ?: ""
+            load()
         }
     }
 
@@ -149,6 +159,31 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
                             Muted("${disk.optString("mount")}  ${Protocol.formatSize(disk.optLong("free"))} free of ${Protocol.formatSize(disk.optLong("total"))}")
                         }
                         Muted("Up ${Protocol.formatDuration(s.optInt("uptime"))}")
+                        health?.let { h ->
+                            h.optJSONObject("battery")?.let { battery ->
+                                val left = if (battery.isNull("minutes")) "" else
+                                    ", ${Protocol.formatMinutes(battery.optInt("minutes"))} " +
+                                        if (battery.optBoolean("charging")) "to full" else "left"
+                                Muted("Battery ${battery.optInt("percent")}% · ${battery.optString("state").lowercase()}$left" +
+                                    if (battery.isNull("health")) "" else " · health ${battery.optInt("health")}%")
+                            }
+                            val warm = h.optJSONArray("temperatures").objects()
+                                .joinToString("  ·  ") { "${it.optString("name")} ${it.optDouble("celsius").toInt()}°" }
+                            if (warm.isNotEmpty()) Muted(warm)
+                            val fans = h.optJSONArray("fans").objects()
+                                .joinToString("  ·  ") { "${it.optString("name")} ${it.optInt("rpm")} rpm" }
+                            if (fans.isNotEmpty()) Muted(fans)
+                            val offered = h.optJSONArray("profiles")
+                            if (offered != null && offered.length() > 0) {
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    repeat(offered.length()) { index ->
+                                        val name = offered.optString(index)
+                                        FilterChip(selected = name == h.optString("profile"), onClick = { profile(name) },
+                                            label = { Text(Protocol.profileName(name)) })
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -161,7 +196,9 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
                     placeholder = { Text("Find a process") }, modifier = Modifier.weight(1f),
                 )
             }
-            if (note.isNotEmpty()) Text(note, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 6.dp))
+            listOf(problem, note).filter { it.isNotEmpty() }.distinct().forEach {
+                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 6.dp))
+            }
             LazyColumn(Modifier.weight(1f).padding(top = 6.dp)) {
                 items(list, key = { it.optInt("pid") }) { process ->
                     Row(

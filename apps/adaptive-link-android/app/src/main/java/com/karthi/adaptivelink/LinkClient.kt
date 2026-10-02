@@ -68,6 +68,7 @@ class LinkClient(
 
     /** Every address the computer is known by; it tells the phone when they change. */
     @Volatile private var hosts: List<String> = computer.hosts
+    @Volatile private var wake: List<String> = computer.wake
 
     val http: OkHttpClient = build(withPhoneKey = true)
 
@@ -214,12 +215,51 @@ class LinkClient(
      * is what lets it find the computer again after an address changes.
      */
     private fun learn(status: JSONObject) {
+        // The owner's relay, or that there is none (any more).
+        if (status.has("relay")) {
+            val relay = Relay.fromJson(status.optJSONObject("relay")?.toString())?.toJson().orEmpty()
+            val store = Store(appContext)
+            if (store.relay != relay) store.relay = relay
+        }
         val told = status.optJSONArray("hosts") ?: return
         val fresh = List(told.length()) { told.optString(it) }.filter { Computer.isAddress(it) }
         val merged = (fresh + hosts).distinct().take(8)
-        if (merged == hosts || fresh.isEmpty()) return
-        hosts = merged
-        Store(appContext).computer = computer.copy(hosts = merged)
+        // Where to send the packet that wakes it, for when it is asleep and cannot say.
+        val waking = status.optJSONArray("wake").let { array ->
+            if (array == null) wake else List(array.length()) { array.optJSONObject(it) }.filterNotNull()
+                .map { "${it.optString("mac")}|${it.optString("broadcast")}" }.filter { Computer.isWake(it) }
+        }
+        if ((merged == hosts || fresh.isEmpty()) && waking == wake) return
+        if (fresh.isNotEmpty()) hosts = merged
+        wake = waking
+        Store(appContext).computer = computer.copy(hosts = hosts, wake = waking)
+    }
+
+    /** Whether this phone knows how to wake the computer at all. */
+    val canWake get() = wake.isNotEmpty()
+
+    /**
+     * Ask the sleeping computer to wake. Only on its own network: the packet
+     * is a broadcast, which no router passes on. Returns how many were sent.
+     */
+    suspend fun wake(): Int = withContext(Dispatchers.IO) {
+        var sent = 0
+        runCatching {
+            java.net.DatagramSocket().use { socket ->
+                socket.broadcast = true
+                for (entry in wake) {
+                    val (mac, broadcast) = entry.split('|')
+                    val packet = Protocol.magicPacket(mac)
+                    for (target in listOf(broadcast, "255.255.255.255")) for (port in listOf(9, 7)) {
+                        runCatching {
+                            socket.send(java.net.DatagramPacket(packet, packet.size, java.net.InetAddress.getByName(target), port))
+                            sent++
+                        }
+                    }
+                }
+            }
+        }
+        sent
     }
 
     private fun url(path: String): String = base(host ?: hosts.first()) + path
