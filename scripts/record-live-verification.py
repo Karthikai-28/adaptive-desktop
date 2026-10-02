@@ -131,6 +131,21 @@ CHECKS = [
         "prompt": "In \"clip\", does Ctrl+P pin an entry so it survives Clear Clipboard History, and is a copied image listed and pasted back?",
     },
     {
+        "id": "link_phone",
+        "backlog": "Adaptive Link from the real phone.",
+        "prompt": "Paired with your own phone: do the screen, trackpad, media, presenter, run, files and notifications all work on Wi-Fi?",
+    },
+    {
+        "id": "link_away",
+        "backlog": "Adaptive Link over Tailscale.",
+        "prompt": "With the phone on mobile data and Tailscale on both, does Adaptive Link connect and show the screen?",
+    },
+    {
+        "id": "link_camera",
+        "backlog": "Phone camera as webcam.",
+        "prompt": "After install-link-camera.sh, does a browser or meeting app list \"Phone Camera\" and show the phone's picture?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",

@@ -1,0 +1,12 @@
+[Unit]
+Description=Adaptive Link: this computer, from the owner's paired phone
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/adaptive-desktop/services/adaptive-link/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

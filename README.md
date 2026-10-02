@@ -35,6 +35,7 @@ first.
 | Project context | `services/project-context/` over D-Bus |
 | Command palette | `apps/adaptive-command/` (`providers.py` answers, `modes.py` modes), the shell bridge `shellActions.js` |
 | Screenshot annotation | `apps/adaptive-annotate/` |
+| Phone link | `services/adaptive-link/` (daemon), `apps/adaptive-link-android/` (Android app) |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/` |
 
 ### Canonical paths
@@ -194,4 +195,5 @@ Full procedures: `docs/RECOVERY_RUNBOOK.md`, `docs/UNINSTALL_AND_RECOVERY.md`.
 | `docs/COMMAND_PERMISSION_MODEL.md` | Command surface safety model |
 | `docs/RECOVERY_RUNBOOK.md` | Getting back to a working desktop |
 | `docs/GNOME_PORT.md` | What a move to GNOME 45+ and Wayland would take |
+| `docs/ADAPTIVE_LINK.md` | The computer from your phone: setup and security model |
 | `docs/REPO_DOCUMENTATION_MAP.md` | Everything else |

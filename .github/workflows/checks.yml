@@ -38,7 +38,11 @@ jobs:
           sudo apt-get install -y \
             gnome-shell gnome-shell-extension-prefs gnome-terminal gedit \
             python3-gi python3-gi-cairo python3-cairo gir1.2-gtk-4.0 gir1.2-gtk-3.0 \
-            xvfb dbus-x11 libglib2.0-bin ripgrep shellcheck git
+            xvfb dbus-x11 libglib2.0-bin ripgrep shellcheck git \
+            xdotool xclip curl python3-pip gir1.2-gstreamer-1.0 \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-x
+      - name: What Adaptive Link imports
+        run: pip install --user aiohttp cryptography pillow
       - name: The scripts live in ~/adaptive-desktop
         run: ln -s "$GITHUB_WORKSPACE" "$HOME/adaptive-desktop"
       - name: All checks, including the sandboxes

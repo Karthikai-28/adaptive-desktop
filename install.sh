@@ -52,6 +52,7 @@ PARTS=(
     "wallpaper|Hourly wallpaper rotation|status_unit adaptive-wallpaper.timer|$S/install-wallpaper-rotation.sh"
     "file-index|Fifteen-minute home index for the palette|status_unit adaptive-index.timer|$S/install-file-index.sh"
     "power|Power profile follows the charger (only if you turned it on)|status_power|install_power"
+    "link|Adaptive Link: this computer from your paired phone|status_unit adaptive-link.service|$S/install-link.sh"
 )
 
 status_project_service() {

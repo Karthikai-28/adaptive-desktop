@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No cleartext traffic at all. The computer's certificate is pinned in code
+     (LinkClient.kt), because it is self-signed and known only after pairing. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

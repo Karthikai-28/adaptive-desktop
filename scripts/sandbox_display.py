@@ -35,6 +35,12 @@ def _outer(script, name, timeout):
     env = {k: v for k, v in os.environ.items()
            if k not in ("DCONF_PROFILE", "WAYLAND_DISPLAY", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
                         "XDG_CACHE_HOME", "DBUS_SESSION_BUS_ADDRESS")}
+    # Packages installed for this user (pip --user) live under the real HOME;
+    # keep them importable once HOME points at the sandbox.
+    import site
+    user_site = site.getusersitepackages()
+    if os.path.isdir(user_site):
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [user_site, env.get("PYTHONPATH", "")]))
     runtime = Path(sandbox) / "run"
     runtime.mkdir(mode=0o700)
     env.update({"HOME": str(home), INNER: sandbox, "GSK_RENDERER": "cairo", "GDK_BACKEND": "x11",
@@ -59,6 +65,10 @@ def _outer(script, name, timeout):
         if os.environ.get("ADAPTIVE_KEEP_SANDBOX"):
             print(f"Sandbox kept: {sandbox}")
         else:
+            # The sandbox session may have mounted gvfs in its runtime
+            # directory; it must be unmounted before the directory can go.
+            subprocess.run(["fusermount", "-uz", str(Path(sandbox) / "run" / "gvfs")],
+                           capture_output=True, check=False)
             shutil.rmtree(sandbox, ignore_errors=True)
 
 

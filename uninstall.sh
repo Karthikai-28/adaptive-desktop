@@ -36,14 +36,14 @@ say() { echo "  $([ "$DRY" = 1 ] && echo 'would' || echo 'did') $*"; }
 run() { [ "$DRY" = 1 ] || "$@"; }
 
 echo "Timers and services"
-for unit in adaptive-wallpaper.timer adaptive-index.timer adaptive-power-auto.service; do
+for unit in adaptive-wallpaper.timer adaptive-index.timer adaptive-power-auto.service adaptive-link.service; do
     if [ -f "$UNITS/$unit" ]; then
         run systemctl --user disable --now "$unit" 2>/dev/null || true
         say "disable $unit"
     fi
 done
 for file in adaptive-wallpaper.service adaptive-wallpaper.timer adaptive-index.service \
-    adaptive-index.timer adaptive-power-auto.service; do
+    adaptive-index.timer adaptive-power-auto.service adaptive-link.service; do
     if [ -f "$UNITS/$file" ]; then
         run rm -f "$UNITS/$file"
         say "remove $UNITS/$file"
@@ -103,7 +103,7 @@ fi
 echo "Background processes"
 for pid in $(pgrep -x python3 || true); do
     if tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null |
-        grep -qE "adaptive-gestures\.py|project-context/main\.py|adaptive-power-auto\.py"; then
+        grep -qE "adaptive-gestures\.py|project-context/main\.py|adaptive-power-auto\.py|adaptive-link/server\.py"; then
         run kill "$pid" 2>/dev/null || true
         say "stop process $pid"
     fi

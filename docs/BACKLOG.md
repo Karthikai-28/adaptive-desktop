@@ -583,6 +583,35 @@ comparing the set of methods before and after and by the sandboxes above.
   are settings of KDE Connect and GSConnect themselves.
 - **GNOME 45+ and Wayland.** Assessed, not started: `docs/GNOME_PORT.md`.
 
+## Milestone 17 — Adaptive Link: the computer from your phone
+
+Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
+
+- ✅ **Daemon** (`services/adaptive-link/`). Mutual TLS to one paired phone;
+  nothing listens until one is paired. Screen as JPEG frames, pointer and
+  keyboard, commands, files, clipboard, media (MPRIS), volume, power, phone
+  notifications, phone camera into a v4l2loopback device. Private and
+  Tailscale addresses only. An audit log. `scripts/link-cli.py`.
+- ✅ **Pairing**: a QR code for two minutes, six digits compared on both
+  screens, the owner's confirmation on the computer.
+- ✅ **Android app** (`apps/adaptive-link-android/`, Kotlin and Compose). Key
+  in the hardware keystore, the computer's certificate pinned, locked behind
+  fingerprint or screen lock. Screen, Trackpad, Media, Presenter, Run, Files,
+  Webcam, More.
+- ✅ **Checked without a phone**: `verify-link.py` (the daemon against a
+  phone and three intruders) and `verify-link-android.py` (the app on an
+  emulator: keystore, pairing, mutual TLS, every screen opened, a command
+  typed on the phone).
+- 🔬 **Your own phone on Wi-Fi.** Not yet installed on a real device.
+- 🔬 **Away, over Tailscale.** Tailscale is installed on the computer but
+  signed out; it needs `sudo tailscale up` and the app on the phone.
+- 🔬 **Phone camera as webcam.** Written, never run: the virtual camera needs
+  `scripts/install-link-camera.sh` (sudo), and the emulator's camera is not a
+  test of a real one. Phone notifications on the computer are in the same
+  state: the request is checked, the listener service needs a real phone.
+- ⬜ Not there: sound from the computer on the phone, waking a suspended
+  computer, Wayland, iOS.
+
 ## Immediate next work
 
 0. `./install.sh --status`, then `./install.sh`, then
@@ -629,6 +658,18 @@ comparing the set of methods before and after and by the sandboxes above.
   `startup add <command>` stored its words in `args.command`, which is also
   where the chosen subcommand lives, so no branch matched and the CLI printed
   nothing and exited 0.
+- **Stopping a wrapper is not stopping what it wraps.** `xvfb-run` and
+  `dbus-run-session` each start their command in a way that a signal to the
+  wrapper, or to its process group, does not reach. A test that started the
+  link daemon that way left it running and holding its port, and the next
+  run failed with "address already in use". Find the processes by something
+  they all carry (the sandbox path in their environment) and stop those.
+- **A preference saved with `apply()` may not be saved.** Android writes it
+  in the background; a process that ends first loses it. The app's pairing
+  record is written with `commit()`.
+- **Closing a listener does not close its connections.** Switching the link
+  off closed the port but left an open screen stream running until aiohttp's
+  shutdown timeout, a minute later. Open sockets are tracked and closed first.
 - Only one Adaptive rail extension may be enabled. `adaptive-shell-v16@local`
   is a retired duplicate kept for rollback; when both it and
   `adaptive-shell@local` are enabled, two rails stack and every dock label

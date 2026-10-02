@@ -34,3 +34,11 @@ shell-memory-soak-*.txt
 __pycache__/
 codebase_digest.md
 
+
+# Android SDK and build output for apps/adaptive-link-android
+.local/android-sdk/
+apps/adaptive-link-android/.gradle/
+apps/adaptive-link-android/build/
+apps/adaptive-link-android/app/build/
+apps/adaptive-link-android/local.properties
+dist/

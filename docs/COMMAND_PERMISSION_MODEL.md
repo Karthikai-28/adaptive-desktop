@@ -63,3 +63,12 @@ sets them but you, or a project template you chose to create a project from.
   small tuple naming one of a fixed set of things the palette can do - rather
   than as code, so every mode can be checked without a display and no mode can
   do something the palette does not already know how to do.
+
+## The paired phone
+
+Adaptive Link (`docs/ADAPTIVE_LINK.md`) lets one paired phone do what the
+owner can do at the keyboard, including running commands. It is not a
+provider and does not go through the palette: its permission is the pairing
+itself - mutual TLS with a key held in the phone's hardware - and three
+switches on the computer (`allow_exec`, `allow_files`, `allow_power`), each
+of which takes effect at once. Everything it does is written to an audit log.

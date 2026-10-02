@@ -109,6 +109,8 @@ if [ "$QUICK" = 0 ]; then
     step "Annotate window (virtual display)" quiet python3 "$REPO/scripts/verify-annotate.py"
     step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh"
     step "Files with the inspector (the Nautilus fork, sandboxed)" quiet python3 "$REPO/scripts/verify-files-inspector.py"
+    step "Adaptive Link: the daemon against a phone and three intruders" quiet python3 "$REPO/scripts/verify-link.py"
+    step "Adaptive Link: the Android app on a device (skips with none attached)" quiet python3 "$REPO/scripts/verify-link-android.py"
 fi
 
 if [ "${#failed[@]}" != 0 ]; then
