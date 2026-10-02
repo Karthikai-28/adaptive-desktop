@@ -84,11 +84,11 @@ def describe(state):
         limits = ", ".join(SWITCH_NAMES.get(name, name) for name in phone["deny"])
         lines.append(f"Paired: {phone['name']} (since {when}, {phone['fingerprint'][:8]})"
                      + (f" - not allowed: {limits}" if limits else ""))
-        state = phone.get("state")
-        if state and state.get("battery") is not None:
-            signal = "" if state.get("signal") is None else f", signal {state['signal']}/4"
-            lines.append(f"  battery {state['battery']}%{' charging' if state['charging'] else ''}{signal}"
-                         + (f", on {state['network']}" if state.get("network") else ""))
+        said = phone.get("state")   # what the phone has said of itself
+        if said and said.get("battery") is not None:
+            signal = "" if said.get("signal") is None else f", signal {said['signal']}/4"
+            lines.append(f"  battery {said['battery']}%{' charging' if said['charging'] else ''}{signal}"
+                         + (f", on {said['network']}" if said.get("network") else ""))
     for item in state["addresses"]:
         lines.append(f"  {item['address']:<16} this network")
     config = state["config"]
