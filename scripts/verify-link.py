@@ -135,6 +135,18 @@ def pure_checks(check):
         check(desktop.upload_target("", folder).name == "file", "files: a nameless upload still gets a name")
     check(desktop.clean_line("<b>hi</b>\x00\x1b[31m & you", 100) == "&lt;b&gt;hi&lt;/b&gt;  [31m &amp; you",
           "notifications: markup and control characters from the phone are neutralised")
+    with tempfile.TemporaryDirectory() as folder:
+        audit = desktop.Audit(Path(folder) / "link.log")
+        audit.MAX_BYTES = 20_000
+        for index in range(3000):
+            audit.write("1.2.3.4", "refused", f"attempt {index}")
+        size = (Path(folder) / "link.log").stat().st_size
+        check(size < 40_000 and audit.tail(1)[0]["detail"] == "attempt 2999",
+              f"audit: the record is bounded and keeps the newest entries ({size} bytes)")
+    allow_all = {"PacketFilter": [{"Dsts": [{"Ports": {"First": 0, "Last": 65535}}]}]}
+    link_only = {"PacketFilter": [{"Dsts": [{"Ports": {"First": 47823, "Last": 47824}}]}]}
+    check(I.exposed_ports(allow_all) == "every port" and I.exposed_ports(link_only) == "" and I.exposed_ports(None) == "",
+          "tailscale: a policy that exposes more than the link's ports is noticed")
     check(desktop.parse_volume("Volume: front-left: 32768 /  50% / -18.06 dB") == 50, "sound: volume is read")
     check(set(desktop.POWER_ACTIONS) == {"lock", "unlock", "screen-off", "suspend", "reboot", "poweroff"},
           "power: a fixed list of actions")
@@ -327,6 +339,25 @@ async def daemon_checks(sandbox, check):
                 check(error.status == 403, "exec: refused when the owner turns it off")
             control.call("POST", "/configure", {"allow_exec": True})
 
+            # ------------------------------------------------- watch, not act
+            control.call("POST", "/configure", {"allow_input": False})
+            subprocess.run(["xdotool", "mousemove", "5", "5"], check=False)
+            async with phone.ws_connect(f"{link_url}/v1/screen?preset=low") as ws:
+                message = await asyncio.wait_for(ws.receive(), 10)
+                await ws.send_json({"t": "move", "x": 0.9, "y": 0.9})
+                await asyncio.sleep(0.6)
+                where = subprocess.run(["xdotool", "getmouselocation"], capture_output=True, text=True).stdout
+                check(message.type == aiohttp.WSMsgType.BINARY and "x:5 y:5" in where,
+                      "view only: with input off the phone still sees the screen but cannot move the pointer")
+            try:
+                async with phone.ws_connect(f"{link_url}/v1/input"):
+                    check(False, "view only: the trackpad is refused")
+            except aiohttp.WSServerHandshakeError as error:
+                check(error.status == 403, "view only: the trackpad is refused")
+            async with phone.post(f"{link_url}/v1/launch", json={"id": "org.gnome.Calculator.desktop"}) as reply:
+                check(reply.status == 403, "view only: launching an app is refused")
+            control.call("POST", "/configure", {"allow_input": True})
+
             # -------------------------------------------------------------- files
             (home / "movie.mkv").write_bytes(b"\x1a\x45" * 5000)
             async with phone.get(f"{link_url}/v1/files", params={"path": "~"}) as reply:
@@ -435,6 +466,36 @@ async def daemon_checks(sandbox, check):
         check(control.call("POST", "/unpair")["ok"] and not tcp_open(PORT), "unpair: the port closes")
         check((await try_status(pinned(new_crt, new_key)))[0] != 200, "unpair: the phone can no longer connect")
         check(not Path("/tmp/pwned").exists(), "input: the hostile key name ran nothing")
+
+        # ------------------------------------- the answer is for who asked
+        qr = json.loads(control.call("POST", "/pair/start")["payload"])
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
+            async with http.post(f"{pair_url}/pair", json={"t": qr["t"], "cert": phone_cert, "name": "P"}) as reply:
+                await reply.json()
+            # The pairing port stays up a few seconds after the answer, for the
+            # phone to collect it; the decision is made in the background here
+            # so the questions below arrive inside that time.
+            deciding = asyncio.ensure_future(asyncio.to_thread(control.call, "POST", "/pair/decide", {"accept": False}))
+            await asyncio.sleep(0.7)
+            async with http.get(f"{pair_url}/pair/wait") as reply:
+                check(reply.status == 403, "pairing: how it ended is not told to someone without the code")
+            async with http.get(f"{pair_url}/pair/wait", params={"t": qr["t"]}) as reply:
+                check((await reply.json()).get("state") == "rejected", "pairing: the phone that asked still hears the answer afterwards")
+            await deciding
+        await asyncio.sleep(1)
+
+        # A stranger hammering the pairing port is slowed, and the record stays small.
+        control.call("POST", "/pair/start")
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
+            codes = []
+            for _ in range(90):
+                async with http.get(f"{pair_url}/hello") as reply:
+                    codes.append(reply.status)
+        check(429 in codes, "pairing port: too many requests from one address are turned away")
+        control.call("POST", "/pair/cancel")
+        refusals = [e for e in control.call("GET", "/log")["entries"] if e["action"] == "account-refused"]
+        check(len(refusals) < 10, f"audit: repeated refusals do not flood the record ({len(refusals)})")
+        await asyncio.sleep(61)   # let the allowance refill before the checks that follow
 
         # ------------------------------------------------ sign-in, no code
         # This computer signed in to an account. A device Tailscale vouches

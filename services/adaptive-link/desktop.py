@@ -361,12 +361,35 @@ def open_path(path):
 class Audit:
     """One line per thing the phone did, so there is a record to read."""
 
+    MAX_BYTES = 2 * 1024 * 1024
+    KEEP_LINES = 5000
+
     def __init__(self, path):
         self.path = Path(path)
+
+    def _trim(self):
+        """Keep the record bounded: the newest lines, when it has grown large.
+        Requests from an unpaired device are written here too, so without a
+        bound anyone on the network could fill the disk."""
+        try:
+            if self.path.stat().st_size <= self.MAX_BYTES:
+                return
+            lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()[-self.KEEP_LINES:]
+            # Down to half the limit, so the trim is not repeated on every line.
+            kept, size = [], 0
+            for line in reversed(lines):
+                size += len(line.encode()) + 1
+                if size > self.MAX_BYTES // 2:
+                    break
+                kept.append(line)
+            self.path.write_text("\n".join(reversed(kept)) + "\n", encoding="utf-8")
+        except OSError:
+            pass
 
     def write(self, peer, action, detail=""):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._trim()
             line = json.dumps({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "from": peer,
                                "action": action, "detail": str(detail)[:300]})
             with self.path.open("a", encoding="utf-8") as handle:

@@ -45,6 +45,10 @@ DEFAULT_CONFIG = {
     # router port-forward straight from the internet is refused unless this
     # is turned on by hand.
     "allow_public": False,
+    # Pointer, keyboard and launching apps. Off, the phone can watch the
+    # screen but not act on it. (With this on, turning allow_exec off only
+    # removes the Run screen: a keyboard can still type into a terminal.)
+    "allow_input": True,
     "allow_exec": True,
     "allow_files": True,
     "allow_power": True,
@@ -433,6 +437,37 @@ def whois(address, port):
 def same_account(peer, own):
     """Whether a peer is signed in to this computer's own account."""
     return bool(own) and bool(peer) and peer.get("account", "").casefold() == own.casefold()
+
+
+LINK_PORTS = (DEFAULT_PORT, PAIRING_PORT)
+
+
+def exposed_ports(netmap, ports=LINK_PORTS):
+    """Whether the Tailscale policy lets other devices reach more of this
+    computer than the link's own ports. Returns a description, or "".
+
+    It matters because the link's node runs in userspace: a connection to any
+    port it is allowed to receive is handed to that port on this machine's
+    loopback - including services that listen on localhost only and were
+    never meant to be reachable from another device.
+    """
+    if not isinstance(netmap, dict):
+        return ""
+    low, high = min(ports), max(ports)
+    for rule in netmap.get("PacketFilter") or []:
+        for dst in rule.get("Dsts") or rule.get("DstPorts") or []:
+            span = dst.get("Ports") or {}
+            first, last = span.get("First", 0), span.get("Last", 65535)
+            if first < low or last > high:
+                return "every port" if (first, last) == (0, 65535) else f"ports {first}-{last}"
+    return ""
+
+
+def tailnet_exposure():
+    """What else of this computer the Tailscale policy exposes, or ""."""
+    if _test_accounts() is not None:
+        return ""
+    return exposed_ports(_tailscale_json("debug", "netmap"))
 
 
 def local_addresses():

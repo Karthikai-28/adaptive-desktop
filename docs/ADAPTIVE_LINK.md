@@ -39,8 +39,19 @@ One phone. Nothing else.
   `~/.local/state/adaptive-desktop/link.log` (`link-cli.py log`), and the
   computer shows a notification when the phone connects.
 
-What this does not protect against: someone who has your unlocked phone and
-can pass its screen lock has what you have. Unpair from the computer
+What this does not protect against:
+
+- Someone who has your unlocked phone and can pass its screen lock has what
+  you have. The app stays open for fifteen seconds after you leave it.
+- With `allow power` on, the phone can unlock the computer's screen. That is
+  what "complete control" means, and it is also what someone holding your
+  open phone would have.
+- Sign-in trusts your Tailscale network. Anyone you share a device into that
+  network with, or who gets into the account it is signed in with, can ask to
+  connect; with auto-approve on they would be accepted.
+- Everything rests on the computer's user account. Another program running
+  as you on the computer can pair a device or read the link's key, as it
+  could already read anything else of yours. Unpair from the computer
 (`link-cli.py unpair`) if the phone is lost; it takes effect at once.
 
 ## Signing in, instead of pairing
@@ -89,6 +100,42 @@ codes as the only way in.
 The difference from Apple that remains: Apple runs the account, the network
 and the devices. Here the account is Google's, the private network is
 Tailscale's, and the trust between your devices is this project's.
+
+## Closing the rest of the computer
+
+**Do this once after signing the computer in.** The link's Tailscale node runs
+in userspace, which is why it needs no root - and the consequence is that any
+connection it is allowed to receive is handed to that port on this machine's
+own loopback. Tailscale's default policy allows every port between your
+devices. Together that means every service listening on this computer,
+*including ones bound to localhost only* (a development database, a local AI
+server, a print service), can be reached from your other devices on the
+account - and so by any app on your phone.
+
+`scripts/link-cli.py status` warns while that is so. Close it by telling
+Tailscale that only the link's two ports are reachable on this computer. In
+the admin console, **Access controls** (https://login.tailscale.com/admin/acls),
+replace the policy with:
+
+```json
+{
+  "hosts": { "adaptive-link": "100.x.y.z" },
+  "acls": [
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["adaptive-link:47823-47824"] }
+  ]
+}
+```
+
+with the computer's Tailscale address from `link-cli.py status` in place of
+`100.x.y.z`. Your devices can then reach Adaptive Link on this computer and
+nothing else on it. (This policy also stops your devices reaching each other
+on other ports; add rules for anything else you use Tailscale for.) The
+warning goes away within a minute of saving.
+
+The alternative that needs no policy is the system Tailscale
+(`sudo tailscale up`), which does not hand connections to loopback; services
+bound to localhost stay private, though ones bound to every interface are
+reachable as they already are on your Wi-Fi.
 
 ## Pairing by code
 
@@ -162,14 +209,22 @@ cryptography`), `xdotool` and `xclip`.
 | Webcam | The phone's camera as "Phone Camera" in any app that takes a webcam |
 | More | Clipboard both ways, lock, unlock, screen off, suspend, restart, shut down, the phone's notifications on the computer, unpair |
 
-Three switches on the computer narrow that, each taking effect at once:
+Switches on the computer narrow that, each taking effect at once:
 
 ```sh
-scripts/link-cli.py allow exec off     # no commands
+scripts/link-cli.py allow input off    # watch only: no pointer, keyboard or launching apps
+scripts/link-cli.py allow exec off     # no Run screen
 scripts/link-cli.py allow files off    # no file access
-scripts/link-cli.py allow power off    # no lock, suspend, restart
+scripts/link-cli.py allow power off    # no lock, unlock, suspend, restart
 scripts/link-cli.py off                # nothing at all, until "on"
 ```
+
+They are not independent, and it is better to know it than to trust a switch
+that does less than its name: while `input` is on, the phone has a keyboard,
+and a keyboard can type a command into a terminal or open a file, whatever
+`exec` and `files` say. To stop the phone acting on the computer, turn
+`input` off as well. The clipboard, media controls and the phone's
+notifications are always available to the paired phone.
 
 ## How it is checked
 

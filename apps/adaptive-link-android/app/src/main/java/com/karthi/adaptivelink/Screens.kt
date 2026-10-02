@@ -167,7 +167,7 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
     fun signIn() {
         stage = "asking"
         scope.launch {
-            val (found, why) = Discovery.find(named)
+            val (found, why) = Discovery.find(activity, named)
             if (found == null) {
                 problem = why
                 stage = "failed"

@@ -1,5 +1,8 @@
 package com.karthi.adaptivelink
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -57,6 +60,26 @@ object Discovery {
             // own test reaches a computer. Never accepted on a real phone.
             (isEmulator() && address.hostAddress == "10.0.2.2")
 
+    /**
+     * Whether this phone is on Tailscale right now: a VPN is up and one of its
+     * addresses is in Tailscale's own IPv6 prefix, which nothing else uses.
+     *
+     * Without this the address check alone is not enough. 100.64.0.0/10 is
+     * also the range mobile carriers put phones in, so with Tailscale off a
+     * name could resolve to an address in that range that belongs to someone
+     * else, and the phone would be asking a stranger who it is. With the VPN
+     * up, that whole range is routed into Tailscale and reaches only the
+     * devices on the account's network.
+     */
+    fun tailscaleActive(context: Context): Boolean {
+        if (isEmulator()) return true   // the app's own test has no Tailscale
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return manager.allNetworks.any { network ->
+            val vpn = manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+            vpn && manager.getLinkProperties(network)?.linkAddresses.orEmpty().any { onTailnet(it.address) }
+        }
+    }
+
     /** Remembers the certificate the other end presented. */
     private class Capture : X509TrustManager {
         @Volatile var fingerprint: String = ""
@@ -72,7 +95,11 @@ object Discovery {
      * ("name" or "name:port"), tried before the well-known names.
      * Returns what was found, or why nothing was.
      */
-    suspend fun find(typed: String = ""): Pair<Found?, String> = withContext(Dispatchers.IO) {
+    suspend fun find(context: Context, typed: String = ""): Pair<Found?, String> = withContext(Dispatchers.IO) {
+        if (!tailscaleActive(context)) {
+            return@withContext null to "Tailscale is not connected on this phone. Open the Tailscale app, " +
+                "sign in with the same account as the computer, and switch it on."
+        }
         val problems = mutableListOf<String>()
         val candidates = (listOf(typed.trim()).filter { it.isNotEmpty() } + NAMES).distinct()
         for (candidate in candidates) {

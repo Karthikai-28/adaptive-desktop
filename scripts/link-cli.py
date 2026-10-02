@@ -5,8 +5,9 @@
     link-cli.py pair           show the pairing QR code (opens a window)
     link-cli.py unpair         forget the paired phone
     link-cli.py on | off       start or stop accepting the phone
-    link-cli.py allow exec|files|power on|off
-                               what the phone may do
+    link-cli.py allow input|exec|files|power on|off
+                               what the phone may do (input: pointer, keyboard
+                               and launching apps; off, it can only watch)
     link-cli.py allow account on|off
                                whether a device signed in to your account may
                                ask to connect without a pairing code
@@ -52,10 +53,16 @@ def describe(state):
     if not state["tailscale"]:
         lines.append("  Tailscale is not connected: the phone can reach this computer on the local network only.")
     config = state["config"]
-    allowed = [name for name, key in (("commands", "allow_exec"), ("files", "allow_files"),
-                                      ("power", "allow_power")) if config[key]]
-    lines.append("The phone may: screen and input, media, clipboard, notifications"
+    allowed = [name for name, key in (("pointer and keyboard", "allow_input"), ("commands", "allow_exec"),
+                                      ("files", "allow_files"), ("power", "allow_power")) if config[key]]
+    lines.append("The phone may: see the screen, media, clipboard, notifications"
                  + (", " + ", ".join(allowed) if allowed else ""))
+    if config["allow_input"] and not config["allow_exec"]:
+        lines.append("  Note: with pointer and keyboard on, commands can still be typed into a terminal.")
+    if state.get("exposure"):
+        lines.append(f"WARNING: your Tailscale policy lets your other devices reach {state['exposure']} of this")
+        lines.append("  computer, including services that listen on localhost only. Restrict it to the link's")
+        lines.append("  two ports: docs/ADAPTIVE_LINK.md, \"Closing the rest of the computer\".")
     lines.append("Phone camera as webcam: " + (state["camera"] or "not installed (scripts/install-link-camera.sh)"))
     if state["viewing"]:
         lines.append("The phone is viewing the screen now.")
@@ -68,7 +75,7 @@ def main(argv=None):
     for name in ("status", "pair", "unpair", "on", "off", "log"):
         sub.add_parser(name)
     allow = sub.add_parser("allow")
-    allow.add_argument("what", choices=["exec", "files", "power", "account", "auto-approve"])
+    allow.add_argument("what", choices=["input", "exec", "files", "power", "account", "auto-approve"])
     allow.add_argument("state", choices=["on", "off"])
     args = parser.parse_args(argv)
 

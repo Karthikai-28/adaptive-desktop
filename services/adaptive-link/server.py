@@ -37,6 +37,7 @@ import screen
 VERSION = 1
 CONNECT_NOTICE_EVERY_S = 600
 EXEC_OUTPUT_CHUNK = 4096
+PAIR_ASKS_PER_MINUTE = 60
 
 
 def control_socket_path():
@@ -76,6 +77,8 @@ class Link:
         self._pair_timer = None
         # The account this computer is signed in with, or "" (see sync_account).
         self.account = ""
+        # What the Tailscale policy exposes of this computer beyond the link.
+        self.exposure = ""
         self._last_notice = 0.0
         self.problem = ""
         self._sessions = 0
@@ -83,6 +86,8 @@ class Link:
         # Every open socket to the phone, so that switching the link off or
         # unpairing ends what the phone is doing now, not at its next request.
         self._sockets = set()
+        self._pair_asks = {}
+        self._refused_noted = {}
 
     # ------------------------------------------------------------ listeners
 
@@ -233,7 +238,8 @@ class Link:
             # so a changed address at home does not mean pairing again.
             "hosts": [address for address, _kind in await asyncio.to_thread(identity.local_addresses)],
             "screen": list(self.input.screen),
-            "can": {"exec": self._allowed("allow_exec"), "files": self._allowed("allow_files"),
+            "can": {"control": self._allowed("allow_input"),
+                    "exec": self._allowed("allow_exec"), "files": self._allowed("allow_files"),
                     "power": self._allowed("allow_power"), "input": self.input.available,
                     "camera": camera.find_device() is not None},
         })
@@ -242,9 +248,13 @@ class Link:
     # ----------------------------------------------------- screen and input
 
     async def _read_input(self, ws):
-        """Apply the input events arriving on a socket until it closes."""
+        """Apply the input events arriving on a socket until it closes.
+
+        With input turned off the socket is still read (so a close is seen)
+        and what arrives is dropped: the phone may watch, not act.
+        """
         async for message in ws:
-            if message.type != WSMsgType.TEXT:
+            if message.type != WSMsgType.TEXT or not self._allowed("allow_input"):
                 continue
             try:
                 event = json.loads(message.data)
@@ -283,6 +293,8 @@ class Link:
 
     async def h_input(self, request):
         """Trackpad, keyboard, remote and presenter: input with no picture."""
+        if not self._allowed("allow_input"):
+            return json_error(403, "pointer and keyboard are turned off on the computer")
         if not await self._have_screen():
             return json_error(503, "there is no screen to control")
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
@@ -446,6 +458,8 @@ class Link:
         return web.json_response({"apps": await asyncio.to_thread(desktop.applications)})
 
     async def h_launch(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "pointer and keyboard are turned off on the computer")
         app_id = (await read_json(request)).get("id")
         self.audit.write(request["peer"], "launch", app_id)
         return web.json_response({"ok": await asyncio.to_thread(desktop.launch, app_id)})
@@ -575,6 +589,7 @@ class Link:
         Otherwise it is open only during a pairing by code.
         """
         self.account = await asyncio.to_thread(identity.own_account) if self.config["account_enroll"] else ""
+        self.exposure = await asyncio.to_thread(identity.tailnet_exposure)
         if self.account and self.config["enabled"]:
             await self._open_pair_listener()
         elif self._pairing.get("state") not in ("waiting", "pending"):
@@ -629,7 +644,9 @@ class Link:
         if self._pair_timer is not None:
             self._pair_timer.cancel()
             self._pair_timer = None
-        self._pairing = {"state": state}
+        # The answer is kept for the device that asked (its code, or its
+        # place on the account), and for nobody else.
+        self._pairing = {"state": state, "token": self._pairing.get("token", "")}
         self._pair_decided.set()
         if not self.account:
             await self._close_pair_listener(0.5 if state in ("idle", "expired") else 3)
@@ -637,6 +654,22 @@ class Link:
     async def cancel_pairing(self):
         if self._pairing.get("state") != "idle" or (self._pair_runner is not None and not self.account):
             await self._close_pairing("idle")
+
+    def _too_many(self, address):
+        """Whether this address has asked the pairing port too often.
+
+        The port answers devices that are not trusted yet, and each question
+        costs a lookup and a line in the record; this bounds both. Devices on
+        the account's network all arrive from this machine's own address and
+        share one allowance, which is ample for a person and their phones.
+        """
+        now = time.monotonic()
+        recent = [t for t in self._pair_asks.get(address, []) if now - t < 60]
+        recent.append(now)
+        self._pair_asks[address] = recent[-PAIR_ASKS_PER_MINUTE - 1:]
+        if len(self._pair_asks) > 500:
+            self._pair_asks = {address: self._pair_asks[address]}
+        return len(recent) > PAIR_ASKS_PER_MINUTE
 
     def _pair_peer(self, request):
         peer = request.transport.get_extra_info("peername") if request.transport else None
@@ -653,8 +686,11 @@ class Link:
             return peer
         # On record, because "why can my own phone not find the computer" is
         # answered here: it is not on the network, or on another account.
-        self.audit.write(address, "account-refused",
-                         f"signed in as {peer['account']}" if peer else "not a device on this computer's Tailscale network")
+        now = time.monotonic()
+        if now - self._refused_noted.get(address, 0) > 60:
+            self._refused_noted = {address: now} if len(self._refused_noted) > 200 else {**self._refused_noted, address: now}
+            self.audit.write(address, "account-refused",
+                             f"signed in as {peer['account']}" if peer else "not a device on this computer's Tailscale network")
         return None
 
     async def h_hello(self, request):
@@ -663,6 +699,8 @@ class Link:
         address, _port = self._pair_peer(request)
         if not identity.peer_allowed(address, self.config["allow_public"]):
             return json_error(403, "this network is not allowed")
+        if self._too_many(address):
+            return json_error(429, "too many requests; wait a minute")
         peer = await self._signed_in_peer(request)
         if peer is None:
             return json_error(403, "sign in to the same account as this computer, or use a pairing code")
@@ -676,6 +714,8 @@ class Link:
         address, _port = self._pair_peer(request)
         if not identity.peer_allowed(address, self.config["allow_public"]):
             return json_error(403, "this network is not allowed")
+        if self._too_many(address):
+            return json_error(429, "too many requests; wait a minute")
         state = self._pairing.get("state")
         if state == "pending":
             return json_error(409, "another device is waiting to be answered")
@@ -721,9 +761,11 @@ class Link:
 
     async def h_pair_wait(self, request):
         """The phone waits here for the owner's answer on the computer."""
-        decided = self._pairing.get("state") in ("paired", "rejected", "expired")
+        address, _port = self._pair_peer(request)
+        if self._too_many(address):
+            return json_error(429, "too many requests; wait a minute")
         by_code = identity.tokens_match(request.query.get("t"), self._pairing.get("token", ""))
-        if not decided and not by_code and await self._signed_in_peer(request) is None:
+        if not by_code and await self._signed_in_peer(request) is None:
             return json_error(403, "wrong pairing code")
         try:
             await asyncio.wait_for(self._pair_decided.wait(), 25)
@@ -778,6 +820,7 @@ class Link:
             "camera": camera.find_device(),
             "pairing": self.pairing_state(),
             "account": self.account,
+            "exposure": self.exposure,
         }
 
     async def _start_control(self):
@@ -812,7 +855,7 @@ class Link:
 
         async def configure(request):
             data = await read_json(request)
-            for key in ("allow_exec", "allow_files", "allow_power", "allow_public", "notify_on_connect",
+            for key in ("allow_input", "allow_exec", "allow_files", "allow_power", "allow_public", "notify_on_connect",
                         "account_enroll", "auto_approve_account"):
                 if isinstance(data.get(key), bool):
                     self.config[key] = data[key]
