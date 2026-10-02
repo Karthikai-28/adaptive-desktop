@@ -40,8 +40,12 @@ button.pair-quiet { background: none; background-color: alpha(white, 0.08); colo
 
 
 class PairWindow(Gtk.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, attach=False):
         super().__init__(application=app, title="Pair a phone")
+        # Attached: opened by the daemon because a phone has asked to pair in
+        # a pairing this window did not start. It shows the request and must
+        # not start, or on closing cancel, a pairing of its own.
+        self.attached = attach
         self.add_css_class("pair")
         self.set_resizable(False)
         Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
@@ -57,8 +61,14 @@ class PairWindow(Gtk.ApplicationWindow):
         self.set_child(self.box)
         self.connect("close-request", self._on_close)
 
+        if attach:
+            self.hosts = []
+            self._message("A phone is asking to pair", "One moment\u2026")
+            GLib.timeout_add(200, self._poll)
+            return
+
         try:
-            started = control.call("POST", "/pair/start")
+            started = control.call("POST", "/pair/start", {"ui": True})
         except control.NotRunning:
             self._message("Adaptive Link is not running",
                           "Start it with: systemctl --user start adaptive-link")
@@ -162,7 +172,8 @@ class PairWindow(Gtk.ApplicationWindow):
 
         current = state.get("state")
         if current == "waiting":
-            self.remaining.set_text(f"Waiting for the phone - {state.get('seconds_left', 0)} s left")
+            if not self.attached:
+                self.remaining.set_text(f"Waiting for the phone - {state.get('seconds_left', 0)} s left")
         elif current == "pending" and self.state != "pending":
             self._show_request(state["name"], state["code"])
         elif current == "paired":
@@ -187,6 +198,11 @@ class PairWindow(Gtk.ApplicationWindow):
             pass
 
     def _on_close(self, *_):
+        if self.attached:
+            # Closing the request without answering it is a "no".
+            if self.state == "pending":
+                self._decide(False)
+            return False
         if self.state in ("waiting", "pending", "idle"):
             try:
                 control.call("POST", "/pair/cancel")
@@ -196,8 +212,11 @@ class PairWindow(Gtk.ApplicationWindow):
 
 
 def main():
-    app = Gtk.Application(application_id=APP_ID)
-    app.connect("activate", lambda a: (a.get_active_window() or PairWindow(a)).present())
+    attach = "--attach" in sys.argv
+    # Not unique when attached: the request has to appear even if a pairing
+    # window from an earlier attempt was left open.
+    app = Gtk.Application(application_id=APP_ID + (".Request" if attach else ""))
+    app.connect("activate", lambda a: (a.get_active_window() or PairWindow(a, attach)).present())
     return app.run(None)
 
 

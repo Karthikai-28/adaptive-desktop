@@ -64,15 +64,22 @@ through **Tailscale**: a private network between your own devices, so the
 computer is never exposed to the internet and nothing on your router changes.
 The app tries every address at once and uses whichever answers.
 
-Tailscale has to be signed in on both, which only you can do:
+The link has its own Tailscale node on the computer, which needs no root:
 
 ```sh
-sudo tailscale up          # on the computer
+scripts/install-link-tailnet.sh    # prints a sign-in link the first time
 ```
 
-and install Tailscale from the Play Store on the phone, with the same account.
-Pair (or pair again) after that so the QR code includes the Tailscale address.
-`link-cli.py status` says whether Tailscale is connected.
+Open the link, sign in (a Google account works), and install Tailscale on the
+phone with the same account. The computer then has a name on your private
+network - `<host>-link.<your-tailnet>.ts.net` - that identifies it rather than
+where it is, so the phone reaches it from any network. The pairing code
+carries that name first and the numeric addresses as fallbacks, and the
+computer tells the phone its current addresses on every connection, so a
+changed address at home never means pairing again.
+
+A pairing code can also be typed instead of scanned (the pairing window can
+copy it as text), for when the phone is not in front of the computer.
 
 If the phone cannot connect on Wi-Fi, check the firewall: `sudo ufw status`,
 and if it is active, `sudo ufw allow 47823/tcp` and, for pairing,

@@ -113,12 +113,13 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
         }
         stage = "asking"
         scope.launch {
+          try {
             val client = LinkClient(activity, offer.computer)
             val answer = client.requestPairing(offer.token, activity.phoneName())
             val expected = Protocol.pairingCode(offer.computer.fingerprint, LinkIdentity.fingerprint(activity))
             when {
                 answer == null -> {
-                    problem = "The computer did not answer. Is the phone on the same Wi-Fi, or on Tailscale?"
+                    problem = "The computer did not answer.\n" + client.lastProblem
                     stage = "failed"
                 }
                 answer.optString("code") != expected -> {
@@ -142,6 +143,12 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
                     }
                 }
             }
+          } catch (e: Exception) {
+            // Whatever went wrong, say it on the screen: a pairing that
+            // fails silently, or by closing the app, cannot be diagnosed.
+            problem = "Pairing failed: ${e.javaClass.simpleName}: ${e.message}"
+            stage = "failed"
+          }
         }
     }
 

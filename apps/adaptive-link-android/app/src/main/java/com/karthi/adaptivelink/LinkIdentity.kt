@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.security.keystore.StrongBoxUnavailableException
 import java.math.BigInteger
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -69,12 +68,21 @@ object LinkIdentity {
     private fun create(context: Context) {
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, STORE)
         val hasStrongBox = context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
-        try {
-            generator.initialize(spec(hasStrongBox))
-            generator.generateKeyPair()
-        } catch (e: StrongBoxUnavailableException) {
-            generator.initialize(spec(false))
-            generator.generateKeyPair()
+        if (hasStrongBox) {
+            // StrongBox chips differ in what they accept, and a phone that
+            // refuses these parameters does not always say so with
+            // StrongBoxUnavailableException. Whatever it throws, the phone's
+            // ordinary secure hardware (the TEE) is still hardware-backed
+            // and non-exportable, so fall back to it rather than fail.
+            try {
+                generator.initialize(spec(true))
+                generator.generateKeyPair()
+                return
+            } catch (e: Exception) {
+                runCatching { store().deleteEntry(ALIAS) }
+            }
         }
+        generator.initialize(spec(false))
+        generator.generateKeyPair()
     }
 }

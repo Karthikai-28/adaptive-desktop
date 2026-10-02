@@ -216,6 +216,15 @@ async def daemon_checks(sandbox, check):
                   "pairing: the computer shows the same digits and waits for its owner")
             check(control.status()["phone"] is None and not tcp_open(PORT),
                   "pairing: nothing is trusted until the owner says so")
+            # Pairing was started with no window open (as link-cli and a remote
+            # owner do). The request must still appear somewhere it can be answered.
+            for _ in range(40):
+                if subprocess.run(["xdotool", "search", "--name", "Pair a phone"],
+                                  capture_output=True, text=True).stdout.strip():
+                    break
+                await asyncio.sleep(0.25)
+            shown = subprocess.run(["xdotool", "search", "--name", "Pair a phone"], capture_output=True, text=True).stdout
+            check(bool(shown.strip()), "pairing: a request opens a window to answer it in, even when none was open")
             async with http.post(f"{pair_url}/pair", json={"t": qr["t"], "cert": phone_cert, "name": "Second"}) as reply:
                 check(reply.status == 409, "pairing: a second phone cannot use the same window")
 

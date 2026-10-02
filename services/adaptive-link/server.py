@@ -71,6 +71,7 @@ class Link:
         self._pair_runner = None
         self._control_runner = None
         self._pairing = {"state": "idle"}
+        self._pair_reached = {"hellos": 0, "alerts": []}
         self._pair_decided = asyncio.Event()
         self._pair_timer = None
         self._last_notice = 0.0
@@ -221,7 +222,10 @@ class Link:
         info = await asyncio.to_thread(desktop.status)
         info.update({
             "version": VERSION,
-            "via": "tailscale" if identity.is_tailscale(request["peer"]) else "lan",
+            "via": "tailscale" if identity.came_by_tailnet(request.host, request["peer"]) else "lan",
+            # Where this computer can be reached now. The phone keeps these,
+            # so a changed address at home does not mean pairing again.
+            "hosts": [address for address, _kind in await asyncio.to_thread(identity.local_addresses)],
             "screen": list(self.input.screen),
             "can": {"exec": self._allowed("allow_exec"), "files": self._allowed("allow_files"),
                     "power": self._allowed("allow_power"), "input": self.input.available,
@@ -491,11 +495,33 @@ class Link:
         state = dict(self._pairing)
         state.pop("token", None)
         state.pop("cert_pem", None)
+        state.pop("ui", None)
         if state.get("expires"):
             state["seconds_left"] = max(0, int(state["expires"] - time.time()))
+        state["reached"] = dict(self._pair_reached)
         return state
 
-    async def start_pairing(self, seconds=None):
+    def _show_pairing_request(self):
+        """Put the request in front of the owner.
+
+        A request that only raised a notification could not be answered: a
+        notification has nowhere to press Pair. Unless the pairing window is
+        already open (it shows the request itself), open it now, attached to
+        this pairing rather than starting another.
+        """
+        if self._pairing.get("ui"):
+            return
+        try:
+            import subprocess
+            import sys
+            subprocess.Popen([sys.executable, str(Path(__file__).with_name("pair_window.py")), "--attach"],
+                             start_new_session=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._pairing["ui"] = True
+        except OSError:
+            pass
+
+    async def start_pairing(self, seconds=None, ui=False):
         """Open the pairing window. Returns what the QR code holds.
 
         Two minutes by default. A typed code takes longer than a scan, so the
@@ -515,10 +541,24 @@ class Link:
         runner = web.AppRunner(app, access_log=None, shutdown_timeout=1.0)
         await runner.setup()
         context = identity.pairing_context(self.key_path, self.cert_path)
+        # A phone that cannot pair shows up here first: whether anything
+        # reached the port at all, and what TLS said about it. A handshake
+        # that fails never becomes a request, so it is counted at this level.
+        self._pair_reached = {"hellos": 0, "alerts": []}
+
+        def tls_event(_conn, direction, _version, content_type, msg_type, _data):
+            name = getattr(msg_type, "name", str(msg_type))
+            if direction == "read" and name == "CLIENT_HELLO":
+                self._pair_reached["hellos"] += 1
+            elif getattr(content_type, "name", "") == "ALERT":
+                self._pair_reached["alerts"] = (self._pair_reached["alerts"] + [f"{direction} {name}"])[-5:]
+
+        if hasattr(context, "_msg_callback"):
+            context._msg_callback = tls_event
         await web.TCPSite(runner, host="0.0.0.0", port=self.pairing_port, ssl_context=context).start()
         self._pair_runner = runner
 
-        self._pairing = {"state": "waiting", "token": token, "attempts": 0,
+        self._pairing = {"state": "waiting", "token": token, "attempts": 0, "ui": bool(ui),
                          "expires": time.time() + window}
         self._pair_decided = asyncio.Event()
         self._pair_timer = asyncio.get_running_loop().call_later(
@@ -580,6 +620,7 @@ class Link:
                               "cert_pem": pem.decode(), "fingerprint": digest, "from": address})
         self.audit.write(address, "pairing-requested", name)
         desktop.notify("A phone wants to pair", f"{name} - check that it shows {code[:3]} {code[3:]}")
+        self._show_pairing_request()
         return web.json_response({"ok": True, "code": code, "host": socket.gethostname()})
 
     async def h_pair_wait(self, request):
@@ -649,7 +690,8 @@ class Link:
             return web.json_response(self.describe())
 
         async def pair_start(request):
-            return web.json_response(await self.start_pairing((await read_json(request)).get("seconds")))
+            data = await read_json(request)
+            return web.json_response(await self.start_pairing(data.get("seconds"), ui=bool(data.get("ui"))))
 
         async def pair_state(_request):
             return web.json_response(self.pairing_state())

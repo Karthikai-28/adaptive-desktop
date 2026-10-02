@@ -18,7 +18,9 @@ object Link {
 
     fun client(context: Context): LinkClient? {
         val computer = Store(context).computer ?: return null.also { cached = null }
-        cached?.let { if (it.computer == computer) return it }
+        // The same computer is the same certificate; its addresses may have
+        // been updated since, and that is no reason for a new connection.
+        cached?.let { if (it.computer.fingerprint == computer.fingerprint) return it }
         return LinkClient(context, computer).also { cached = it }
     }
 

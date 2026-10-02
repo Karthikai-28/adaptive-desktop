@@ -1,0 +1,14 @@
+[Unit]
+Description=Adaptive Link: this computer's own Tailscale node (no root, userspace networking)
+After=network-online.target
+
+[Service]
+# A second tailscaled, separate from the system one: it needs no root because
+# it creates no network device. Connections from the owner's other devices
+# arrive here and are handed to the link's port on this machine.
+ExecStart=/usr/sbin/tailscaled --tun=userspace-networking --statedir=%h/.local/state/adaptive-desktop/tailnet --socket=%t/adaptive-tailnet.sock --port=0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -319,9 +319,55 @@ def is_tailscale(address):
     return ip in ipaddress.ip_network("100.64.0.0/10") or ip in ipaddress.ip_network("fd7a:115c:a1e0::/48")
 
 
+def tailnet_socket():
+    """The socket of the link's own Tailscale node (scripts/install-link-tailnet.sh)."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return Path(runtime) / "adaptive-tailnet.sock"
+
+
+def parse_tailnet_status(text):
+    """(name, address) from `tailscale status --json`, or None unless it is
+    signed in and running. The name is the stable one: it stays the same
+    whatever network either device is on."""
+    try:
+        status = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(status, dict) or status.get("BackendState") != "Running":
+        return None
+    me = status.get("Self") or {}
+    name = str(me.get("DNSName") or "").rstrip(".")
+    addresses = [a for a in me.get("TailscaleIPs") or [] if ":" not in str(a)]
+    if not name and not addresses:
+        return None
+    return name, (addresses[0] if addresses else "")
+
+
+def tailnet():
+    """(name, address) of the link's own Tailscale node, or None."""
+    socket_path = tailnet_socket()
+    if not socket_path.exists():
+        return None
+    try:
+        import subprocess
+        out = subprocess.run(["tailscale", f"--socket={socket_path}", "status", "--json"],
+                             capture_output=True, text=True, timeout=4).stdout
+    except (OSError, ValueError):
+        return None
+    return parse_tailnet_status(out)
+
+
 def local_addresses():
-    """[(address, kind)] this machine can be reached at: "lan" or "tailscale"."""
+    """[(address, kind)] this machine can be reached at: "lan" or "tailscale".
+
+    The Tailscale name comes first. It identifies this computer rather than
+    where it is, so it keeps working when either device changes network; the
+    numeric addresses after it are the fallbacks.
+    """
     found = []
+    own = tailnet()
+    if own:
+        found.extend((value, "tailscale") for value in own if value)
     try:
         import subprocess
         out = subprocess.run(["ip", "-o", "-4", "addr", "show", "scope", "global"],
@@ -336,7 +382,16 @@ def local_addresses():
         address = parts[parts.index("inet") + 1].split("/")[0]
         if interface.startswith(("docker", "br-", "veth", "virbr")):
             continue
-        found.append((address, "tailscale" if is_tailscale(address) else "lan"))
+        if not any(address == known for known, _kind in found):
+            found.append((address, "tailscale" if is_tailscale(address) else "lan"))
     # Tailscale first: it is the address that works from anywhere.
     found.sort(key=lambda item: item[1] != "tailscale")
     return found
+
+
+def came_by_tailnet(host_header, peer):
+    """Whether a request arrived over Tailscale: by the address it was sent
+    to (the link's own node hands connections on from this machine, so the
+    peer address alone does not say) or by where it came from."""
+    host = str(host_header or "").rsplit(":", 1)[0].strip("[]").lower()
+    return host.endswith(".ts.net") or is_tailscale(host) or is_tailscale(peer)

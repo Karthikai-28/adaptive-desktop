@@ -43,6 +43,9 @@ class LinkClient(context: Context, val computer: Computer) {
     @Volatile var host: String? = null
         private set
 
+    /** Every address the computer is known by; it tells the phone when they change. */
+    @Volatile private var hosts: List<String> = computer.hosts
+
     val http: OkHttpClient = build(withPhoneKey = true)
 
     private fun build(withPhoneKey: Boolean): OkHttpClient {
@@ -71,7 +74,7 @@ class LinkClient(context: Context, val computer: Computer) {
      */
     suspend fun connect(): JSONObject? = coroutineScope {
         val quick = http.newBuilder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).build()
-        val attempts = computer.hosts.map { candidate ->
+        val attempts = hosts.map { candidate ->
             async(Dispatchers.IO) {
                 runCatching {
                     quick.newCall(Request.Builder().url("${base(candidate)}/v1/status").build()).execute().use {
@@ -90,10 +93,26 @@ class LinkClient(context: Context, val computer: Computer) {
         }
         attempts.forEach { it.cancel() }
         host = found?.first
+        found?.second?.let { learn(it) }
         found?.second
     }
 
-    private fun url(path: String): String = base(host ?: computer.hosts.first()) + path
+    /**
+     * The computer says where it can be reached now (its Tailscale name, its
+     * current addresses). This came over the authenticated link, so it is the
+     * paired computer saying it. The phone remembers them, newest first, which
+     * is what lets it find the computer again after an address changes.
+     */
+    private fun learn(status: JSONObject) {
+        val told = status.optJSONArray("hosts") ?: return
+        val fresh = List(told.length()) { told.optString(it) }.filter { Computer.isAddress(it) }
+        val merged = (fresh + hosts).distinct().take(8)
+        if (merged == hosts || fresh.isEmpty()) return
+        hosts = merged
+        Store(appContext).computer = computer.copy(hosts = merged)
+    }
+
+    private fun url(path: String): String = base(host ?: hosts.first()) + path
 
     suspend fun get(path: String): JSONObject? = call(Request.Builder().url(url(path)).build())
 
@@ -117,7 +136,7 @@ class LinkClient(context: Context, val computer: Computer) {
     }
 
     suspend fun upload(name: String, body: RequestBody): JSONObject? {
-        val target = okhttp3.HttpUrl.Builder().scheme("https").host(host ?: computer.hosts.first())
+        val target = okhttp3.HttpUrl.Builder().scheme("https").host(host ?: hosts.first())
             .port(computer.port).addPathSegments("v1/upload").addQueryParameter("name", name).build()
         val long = http.newBuilder().writeTimeout(0, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
         return withContext(Dispatchers.IO) {
@@ -137,28 +156,48 @@ class LinkClient(context: Context, val computer: Computer) {
      * to prove itself (same pin), the phone cannot yet.
      */
     suspend fun requestPairing(token: String, phoneName: String): JSONObject? = withContext(Dispatchers.IO) {
+        lastProblem = ""
+        val body = try {
+            JSONObject().put("t", token).put("name", phoneName)
+                .put("cert", Protocol.pem(LinkIdentity.certificate(appContext).encoded))
+        } catch (e: Exception) {
+            lastProblem = "This phone could not create its key: ${describe(e)}"
+            return@withContext null
+        }
         val open = build(withPhoneKey = false)
-        val body = JSONObject().put("t", token).put("name", phoneName)
-            .put("cert", Protocol.pem(LinkIdentity.certificate(appContext).encoded))
+        val problems = mutableListOf<String>()
         for (candidate in computer.hosts) {
-            val answer = runCatching {
-                open.newCall(
+            try {
+                val answer = open.newCall(
                     Request.Builder().url("${base(candidate, computer.pairingPort)}/pair")
                         .post(body.toString().toRequestBody(JSON)).build()
                 ).execute().use { JSONObject(it.body!!.string()) }
-            }.getOrNull()
-            if (answer != null) {
                 host = candidate
                 return@withContext answer
+            } catch (e: Exception) {
+                problems += "$candidate: ${describe(e)}"
             }
         }
+        lastProblem = problems.joinToString("\n")
         null
+    }
+
+    /** Why the last pairing request failed, in words fit to show. */
+    @Volatile var lastProblem: String = ""
+        private set
+
+    private fun describe(e: Exception): String = when (e) {
+        is java.net.SocketTimeoutException -> "no answer (timed out) - a firewall on the computer, or the two are on different networks"
+        is java.net.ConnectException -> "connection refused - pairing is not open on the computer, or its window has closed"
+        is java.net.NoRouteToHostException -> "no route - the phone is not on the computer's network"
+        is javax.net.ssl.SSLException -> "secure connection failed: ${e.message}"
+        else -> "${e.javaClass.simpleName}: ${e.message}"
     }
 
     /** Wait for the owner to press Pair or Reject on the computer. */
     suspend fun awaitPairing(token: String): String = withContext(Dispatchers.IO) {
         val open = build(withPhoneKey = false).newBuilder().readTimeout(35, TimeUnit.SECONDS).build()
-        val target = okhttp3.HttpUrl.Builder().scheme("https").host(host ?: computer.hosts.first())
+        val target = okhttp3.HttpUrl.Builder().scheme("https").host(host ?: hosts.first())
             .port(computer.pairingPort).addPathSegments("pair/wait").addQueryParameter("t", token).build()
         repeat(8) {
             val state = runCatching {
