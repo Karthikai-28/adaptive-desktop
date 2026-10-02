@@ -61,6 +61,11 @@ DEFAULT_CONFIG = {
     # The desktop's own notifications are told to a phone that asks for them.
     # Alerts about the machine itself (a full disk, a low battery) always are.
     "send_notifications": True,
+    # What is copied on the computer is told to a phone that asks, as it is
+    # copied. Off until the owner wants it: a clipboard holds passwords.
+    "sync_clipboard": False,
+    # Lock the computer when the paired phone leaves its network.
+    "proximity_lock": False,
     # A device signed in to the same Google account as this computer may ask
     # to connect without a pairing code. It still has to be approved here,
     # once, unless auto_approve_account is on.

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -118,6 +119,8 @@ fun KeyboardBar(send: (String) -> Unit) {
             onValueChange = { text = it },
             placeholder = { Text("Type, then send") },
             singleLine = true,
+            // Or say it: what is heard is typed on the computer.
+            trailingIcon = { Dictate { send(Protocol.text(it)) } },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = {
@@ -163,12 +166,34 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
     var options by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val input = remember { InputSocket(client) }
+    // The whole screen, or one display of it - which can be one made for
+    // this phone, beside the computer's own.
+    var display by remember { mutableStateOf("") }
+    var displays by remember { mutableStateOf(listOf<String>()) }
+    var extended by remember { mutableStateOf("") }
+    val showing = if (display.isEmpty()) "" else "&display=" + java.net.URLEncoder.encode(display, "UTF-8")
+    val input = remember(display) { InputSocket(client, "/v1/input?x=1$showing") }
     val surface = remember { VideoView(context) }
-    DisposableEffect(Unit) { onDispose { input.close(); surface.release() } }
+    DisposableEffect(Unit) { onDispose { surface.release() } }
+    DisposableEffect(input) { onDispose { input.close() } }
+    LaunchedEffect(options) {
+        if (options) client.get("/v1/machine/display")?.optJSONArray("outputs")?.let { outputs ->
+            displays = List(outputs.length()) { outputs.optJSONObject(it) }.filterNotNull()
+                .filter { it.optBoolean("on") }.map { it.optString("name") }
+        }
+    }
+    // The display made for this phone is taken away again on leaving.
+    DisposableEffect(extended) {
+        val made = extended
+        onDispose {
+            if (made.isNotEmpty()) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                client.post("/v1/machine/display", JSONObject().put("action", "unextend").put("target", made))
+            }
+        }
+    }
 
     if (video) {
-        DisposableEffect(quality, sound) {
+        DisposableEffect(quality, sound, display) {
             note = "Connecting…"
             picture = IntSize.Zero
             val watching = ScreenVideo(context, client) { said -> if (picture != IntSize.Zero || said.isNotEmpty()) note = said }
@@ -176,7 +201,7 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
             surface.onSize = { w, h -> picture = IntSize(w, h); note = "" }
             watching.show(surface)
             val starting = scope.launch {
-                val agreed = watching.start(quality, sound)
+                val agreed = watching.start(quality, sound, display)
                 hearing = agreed && watching.sound
                 // No picture after a while: the two could not reach each
                 // other this way. The other way still works.
@@ -194,8 +219,8 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
             }
         }
     } else {
-        DisposableEffect(quality) {
-            val opened = client.socket("/v1/screen?preset=$quality", object : WebSocketListener() {
+        DisposableEffect(quality, display) {
+            val opened = client.socket("/v1/screen?preset=$quality$showing", object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size)?.let {
                         frame = it
@@ -237,6 +262,36 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                     if (video) DropdownMenuItem(
                         text = { Text(if (!sound) "Sound: off" else if (hearing || picture == IntSize.Zero) "Sound: on" else "Sound: on (the computer has none to send)") },
                         onClick = { sound = !sound; store.screenSound = sound; options = false },
+                    )
+                    if (displays.size > 1 || display.isNotEmpty()) (listOf("") + displays).distinct().forEach { name ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (name.isEmpty()) "Show every display" else "Show only $name",
+                                    color = if (display == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            },
+                            onClick = { display = name; options = false },
+                        )
+                    }
+                    if (extended.isEmpty()) DropdownMenuItem(
+                        text = { Text("Use this phone as another display") },
+                        onClick = {
+                            options = false
+                            scope.launch {
+                                // As wide as this phone held sideways, within what a display output can be asked for.
+                                val metrics = context.resources.displayMetrics
+                                val long = maxOf(metrics.widthPixels, metrics.heightPixels).coerceAtMost(1920) / 8 * 8
+                                val short = (minOf(metrics.widthPixels, metrics.heightPixels) * long /
+                                    maxOf(metrics.widthPixels, metrics.heightPixels)) / 8 * 8
+                                val reply = client.post("/v1/machine/display", JSONObject().put("action", "extend").put("value", "${long}x$short"))
+                                if (reply?.optBoolean("ok") == true) {
+                                    extended = reply.optString("text")
+                                    display = extended
+                                } else note = reply?.optString("error")?.ifBlank { null } ?: "The computer could not make another display"
+                            }
+                        },
+                    ) else DropdownMenuItem(
+                        text = { Text("Stop using this phone as a display") },
+                        onClick = { options = false; display = ""; extended = "" },
                     )
                 }
             }
@@ -364,9 +419,15 @@ fun TrackpadPage(client: LinkClient, onBack: () -> Unit) {
     val input = remember { InputSocket(client) }
     DisposableEffect(Unit) { onDispose { input.close() } }
     var keyboard by remember { mutableStateOf(true) }
+    // Aim the phone like a pointer, instead of dragging on it.
+    var air by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    if (air) AirMouse { input.send(it) }
 
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar("Trackpad", onBack) {
+            if (hasGyroscope(context)) FilterChip(selected = air, onClick = { air = !air }, label = { Text("Air") },
+                modifier = Modifier.padding(end = 4.dp))
             IconButton(onClick = { keyboard = !keyboard }) { Icon(Icons.Filled.Keyboard, "Keyboard") }
         }
         Row(Modifier.weight(1f).fillMaxWidth().padding(12.dp)) {
@@ -460,6 +521,15 @@ fun MediaPage(client: LinkClient, onBack: () -> Unit) {
             Spacer(Modifier.height(6.dp))
             Text(current.optString("title").ifBlank { "Playing" }, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             if (current.optString("artist").isNotBlank()) Muted(current.optString("artist"))
+            Protocol.handoffAddress(current.optString("url"), current.optInt("position"))?.let { address ->
+                // What is playing from the web can be carried on with here: paused there, opened here.
+                val context = LocalContext.current
+                TextButton(onClick = {
+                    if (current.optString("status") == "Playing") act("pause")
+                    (context as? MainActivity)?.awayOnPurpose = true
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(address))) }
+                }) { Text("Carry on with it on this phone") }
+            }
             if (current.optInt("length") > 0) {
                 Spacer(Modifier.height(6.dp))
                 Muted("${Protocol.formatDuration(current.optInt("position"))} / ${Protocol.formatDuration(current.optInt("length"))}")

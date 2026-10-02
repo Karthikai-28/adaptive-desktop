@@ -142,6 +142,8 @@ fun RunPage(client: LinkClient, store: Store, onBack: () -> Unit) {
             OutlinedTextField(
                 value = command, onValueChange = { command = it },
                 placeholder = { Text("A command to run on the computer") },
+                // Or say it: what is heard is put here to be looked at before it is run.
+                trailingIcon = { Dictate { command = it } },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -365,6 +367,9 @@ fun CameraPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
     }
     var front by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("Starting…") }
+    var microphone by remember { mutableStateOf(false) }
+    var heard by remember { mutableStateOf("Starting…") }
+    val askToHear = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { microphone = it }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     LaunchedEffect(Unit) {
         if (!granted) {
@@ -392,6 +397,24 @@ fun CameraPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         Muted("On the computer, choose “Phone Camera” as the camera in your meeting app or browser. It stops when you leave this screen.")
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Muted("This phone's microphone as well", Modifier.weight(1f))
+            Switch(checked = microphone, onCheckedChange = { wanted ->
+                if (wanted && ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    activity.awayOnPurpose = true
+                    askToHear.launch(Manifest.permission.RECORD_AUDIO)
+                } else microphone = wanted
+            })
+        }
+        if (microphone) {
+            Muted(heard)
+            DisposableEffect(Unit) {
+                val streamer = MicStreamer(client) { heard = it }
+                streamer.start()
+                onDispose { streamer.stop() }
+            }
+        }
     }
 }
 
@@ -414,6 +437,17 @@ fun MorePage(
     var lock by remember { mutableStateOf(store.lockOnOpen) }
     var unpair by remember { mutableStateOf(false) }
     val clipboard = remember { activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+    var clipboardBoth by remember { mutableStateOf(store.syncClipboard) }
+    var findable by remember { mutableStateOf(store.findPhone) }
+    var approving by remember { mutableStateOf(store.approvals) }
+    var here by remember { mutableStateOf(store.presence) }
+    var messages by remember { mutableStateOf(store.phoneMessages) }
+    var photos by remember { mutableStateOf(store.copyPhotos) }
+    var remote by remember { mutableStateOf(store.remoteNotification) }
+    // What each of those needs from Android is asked for when it is turned on.
+    val askFor = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.any { !it }) note = "Without that permission the phone cannot do it."
+    }
     var alerts by remember { mutableStateOf(store.computerAlerts) }
     var computerNotes by remember { mutableStateOf(store.computerNotifications) }
     // Android 13 and later ask before an app may show notifications at all.
@@ -422,7 +456,7 @@ fun MorePage(
     }
 
     fun listen() {
-        if (android.os.Build.VERSION.SDK_INT >= 33 && (alerts || computerNotes) &&
+        if (android.os.Build.VERSION.SDK_INT >= 33 && store.listens &&
             ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             activity.awayOnPurpose = true
@@ -506,7 +540,45 @@ fun MorePage(
                 Muted("The computer's own notifications as well", Modifier.weight(1f))
                 Switch(checked = computerNotes, onCheckedChange = { computerNotes = it; store.computerNotifications = it; listen() })
             }
-            if (alerts || computerNotes) Muted("The phone stays connected to the computer for these, and says so in its notification shade.")
+        }
+
+        Section("The phone and the computer together") {
+            Together("Clipboard: what is copied on one can be pasted on the other", clipboardBoth) {
+                clipboardBoth = it; store.syncClipboard = it; listen()
+            }
+            if (clipboardBoth) Muted("Also needs \"link-cli.py allow clipboard on\" on the computer. Android lets this phone read its clipboard only while the app is open, so what you copy here goes over when you come to the app.")
+            Together("Find this phone: the computer can make it ring (link-cli.py ring)", findable) {
+                findable = it; store.findPhone = it; listen()
+            }
+            Together("Approve with this phone's fingerprint: unlocking the computer, sudo", approving) {
+                approving = it; store.approvals = it; listen()
+            }
+            Together("Tell the computer this phone is here, so it can lock when the phone leaves", here) {
+                here = it; store.presence = it; listen()
+            }
+            if (here) Muted("Also needs \"link-cli.py allow proximity on\" on the computer.")
+            Together("Calls and text messages on the computer, and texts sent from it", messages) { wanted ->
+                messages = wanted; store.phoneMessages = wanted
+                if (wanted) {
+                    activity.awayOnPurpose = true
+                    askFor.launch(arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.SEND_SMS,
+                        Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG))
+                }
+                listen()
+            }
+            Together("Copy new photos to the computer's Pictures/Phone", photos) { wanted ->
+                photos = wanted; store.copyPhotos = wanted
+                if (wanted) {
+                    activity.awayOnPurpose = true
+                    askFor.launch(arrayOf(if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
+                        else Manifest.permission.READ_EXTERNAL_STORAGE))
+                }
+                listen()
+            }
+            Together("Lock and play/pause as buttons on a notification (a watch shows them too)", remote) {
+                remote = it; store.remoteNotification = it; listen()
+            }
+            if (store.listens) Muted("The phone stays connected to the computer for these, and says so in its notification shade.")
         }
 
         Section("Security") {
@@ -539,16 +611,26 @@ fun MorePage(
         AlertDialog(
             onDismissRequest = { unpair = false },
             title = { Text("Unpair this phone?") },
-            text = { Text("This phone's key is destroyed. To stop the computer accepting it as well, also run link-cli.py unpair there.") },
+            text = {
+                Text(if (store.computers.size > 1) "This phone forgets ${client.computer.name}; the other computers stay paired. To stop ${client.computer.name} accepting this phone, also run link-cli.py unpair there."
+                    else "This phone's key is destroyed. To stop the computer accepting it as well, also run link-cli.py unpair there.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     unpair = false
-                    LinkIdentity.delete()
-                    Cloud(activity).signOut()
+                    // The key is this phone's for every computer it is paired
+                    // with: it goes only when the last of them does.
+                    if (store.computers.size <= 1) {
+                        LinkIdentity.delete()
+                        Cloud(activity).signOut()
+                    }
                     store.computer = null
                     store.relayNotifications = false
                     store.computerAlerts = false
                     store.computerNotifications = false
+                    store.syncClipboard = false; store.findPhone = false; store.approvals = false
+                    store.presence = false; store.phoneMessages = false; store.copyPhotos = false
+                    store.remoteNotification = false
                     EventsService.sync(activity)
                     Link.forget()
                     onUnpaired()
@@ -556,6 +638,14 @@ fun MorePage(
             },
             dismissButton = { TextButton(onClick = { unpair = false }) { Text("Cancel") } },
         )
+    }
+}
+
+@Composable
+private fun Together(label: String, on: Boolean, change: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Muted(label, Modifier.weight(1f))
+        Switch(checked = on, onCheckedChange = change)
     }
 }
 

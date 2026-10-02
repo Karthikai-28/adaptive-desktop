@@ -35,12 +35,24 @@ def fit(width, height, longest):
     return max(2, int(width * scale) // 2 * 2), max(2, int(height * scale) // 2 * 2)
 
 
-def pipeline_description(width, height, preset):
+def source(region=None):
+    """The part of the screen to capture: all of it, or one display
+    (x, y, width, height)."""
+    if not region:
+        return "ximagesrc use-damage=false show-pointer=true "
+    x, y, width, height = (int(value) for value in region)
+    return (f"ximagesrc use-damage=false show-pointer=true startx={x} starty={y} "
+            f"endx={x + width - 1} endy={y + height - 1} ")
+
+
+def pipeline_description(width, height, preset, region=None):
     longest, quality, rate = PRESETS.get(preset, PRESETS["medium"])
+    if region:
+        width, height = region[2], region[3]
     out_w, out_h = fit(width, height, longest)
     return (
-        "ximagesrc use-damage=false show-pointer=true "
-        f"! video/x-raw,framerate={rate}/1 "
+        source(region)
+        + f"! video/x-raw,framerate={rate}/1 "
         "! videoscale method=bilinear "
         f"! video/x-raw,width={out_w},height={out_h} "
         "! videoconvert "
@@ -50,15 +62,16 @@ def pipeline_description(width, height, preset):
 
 
 class Capture:
-    def __init__(self, screen, preset="medium"):
+    def __init__(self, screen, preset="medium", region=None):
         self.screen = screen
+        self.region = region
         self.preset = preset if preset in PRESETS else "medium"
         self._pipeline = None
         self._sink = None
         self._last = b""
 
     def start(self):
-        self._pipeline = Gst.parse_launch(pipeline_description(*self.screen, self.preset))
+        self._pipeline = Gst.parse_launch(pipeline_description(*self.screen, self.preset, self.region))
         self._sink = self._pipeline.get_by_name("sink")
         self._pipeline.set_state(Gst.State.PLAYING)
 

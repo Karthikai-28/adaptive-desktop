@@ -176,6 +176,26 @@ CHECKS = [
         "prompt": "With a TURN server set by link-cli.py relay, does the phone connect from a network where a direct connection fails?",
     },
     {
+        "id": "link_together",
+        "backlog": "Adaptive Link: the phone and the computer together, on a real phone.",
+        "prompt": "With the switches on: does text copied on the computer paste on the phone, does link-cli.py ring make it ring, and does the computer lock when the phone leaves the Wi-Fi and unlock on your fingerprint when it returns?",
+    },
+    {
+        "id": "link_sudo",
+        "backlog": "Adaptive Link: sudo approved by the phone.",
+        "prompt": "After install-link-sudo.sh: does sudo ask the phone, accept your fingerprint, and still take the password when the phone is away?",
+    },
+    {
+        "id": "link_phone_hardware",
+        "backlog": "Adaptive Link: what needs a real phone's hardware.",
+        "prompt": "On a real phone: does Air on the Trackpad move the pointer, does the microphone type what you say, does a written NFC tag press its button, and does the phone's microphone appear as Phone Microphone in a meeting app?",
+    },
+    {
+        "id": "link_second_display",
+        "backlog": "Adaptive Link: the phone as another display.",
+        "prompt": "Does \"Use this phone as another display\" give a display to the right of the main one that windows can be dragged onto, and does it go away on leaving the screen?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",

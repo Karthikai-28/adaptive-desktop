@@ -38,6 +38,7 @@ from aiohttp import WSMsgType, web
 import alerts
 import camera
 import cloud
+import companion
 import desktop
 import identity
 import inputs
@@ -52,6 +53,11 @@ CONNECT_NOTICE_EVERY_S = 600
 KEEP_S = int(os.environ.get("ADAPTIVE_LINK_KEEP_S", "45"))
 # How often the machine is looked at for something worth telling the phone.
 ALERT_EVERY_S = float(os.environ.get("ADAPTIVE_LINK_ALERT_EVERY_S", "30"))
+# How long the phone may be gone from the network before the computer locks.
+PROXIMITY_GRACE_S = float(os.environ.get("ADAPTIVE_LINK_PROXIMITY_S", "60"))
+# What a phone may ask to be told (/v1/events), and the owner's switch each needs.
+EVENT_KINDS = {"notification": "send_notifications", "alert": None, "clipboard": "sync_clipboard",
+               "approve": "allow_power", "approve-done": "allow_power", "ring": None, "sms-send": None}
 EXEC_OUTPUT_CHUNK = 4096
 PAIR_ASKS_PER_MINUTE = 60
 # How old a request made through the account may be and still be acted on.
@@ -137,6 +143,16 @@ class Link:
         # The owner's relay, if they run one, and the screen as video (media.py).
         self.relay = identity.load_relay(self.link_dir)
         self._media = None
+        # The phone and the computer as a pair (companion.py).
+        self.approvals = companion.Approvals(self.events)
+        # The checks say the phone is really gone without waiting for a
+        # network to stop answering.
+        probing = os.environ.get("ADAPTIVE_LINK_PROXIMITY_PROBE") != "0"
+        self.presence = companion.Presence(PROXIMITY_GRACE_S, self._phone_gone,
+                                           companion.reachable if probing else (lambda _address: False))
+        self.phonebook = companion.PhoneBook()
+        self._clip_from_phone = ""
+        self._texts = {}   # texts the phone has been asked to send: id -> whether it did
         self._pair_asks = {}
 
     # ------------------------------------------------------------ listeners
@@ -155,7 +171,11 @@ class Link:
         await self.restart_link()
         await self.restart_cloud()
         self._watchers = [asyncio.ensure_future(alerts.watch_notifications(self.events)),
-                          asyncio.ensure_future(alerts.watch_machine(self.events, ALERT_EVERY_S))]
+                          asyncio.ensure_future(alerts.watch_machine(self.events, ALERT_EVERY_S)),
+                          asyncio.ensure_future(companion.watch_clipboard(
+                              self.events, desktop.clipboard_get,
+                              lambda: self.config["sync_clipboard"] and self.events.listening("clipboard"),
+                              lambda: self._clip_from_phone))]
 
     async def stop(self):
         for watcher in self._watchers:
@@ -306,6 +326,12 @@ class Link:
         add.add_post("/v1/open-url", self.h_open_url)
         add.add_get("/v1/log", self.h_log)
         add.add_get("/v1/events", self.h_events)
+        add.add_post("/v1/approve", self.h_approve)
+        add.add_post("/v1/phone/state", self.h_phone_state)
+        add.add_post("/v1/phone/sms", self.h_phone_sms)
+        add.add_post("/v1/phone/call", self.h_phone_call)
+        add.add_post("/v1/phone/sent", self.h_phone_sent)
+        add.add_get("/v1/mic", self.h_mic)
         add.add_get("/v1/tasks", self.h_tasks)
         add.add_post("/v1/tasks/signal", self.h_task_signal)
         add.add_get("/v1/devices", self.h_devices)
@@ -345,20 +371,34 @@ class Link:
 
     # ----------------------------------------------------- screen and input
 
-    async def _read_input(self, ws):
+    async def _read_input(self, ws, region=None):
         """Apply the input events arriving on a socket until it closes.
 
         With input turned off the socket is still read (so a close is seen)
-        and what arrives is dropped: the phone may watch, not act.
+        and what arrives is dropped: the phone may watch, not act. A key or
+        button still held when the socket closes is let go of, so that a
+        phone going out of reach never leaves one stuck down.
         """
-        async for message in ws:
-            if message.type != WSMsgType.TEXT or not self._allowed("allow_input"):
-                continue
-            try:
-                event = json.loads(message.data)
-            except ValueError:
-                continue
-            await self.input.send(event)
+        held = frozenset()
+        try:
+            async for message in ws:
+                if message.type != WSMsgType.TEXT or not self._allowed("allow_input"):
+                    continue
+                try:
+                    event = json.loads(message.data)
+                except ValueError:
+                    continue
+                if await self.input.send(inputs.in_region(event, region, self.input.screen)):
+                    held = inputs.held_after(held, event)
+        finally:
+            for event in inputs.release(held):
+                await self.input.send(event)
+
+    async def _region(self, request):
+        """The one display the phone asked for (?display=NAME), or None for
+        the whole screen."""
+        name = request.query.get("display", "")
+        return await asyncio.to_thread(machine.region, name) if name else None
 
     async def _have_screen(self):
         # The daemon can start before the graphical session is up; look again
@@ -371,12 +411,13 @@ class Link:
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
         await ws.prepare(request)
         self._track(ws)
-        capture = screen.Capture(self.input.screen, request.query.get("preset", "medium"))
+        region = await self._region(request)
+        capture = screen.Capture(self.input.screen, request.query.get("preset", "medium"), region)
         self.audit.write(request["peer"], "screen", capture.preset)
         self._sessions += 1
         try:
             await asyncio.to_thread(capture.start)
-            reader = asyncio.ensure_future(self._read_input(ws))
+            reader = asyncio.ensure_future(self._read_input(ws, region))
             while not ws.closed and not reader.done():
                 frame = await asyncio.to_thread(capture.next_frame, 1.0)
                 if frame is not None:
@@ -402,8 +443,10 @@ class Link:
                 self._media = media.MediaServer(
                     relay=self.relay, report=lambda what: self.audit.write("-", "screen-video", what))
             self._media.relay = self.relay
+            region = await asyncio.to_thread(machine.region, str(body["display"])) if body.get("display") else None
             started = await asyncio.wait_for(self._media.answer(
-                body.get("offer"), self.input.screen, str(body.get("preset", "medium")), body.get("sound") is not False), 30)
+                body.get("offer"), self.input.screen, str(body.get("preset", "medium")), body.get("sound") is not False,
+                region), 30)
         except ImportError:
             return json_error(503, "video is not installed on the computer (see docs/ADAPTIVE_LINK.md)")
         except (ValueError, asyncio.TimeoutError) as error:
@@ -425,7 +468,7 @@ class Link:
         await ws.prepare(request)
         self._track(ws)
         self.audit.write(request["peer"], "input")
-        await self._read_input(ws)
+        await self._read_input(ws, await self._region(request))
         return ws
 
     # ------------------------------------------------------------- commands
@@ -559,6 +602,8 @@ class Link:
 
     async def h_clipboard_set(self, request):
         data = await read_json(request)
+        if isinstance(data.get("text"), str):
+            self._clip_from_phone = data["text"]   # not to be told back to the phone as news
         return web.json_response({"ok": await asyncio.to_thread(desktop.clipboard_set, data.get("text"))})
 
     # -------------------------------------------------------- notifications
@@ -737,7 +782,11 @@ class Link:
     async def h_upload(self, request):
         if not self._allowed("allow_files"):
             return json_error(403, "file access is turned off on the computer")
-        target = desktop.upload_target(request.query.get("name"))
+        kind = request.query.get("to", "")
+        project = ""
+        if kind == "scans":
+            project = next((p["path"] for p in await asyncio.to_thread(system.projects) if p["active"]), "")
+        target = desktop.upload_target(request.query.get("name"), desktop.upload_folder(kind, project))
         target.parent.mkdir(parents=True, exist_ok=True)
         size = 0
         try:
@@ -778,9 +827,12 @@ class Link:
         out of reach misses nothing that is still remembered. Without a
         socket (?once=1) the same list comes back as one answer.
         """
-        wanted = set(request.query.get("kinds", "notification,alert").split(","))
-        if not self.config["send_notifications"]:
-            wanted.discard("notification")
+        def may(kind):
+            # Looked at each time, so a switch turned off takes effect on
+            # what is already being listened to.
+            return kind in EVENT_KINDS and (EVENT_KINDS[kind] is None or self._allowed(EVENT_KINDS[kind]))
+
+        wanted = {kind for kind in request.query.get("kinds", "notification,alert").split(",") if may(kind)}
         try:
             after = int(request.query.get("after", "0"))
         except ValueError:
@@ -791,7 +843,15 @@ class Link:
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=4 * 1024)
         await ws.prepare(request)
         self._track(ws)
-        queue = self.events.listen()
+        queue = self.events.listen(wanted)
+        # A phone that says it is here, and is on the computer's own network
+        # (not reaching in from elsewhere), counts as present.
+        caller = request["phone"]
+        present = request.query.get("present") == "1" and not identity.is_loopback(request["peer"])
+        if present:
+            self.presence.arrive(caller["fingerprint"], request["peer"])
+            if self.presence.locked_here:
+                asyncio.ensure_future(self._offer_unlock())
         try:
             for item in missed:
                 await ws.send_json(item)
@@ -803,12 +863,117 @@ class Link:
                     waiting.cancel()
                     break
                 item = waiting.result()
-                if item["kind"] in wanted and (item["kind"] != "notification" or self.config["send_notifications"]):
+                if may(item["kind"]):
                     await ws.send_json(item)
         except (ConnectionResetError, asyncio.CancelledError):
             pass
         finally:
             self.events.leave(queue)
+            if present:
+                self.presence.leave(caller["fingerprint"])
+        return ws
+
+    # ------------------------------------------ the phone and the computer
+
+    async def _phone_gone(self):
+        """No paired phone is on the network any more."""
+        if not self.config["proximity_lock"] or await asyncio.to_thread(desktop.locked):
+            return
+        if await asyncio.to_thread(desktop.power, "lock"):
+            self.presence.locked_here = True
+            self.audit.write("-", "locked", "the phone left the network")
+
+    async def _offer_unlock(self):
+        """The phone is back and the computer was locked for its leaving:
+        ask it, and unlock on its fingerprint."""
+        if not self.config["allow_power"]:
+            return
+        answer = await self.approvals.ask("unlock", f"Unlock {socket.gethostname()}?", self.phones)
+        if answer["ok"] and self.presence.locked_here:
+            self.presence.locked_here = False
+            await asyncio.to_thread(desktop.power, "unlock")
+            self.audit.write("-", "unlocked", "the phone came back and approved it")
+
+    async def h_approve(self, request):
+        if not self._allowed("allow_power"):
+            return json_error(403, "power actions are turned off on the computer")
+        data = await read_json(request)
+        taken = self.approvals.answer(data.get("ask"), data.get("ok") is True, data.get("signature", ""), request["phone"])
+        self.audit.write(request["peer"], "approval", "yes" if data.get("ok") is True else "no")
+        return web.json_response({"ok": taken})
+
+    async def h_phone_state(self, request):
+        kept = self.phonebook.set_state(request["phone"]["fingerprint"], await read_json(request))
+        return web.json_response({"ok": True, **kept})
+
+    async def h_phone_sms(self, request):
+        data = await read_json(request)
+        entry = self.phonebook.add_message(request["phone"]["name"], data.get("from"), data.get("name"), data.get("text"))
+        code = companion.find_code(entry["text"])
+        if code and self.config["sync_clipboard"]:
+            await asyncio.to_thread(desktop.clipboard_set, code)
+        note = entry["text"] + (f"\n\nThe code {code} is on the clipboard." if code and self.config["sync_clipboard"] else "")
+        await asyncio.to_thread(self.notifications.show, f"sms:{entry['from']}", "Messages",
+                                entry["name"] or entry["from"] or "Text message", note)
+        # Who wrote, not what: the message is the owner's, not the log's.
+        self.audit.write(request["peer"], "sms", entry["name"] or entry["from"])
+        return web.json_response({"ok": True, "code": code})
+
+    async def h_phone_call(self, request):
+        data = await read_json(request)
+        who = str(data.get("name") or data.get("from") or "Unknown caller")[:60]
+        if data.get("state") == "ringing":
+            await asyncio.to_thread(self.notifications.show, "call", "Phone", f"{who} is calling",
+                                    str(data.get("from") or "")[:40])
+            self.audit.write(request["peer"], "call", who)
+        else:
+            await asyncio.to_thread(self.notifications.dismiss, "call")
+        return web.json_response({"ok": True})
+
+    async def h_phone_sent(self, request):
+        data = await read_json(request)
+        waiting = self._texts.get(str(data.get("id")))
+        if waiting is not None and not waiting.done():
+            waiting.set_result(data.get("ok") is True)
+        return web.json_response({"ok": waiting is not None})
+
+    async def send_text(self, number, text):
+        """Ask a listening phone to send a text message. (done, what to say)."""
+        number, text = companion.clean_number(number), str(text or "").strip()[:1000]
+        if not number or not text:
+            return False, "a phone number and something to say"
+        if not self.events.listening("sms-send"):
+            return False, "no phone is listening (turn on calls and messages in the app)"
+        ident = companion.secrets.token_hex(6)
+        self._texts[ident] = asyncio.get_running_loop().create_future()
+        self.events.add("sms-send", "", keep=False, data={"send": ident, "to": number, "body": text})
+        try:
+            sent = await asyncio.wait_for(self._texts[ident], 30)
+        except asyncio.TimeoutError:
+            return False, "the phone did not answer"
+        finally:
+            self._texts.pop(ident, None)
+        self.audit.write("", "sms-sent" if sent else "sms-failed", number)
+        return sent, "Sent" if sent else "the phone could not send it"
+
+    async def h_mic(self, request):
+        """The phone's microphone: 16 kHz, 16-bit, one channel, as it comes."""
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=256 * 1024)
+        microphone = companion.Microphone()
+        if not await asyncio.to_thread(microphone.start):
+            await asyncio.to_thread(microphone.stop)
+            return json_error(503, "the computer has no sound server to give the microphone to")
+        await ws.prepare(request)
+        self._track(ws)
+        self.audit.write(request["peer"], "microphone")
+        try:
+            async for message in ws:
+                if message.type == WSMsgType.BINARY:
+                    microphone.push(message.data)
+        finally:
+            await asyncio.to_thread(microphone.stop)
         return ws
 
     # -------------------------------------------------------------- pairing
@@ -1306,7 +1471,9 @@ class Link:
             "phone": {"name": self.phone["name"], "paired_at": self.phone["paired_at"],
                       "fingerprint": self.phone["fingerprint"]} if self.phone else None,
             "phones": [{"name": phone["name"], "paired_at": phone["paired_at"], "fingerprint": phone["fingerprint"],
-                        "deny": phone["deny"]} for phone in self.phones],
+                        "deny": phone["deny"], "state": self.phonebook.state.get(phone["fingerprint"])}
+                       for phone in self.phones],
+            "present": self.presence.anyone,
             "addresses": [{"address": a, "kind": k} for a, k in addresses],
             "fingerprint": self.fingerprint,
             "viewing": self._sessions + (self._media.viewers if self._media is not None else 0),
@@ -1358,7 +1525,8 @@ class Link:
         async def configure(request):
             data = await read_json(request)
             for key in ("allow_input", "allow_exec", "allow_files", "allow_power", "allow_public", "notify_on_connect",
-                        "account_enroll", "auto_approve_account", "send_notifications"):
+                        "account_enroll", "auto_approve_account", "send_notifications", "sync_clipboard",
+                        "proximity_lock"):
                 if isinstance(data.get(key), bool):
                     self.config[key] = data[key]
             identity.save_config(self.config, self.link_dir)
@@ -1373,6 +1541,30 @@ class Link:
                 return web.json_response({"ok": done, "text": text, **await asyncio.to_thread(system.wake_state)})
             return web.json_response({"ok": True, "addresses": await asyncio.to_thread(system.wake_addresses),
                                       **await asyncio.to_thread(system.wake_state)})
+
+        async def approve(request):
+            # Something on this computer wants the phone's yes: sudo, by way
+            # of scripts/link-approve.py. The answer carries the phone's
+            # signature, which the asker checks for itself.
+            data = await read_json(request)
+            what = str(data.get("what", ""))[:20]
+            if what not in ("sudo", "unlock") or not self.config["allow_power"]:
+                return web.json_response({"ok": False, "why": "not something the phone is asked"})
+            answer = await self.approvals.ask(what, str(data.get("text", ""))[:200], self.phones, data.get("nonce", ""))
+            self.audit.write("", "approval-asked", f"{what}: {'yes' if answer['ok'] else answer.get('why', 'no')}")
+            return web.json_response(answer)
+
+        async def ring(_request):
+            heard = self.events.listening("ring")
+            self.events.add("ring", "", keep=False)
+            return web.json_response({"ok": heard})
+
+        async def sms(request):
+            data = await read_json(request)
+            if data.get("to"):
+                done, text = await self.send_text(data.get("to"), data.get("text"))
+                return web.json_response({"ok": done, "text": text})
+            return web.json_response({"ok": True, "messages": self.phonebook.messages})
 
         async def relay(request):
             data = await read_json(request)
@@ -1410,6 +1602,9 @@ class Link:
         app.router.add_get("/log", log)
         app.router.add_post("/wake", wake)
         app.router.add_post("/relay", relay)
+        app.router.add_post("/approve", approve)
+        app.router.add_post("/ring", ring)
+        app.router.add_post("/sms", sms)
         app.router.add_post("/cloud/setup", cloud_setup)
         app.router.add_post("/cloud/signin", cloud_signin)
         app.router.add_post("/cloud/signout", cloud_signout)

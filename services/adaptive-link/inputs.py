@@ -12,6 +12,7 @@ names. It has no side effects and is checked directly by verify-link.py.
     {"t": "double"}                        double click
     {"t": "scroll", "dx": 0, "dy": -2}     wheel steps
     {"t": "key", "k": "Right", "m": ["ctrl"]}
+    {"t": "keydown" | "keyup", "k": "w"}   a key held (a game pad's buttons)
     {"t": "text", "s": "hello"}            typed as it is
 
 X11 only (xdotool). docs/GNOME_PORT.md covers what Wayland would need.
@@ -83,7 +84,43 @@ def translate(event, screen):
             if modifier and modifier not in modifiers:
                 modifiers.append(modifier)
         return ["key --clearmodifiers " + "+".join(modifiers + [key])]
+    if kind in ("keydown", "keyup"):
+        key = event.get("k")
+        if not isinstance(key, str) or not _KEY.match(key):
+            return []
+        return [f"{kind} {key}"]
     return []
+
+
+def held_after(held, event):
+    """The keys and buttons held down once this event has been applied, so
+    that whatever is still down when the phone goes can be let go of."""
+    if not isinstance(event, dict):
+        return held
+    kind, key = event.get("t"), event.get("k")
+    if kind in ("keydown", "keyup") and isinstance(key, str) and _KEY.match(key):
+        return held | {f"key {key}"} if kind == "keydown" else held - {f"key {key}"}
+    if kind in ("down", "up"):
+        button = f"button {int(_number(event.get('b', 1), 1, 3, 1))}"
+        return held | {button} if kind == "down" else held - {button}
+    return held
+
+
+def release(held):
+    """The events that let go of everything in `held`."""
+    return [{"t": "keyup", "k": item.split()[1]} if item.startswith("key ") else {"t": "up", "b": int(item.split()[1])}
+            for item in sorted(held)]
+
+
+def in_region(event, region, screen):
+    """A pointer position given as a fraction of one display, as the same
+    place on the whole screen. Anything else is passed on as it is."""
+    if not region or not isinstance(event, dict) or event.get("t") != "move":
+        return event
+    x, y, width, height = region
+    whole_w, whole_h = max(screen[0], 1), max(screen[1], 1)
+    return dict(event, x=(x + _number(event.get("x"), 0, 1) * width) / whole_w,
+                y=(y + _number(event.get("y"), 0, 1) * height) / whole_h)
 
 
 def text_of(event):

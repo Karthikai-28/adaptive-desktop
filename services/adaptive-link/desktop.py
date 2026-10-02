@@ -151,6 +151,8 @@ def players():
             "status": info.get("PlaybackStatus", "Stopped"),
             "title": str(meta.get("xesam:title", "")),
             "artist": ", ".join(artist) if isinstance(artist, (list, tuple)) else str(artist),
+            # Where it is playing from, for carrying on with it on the phone.
+            "url": web_address(str(meta.get("xesam:url", ""))),
             "length": int(meta.get("mpris:length", 0)) // 1_000_000,
             "position": int(info.get("Position", 0)) // 1_000_000,
         })
@@ -328,6 +330,21 @@ def list_directory(path):
     entries.sort(key=lambda e: (not e["dir"], e["name"].startswith("."), e["name"].casefold()))
     parent = str(directory.parent) if directory.parent != directory else ""
     return {"path": str(directory), "parent": parent, "entries": entries}
+
+
+PHOTO_DIR = Path.home() / "Pictures" / "Phone"
+
+
+def upload_folder(kind, project_path=""):
+    """Where a kind of file from the phone goes: photos it copies over by
+    itself, pages it has scanned (into the active project, if there is one),
+    and everything else."""
+    if kind == "photos":
+        return PHOTO_DIR
+    if kind == "scans":
+        project = Path(project_path) if project_path else None
+        return (project if project and project.is_dir() else Path.home() / "Documents") / "Scans"
+    return UPLOAD_DIR
 
 
 def upload_target(name, directory=None):

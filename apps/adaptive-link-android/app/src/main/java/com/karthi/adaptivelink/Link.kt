@@ -21,6 +21,8 @@ object Link {
         // The same computer is the same certificate; its addresses may have
         // been updated since, and that is no reason for a new connection.
         cached?.let { if (it.computer.fingerprint == computer.fingerprint) return it }
+        // Another computer was chosen: let go of what led to the last one.
+        cached?.close()
         return LinkClient(context, computer).also { cached = it }
     }
 
@@ -45,13 +47,13 @@ class LinkState {
  * remote and the presenter all send through one of these. It opens on first
  * use and quietly reopens if the connection drops.
  */
-class InputSocket(private val client: LinkClient) {
+class InputSocket(private val client: LinkClient, private val path: String = "/v1/input") {
     @Volatile private var socket: WebSocket? = null
 
     @Synchronized
     private fun open(): WebSocket {
         socket?.let { return it }
-        val created = client.socket("/v1/input", object : WebSocketListener() {
+        val created = client.socket(path, object : WebSocketListener() {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (socket === webSocket) socket = null
             }

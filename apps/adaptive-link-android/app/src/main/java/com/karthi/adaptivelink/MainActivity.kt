@@ -11,7 +11,10 @@ import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -34,10 +37,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.launch
 
 enum class Page {
     Home, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
-    Bluetooth, DisplaySound, Services, Windows, More,
+    Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More,
 }
 
 /** Apple dark appearance with one accent, as on the desktop. */
@@ -98,6 +102,26 @@ class MainActivity : FragmentActivity() {
         awayOnPurpose = false
         stoppedAt = 0L
         if (!unlocked) unlock()
+    }
+
+    /**
+     * The clipboard, phone to computer. Android lets an app read it only
+     * while the app is in front, so this is when it is sent: on coming to
+     * the app, if it has changed and the owner has the clipboard shared.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        val store = Store(this)
+        if (!hasFocus || !unlocked || !store.syncClipboard) return
+        val text = runCatching {
+            getSystemService(android.content.ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
+        }.getOrNull().orEmpty()
+        if (text.isEmpty() || text == store.clipboardSeen || text.length > 20_000) return
+        store.clipboardSeen = text
+        val client = Link.client(this) ?: return
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            if (client.host != null || client.connect() != null) client.post("/v1/clipboard", org.json.JSONObject().put("text", text))
+        }
     }
 
     override fun onStop() {
@@ -191,37 +215,93 @@ private fun App(activity: MainActivity) {
 
     LaunchedEffect(computer) { LinkWidget.refresh(activity) }
 
+    // Pairing with another computer, beside the ones there already are.
+    var adding by remember { mutableStateOf(false) }
+
     val paired = computer
-    if (paired == null) {
-        PairScreen(activity) { computer = store.computer }
+    if (paired == null || adding) {
+        BackHandler(enabled = adding) { adding = false }
+        Column(Modifier.fillMaxSize().systemBarsPadding()) {
+            if (adding) TopBar("Pair another computer", onBack = { adding = false })
+            PairScreen(activity) {
+                adding = false
+                page = Page.Home
+                state.status = null
+                computer = store.computer
+                EventsService.sync(activity)
+            }
+        }
         return
     }
-    val client = remember(paired) { Link.client(activity)!! }
+    val client = remember(paired.fingerprint) { Link.client(activity)!! }
 
     BackHandler(enabled = page != Page.Home) { page = Page.Home }
 
-    Column(Modifier.fillMaxSize().systemBarsPadding()) {
-        when (page) {
-            Page.Home -> HomeScreen(client, state, onOpen = { page = it })
-            Page.Screen -> ScreenPage(client, store) { page = Page.Home }
-            Page.Trackpad -> TrackpadPage(client) { page = Page.Home }
-            Page.Media -> MediaPage(client) { page = Page.Home }
-            Page.Presenter -> PresenterPage(activity, client) { page = Page.Home }
-            Page.Run -> RunPage(client, store) { page = Page.Home }
-            Page.Files -> FilesPage(activity, client, folder) { folder = "~"; page = Page.Home }
-            Page.Tasks -> TasksPage(client) { page = Page.Home }
-            Page.Devices -> DevicesPage(client, onBack = { page = Page.Home }, onBrowse = { folder = it; page = Page.Files })
-            Page.Network -> NetworkPage(client) { page = Page.Home }
-            Page.Desktop -> DesktopPage(client) { page = Page.Home }
-            Page.Bluetooth -> BluetoothPage(client) { page = Page.Home }
-            Page.DisplaySound -> DisplaySoundPage(client) { page = Page.Home }
-            Page.Services -> ServicesPage(client) { page = Page.Home }
-            Page.Windows -> WindowsPage(client) { page = Page.Home }
-            Page.Camera -> CameraPage(activity, client) { page = Page.Home }
-            Page.More -> MorePage(activity, client, store, state, onBack = { page = Page.Home }, onUnpaired = {
-                computer = null
+    val home: @Composable () -> Unit = {
+        HomeScreen(client, state, onOpen = { page = it }, computers = store.computers, onAdd = { adding = true }, onSwitch = { chosen ->
+            store.switchTo(chosen.fingerprint)
+            state.status = null
+            page = Page.Home
+            computer = store.computer
+            // What listens in the background listens to the one chosen.
+            EventsService.sync(activity)
+        })
+    }
+
+    // On a tablet, or a phone unfolded: the list on one side, what was
+    // chosen from it on the other.
+    BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding()) {
+        if (maxWidth >= 840.dp) {
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.weight(0.38f).fillMaxHeight()) { home() }
+                Column(Modifier.weight(0.62f).fillMaxHeight()) {
+                    if (page == Page.Home) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Choose something on the left", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else Pages(activity, client, store, state, page, folder, { page = it }, { folder = it }) {
+                        computer = store.computer
+                        page = Page.Home
+                    }
+                }
+            }
+        } else Column(Modifier.fillMaxSize()) {
+            if (page == Page.Home) home()
+            else Pages(activity, client, store, state, page, folder, { page = it }, { folder = it }) {
+                computer = store.computer
                 page = Page.Home
-            })
+            }
+        }
+    }
+}
+
+/** The screen that was chosen from the home screen. */
+@Composable
+private fun Pages(
+    activity: MainActivity, client: LinkClient, store: Store, state: LinkState, page: Page, folder: String,
+    go: (Page) -> Unit, setFolder: (String) -> Unit, onUnpaired: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        when (page) {
+            Page.Home -> Unit
+            Page.Screen -> ScreenPage(client, store) { go(Page.Home) }
+            Page.Trackpad -> TrackpadPage(client) { go(Page.Home) }
+            Page.Media -> MediaPage(client) { go(Page.Home) }
+            Page.Presenter -> PresenterPage(activity, client) { go(Page.Home) }
+            Page.Run -> RunPage(client, store) { go(Page.Home) }
+            Page.Files -> FilesPage(activity, client, folder) { setFolder("~"); go(Page.Home) }
+            Page.Tasks -> TasksPage(client) { go(Page.Home) }
+            Page.Devices -> DevicesPage(client, onBack = { go(Page.Home) }, onBrowse = { setFolder(it); go(Page.Files) })
+            Page.Network -> NetworkPage(client) { go(Page.Home) }
+            Page.Desktop -> DesktopPage(client) { go(Page.Home) }
+            Page.Bluetooth -> BluetoothPage(client) { go(Page.Home) }
+            Page.DisplaySound -> DisplaySoundPage(client) { go(Page.Home) }
+            Page.Services -> ServicesPage(client) { go(Page.Home) }
+            Page.Windows -> WindowsPage(client) { go(Page.Home) }
+            Page.Controls -> ControlsPage(activity, client, store, onBack = { go(Page.Home) }, onGamepad = { go(Page.Gamepad) })
+            Page.Gamepad -> GamepadPage(client) { go(Page.Controls) }
+            Page.Scan -> ScanPage(activity, client) { go(Page.Home) }
+            Page.Camera -> CameraPage(activity, client) { go(Page.Home) }
+            Page.More -> MorePage(activity, client, store, state, onBack = { go(Page.Home) }, onUnpaired = onUnpaired)
         }
     }
 }

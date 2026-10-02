@@ -43,28 +43,39 @@ class Events:
         # Numbered from the clock, so numbers keep rising across a restart
         # and a phone never mistakes a new event for one it has seen.
         self._next = int(time.time() * 1000)
-        self._listeners = set()
+        self._listeners = {}   # queue -> the kinds it wants
 
-    def add(self, kind, title, text="", app=""):
+    def add(self, kind, title, text="", app="", keep=True, data=None):
+        """Say something to the phones. With keep=False it is for whoever is
+        listening now and is not remembered: a request to ring, the
+        clipboard, a question that will have been answered or given up on by
+        the time a phone that was away comes back."""
         item = {"id": self._next, "at": int(time.time()), "kind": kind,
                 "title": str(title)[:120], "text": str(text)[:600], "app": str(app)[:60]}
+        if data:
+            item.update(data)
         self._next += 1
-        self._items = (self._items + [item])[-self._limit:]
-        for queue in list(self._listeners):
-            if queue.qsize() < self._limit:
+        if keep:
+            self._items = (self._items + [item])[-self._limit:]
+        for queue, kinds in list(self._listeners.items()):
+            if kind in kinds and queue.qsize() < self._limit:
                 queue.put_nowait(item)
         return item
 
     def since(self, after):
         return [item for item in self._items if item["id"] > after]
 
-    def listen(self):
+    def listen(self, kinds=("notification", "alert")):
         queue = asyncio.Queue()
-        self._listeners.add(queue)
+        self._listeners[queue] = set(kinds)
         return queue
 
     def leave(self, queue):
-        self._listeners.discard(queue)
+        self._listeners.pop(queue, None)
+
+    def listening(self, kind):
+        """Whether any phone is connected now and wants this kind of thing."""
+        return any(kind in kinds for kinds in self._listeners.values())
 
 
 # ------------------------------------------------------------------ alerts

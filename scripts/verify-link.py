@@ -273,6 +273,105 @@ def pure_checks(check):
           "share: only a web address is opened, never a file, a script or an option")
 
     import alerts
+    import companion
+    check(companion.find_code("Your verification code is 482913. Do not share it.") == "482913"
+          and companion.find_code("G-739 201 is your Google verification code") == "739201"
+          and companion.find_code("Use OTP 4821 to sign in") == "4821"
+          and companion.find_code("Lunch at 1300? It cost 4500 last time") == ""
+          and companion.find_code("Your code: call 18005551234 for help") == ""
+          and companion.find_code("") == "" and companion.find_code(None) == "",
+          "texts: a one-time code is found in a message that speaks of one, and nowhere else")
+    check(companion.clean_number("+91 98765-43210") == "+919876543210" and companion.clean_number("(555) 010 9999") == "5550109999"
+          and not any(companion.clean_number(bad) for bad in ("12", "+1 555; rm -rf", "abc", "", None, "1" * 20)),
+          "texts: only a phone number is sent to")
+    from cryptography.hazmat.primitives import hashes as H, serialization as S
+    from cryptography.hazmat.primitives.asymmetric import ec as E
+    import base64
+    signer_key, signer_cert = I.make_certificate("Adaptive Link Phone")
+    other_key, _other_cert = I.make_certificate("Adaptive Link Phone")
+
+    def sign(key_pem, what, nonce):
+        key = S.load_pem_private_key(key_pem, None)
+        return base64.b64encode(key.sign(companion.approval_message(what, nonce), E.ECDSA(H.SHA256()))).decode()
+
+    check(companion.approved_by(signer_cert, "sudo", "ab" * 16, sign(signer_key, "sudo", "ab" * 16))
+          and not companion.approved_by(signer_cert, "sudo", "ab" * 16, sign(other_key, "sudo", "ab" * 16))
+          and not companion.approved_by(signer_cert, "sudo", "cd" * 16, sign(signer_key, "sudo", "ab" * 16))
+          and not companion.approved_by(signer_cert, "sudo", "ab" * 16, sign(signer_key, "unlock", "ab" * 16))
+          and not companion.approved_by(signer_cert, "sudo", "ab" * 16, "not a signature")
+          and not companion.approved_by(signer_cert, "sudo", "ab" * 16, ""),
+          "approvals: a yes counts only if the phone's own key signed this request and no other")
+    with tempfile.TemporaryDirectory() as folder:
+        # What sudo's helper does, as root would: its own check, with openssl.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("link_approve", REPO / "scripts/link-approve.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        public = subprocess.run(["openssl", "x509", "-pubkey", "-noout"], input=signer_cert, capture_output=True).stdout
+        (Path(folder) / "phone.pem").write_bytes(public)
+        check(helper.message("sudo", "ab" * 16) == companion.approval_message("sudo", "ab" * 16)
+              and helper.signed_by_a_phone(folder, "sudo", "ab" * 16, sign(signer_key, "sudo", "ab" * 16))
+              and not helper.signed_by_a_phone(folder, "sudo", "ab" * 16, sign(other_key, "sudo", "ab" * 16))
+              and not helper.signed_by_a_phone(folder, "sudo", "ff" * 16, sign(signer_key, "sudo", "ab" * 16))
+              and not helper.signed_by_a_phone(folder + "/none", "sudo", "ab" * 16, sign(signer_key, "sudo", "ab" * 16))
+              and not helper.signed_by_a_phone(folder, "sudo", "ab" * 16, "garbage"),
+              "approvals: sudo's helper checks the phone's signature for itself, against the keys only root can change")
+        pam = Path(folder) / "sudo"
+        pam.write_text("#%PAM-1.0\n\n@include common-auth\n@include common-account\n")
+        line = "auth sufficient pam_exec.so quiet /usr/local/lib/adaptive-link/link-approve"
+        subprocess.run(["sed", "-i", f"0,/^[^#]/s||{line}\\n&|", str(pam)], check=True)
+        check(pam.read_text() == f"#%PAM-1.0\n\n{line}\n@include common-auth\n@include common-account\n",
+              "approvals: the phone is asked before the password, and the password still follows")
+    events = alerts.Events()
+    waiting = events.listen({"ring"})
+    events.add("ring", "", keep=False)
+    events.add("alert", "kept")
+    check(waiting.qsize() == 1 and [item["kind"] for item in events.since(0)] == ["alert"]
+          and events.listening("ring") and not events.listening("clipboard"),
+          "events: something for whoever is listening now is not kept for later, and goes only to who asked for its kind")
+
+    async def presence():
+        gone = []
+
+        async def went():
+            gone.append(True)
+        here = companion.Presence(0.2, went, probe=lambda address: address == "asleep")
+        here.arrive("a", "away")
+        here.leave("a")
+        await asyncio.sleep(0.1)
+        here.arrive("a", "away")          # back within the grace period
+        await asyncio.sleep(0.3)
+        back_in_time = not gone
+        here.leave("a")
+        await asyncio.sleep(0.5)
+        left = list(gone)
+        here.arrive("b", "asleep")
+        here.leave("b")
+        await asyncio.sleep(0.5)
+        return back_in_time, left, len(gone)
+    check(asyncio.run(presence()) == (True, [True], 1),
+          "presence: a phone that comes straight back, or has only gone to sleep, has not left; one that is gone has")
+    check(inputs.translate({"t": "keydown", "k": "w"}, (100, 100)) == ["keydown w"]
+          and inputs.translate({"t": "keyup", "k": "w; reboot"}, (100, 100)) == []
+          and inputs.held_after(inputs.held_after(frozenset(), {"t": "keydown", "k": "w"}), {"t": "down", "b": 1}) == {"key w", "button 1"}
+          and inputs.held_after(frozenset({"key w"}), {"t": "keyup", "k": "w"}) == frozenset()
+          and inputs.release({"key w", "button 3"}) == [{"t": "up", "b": 3}, {"t": "keyup", "k": "w"}],
+          "input: a held key is pressed and let go, and whatever is still held can be let go of")
+    check(inputs.in_region({"t": "move", "x": 0.5, "y": 0.5}, (1920, 0, 1280, 800), (3200, 1200))
+          == {"t": "move", "x": 0.8, "y": 400 / 1200}
+          and inputs.in_region({"t": "click", "b": 1}, (1920, 0, 1280, 800), (3200, 1200)) == {"t": "click", "b": 1}
+          and inputs.in_region({"t": "move", "x": 0.5, "y": 0.5}, None, (3200, 1200)) == {"t": "move", "x": 0.5, "y": 0.5},
+          "input: a touch on one display lands on that display")
+    check("startx=1920 starty=0 endx=3199 endy=799" in screen.source((1920, 0, 1280, 800)) and "startx" not in screen.source()
+          and "width=960,height=600" in screen.pipeline_description(3200, 1200, "low", (1920, 0, 1280, 800)),
+          "screen: one display is captured at its own size")
+    check(desktop.upload_folder("photos") == Path.home() / "Pictures/Phone"
+          and desktop.upload_folder("scans", "/nonexistent/project") == Path.home() / "Documents/Scans"
+          and desktop.upload_folder("scans", tempfile.gettempdir()) == Path(tempfile.gettempdir()) / "Scans"
+          and desktop.upload_folder("../../etc") == desktop.UPLOAD_DIR,
+          "files: photos, scans and everything else each have their place, and nothing else can be named")
+
+    import alerts
     quiet = {"disks": [("/", 50 << 30, 100 << 30)], "memory": (8 << 30, 16 << 30),
              "battery": {"percent": 80, "charging": False}, "hottest": 50, "usb": {"1-1": "Mouse"}, "failed": []}
     state, said = alerts.decide(None, dict(quiet, disks=[("/", 1 << 30, 100 << 30)], failed=["old.service"]))
@@ -394,6 +493,7 @@ async def daemon_checks(sandbox, check):
     tools = sandbox / "tools"
     env.update(PATH=f"{fake_system_tools.install(tools / 'bin')}:{env['PATH']}", FAKE_TOOLS_DIR=str(tools),
                ADAPTIVE_LINK_KEEP_S="3", ADAPTIVE_LINK_ALERT_EVERY_S="1",
+               ADAPTIVE_LINK_PROXIMITY_S="2", ADAPTIVE_LINK_PROXIMITY_PROBE="0",
                # No sound server here, and none is to be started by asking for one.
                PULSE_SERVER="unix:/nonexistent/pulse")
     # Google, as far as these checks go (scripts/fake_cloud.py).
@@ -958,6 +1058,143 @@ async def daemon_checks(sandbox, check):
                   "events: the owner can keep the computer's notifications from the phone; alerts still come")
             control.call("POST", "/configure", {"send_notifications": True})
 
+            # ------------------------------ the phone and the computer as one
+            import base64
+            import companion
+            from cryptography.hazmat.primitives import hashes as H, serialization as S
+            from cryptography.hazmat.primitives.asymmetric import ec as E
+            _stranger_key, signer_cert = I.make_certificate("Adaptive Link Phone")
+
+            def signed(what, nonce):
+                key = S.load_pem_private_key(Path(phone_key).read_bytes(), None)
+                return base64.b64encode(key.sign(companion.approval_message(what, nonce), E.ECDSA(H.SHA256()))).decode()
+
+            def ask(path, body=None, timeout=45):
+                return asyncio.to_thread(control.call, "POST", path, body, timeout)
+
+            # The clipboard: off until the owner turns it on.
+            async with phone.ws_connect(f"{link_url}/v1/events?kinds=clipboard,ring") as listening:
+                await run("printf 'copied on the computer' | xclip -selection clipboard -i", detach=True)
+                check((await ask("/ring"))["ok"] and (await asyncio.wait_for(listening.receive_json(), 10))["kind"] == "ring",
+                      "phone: the computer makes a listening phone ring, and the clipboard is not told while that is off")
+            check(not (await ask("/ring"))["ok"], "phone: with no phone listening, the computer says so")
+            control.call("POST", "/configure", {"sync_clipboard": True})
+            async with phone.ws_connect(f"{link_url}/v1/events?kinds=clipboard") as listening:
+                await asyncio.sleep(2.5)   # what was there before the phone listened is not news
+                await change("/v1/clipboard", text="sent by the phone")
+                await asyncio.sleep(2.5)
+                await run("printf 'copied afterwards' | xclip -selection clipboard -i", detach=True)
+                heard = await asyncio.wait_for(listening.receive_json(), 10)
+                check(heard["kind"] == "clipboard" and heard["text"] == "copied afterwards",
+                      "clipboard: what is copied on the computer reaches the phone, and what the phone sent is not sent back")
+
+            # Texts and calls.
+            texted = await change("/v1/phone/sms", **{"from": "+15550100", "name": "Bank", "text": "Your login code is 771204."})
+            async with phone.get(f"{link_url}/v1/clipboard") as reply:
+                pasted = (await reply.json())["text"]
+            check(texted["code"] == "771204" and pasted == "771204"
+                  and control.call("POST", "/sms", {})["messages"][-1]["name"] == "Bank",
+                  "texts: a message from the phone is shown on the computer, and its code is ready to paste")
+            async with phone.get(f"{link_url}/v1/log") as reply:
+                written = json.dumps((await reply.json())["entries"][-8:])
+            check("771204" not in written and "Bank" in written, "texts: the record says who wrote, not what")
+            ringing = await change("/v1/phone/call", state="ringing", name="Ada", **{"from": "+15550111"})
+            check(ringing["ok"] and (await change("/v1/phone/call", state="ended"))["ok"], "calls: a call is shown, and cleared when it ends")
+            async with phone.ws_connect(f"{link_url}/v1/events?kinds=sms-send") as listening:
+                sending = asyncio.ensure_future(ask("/sms", {"to": "+1 555 0100", "text": "On my way"}))
+                order = await asyncio.wait_for(listening.receive_json(), 10)
+                await change("/v1/phone/sent", id=order["send"], ok=True)
+                sent = await sending
+                check(order["to"] == "+15550100" and order["body"] == "On my way" and sent["ok"],
+                      "texts: one written on the computer is sent by the phone")
+            refused = [await ask("/sms", {"to": "+1 555 0100", "text": "nobody listening"}),
+                       await ask("/sms", {"to": "not a number", "text": "x"})]
+            check(not any(r["ok"] for r in refused), "texts: not without a phone listening, nor to something that is not a number")
+
+            stated = await change("/v1/phone/state", battery=64, charging=True, signal=3, network="wifi")
+            check(stated["battery"] == 64 and control.status()["phones"][0]["state"]["signal"] == 3
+                  and (await change("/v1/phone/state", battery="lots", signal=99))["battery"] is None,
+                  "phone: its battery and signal are known to the computer")
+
+            # Approvals: the phone's fingerprint says yes, and signs for it.
+            check(not (await ask("/approve", {"what": "sudo", "text": "x"}))["ok"]
+                  and not (await ask("/approve", {"what": "format-disk", "text": "x"}))["ok"],
+                  "approvals: nothing is approved with no phone listening, and only what the phone is asked")
+            helper_env = dict(os.environ, LINK_SOCKET=str(Path(os.environ["XDG_RUNTIME_DIR"]) / "adaptive-link.sock"),
+                              LINK_APPROVERS=str(sandbox / "approvers"))
+            (sandbox / "approvers").mkdir()
+            (sandbox / "approvers/phone.pem").write_bytes(subprocess.run(
+                ["openssl", "x509", "-pubkey", "-noout", "-in", phone_crt], capture_output=True).stdout)
+
+            async def helper():
+                return await asyncio.to_thread(lambda: subprocess.run(
+                    [sys.executable, str(REPO / "scripts/link-approve.py")], env=helper_env, timeout=60).returncode)
+
+            async with phone.ws_connect(f"{link_url}/v1/events?kinds=approve") as listening:
+                asking = asyncio.ensure_future(helper())
+                question = await asyncio.wait_for(listening.receive_json(), 10)
+                answered = await change("/v1/approve", ask=question["ask"], ok=True, signature=signed("sudo", question["nonce"]))
+                check(question["title"] == "sudo" and "administrator rights" in question["text"] and answered["ok"]
+                      and await asking == 0, "approvals: sudo's helper asks the phone, and takes its signed yes")
+                asking = asyncio.ensure_future(helper())
+                question = await asyncio.wait_for(listening.receive_json(), 10)
+                await change("/v1/approve", ask=question["ask"], ok=True, signature=signed("unlock", question["nonce"]))
+                check(await asking == 1, "approvals: a yes signed for something else is not a yes")
+                asking = asyncio.ensure_future(helper())
+                question = await asyncio.wait_for(listening.receive_json(), 10)
+                await change("/v1/approve", ask=question["ask"], ok=False)
+                check(await asking == 1, "approvals: a no on the phone falls through to the password")
+                (sandbox / "approvers/phone.pem").write_bytes(subprocess.run(
+                    ["openssl", "x509", "-pubkey", "-noout"], input=signer_cert, capture_output=True).stdout)
+                asking = asyncio.ensure_future(helper())
+                question = await asyncio.wait_for(listening.receive_json(), 10)
+                await change("/v1/approve", ask=question["ask"], ok=True, signature=signed("sudo", question["nonce"]))
+                check(await asking == 1, "approvals: nor a yes from a phone whose key root was never given")
+
+            # Leaving and coming back. The phone has to be on the computer's
+            # own network to count as here, so it comes in by that address.
+            lan = control.status()["addresses"]
+            if lan:
+                near_url = f"https://{lan[0]['address']}:{PORT}"
+                control.call("POST", "/configure", {"proximity_lock": True})
+
+                def locks():
+                    return [call[1] for call in asked() if call[0] == "loginctl"]
+
+                async with phone.ws_connect(f"{near_url}/v1/events?kinds=approve&present=1"):
+                    await asyncio.sleep(0.5)
+                    here = control.status()["present"]
+                await asyncio.sleep(1)
+                async with phone.ws_connect(f"{near_url}/v1/events?kinds=approve&present=1"):
+                    await asyncio.sleep(3)
+                check(here and locks() == [], "presence: a phone that comes straight back does not lock the computer")
+                await asyncio.sleep(4)
+                check(locks() == ["lock-session"] and not control.status()["present"],
+                      "presence: the computer locks when the phone has left its network")
+                async with phone.ws_connect(f"{near_url}/v1/events?kinds=approve&present=1") as listening:
+                    question = await asyncio.wait_for(listening.receive_json(), 10)
+                    await change("/v1/approve", ask=question["ask"], ok=True, signature=signed("unlock", question["nonce"]))
+                    await asyncio.sleep(1)
+                    check(question["title"] == "unlock" and locks() == ["lock-session", "unlock-session"],
+                          "presence: when it comes back it is asked, and its fingerprint unlocks the computer")
+                control.call("POST", "/configure", {"proximity_lock": False})
+            control.call("POST", "/configure", {"sync_clipboard": False})
+
+            # The microphone, held keys, one display, and where files go.
+            async with phone.get(f"{link_url}/v1/mic") as reply:
+                check(reply.status == 503, "microphone: says so when the computer has no sound server to give it to")
+            shown = (await read("display"))["outputs"][0]
+            async with phone.ws_connect(f"{link_url}/v1/screen?preset=low&display={shown['name']}") as ws:
+                message = await asyncio.wait_for(ws.receive(), 15)
+                check(len(shown["at"]) == 4 and message.type == aiohttp.WSMsgType.BINARY and message.data.startswith(b"\xff\xd8"),
+                      "screen: one display can be asked for by name")
+            async with phone.post(f"{link_url}/v1/upload?name=holiday.jpg&to=photos", data=b"photo") as reply:
+                where = (await reply.json())["path"]
+            async with phone.post(f"{link_url}/v1/upload?name=page.pdf&to=scans", data=b"scan") as reply:
+                scanned = (await reply.json())["path"]
+            check(where == str(home / "Pictures/Phone/holiday.jpg") and scanned == str(home / "Documents/Scans/page.pdf"),
+                  "files: the phone's photos and its scans each arrive in their own folder")
+
             async with phone.get(f"{link_url}/v1/desktop") as reply:
                 check(isinstance((await reply.json())["projects"], list), "desktop: the projects are listed (none here)")
             async with phone.post(f"{link_url}/v1/desktop", json={"action": "note", "value": "from the\nphone"}) as reply:
@@ -991,9 +1228,12 @@ async def daemon_checks(sandbox, check):
 
             # -------------------------------------------------------------- audit
             async with phone.get(f"{link_url}/v1/log") as reply:
-                actions = [entry["action"] for entry in (await reply.json())["entries"]]
-            check(all(a in actions for a in ("paired", "connected", "screen", "exec", "upload", "download", "refused")
-                      if a != "refused") and "exec" in actions,
+                recent = [entry["action"] for entry in (await reply.json())["entries"]]
+            # The phone is shown the latest hundred; the record itself holds all of it.
+            record = home / ".local/state/adaptive-desktop/link.log"
+            actions = [json.loads(line)["action"] for line in record.read_text().splitlines()]
+            check(all(a in actions for a in ("paired", "connected", "screen", "exec", "upload", "download"))
+                  and 0 < len(recent) <= 100 and recent == actions[-len(recent):],
                   "audit: what the phone did is on record")
             check(stat.S_IMODE((home / ".local/state/adaptive-desktop/link.log").stat().st_mode) == 0o600,
                   "audit: the record is private")

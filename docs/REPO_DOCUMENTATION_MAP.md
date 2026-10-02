@@ -37,6 +37,7 @@ adaptive-desktop/
 - `DESIGN_SYSTEM.md` — colors, spacing, typography, icons, motion, consistency.
 - `IMPLEMENTATION_GUIDE.md` — safe development workflow.
 - `BACKLOG.md` — current implementation status and remaining work.
+- `SUPERPOWERS.md` — where it goes after the features: one way in, anticipation, zero setup, measured smoothness, workarounds that need no one.
 
 ## Install into the repo
 

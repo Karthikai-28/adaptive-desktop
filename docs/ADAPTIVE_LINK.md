@@ -289,12 +289,12 @@ on the local network only and the screen is sent a picture at a time.
 | In the app | On the computer |
 | --- | --- |
 | Screen | The screen as video with the computer's sound (three qualities), or a picture at a time where video cannot be had; tap to click, drag to drag, long-press for right-click, pinch to zoom, a scroll mode, a keyboard |
-| Trackpad | Relative pointer, a scroll strip, both buttons, a keyboard with the keys a phone lacks |
-| Media | Whatever is playing (MPRIS): play, pause, next, previous, seek, volume |
+| Trackpad | Relative pointer, a scroll strip, both buttons, a keyboard with the keys a phone lacks; *Air* aims the phone like a pointer; the microphone on the keyboard types what you say |
+| Media | Whatever is playing (MPRIS): play, pause, next, previous, seek, volume; what is playing from the web can be carried on with on the phone |
 | Presenter | Next and previous slide (also on the phone's volume buttons), start, blank, end, a timer |
 | Run | A command, with its output; or started and left running (a player, an app). Commands you run often are kept as buttons |
 | Files | Browse, open a file on the computer (play a movie), download to the phone, send a file to `~/Downloads/Phone` |
-| Webcam | The phone's camera as "Phone Camera" in any app that takes a webcam |
+| Webcam | The phone's camera as "Phone Camera" in any app that takes a webcam, and its microphone as "Phone Microphone" |
 | Tasks | Load, memory and disks, the battery (time left, wear), temperatures and fans, the power profile; the processes, found by name; pause, resume, end or kill one of yours, alone or with everything it started; make it less important |
 | Devices | What is plugged in over USB, each switched off and on (as if unplugged); the drives: browse, mount, unmount, safely remove |
 | Network | Each connection with its addresses and its speed; Wi-Fi on and off, the networks in range and joining one (with its password if it is new), connecting and disconnecting, VPNs up and down |
@@ -303,6 +303,8 @@ on the local network only and the screen is sent a picture at a time.
 | Display | Brightness; each display on or off, its size, which is the main one. Where sound comes out and which microphone is used, the volume of each, mute |
 | Bluetooth | On and off; the devices the computer knows, each connected and disconnected |
 | Services | Your own services (systemd, `--user`): start, stop, restart, and what each last wrote |
+| Controls | A page of buttons of your own: a command, keys to press, text to type, or lock, play and focus. A game pad (a stick and buttons that hold keys down). Any button can be written to an NFC tag |
+| Scan | Photograph a page, drag its corners, and it arrives straightened as a PDF in the active project's `Scans` folder |
 | More | Clipboard both ways, lock, unlock, screen off, suspend, restart, shut down, the phone's notifications on the computer, the computer's alerts and notifications on the phone, unpair |
 
 And without opening the app:
@@ -342,6 +344,59 @@ and a keyboard can type a command into a terminal or open a file, whatever
 `input` off as well. The clipboard, media controls and the phone's
 notifications are always available to the paired phone.
 
+### The phone and the computer together
+
+Each of these is a switch in the app's More screen, off until you turn it on;
+some need a switch on the computer as well. The phone keeps a connection open
+for them and says so in its notification shade.
+
+- **Clipboard.** `link-cli.py allow clipboard on`, and the switch in the app.
+  What is copied on the computer reaches the phone as it is copied. The other
+  way is limited by Android, which lets an app read the clipboard only while
+  it is in front: what you copy on the phone goes over when you next open the
+  app. A clipboard holds passwords; that is why both ends have to agree.
+- **Find this phone.** `link-cli.py ring` makes it ring at full volume,
+  whatever it is set to, for up to a minute.
+- **Approve with the phone's fingerprint.** The computer asks, the phone
+  shows what is asked, you answer with your fingerprint or screen lock, and
+  the yes is signed by the key in the phone's secure hardware over that one
+  request. Two things use it:
+  - *Unlocking*, when the phone comes back (below).
+  - *sudo*, if you install it: `scripts/install-link-sudo.sh` (asks for sudo
+    itself). sudo then asks the phone first and the password after. The
+    program sudo runs is root's own copy, and it checks the phone's signature
+    for itself against public keys kept where only root can change them - so
+    a program running as you can make the phone ask (you will see a question
+    you did not expect, and should refuse it) but cannot make up the answer.
+    Understand what it changes before installing it: anyone who can unlock
+    your phone and reach this computer can then become root here.
+    `--remove` takes it out.
+- **Lock when the phone leaves.** `link-cli.py allow proximity on`, and the
+  switch in the app. The phone counts as here while it is connected from the
+  computer's own network. When that connection ends the computer waits a
+  minute and asks the network whether the phone still answers (a phone that
+  has gone to sleep drops its connection but has not left); if not, it locks.
+  When the phone returns it is asked, and your fingerprint unlocks the
+  computer.
+- **Calls and text messages.** A call shows on the computer while it rings; a
+  text shows with who sent it, and a one-time code in it is put on the
+  computer's clipboard if the clipboard is shared. `link-cli.py sms` lists the
+  recent ones and `link-cli.py sms NUMBER TEXT` sends one from the phone. The
+  record keeps who wrote, never what. Android asks for the SMS and phone
+  permissions when you turn this on.
+- **Photos.** New photos are copied to `~/Pictures/Phone` when the phone
+  reaches the computer on its own network - from the day you turn it on, not
+  the whole camera roll.
+- **The phone's battery and signal** are in `link-cli.py status`.
+- **Buttons on a notification** (lock, play/pause, next): a watch paired with
+  the phone shows them too, which makes it a remote. There is no separate
+  watch app.
+
+Several computers can be paired with one phone (the computer icon on the home
+screen); what listens in the background listens to the one chosen. On a
+tablet, or a phone unfolded, the list and what was chosen from it sit side by
+side.
+
 ### The screen as video
 
 The screen used to be sent as one JPEG after another, each whole. It is now
@@ -351,6 +406,12 @@ only what changed - and what the computer is playing goes with it as Opus.
 The offer and the answer travel over the link, so only a paired device can
 set it up, and the media is encrypted between the two with keys agreed in
 that exchange. Pointer and keyboard keep their own socket.
+
+The screen's menu can also show one display instead of all of them, and
+*Use this phone as another display* asks the computer to turn on an output
+with nothing plugged into it, at the phone's size, to the right of the main
+one - which then is that display. It needs such an output, and a driver that
+will light one with nothing attached; where there is none the app says so.
 
 If the two cannot make that connection the app says so and falls back to
 JPEG frames by itself; *Video: off* in the screen's menu chooses that
@@ -410,8 +471,10 @@ data, the camera, and everything that was checked only against a stand-in:
 the real NetworkManager and UDisks (turning Wi-Fi off and having it come
 back, joining a network with its password, removing a real drive), real
 Bluetooth, displays and sound devices, waking the computer from sleep, the
-computer's sound on the phone, a relay, and the widget and tiles on a real
-home screen.
+computer's sound on the phone, a relay, the widget and tiles on a real home
+screen, and what needs hardware an emulator has not got: NFC tags, the
+gyroscope, speech, a watch, the phone as another display, and sudo through
+PAM.
 
 ## Known limits
 

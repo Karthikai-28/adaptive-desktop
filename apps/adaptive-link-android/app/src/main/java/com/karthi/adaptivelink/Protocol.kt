@@ -55,6 +55,35 @@ data class Computer(
     }
 }
 
+/** The computers a phone is paired with: kept as a list, with one of them the one being talked to. */
+object Computers {
+    const val LIMIT = 8
+
+    fun toJson(computers: List<Computer>): String = JSONArray(computers.take(LIMIT).map { JSONObject(it.toJson()) }).toString()
+
+    fun fromJson(text: String?): List<Computer>? = runCatching {
+        val array = JSONArray(text ?: return null)
+        List(array.length()) { array.getJSONObject(it).toString() }.mapNotNull { Computer.fromJson(it) }
+            .distinctBy { it.fingerprint }.take(LIMIT)
+    }.getOrNull()
+
+    fun current(computers: List<Computer>, fingerprint: String?): Computer? =
+        computers.firstOrNull { it.fingerprint == fingerprint } ?: computers.firstOrNull()
+
+    /**
+     * The list, and which is talked to, after `value` is stored while
+     * `talkingTo` is the current one. A known computer is brought up to date
+     * and nothing else changes; a new one is added and becomes current;
+     * nothing (null) forgets the current one.
+     */
+    fun after(computers: List<Computer>, talkingTo: String?, value: Computer?): Pair<List<Computer>, String?> = when {
+        value == null -> computers.filter { it.fingerprint != talkingTo }.let { it to it.firstOrNull()?.fingerprint }
+        computers.any { it.fingerprint == value.fingerprint } ->
+            computers.map { if (it.fingerprint == value.fingerprint) value else it } to talkingTo
+        else -> (computers + value).takeLast(LIMIT) to value.fingerprint
+    }
+}
+
 /** What a scanned pairing code holds: the computer, and the one-time token. */
 data class PairingOffer(val computer: Computer, val token: String) {
     companion object {
@@ -88,6 +117,26 @@ data class Relay(val url: String, val username: String, val credential: String) 
             require(Regex("^turns?:[A-Za-z0-9.\\-:\\[\\]?=_]{1,190}$").matches(url))
             Relay(url, json.optString("username").take(200), json.optString("credential").take(200))
         }.getOrNull()
+    }
+}
+
+/** A button the owner has put on their own page of controls. */
+data class Control(val label: String, val kind: String, val value: String) {
+    companion object {
+        const val LIMIT = 40
+        /** What a button can do: run a command, press keys, type text, or one of the one-tap actions. */
+        val KINDS = listOf("command", "keys", "text", "action")
+
+        fun listToJson(controls: List<Control>): String = JSONArray(controls.take(LIMIT).map {
+            JSONObject().put("l", it.label).put("k", it.kind).put("v", it.value)
+        }).toString()
+
+        fun listFromJson(text: String): List<Control> = runCatching {
+            val array = JSONArray(text)
+            List(array.length()) { array.getJSONObject(it) }
+                .map { Control(it.getString("l").trim().take(24), it.getString("k"), it.getString("v").take(8000)) }
+                .filter { it.label.isNotBlank() && it.value.isNotBlank() && it.kind in KINDS }.take(LIMIT)
+        }.getOrDefault(emptyList())
     }
 }
 
@@ -140,6 +189,40 @@ object Protocol {
     fun key(name: String, vararg modifiers: String) =
         JSONObject().put("t", "key").put("k", name).put("m", JSONArray(modifiers.toList())).toString()
     fun text(value: String) = JSONObject().put("t", "text").put("s", value).toString()
+    /** A key held down, or let go: a game pad's buttons. */
+    fun hold(name: String, down: Boolean) = JSONObject().put("t", if (down) "keydown" else "keyup").put("k", name).toString()
+
+    /**
+     * A key with its modifiers as the owner writes it - "ctrl+alt+t", "F5",
+     * "super" - as the event that presses it, or null if it is not one.
+     */
+    fun keys(written: String): String? {
+        // "ctrl+" names no key: something was left unfinished.
+        if (written.trim().endsWith("+")) return null
+        val parts = written.trim().split('+').map { it.trim() }.filter { it.isNotEmpty() }
+        val name = parts.lastOrNull() ?: return null
+        val modifiers = parts.dropLast(1).map { it.lowercase() }
+        if (!Regex("^[A-Za-z0-9_]{1,40}$").matches(name) || modifiers.any { it !in listOf("ctrl", "shift", "alt", "super") }) return null
+        val key = when (name.lowercase()) {
+            "enter" -> "Return"; "esc" -> "Escape"; "space" -> "space"; "tab" -> "Tab"; "super" -> "Super_L"
+            "ctrl" -> "Control_L"; "shift" -> "Shift_L"; "alt" -> "Alt_L"
+            "del" -> "Delete"; "backspace" -> "BackSpace"; "up" -> "Up"; "down" -> "Down"; "left" -> "Left"; "right" -> "Right"
+            else -> name
+        }
+        return key(key, *modifiers.toTypedArray())
+    }
+
+    /**
+     * Which of four keys a stick pushed to (x, y) holds down, each from -1
+     * to 1: none near the middle, two on a diagonal.
+     */
+    fun stickKeys(x: Float, y: Float, up: String, down: String, left: String, right: String, dead: Float = 0.35f): Set<String> =
+        buildSet {
+            if (y < -dead) add(up)
+            if (y > dead) add(down)
+            if (x < -dead) add(left)
+            if (x > dead) add(right)
+        }
 
     fun formatSize(bytes: Long): String = when {
         bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
@@ -151,6 +234,36 @@ object Protocol {
     /** A speed from two readings of a byte count taken `seconds` apart. */
     fun formatRate(before: Long, after: Long, seconds: Double): String =
         if (seconds <= 0 || after < before) "0 B/s" else formatSize(((after - before) / seconds).toLong()) + "/s"
+
+    /**
+     * How large a page marked by four corners (top-left, top-right,
+     * bottom-right, bottom-left, in pixels) comes out when pulled straight:
+     * as wide as its wider edge and as tall as its taller one, and no
+     * larger than `longest` on its longer side.
+     */
+    fun pageSize(corners: List<Pair<Float, Float>>, longest: Int): Pair<Int, Int> {
+        fun between(a: Pair<Float, Float>, b: Pair<Float, Float>) =
+            Math.hypot((a.first - b.first).toDouble(), (a.second - b.second).toDouble())
+        val width = maxOf(between(corners[0], corners[1]), between(corners[3], corners[2]))
+        val height = maxOf(between(corners[0], corners[3]), between(corners[1], corners[2]))
+        val scale = minOf(1.0, longest / maxOf(width, height, 1.0))
+        return maxOf(1, (width * scale).toInt()) to maxOf(1, (height * scale).toInt())
+    }
+
+    /**
+     * Where to carry on with what the computer is playing: its address, at
+     * the second it has reached where the site takes one (YouTube does).
+     */
+    fun handoffAddress(url: String, position: Int): String? {
+        if (!Regex("^https?://[^\\s/]+\\S*$", RegexOption.IGNORE_CASE).matches(url)) return null
+        val host = url.substringAfter("://").substringBefore('/').lowercase()
+        if (position <= 0 || !(host.endsWith("youtube.com") || host.endsWith("youtu.be"))) return url
+        val bare = url.replace(Regex("([?&])t=[^&#]*&?"), "$1").trimEnd('?', '&')
+        return bare + (if ('?' in bare) "&" else "?") + "t=${position}s"
+    }
+
+    /** What the phone signs to approve something on the computer: this request and no other. */
+    fun approvalMessage(what: String, nonce: String): ByteArray = "adaptive-link approve\n$what\n$nonce".toByteArray()
 
     /**
      * The packet that wakes a sleeping computer: six bytes of 0xFF, then its

@@ -309,7 +309,11 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(not has("Connecting") and not has("could not be started")
          and "video connected" in audited("screen-video"), "screen: the picture arrives, as video")
     tap("Picture and sound", wait=1.5)
-    step(has("Low quality", "High quality") and has("Video: on", "Sound: on"), "screen: quality, video and sound are chosen in one place")
+    step(has("Low quality", "High quality") and has("Video: on", "Sound: on") and has("Use this phone as another display"),
+         "screen: quality, video, sound and which display are chosen in one place")
+    tap("Use this phone as another display", wait=5)
+    step(has("no spare display output"), "screen: says so when the computer has no output to make another display of")
+    tap("Picture and sound", wait=1.5)
     tap("Low quality", wait=3)
     for _ in range(10):
         if not has("Connecting"):
@@ -511,6 +515,13 @@ def screens(check, adb, device, control, build_env, sandbox):
          "webcam: the camera opens, and says so if the computer has no virtual camera")
     tap("Switch camera", wait=3)
     step(has("Webcam"), "webcam: switching cameras")
+    sh("shell", "pm", "grant", "com.karthi.adaptivelink", "android.permission.RECORD_AUDIO")
+    for label, _x, y in nodes():
+        if label.startswith("This phone's microphone as well"):
+            sh("shell", "input", "tap", "980", str(y))
+            break
+    time.sleep(4)
+    step(has("no sound server"), "microphone: offered, and says so when the computer has nowhere to give it")
     home()
 
     # ------------------------------------------------------------- share
@@ -547,8 +558,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     tap("Suspend", wait=1.5)
     step(has("Cancel", "Yes"), "more: suspend asks first")
     tap("Cancel", wait=1)
-    sh("shell", "input", "swipe", "540", "1500", "540", "600", "300")
-    time.sleep(1)
+    reach("Show them on the computer")
     # The switch sits at the right-hand end of its label's row.
     for label, _x, y in nodes():
         if label == "Show them on the computer":
@@ -580,6 +590,130 @@ def screens(check, adb, device, control, build_env, sandbox):
         time.sleep(2)
     step("A service has failed" in sh("shell", "dumpsys", "notification", "--noredact"),
          "alerts: something going wrong on the computer is shown on the phone")
+
+    # ------------------------------- the phone and the computer together
+    def switch(label):
+        """Flip the switch at the end of a row in More, found by how its label starts."""
+        reach(label)
+        for found, _x, y in nodes():
+            if found.startswith(label):
+                sh("shell", "input", "tap", "980", str(y))
+                time.sleep(2)
+                return True
+        return False
+
+    def notified(text):
+        return text in sh("shell", "dumpsys", "notification", "--noredact")
+
+    def until(done, seconds=20):
+        for _ in range(seconds):
+            if done():
+                return True
+            time.sleep(1)
+        return done()
+
+    switch("Find this phone")
+    time.sleep(5)
+    rang = control.call("POST", "/ring")["ok"]
+    step(rang and until(lambda: notified("is looking for this phone")), "find: the computer makes the phone ring")
+    step(until(lambda: (control.status()["phones"][-1].get("state") or {}).get("battery") is not None),
+         "phone: its battery is known to the computer")
+
+    # Approving sudo: the helper, as root would run it, with root's copy of this phone's key.
+    control.call("POST", "/configure", {"allow_power": True})   # the lock, the suspend and the rest are stand-ins here
+    switch("Approve with this phone")
+    time.sleep(5)
+    paired = json.loads((sandbox / "home/.config/adaptive-desktop/link/phones.json").read_text())["phones"]
+    keys = sandbox / "approvers"
+    keys.mkdir()
+    (keys / "phone.pem").write_bytes(subprocess.run(["openssl", "x509", "-pubkey", "-noout"],
+                                                    input=paired[-1]["cert_pem"].encode(), capture_output=True).stdout)
+    helper = subprocess.Popen([sys.executable, str(REPO / "scripts/link-approve.py")],
+                              env=dict(os.environ, LINK_SOCKET=str(sandbox / "run/adaptive-link.sock"), LINK_APPROVERS=str(keys)))
+    asked = until(lambda: notified("Allow administrator rights"))
+    sh("shell", "cmd", "statusbar", "expand-notifications")
+    time.sleep(2)
+    tap("Allow administrator rights on", exact=False, wait=4)
+    step(asked and has("Approve", "Refuse") and has("Say yes only if you asked"), "approvals: sudo's question is put to the owner on the phone")
+    tap("Approve", wait=3)
+    sh("shell", "input", "text", PIN)
+    sh("shell", "input", "keyevent", "KEYCODE_ENTER")
+    try:
+        verdict = helper.wait(timeout=45)
+    except subprocess.TimeoutExpired:
+        helper.kill()
+        verdict = None
+    step(verdict == 0, f"approvals: the owner's screen lock, then the phone's signature, is what sudo's helper accepts ({verdict})")
+    control.call("POST", "/configure", {"allow_power": False})
+    sh("shell", "cmd", "statusbar", "collapse")
+    time.sleep(2)
+
+    # Texts and calls, with the emulator's own telephone.
+    for permission in ("RECEIVE_SMS", "SEND_SMS", "READ_PHONE_STATE", "READ_CALL_LOG"):
+        sh("shell", "pm", "grant", "com.karthi.adaptivelink", f"android.permission.{permission}")
+    home()
+    reach("More")
+    tap("More", wait=2)
+    switch("Calls and text messages")
+    time.sleep(5)
+    sh("emu", "sms", "send", "5550100", "Your login code is 482913")
+    step(until(lambda: any("482913" in m["text"] for m in control.call("POST", "/sms", {})["messages"])),
+         "texts: a message arriving on the phone is shown on the computer")
+    sent = control.call("POST", "/sms", {"to": "5550123", "text": "On my way"}, 45)
+    step(sent["ok"], f"texts: one written on the computer is sent by the phone ({sent.get('text')})")
+    sh("emu", "gsm", "call", "5550111")
+    step(until(lambda: "call" in [e["action"] for e in control.call("GET", "/log")["entries"]]),
+         "calls: a call to the phone is shown on the computer")
+    sh("emu", "gsm", "cancel", "5550111")
+
+    # ------------------------------------------------ the owner's own buttons
+    home()
+    reach("Services")
+    tap("Controls", wait=3)
+    step(has("A page of buttons of your own"), "controls: an empty page says what it is for")
+    tap("Add a button", wait=1.5)
+    for field, text in (("What the button says", "Quiet"),):
+        tap(field, wait=1)
+        sh("shell", "input", "text", text)
+    tap("Action", wait=1)
+    tap("lock, play-pause, next, mute or focus", wait=1)
+    sh("shell", "input", "text", "mute")
+    sh("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(1)
+    tap("Add", wait=2)
+    before = machine_now()["muted"]
+    tap("Quiet", wait=5)
+    step(machine_now()["muted"] != before, "controls: a button of the owner's own does what it was made for")
+    sh("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "adaptivelink://do/mute")
+    step(until(lambda: machine_now()["muted"] == before, 12), "tags: a tag, or a link, for a one-tap action does it")
+    sh("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "'adaptivelink://do/control/Quiet?k=wrong'")
+    time.sleep(6)
+    step(machine_now()["muted"] == before, "tags: one of the owner's buttons is pressed only by a tag this phone wrote")
+    tap("Game pad", wait=2)
+    step(has("WASD", "Arrows") and has("A", "B"), "game pad: a stick and buttons that hold keys down")
+    home()
+
+    # ------------------------------------------------------------- scan
+    reach("Services")
+    tap("Scan", wait=3)
+    allow_permission()
+    time.sleep(4)
+    tap("Photograph the page", wait=8)
+    step(has("Use this page", "Take it again") and has("Drag the corners"), "scan: a page is photographed, and its corners can be set")
+    tap("Use this page", wait=2)
+    tap("Send as PDF", wait=10)
+    scans = list((sandbox / "home/Documents/Scans").glob("*.pdf"))
+    step(len(scans) == 1 and scans[0].read_bytes().startswith(b"%PDF") and has("On the computer"),
+         "scan: the pages arrive on the computer as one PDF")
+    home()
+
+    # ----------------------------------------------- more than one computer
+    tap("Computers", wait=1.5)
+    step(has("Pair another computer"), "computers: the ones paired, and pairing another")
+    tap("Pair another computer", wait=3)
+    step(has("Pair another computer") and (has("airing code") or has("Sign in with Google")),
+         "computers: pairing another opens beside the one there already is")
+    back(2)
     home()
     reach("More")
     tap("More", wait=2)

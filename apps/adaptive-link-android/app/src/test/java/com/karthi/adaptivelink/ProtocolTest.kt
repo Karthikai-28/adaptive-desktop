@@ -174,4 +174,71 @@ class ProtocolTest {
         assertNull(Relay.fromJson("""{"url":"turn:host and more"}"""))
         assertNull(Relay.fromJson("""{"username":"me"}"""))
     }
+
+    @Test
+    fun severalComputersAndTheOneTalkedTo() {
+        val a = Computer("a", listOf("10.0.0.1"), 47823, 47824, "aa".repeat(32))
+        val b = Computer("b", listOf("10.0.0.2"), 47823, 47824, "bb".repeat(32))
+        // The first paired is the one talked to; a second becomes it.
+        assertEquals(listOf(a) to a.fingerprint, Computers.after(emptyList(), null, a))
+        assertEquals(listOf(a, b) to b.fingerprint, Computers.after(listOf(a), a.fingerprint, b))
+        // What is learnt of one that is not being talked to does not change which is.
+        val moved = a.copy(hosts = listOf("10.0.0.9"))
+        assertEquals(listOf(moved, b) to b.fingerprint, Computers.after(listOf(a, b), b.fingerprint, moved))
+        // Forgetting the one talked to moves to another; forgetting the last leaves none.
+        assertEquals(listOf(a) to a.fingerprint, Computers.after(listOf(a, b), b.fingerprint, null))
+        assertEquals(emptyList<Computer>() to null, Computers.after(listOf(a), a.fingerprint, null))
+        assertEquals(listOf(a, b), Computers.fromJson(Computers.toJson(listOf(a, b))))
+        assertEquals(b, Computers.current(listOf(a, b), b.fingerprint))
+        assertEquals(a, Computers.current(listOf(a, b), "gone"))
+        assertNull(Computers.fromJson(null))
+    }
+
+    @Test
+    fun theOwnersButtons() {
+        val controls = listOf(Control("Backup", "command", "rsync -a ~/work /mnt"), Control("Terminal", "keys", "ctrl+alt+t"))
+        assertEquals(controls, Control.listFromJson(Control.listToJson(controls)))
+        assertEquals(0, Control.listFromJson("""[{"l":"x","k":"format-disk","v":"y"},{"l":"","k":"keys","v":"a"}]""").size)
+        assertEquals(Protocol.key("t", "ctrl", "alt"), Protocol.keys("Ctrl+Alt+t"))
+        assertEquals(Protocol.key("Return"), Protocol.keys("enter"))
+        assertEquals(Protocol.key("F5"), Protocol.keys(" F5 "))
+        assertNull(Protocol.keys("ctrl+"))
+        assertNull(Protocol.keys("hyper+a"))
+        assertNull(Protocol.keys("a; reboot"))
+        assertNull(Protocol.keys(""))
+    }
+
+    @Test
+    fun aStickHoldsTheKeysItIsPushedTowards() {
+        assertEquals(emptySet<String>(), Protocol.stickKeys(0.1f, -0.2f, "w", "s", "a", "d"))
+        assertEquals(setOf("w"), Protocol.stickKeys(0f, -1f, "w", "s", "a", "d"))
+        assertEquals(setOf("s", "d"), Protocol.stickKeys(0.8f, 0.7f, "w", "s", "a", "d"))
+        assertEquals(setOf("a"), Protocol.stickKeys(-0.9f, 0.2f, "w", "s", "a", "d"))
+    }
+
+    @Test
+    fun aSlantedPageComesOutStraight() {
+        // Wider at the bottom than the top, as a page photographed from its foot is.
+        val corners = listOf(100f to 100f, 900f to 120f, 1000f to 1500f, 0f to 1480f)
+        val (width, height) = Protocol.pageSize(corners, 5000)
+        assertEquals(1000, width)
+        assertTrue(height in 1380..1385)
+        val (w, h) = Protocol.pageSize(corners, 700)
+        assertTrue(maxOf(w, h) in 699..700 && w < h)
+        assertEquals(1 to 1, Protocol.pageSize(listOf(0f to 0f, 0f to 0f, 0f to 0f, 0f to 0f), 100))
+    }
+
+    @Test
+    fun carryingOnWhereTheComputerLeftOff() {
+        assertEquals("https://www.youtube.com/watch?v=abc&t=95s", Protocol.handoffAddress("https://www.youtube.com/watch?v=abc", 95))
+        assertEquals("https://www.youtube.com/watch?v=abc&t=95s", Protocol.handoffAddress("https://www.youtube.com/watch?v=abc&t=12s", 95))
+        assertEquals("https://example.org/film.mp4", Protocol.handoffAddress("https://example.org/film.mp4", 95))
+        assertNull(Protocol.handoffAddress("file:///home/me/film.mkv", 95))
+        assertNull(Protocol.handoffAddress("", 0))
+    }
+
+    @Test
+    fun whatThePhoneSignsToApprove() {
+        assertEquals("adaptive-link approve\nsudo\nabcd", String(Protocol.approvalMessage("sudo", "abcd")))
+    }
 }

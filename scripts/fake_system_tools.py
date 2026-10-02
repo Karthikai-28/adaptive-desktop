@@ -209,7 +209,11 @@ def xdg_open(args, _state):
     """Opens nothing: a browser started by a check would outlive it."""
 
 
-TOOLS = {"nmcli": None, "udisksctl": None, "bluetoothctl": bluetoothctl, "pactl": pactl, "systemctl": systemctl,
+def loginctl(args, _state):
+    """Locks and unlocks nothing: the screen in front of whoever runs the checks is theirs."""
+
+
+TOOLS = {"loginctl": loginctl, "nmcli": None, "udisksctl": None, "bluetoothctl": bluetoothctl, "pactl": pactl, "systemctl": systemctl,
          "powerprofilesctl": powerprofilesctl, "xdg-open": xdg_open}
 
 

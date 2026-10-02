@@ -105,7 +105,7 @@ class ScreenVideo(
     }
 
     /** Ask the computer for its screen. Returns whether it agreed. */
-    suspend fun start(preset: String, withSound: Boolean): Boolean {
+    suspend fun start(preset: String, withSound: Boolean, display: String = ""): Boolean {
         val stun = Cloud(context).config.stun
         val connection = Rtc.factory(context).createPeerConnection(
             PeerConnection.RTCConfiguration(Rtc.iceServers(context, stun)).apply {
@@ -150,7 +150,7 @@ class ScreenVideo(
             while (connection.iceGatheringState() != PeerConnection.IceGatheringState.COMPLETE) delay(50)
         }
         val reply = client.post("/v1/rtc", JSONObject().put("offer", connection.localDescription.description)
-            .put("preset", preset).put("sound", withSound))
+            .put("preset", preset).put("sound", withSound).put("display", display))
         if (reply == null || !reply.optBoolean("ok")) {
             onState(reply?.optString("error").orEmpty())
             return false

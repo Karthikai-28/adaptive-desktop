@@ -58,11 +58,13 @@ def frame_size(width, height, preset):
     return max(16, out_w // 16 * 16), out_h, rate
 
 
-def video_pipeline(width, height, preset):
+def video_pipeline(width, height, preset, region=None):
+    if region:
+        width, height = region[2], region[3]
     out_w, out_h, rate = frame_size(width, height, preset)
     return (
-        "ximagesrc use-damage=false show-pointer=true "
-        f"! video/x-raw,framerate={rate}/1 "
+        screen.source(region)
+        + f"! video/x-raw,framerate={rate}/1 "
         "! videoscale method=bilinear "
         f"! video/x-raw,width={out_w},height={out_h} "
         "! videoconvert "
@@ -143,10 +145,10 @@ class _Source(MediaStreamTrack):
 class ScreenTrack(_Source):
     kind = "video"
 
-    def __init__(self, screen_size, preset):
+    def __init__(self, screen_size, preset, region=None):
         super().__init__()
-        self.width, self.height, self.rate = frame_size(*screen_size, preset)
-        self.description = video_pipeline(*screen_size, preset)
+        self.width, self.height, self.rate = frame_size(*(region[2:] if region else screen_size), preset)
+        self.description = video_pipeline(*screen_size, preset, region)
         self._started = time.monotonic()
 
     async def recv(self):
@@ -206,7 +208,7 @@ class MediaServer:
     def viewers(self):
         return len(self._watching)
 
-    async def answer(self, offer_sdp, screen_size, preset="medium", sound=True):
+    async def answer(self, offer_sdp, screen_size, preset="medium", sound=True, region=None):
         """Start sending the screen to the phone that made this offer.
         Returns {"id", "answer", "sound", "size"}; raises ValueError for an
         offer that is not one."""
@@ -218,7 +220,7 @@ class MediaServer:
         peer = RTCPeerConnection(rtc.configuration(relay=self.relay))
         session = self._next
         self._next += 1
-        picture = ScreenTrack(screen_size, preset)
+        picture = ScreenTrack(screen_size, preset, region)
         voice = SoundTrack() if sound and "m=audio" in offer_sdp else None
         if not await asyncio.to_thread(picture.start):
             await peer.close()

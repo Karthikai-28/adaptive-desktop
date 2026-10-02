@@ -19,6 +19,14 @@
                                ask to connect without a pairing code
     link-cli.py allow auto-approve on|off
                                whether such a device is accepted without asking
+    link-cli.py allow clipboard on|off
+                               whether what is copied here is told to the phone
+                               as it is copied (and codes in its texts copied here)
+    link-cli.py allow proximity on|off
+                               lock this computer when the phone leaves its network
+    link-cli.py ring           make the phone ring, to find it
+    link-cli.py sms [NUMBER TEXT...]
+                               the phone's recent texts, or send one from it
     link-cli.py allow notifications on|off
                                whether this computer's notifications are told
                                to a phone that asks for them
@@ -76,6 +84,11 @@ def describe(state):
         limits = ", ".join(SWITCH_NAMES.get(name, name) for name in phone["deny"])
         lines.append(f"Paired: {phone['name']} (since {when}, {phone['fingerprint'][:8]})"
                      + (f" - not allowed: {limits}" if limits else ""))
+        state = phone.get("state")
+        if state and state.get("battery") is not None:
+            signal = "" if state.get("signal") is None else f", signal {state['signal']}/4"
+            lines.append(f"  battery {state['battery']}%{' charging' if state['charging'] else ''}{signal}"
+                         + (f", on {state['network']}" if state.get("network") else ""))
     for item in state["addresses"]:
         lines.append(f"  {item['address']:<16} this network")
     config = state["config"]
@@ -140,8 +153,11 @@ def do_signin():
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Adaptive Link")
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("status", "pair", "on", "off", "log", "signin", "signout"):
+    for name in ("status", "pair", "on", "off", "log", "signin", "signout", "ring"):
         sub.add_parser(name)
+    sms = sub.add_parser("sms")
+    sms.add_argument("to", nargs="?")
+    sms.add_argument("text", nargs="*")
     unpair = sub.add_parser("unpair")
     unpair.add_argument("name", nargs="?", help="one device, by its name or the start of its fingerprint; all of them if left out")
     phone = sub.add_parser("phone")
@@ -156,7 +172,8 @@ def main(argv=None):
     wake = sub.add_parser("wake")
     wake.add_argument("state", nargs="?", choices=["on", "off"])
     allow = sub.add_parser("allow")
-    allow.add_argument("what", choices=["input", "exec", "files", "power", "account", "auto-approve", "notifications"])
+    allow.add_argument("what", choices=["input", "exec", "files", "power", "account", "auto-approve", "notifications",
+                                        "clipboard", "proximity"])
     allow.add_argument("state", choices=["on", "off"])
     args = parser.parse_args(argv)
 
@@ -192,10 +209,23 @@ def main(argv=None):
             print(describe(state)[0])
         elif args.action == "allow":
             key = {"account": "account_enroll", "auto-approve": "auto_approve_account",
-                   "notifications": "send_notifications"}.get(
+                   "notifications": "send_notifications", "clipboard": "sync_clipboard",
+                   "proximity": "proximity_lock"}.get(
                 args.what, f"allow_{args.what}")
             state = control.call("POST", "/configure", {key: args.state == "on"})
             print("\n".join(describe(state)))
+        elif args.action == "ring":
+            heard = control.call("POST", "/ring")["ok"]
+            print("The phone is ringing." if heard else "No phone is listening (turn on \"Find this phone\" in the app).")
+            return 0 if heard else 1
+        elif args.action == "sms":
+            if args.to:
+                answer = control.call("POST", "/sms", {"to": args.to, "text": " ".join(args.text)}, timeout=40)
+                print(answer["text"])
+                return 0 if answer["ok"] else 1
+            for message in control.call("POST", "/sms", {})["messages"]:
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(message["at"]))
+                print(f"{when}  {message['name'] or message['from']}: {message['text']}")
         elif args.action == "relay":
             body = {}
             if args.url == "off":

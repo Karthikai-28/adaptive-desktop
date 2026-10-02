@@ -101,7 +101,9 @@ def parse_xrandr(text):
         if head:
             outputs.append({"name": head.group(1), "connected": head.group(2) == "connected",
                             "primary": bool(head.group(3)), "on": head.group(4) is not None,
-                            "mode": f"{head.group(4)}x{head.group(5)}" if head.group(4) else "", "modes": []})
+                            "mode": f"{head.group(4)}x{head.group(5)}" if head.group(4) else "", "modes": [],
+                            # Where it lies on the whole screen: x, y, width, height.
+                            "at": [int(head.group(n)) for n in (6, 7, 4, 5)] if head.group(4) else []})
             continue
         mode = MODE_LINE.match(line)
         if mode and outputs:
@@ -111,6 +113,55 @@ def parse_xrandr(text):
             if mode.group(1) not in current["modes"] and len(current["modes"]) < MODE_LIMIT:
                 current["modes"].append(mode.group(1))
     return [output for output in outputs if output["connected"]]
+
+
+def region(name):
+    """(x, y, width, height) of one display on the whole screen, or None."""
+    ok, out = _run("xrandr", "--query")
+    for output in parse_xrandr(out) if ok else []:
+        if output["name"] == name and output["at"]:
+            return tuple(output["at"])
+    return None
+
+
+EXTENDED_MODE = "adaptive-phone"
+
+
+def modeline(width, height):
+    """The timings for a display of this size, as xrandr wants them."""
+    ok, out = _run("cvt", str(width), str(height), "60", timeout=3)
+    match = re.search(r'^Modeline\s+"[^"]*"\s+(.+)$', out, re.MULTILINE) if ok else None
+    return match.group(1).split() if match else []
+
+
+def extend(size):
+    """Make room for the phone as another display: an output with nothing
+    plugged into it is turned on at the phone's size, to the right of the
+    main one. Returns (done, the output's name or why not)."""
+    match = re.fullmatch(r"(\d{3,4})x(\d{3,4})", str(size))
+    if not match:
+        return False, "a size like 1280x800"
+    ok, out = _run("xrandr", "--query")
+    spare = [line.split()[0] for line in out.splitlines() if ok and " disconnected" in line and "+" not in line.split("(")[0]]
+    lit = [output for output in parse_xrandr(out) if output["on"]] if ok else []
+    if not spare or not lit:
+        return False, "this computer has no spare display output to use"
+    timings = modeline(int(match.group(1)), int(match.group(2)))
+    if not timings:
+        return False, "the size could not be worked out"
+    main = next((output["name"] for output in lit if output["primary"]), lit[0]["name"])
+    _run("xrandr", "--newmode", EXTENDED_MODE, *timings)   # already there if this is not the first time
+    _run("xrandr", "--addmode", spare[0], EXTENDED_MODE)
+    done, text = _run("xrandr", "--output", spare[0], "--mode", EXTENDED_MODE, "--right-of", main)
+    return done, spare[0] if done else _last_line(text)
+
+
+def unextend(name):
+    """Take the phone's display away again."""
+    done, text = _run("xrandr", "--output", name, "--off")
+    _run("xrandr", "--delmode", name, EXTENDED_MODE)
+    _run("xrandr", "--rmmode", EXTENDED_MODE)
+    return done, "" if done else _last_line(text)
 
 
 def _brightness():
@@ -134,6 +185,10 @@ def display_action(action, target="", value=""):
                           "--method", "org.freedesktop.DBus.Properties.Set", GSD_POWER[0] + ".Screen", "Brightness",
                           f"<int32 {int(value)}>", timeout=3)
         return done, "" if done else "this screen's brightness cannot be set"
+    if action == "extend":
+        return extend(value)
+    if action == "unextend":
+        return unextend(target) if re.fullmatch(r"[A-Za-z0-9-]{1,30}", target) else (False, "no such display")
     outputs = display()["outputs"]
     output = next((o for o in outputs if o["name"] == target), None)
     if output is None:

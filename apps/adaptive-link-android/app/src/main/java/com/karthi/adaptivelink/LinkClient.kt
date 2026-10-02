@@ -119,7 +119,7 @@ class LinkClient(
         if (listed.hosts.isEmpty() || merged == hosts) return false
         hosts = merged
         val store = Store(appContext)
-        if (store.computer?.fingerprint == computer.fingerprint) store.computer = computer.copy(hosts = merged)
+        if (store.computers.any { it.fingerprint == computer.fingerprint }) store.computer = computer.copy(hosts = merged)
         return true
     }
 
@@ -232,7 +232,9 @@ class LinkClient(
         if ((merged == hosts || fresh.isEmpty()) && waking == wake) return
         if (fresh.isNotEmpty()) hosts = merged
         wake = waking
-        Store(appContext).computer = computer.copy(hosts = hosts, wake = waking)
+        // Only while still paired: a computer just forgotten is not put back by its own last answer.
+        val store = Store(appContext)
+        if (store.computers.any { it.fingerprint == computer.fingerprint }) store.computer = computer.copy(hosts = hosts, wake = waking)
     }
 
     /** Whether this phone knows how to wake the computer at all. */
@@ -285,9 +287,10 @@ class LinkClient(
         runCatching { http.newCall(Request.Builder().url(url(path)).build()).execute() }.getOrNull()
     }
 
-    suspend fun upload(name: String, body: RequestBody): JSONObject? {
+    /** Send a file. `to` says what kind it is - "photos", "scans" - and so where it goes; "" is Downloads/Phone. */
+    suspend fun upload(name: String, body: RequestBody, to: String = ""): JSONObject? {
         val target = okhttp3.HttpUrl.Builder().scheme("https").host(host ?: hosts.first())
-            .port(port).addPathSegments("v1/upload").addQueryParameter("name", name).build()
+            .port(port).addPathSegments("v1/upload").addQueryParameter("name", name).addQueryParameter("to", to).build()
         val long = http.newBuilder().writeTimeout(0, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
         return withContext(Dispatchers.IO) {
             runCatching {

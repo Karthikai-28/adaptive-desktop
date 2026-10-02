@@ -652,8 +652,23 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   networks that forbid direct connections. 🔬 Both written and checked only
   as far as their settings go: neither a sleeping computer nor a relay was
   available to try.
-- ⬜ Not there: Wayland, iOS, and finding each other with no network at all
-  (Apple's Bluetooth and peer-to-peer Wi-Fi).
+- ✅ **The phone and the computer together** (`companion.py`): the clipboard
+  both ways, the computer locking when the phone leaves and unlocking on its
+  fingerprint, sudo approved by the phone (a signature root checks for
+  itself, `scripts/link-approve.py`), calls and texts on the computer and a
+  text sent from it, making the phone ring, its battery and signal, new
+  photos copied over. 🔬 sudo through PAM and the proximity lock on a real
+  network.
+- ✅ **More of the phone used**: its microphone as a microphone on the
+  computer, a document scanner, the phone aimed as a pointer, dictation, NFC
+  tags that press the owner's own buttons, a game pad, a page of the owner's
+  own controls, several computers, a two-pane layout on tablets, one display
+  or the phone as another. 🔬 Everything an emulator has no hardware for.
+- ⬜ Not there: a watch app of its own (the notification's buttons reach a
+  watch), browsing the phone's files from the desktop's file manager, the
+  phone's battery in the panel (it is in `link-cli.py status`), Wayland, iOS,
+  and finding each other with no network at all (Apple's Bluetooth and
+  peer-to-peer Wi-Fi).
 
 ## Immediate next work
 

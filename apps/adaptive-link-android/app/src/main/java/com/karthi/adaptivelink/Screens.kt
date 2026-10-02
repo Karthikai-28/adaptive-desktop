@@ -24,7 +24,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Tune
@@ -343,6 +348,8 @@ private val TILES = listOf(
     Tile(Page.Devices, "Devices", "USB and drives", Icons.Filled.Usb),
     Tile(Page.Network, "Network", "Connections and traffic", Icons.Filled.Wifi),
     Tile(Page.Desktop, "Desktop", "Projects, focus, windows", Icons.Filled.Dashboard),
+    Tile(Page.Controls, "Controls", "Your own buttons", Icons.Filled.Apps),
+    Tile(Page.Scan, "Scan", "Paper to a PDF", Icons.Filled.DocumentScanner),
     Tile(Page.Windows, "Windows", "Switch, move, close", Icons.Filled.Window),
     Tile(Page.DisplaySound, "Display", "Screens and sound", Icons.Filled.Tune),
     Tile(Page.Bluetooth, "Bluetooth", "Devices nearby", Icons.Filled.Bluetooth),
@@ -351,8 +358,12 @@ private val TILES = listOf(
 )
 
 @Composable
-fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
+fun HomeScreen(
+    client: LinkClient, state: LinkState, onOpen: (Page) -> Unit,
+    computers: List<Computer> = emptyList(), onAdd: () -> Unit = {}, onSwitch: (Computer) -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
+    var choosing by remember { mutableStateOf(false) }
     var woke by remember { mutableStateOf("") }
 
     suspend fun refresh() {
@@ -371,7 +382,24 @@ fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
         }
     }
 
-    TopBar(client.computer.name)
+    TopBar(client.computer.name) {
+        // Which computer: the others this phone is paired with, and pairing another.
+        Box {
+            IconButton(onClick = { choosing = true }) { Icon(Icons.Filled.Computer, "Computers") }
+            DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+                computers.forEach { other ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(other.name, color = if (other.fingerprint == client.computer.fingerprint)
+                                MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                        },
+                        onClick = { choosing = false; if (other.fingerprint != client.computer.fingerprint) onSwitch(other) },
+                    )
+                }
+                DropdownMenuItem(text = { Text("Pair another computer") }, onClick = { choosing = false; onAdd() })
+            }
+        }
+    }
     Column(Modifier.padding(horizontal = 16.dp)) {
         Card(Modifier.fillMaxWidth()) {
             val status = state.status
