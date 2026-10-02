@@ -37,6 +37,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -98,13 +100,16 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
     var computerName by remember { mutableStateOf("") }
     var problem by remember { mutableStateOf("") }
 
-    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        val offer = result.contents?.let { PairingOffer.parse(it) }
-        if (result.contents == null) return@rememberLauncherForActivityResult
+    var typing by remember { mutableStateOf(false) }
+    var typed by remember { mutableStateOf("") }
+
+    /** Scanned or typed, the code is handled the same way from here. */
+    fun begin(scanned: String) {
+        val offer = PairingOffer.parse(scanned)
         if (offer == null) {
             problem = "That is not an Adaptive Link pairing code."
             stage = "failed"
-            return@rememberLauncherForActivityResult
+            return
         }
         stage = "asking"
         scope.launch {
@@ -140,6 +145,10 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
         }
     }
 
+    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let { begin(it) }
+    }
+
     Column(
         Modifier.fillMaxSize().systemBarsPadding().padding(28.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
@@ -173,6 +182,20 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
                             .setPrompt("Scan the code on your computer").setBeepEnabled(false).setOrientationLocked(true)
                     )
                 }) { Text(if (stage == "failed") "Scan again" else "Scan pairing code") }
+                Spacer(Modifier.height(8.dp))
+                if (!typing) {
+                    TextButton(onClick = { typing = true }) { Text("Enter the code as text instead") }
+                } else {
+                    // The same code the QR holds, for when it cannot be
+                    // scanned: the computer shows it under the QR code.
+                    OutlinedTextField(
+                        value = typed, onValueChange = { typed = it },
+                        placeholder = { Text("ALINK1…") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = { begin(typed) }, enabled = typed.isNotBlank()) { Text("Pair with this code") }
+                }
                 Spacer(Modifier.height(20.dp))
                 Muted(
                     "This phone's key is made in its secure hardware and never leaves it. " +

@@ -39,6 +39,13 @@ class ProtocolTest {
         assertEquals(a, parsed.computer.fingerprint)
     }
 
+    @Test fun theTextFormIsReadToo() {
+        val text = PairingOffer.TEXT_PREFIX +
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(offer().toByteArray())
+        assertEquals(PairingOffer.parse(offer()), PairingOffer.parse("  $text\n"))
+        assertNull(PairingOffer.parse(PairingOffer.TEXT_PREFIX + "not base64 !!"))
+    }
+
     @Test fun anythingElseIsRefused() {
         assertNull(PairingOffer.parse("https://example.com/"))
         assertNull(PairingOffer.parse(offer { put("v", 2) }))

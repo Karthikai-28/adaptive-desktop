@@ -46,7 +46,15 @@ data class Computer(
 /** What a scanned pairing code holds: the computer, and the one-time token. */
 data class PairingOffer(val computer: Computer, val token: String) {
     companion object {
-        fun parse(text: String): PairingOffer? = runCatching {
+        /** The same offer as text, for typing or pasting when it cannot be scanned. */
+        const val TEXT_PREFIX = "ALINK1."
+
+        /** Reads what the QR code holds, or the text form of it. */
+        fun parse(scanned: String): PairingOffer? = runCatching {
+            val trimmed = scanned.trim()
+            val text = if (trimmed.startsWith(TEXT_PREFIX))
+                String(java.util.Base64.getUrlDecoder().decode(trimmed.removePrefix(TEXT_PREFIX)))
+            else trimmed
             val json = JSONObject(text)
             require(json.getInt("v") == 1)
             val token = json.getString("t")

@@ -68,20 +68,16 @@ def stop_sandbox(daemon, sandbox):
                    capture_output=True, check=False)
 
 
-def _offer(control, device):
-    offer = json.loads(control.call("POST", "/pair/start")["payload"])
-    if device.startswith("emulator-"):
-        offer["h"] = [EMULATOR_HOST]
-    return base64.urlsafe_b64encode(json.dumps(offer).encode()).decode()
+def screens(check, adb, device, control, build_env, sandbox):
+    """Use the app itself, the way its owner does: every button.
 
-
-def screens(check, adb, device, control, build_env, offer_for):
-    """Open the app itself, paired, and visit every screen.
-
-    The app is installed and paired through its own test (which, unlike
-    Gradle's connected test, leaves it installed), then started and driven
-    with taps. Each screen is read back as text through the accessibility
-    tree, and the device log is checked for a crash.
+    The app is installed fresh, paired through its own pairing screen (with
+    the code typed, since an emulator cannot be shown a QR code), and then
+    every screen is opened and every control on it pressed. Each screen is
+    read back as text through the accessibility tree, and the device log is
+    checked for a crash after every step - the first version of this check
+    opened the screens and pressed nothing, and missed a crash on the very
+    first button.
     """
     import re
     import xml.etree.ElementTree as ET
@@ -89,97 +85,245 @@ def screens(check, adb, device, control, build_env, offer_for):
     def sh(*args, timeout=60):
         return subprocess.run([str(adb), "-s", device, *args], capture_output=True, text=True, timeout=timeout).stdout
 
-    built = subprocess.run([gradle(), "--no-daemon", "-q", "assembleDebug", "assembleDebugAndroidTest"],
+    built = subprocess.run([gradle(), "--no-daemon", "-q", "assembleDebug"],
                            cwd=APP, env=build_env, capture_output=True, text=True, timeout=1500)
     if built.returncode != 0:
-        check(False, "the app and its test build")
+        check(False, "the app builds")
         print(built.stderr[-2000:])
         return
-    sh("install", "-r", "-g", str(APP / "app/build/outputs/apk/debug/app-debug.apk"), timeout=180)
-    sh("install", "-r", str(APP / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"), timeout=180)
+    sh("uninstall", "com.karthi.adaptivelink")
+    # Installed as a person installs it: no permissions granted in advance.
+    sh("install", "-r", str(APP / "app/build/outputs/apk/debug/app-debug.apk"), timeout=180)
 
-    def owner():
-        for _ in range(240):
-            if control.call("GET", "/pair/state").get("state") == "pending":
-                control.call("POST", "/pair/decide", {"accept": True})
-                return
-            time.sleep(0.5)
-
-    threading.Thread(target=owner, daemon=True).start()
-    result = sh("shell", "am", "instrument", "-w", "-e", "offer", offer_for(), "-e", "stay", "1",
-                "com.karthi.adaptivelink.test/androidx.test.runner.AndroidJUnitRunner", timeout=240)
-    check("OK (1 test)" in result, "the app is left paired on the device")
-    if "OK (1 test)" not in result:
-        print(result[-1500:])
-        return
-
-    def texts():
-        """Every piece of text on the screen, and where to tap for it."""
+    def nodes():
+        """[(label, x, y)] for every piece of text or described control on screen."""
         sh("shell", "uiautomator", "dump", "/sdcard/ui.xml")
         raw = sh("shell", "cat", "/sdcard/ui.xml")
-        found = {}
+        found = []
         try:
             for node in ET.fromstring(raw[raw.index("<?xml"):]).iter("node"):
-                label = node.get("text") or node.get("content-desc")
                 box = re.findall(r"\d+", node.get("bounds", ""))
-                if label and len(box) == 4:
-                    found[label] = ((int(box[0]) + int(box[2])) // 2, (int(box[1]) + int(box[3])) // 2)
+                if len(box) != 4:
+                    continue
+                centre = ((int(box[0]) + int(box[2])) // 2, (int(box[1]) + int(box[3])) // 2)
+                for label in (node.get("text"), node.get("content-desc")):
+                    if label:
+                        found.append((label, *centre))
         except (ValueError, ET.ParseError):
             pass
         return found
 
-    def tap(label, wait=2.0):
-        where = texts().get(label)
-        if not where:
-            return False
-        sh("shell", "input", "tap", str(where[0]), str(where[1]))
-        time.sleep(wait)
-        return True
-
     def has(*wanted):
-        seen = texts()
-        return all(any(w in label for label in seen) for w in wanted)
+        labels = [label for label, _x, _y in nodes()]
+        return all(any(w in label for label in labels) for w in wanted)
+
+    def tap(label, wait=1.5, exact=True):
+        for found, x, y in nodes():
+            # Android's own dialogs spell their buttons differently between
+            # versions ("While using the app", "WHILE USING THE APP").
+            if found.casefold() == label.casefold() or (not exact and label.casefold() in found.casefold()):
+                sh("shell", "input", "tap", str(x), str(y))
+                time.sleep(wait)
+                return True
+        return False
+
+    def back(wait=1.2):
+        sh("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(wait)
+
+    def focused():
+        return sh("shell", "dumpsys", "window", "displays").split("mCurrentFocus=")[-1].split("\n")[0]
+
+    def crashed():
+        return "FATAL EXCEPTION" in sh("logcat", "-d", "-s", "AndroidRuntime:E")
+
+    def step(ok, message):
+        """A check that also fails if the app has crashed since the last one."""
+        dead = crashed()
+        check(ok and not dead, message + (" - THE APP CRASHED" if dead else ""))
+        if not ok and not dead:
+            # What was on screen instead, to make the failure readable.
+            print("     on screen:", [label[:28] for label, _x, _y in nodes()][:14], "| focus:", focused().strip()[-50:])
+        if dead:
+            print(sh("logcat", "-d", "-s", "AndroidRuntime:E")[-2500:])
+            sh("logcat", "-c")
+            sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
+            time.sleep(3)
+
+    def home():
+        """Back to the app's home screen, from wherever the last step ended."""
+        for _ in range(5):
+            if "adaptivelink" not in focused():
+                sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
+                time.sleep(2.5)
+            if has("Webcam", "Presenter"):
+                return True
+            back()
+        return False
+
+    def allow_permission():
+        for label in ("While using the app", "Allow", "Only this time"):
+            if tap(label, wait=1.5):
+                return True
+        return False
 
     sh("logcat", "-c")
     sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
-    for _ in range(30):
+    time.sleep(4)
+    step(has("Scan pairing code"), "first run: the pairing screen")
+
+    # ------------------------------------------------------- the scanner
+    tap("Scan pairing code", wait=3)
+    asked = "permission" in focused().lower()
+    if asked:
+        allow_permission()
+    for _ in range(10):
+        if "CaptureActivity" in focused():
+            break
+        time.sleep(1)
+    step("CaptureActivity" in focused(),
+         f"pairing: Scan pairing code opens the camera scanner{', after asking for the camera' if asked else ''}")
+    back(2)
+    step("MainActivity" in focused() and has("Scan pairing code"),
+         "pairing: leaving the scanner returns to the app")
+
+    # --------------------------------------------- pairing, by typed code
+    # The computer's owner, pressing Pair when the phone asks.
+    def owner():
+        for _ in range(240):
+            if control.call("GET", "/pair/state").get("state") == "pending":
+                time.sleep(2)
+                owner.seen = has(control.call("GET", "/pair/state")["code"][:3])
+                control.call("POST", "/pair/decide", {"accept": True})
+                return
+            time.sleep(0.5)
+    owner.seen = False
+
+    started = control.call("POST", "/pair/start")
+    offer = json.loads(started["payload"])
+    if device.startswith("emulator-"):
+        offer["h"] = [EMULATOR_HOST]
+    text_code = "ALINK1." + base64.urlsafe_b64encode(json.dumps(offer).encode()).decode().rstrip("=")
+    threading.Thread(target=owner, daemon=True).start()
+
+    step(tap("Enter the code as text instead"), "pairing: a code can be typed instead of scanned")
+    tap("ALINK1\u2026", wait=1)
+    for start in range(0, len(text_code), 120):   # in pieces: adb drops long input
+        sh("shell", "input", "text", text_code[start:start + 120])
+    sh("shell", "input", "keyevent", "KEYCODE_BACK")   # hide the keyboard
+    time.sleep(1)
+    tap("Pair with this code", wait=1)
+    for _ in range(40):
         if has("Connected"):
             break
         time.sleep(1)
-    check(has("Connected", "Screen", "Trackpad", "Presenter", "Webcam"), "home: connected, with its tiles")
+    step(owner.seen, "pairing: the phone shows the same six digits as the computer")
+    step(has("Connected", "Screen", "Trackpad", "Presenter", "Webcam"), "pairing: paired through the app, and connected")
 
-    visits = [
-        ("Screen", ("Screen",), "screen: opens"),
-        ("Trackpad", ("Drag to move",), "trackpad: opens"),
-        ("Media", ("Nothing is playing",), "media: says nothing is playing"),
-        ("Presenter", ("Next", "Previous", "Start timer"), "presenter: opens with its timer"),
-        ("Run", ("Output appears here",), "run: opens"),
-        ("Files", ("Downloads",), "files: lists the computer's home folder"),
-        ("More", ("Clipboard", "Get from computer", "Unpair this phone"), "more: clipboard, power and security"),
-    ]
-    for tile, expected, message in visits:
-        opened = tap(tile)
-        check(opened and has(*expected), message)
-        sh("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(1.2)
+    # Power buttons are pressed below. With power turned off on the computer
+    # they are refused, which is what is checked - a real lock or suspend
+    # here would act on the machine running this test.
+    control.call("POST", "/configure", {"allow_power": False})
 
-    # Run a command from the phone's own screen.
-    if tap("Run"):
-        where = texts().get("A command to run on the computer")
-        if where:
-            sh("shell", "input", "tap", str(where[0]), str(where[1]))
-            time.sleep(1)
-            sh("shell", "input", "text", "echo%sscreen-check")
-            sh("shell", "input", "keyevent", "KEYCODE_ENTER")
-            time.sleep(4)
-        check(has("screen-check", "finished: 0"), "run: a command typed on the phone runs and its output is shown")
-        sh("shell", "input", "keyevent", "KEYCODE_BACK")
-        sh("shell", "input", "keyevent", "KEYCODE_BACK")
+    # ------------------------------------------------------------ screen
+    tap("Screen", wait=4)
+    step(has("Screen") and not has("Connecting"), "screen: the picture arrives")
+    for label in ("Keyboard", "Scroll mode", "L", "H", "M"):
+        tap(label, wait=1.2)
+    step(has("Screen"), "screen: keyboard, scroll mode and the three qualities")
+    sh("shell", "input", "tap", "540", "900")
+    sh("shell", "input", "swipe", "400", "800", "700", "1000", "300")
+    time.sleep(1)
+    step(has("Screen"), "screen: a tap and a drag on the picture")
+    home()
 
-    crashes = sh("logcat", "-d", "-s", "AndroidRuntime:E")
-    check("FATAL EXCEPTION" not in crashes, "the app did not crash on any screen")
-    if "FATAL EXCEPTION" in crashes:
-        print(crashes[-3000:])
+    # ---------------------------------------------------------- trackpad
+    tap("Trackpad")
+    sh("shell", "input", "swipe", "300", "700", "600", "900", "300")
+    sh("shell", "input", "tap", "400", "800")
+    for label in ("Left", "Right", "Esc", "Enter"):
+        tap(label, wait=0.8)
+    step(has("Drag to move"), "trackpad: move, tap, both buttons and the key row")
+    home()
+
+    # ------------------------------------------------------------- media
+    tap("Media", wait=3)
+    for label in ("Louder", "Quieter", "Mute"):
+        tap(label, wait=0.8)
+    step(has("Nothing is playing"), "media: the volume buttons, with nothing playing")
+    home()
+
+    # --------------------------------------------------------- presenter
+    tap("Presenter")
+    for label in ("Next", "Previous", "Start (F5)", "Blank", "End (Esc)", "Pause", "Reset"):
+        tap(label, wait=0.7)
+    sh("shell", "input", "keyevent", "KEYCODE_VOLUME_DOWN")
+    sh("shell", "input", "keyevent", "KEYCODE_VOLUME_UP")
+    time.sleep(1)
+    step(has("Next", "Previous"), "presenter: every button, the timer, and the volume keys")
+    home()
+
+    # --------------------------------------------------------------- run
+    tap("Run")
+    if tap("A command to run on the computer", wait=1):
+        sh("shell", "input", "text", "echo%sscreen-check")
+        sh("shell", "input", "keyevent", "KEYCODE_ENTER")
+        time.sleep(4)
+    step(has("screen-check", "finished: 0"), "run: a command typed on the phone runs and its output is shown")
+    home()
+
+    # ------------------------------------------------------------- files
+    tap("Files", wait=3)
+    step(tap("Downloads", wait=2.5) and has("movie.mkv"), "files: a folder opens")
+    tap("movie.mkv", wait=1.5)
+    step(has("Open on computer", "Download to phone"), "files: a file offers open and download")
+    tap("Download to phone", wait=4)
+    step(has("is in this phone"), "files: a file downloads to the phone")
+    tap("Send a file to the computer", wait=3)
+    step("adaptivelink" not in focused(), f"files: the picker for sending a file opens ({focused().strip()[-50:]})")
+    back(2)
+    step(home(), "files: back in the app after the picker")
+
+    # ------------------------------------------------------------ webcam
+    tap("Webcam", wait=3)
+    allow_permission()
+    time.sleep(4)
+    step(has("Webcam") and has("virtual camera is not installed"),
+         "webcam: the camera opens, and says the computer has no virtual camera here")
+    tap("Switch camera", wait=3)
+    step(has("Webcam"), "webcam: switching cameras")
+    home()
+
+    # -------------------------------------------------------------- more
+    tap("More", wait=2)
+    tap("Get from computer", wait=2)
+    tap("Send to computer", wait=2)
+    step(has("Clipboard"), "more: clipboard both ways")
+    tap("Lock", wait=2)
+    step(has("turned off on the computer"), "more: a power action is refused when the computer has it turned off")
+    tap("Suspend", wait=1.5)
+    step(has("Cancel", "Yes"), "more: suspend asks first")
+    tap("Cancel", wait=1)
+    sh("shell", "input", "swipe", "540", "1500", "540", "600", "300")
+    time.sleep(1)
+    # The switch sits at the right-hand end of its label's row.
+    for label, _x, y in nodes():
+        if label == "Show them on the computer":
+            sh("shell", "input", "tap", "980", str(y))
+            break
+    time.sleep(3)
+    step("adaptivelink" not in focused() or has("Allow Adaptive Link"),
+         "more: the notifications switch opens Android's notification access")
+    if "adaptivelink" not in focused():
+        back(2)
+    home()
+    tap("More", wait=2)
+    sh("shell", "input", "swipe", "540", "1500", "540", "600", "300")
+    time.sleep(1)
+    step(tap("Unpair this phone", wait=1.5) and has("Unpair this phone?"), "more: unpairing asks first")
+    tap("Unpair", wait=3)
+    step(has("Scan pairing code"), "more: unpaired, the app is back at pairing")
+
     sh("shell", "am", "force-stop", "com.karthi.adaptivelink")
 
 
@@ -264,7 +408,7 @@ def main():
         check("exec" in actions and "screen" in actions, "the computer's audit log shows what the phone did")
         check(daemon.poll() is None, "the daemon stayed up throughout")
 
-        screens(check, adb, devices[0], control, build_env, offer_for=lambda: _offer(control, devices[0]))
+        screens(check, adb, devices[0], control, build_env, sandbox)
         text = (sandbox / "daemon.log").read_text()
         check("Traceback" not in text, "no exceptions in the daemon's log")
         if "Traceback" in text:

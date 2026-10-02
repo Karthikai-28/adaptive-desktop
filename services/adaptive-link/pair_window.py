@@ -64,6 +64,7 @@ class PairWindow(Gtk.ApplicationWindow):
                           "Start it with: systemctl --user start adaptive-link")
             return
         self.modules = qr.encode(started["payload"])
+        self.text_code = started.get("text", "")
         self.hosts = started["hosts"]
         self._show_code()
         GLib.timeout_add(500, self._poll)
@@ -106,6 +107,12 @@ class PairWindow(Gtk.ApplicationWindow):
         self.box.append(self._label(f"This computer: {where}", "pair-muted"))
         self.remaining = self._label("", "pair-muted")
         self.box.append(self.remaining)
+        if self.text_code:
+            # For a phone that cannot scan: the same code, to type or paste.
+            copy = Gtk.Button(label="Copy the code as text", halign=Gtk.Align.CENTER)
+            copy.add_css_class("pair-quiet")
+            copy.connect("clicked", self._copy_text)
+            self.box.append(copy)
 
     def _show_request(self, name, code):
         self._clear()
@@ -125,6 +132,11 @@ class PairWindow(Gtk.ApplicationWindow):
         row.append(reject)
         row.append(accept)
         self.box.append(row)
+
+    def _copy_text(self, button):
+        Gdk.Display.get_default().get_clipboard().set_content(
+            Gdk.ContentProvider.new_for_value(self.text_code))
+        button.set_label("Copied")
 
     def _draw(self, _area, cr, width, height):
         quiet = 4

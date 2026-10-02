@@ -20,8 +20,17 @@ android {
     }
 
     buildTypes {
+        // The build that is installed. Unused library code is removed (see
+        // proguard-rules.pro), which takes the app from about 60 MB to a few;
+        // the on-device test runs against this same shrunk build.
+        debug {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            testProguardFiles("proguard-test-rules.pro")
+        }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
     compileOptions {
@@ -48,6 +57,12 @@ dependencies {
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
     implementation("androidx.biometric:biometric:1.1.0")
+    // biometric 1.1.0 asks only for fragment 1.2.5, whose FragmentActivity
+    // rejects the request codes the current activity-result API uses: every
+    // launcher (the QR scanner, the file picker, the camera permission)
+    // crashed with "Can only use lower 16 bits for requestCode". A current
+    // fragment library is asked for by name.
+    implementation("androidx.fragment:fragment:1.8.9")
     implementation("androidx.camera:camera-core:1.4.2")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")

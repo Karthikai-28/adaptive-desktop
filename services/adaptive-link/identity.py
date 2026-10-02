@@ -34,6 +34,7 @@ STATE_DIR = Path.home() / ".local" / "state" / "adaptive-desktop"
 DEFAULT_PORT = 47823
 PAIRING_PORT = 47824
 PAIRING_WINDOW_S = 120
+PAIRING_WINDOW_MAX_S = 600
 PAIRING_MAX_ATTEMPTS = 5
 MAX_CERT_BYTES = 8192
 
@@ -241,6 +242,18 @@ def pairing_payload(name, hosts, port, pairing_port, server_fingerprint, token):
     """What the QR code holds. Short keys keep the code small enough to scan."""
     return json.dumps({"v": 1, "n": name, "h": hosts, "p": port, "pp": pairing_port,
                        "f": server_fingerprint, "t": token}, separators=(",", ":"))
+
+
+PAIRING_TEXT_PREFIX = "ALINK1."
+
+
+def pairing_text(payload):
+    """The QR code's contents as one line of text, for when the code cannot
+    be scanned (the phone's camera is busy or broken, or the two are not in
+    the same room). It carries exactly what the QR does, the one-time code
+    included, so it is as short-lived and as private as the QR."""
+    import base64
+    return PAIRING_TEXT_PREFIX + base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
 # --------------------------------------------------------------------- TLS

@@ -495,8 +495,16 @@ class Link:
             state["seconds_left"] = max(0, int(state["expires"] - time.time()))
         return state
 
-    async def start_pairing(self):
-        """Open the pairing window. Returns what the QR code holds."""
+    async def start_pairing(self, seconds=None):
+        """Open the pairing window. Returns what the QR code holds.
+
+        Two minutes by default. A typed code takes longer than a scan, so the
+        owner can ask for up to ten.
+        """
+        try:
+            window = max(30, min(int(seconds), identity.PAIRING_WINDOW_MAX_S))
+        except (TypeError, ValueError):
+            window = identity.PAIRING_WINDOW_S
         await self.cancel_pairing()
         token = identity.new_pairing_token()
         hosts = [address for address, _kind in identity.local_addresses()]
@@ -511,15 +519,16 @@ class Link:
         self._pair_runner = runner
 
         self._pairing = {"state": "waiting", "token": token, "attempts": 0,
-                         "expires": time.time() + identity.PAIRING_WINDOW_S}
+                         "expires": time.time() + window}
         self._pair_decided = asyncio.Event()
         self._pair_timer = asyncio.get_running_loop().call_later(
-            identity.PAIRING_WINDOW_S, lambda: asyncio.ensure_future(self._expire_pairing()))
+            window, lambda: asyncio.ensure_future(self._expire_pairing()))
+        payload = identity.pairing_payload(socket.gethostname(), hosts, self.port,
+                                           self.pairing_port, self.fingerprint, token)
         return {
-            "payload": identity.pairing_payload(socket.gethostname(), hosts, self.port,
-                                                self.pairing_port, self.fingerprint, token),
+            "payload": payload, "text": identity.pairing_text(payload),
             "hosts": hosts, "fingerprint": self.fingerprint,
-            "seconds": identity.PAIRING_WINDOW_S,
+            "seconds": window,
         }
 
     async def _expire_pairing(self):
@@ -639,8 +648,8 @@ class Link:
         async def status(_request):
             return web.json_response(self.describe())
 
-        async def pair_start(_request):
-            return web.json_response(await self.start_pairing())
+        async def pair_start(request):
+            return web.json_response(await self.start_pairing((await read_json(request)).get("seconds")))
 
         async def pair_state(_request):
             return web.json_response(self.pairing_state())
