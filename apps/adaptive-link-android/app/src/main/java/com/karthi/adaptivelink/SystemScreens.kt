@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,6 +66,26 @@ private fun refused(reply: JSONObject?): String? = when {
     else -> null
 }
 
+/**
+ * After a change that may have cut the phone off from the computer (Wi-Fi
+ * off, another network, a USB device switched off): the computer puts it
+ * back unless the phone gets through to say it can still reach it. Returns
+ * what to tell the owner, or null if there is nothing to tell.
+ */
+private suspend fun keep(client: LinkClient, reply: JSONObject?): String? {
+    // No answer at all may be the change itself taking the connection away.
+    val seconds = reply?.optInt("keep") ?: 45
+    if (seconds <= 0) return null
+    val until = System.currentTimeMillis() + seconds * 1000L
+    while (System.currentTimeMillis() < until) {
+        if (client.post("/v1/keep") != null) return null
+        // It may be somewhere else now: look for it again.
+        client.connect()
+        delay(2000)
+    }
+    return "The phone could not reach the computer after that, so the computer has put it back."
+}
+
 @Composable
 private fun Heading(text: String) {
     Text(text, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
@@ -81,6 +102,7 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
     var list by remember { mutableStateOf(listOf<JSONObject>()) }
     var note by remember { mutableStateOf("") }
     var chosen by remember { mutableStateOf<JSONObject?>(null) }
+    var tree by remember { mutableStateOf(false) }
 
     suspend fun load() {
         val reply = client.get("/v1/tasks?sort=${if (byMemory) "memory" else "cpu"}&q=${java.net.URLEncoder.encode(query, "UTF-8")}")
@@ -148,7 +170,9 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(process.optString("name"), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Muted("${process.optInt("pid")} · ${process.optString("user")}")
+                            Muted(listOf(process.optInt("pid").toString(), process.optString("user"),
+                                if (process.optBoolean("paused")) "paused" else "",
+                                if (process.optInt("nice") > 0) "low priority" else "").filter { it.isNotBlank() }.joinToString(" · "))
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("${process.optDouble("cpu")}%", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
@@ -162,10 +186,11 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
 
     chosen?.let { process ->
         val pid = process.optInt("pid")
+        val mine = process.optBoolean("mine")
         fun act(action: String) {
             chosen = null
             scope.launch {
-                val reply = client.post("/v1/tasks/signal", JSONObject().put("pid", pid).put("action", action))
+                val reply = client.post("/v1/tasks/signal", JSONObject().put("pid", pid).put("action", action).put("tree", tree))
                 note = refused(reply) ?: ""
                 load()
             }
@@ -180,13 +205,28 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     Muted("Running for ${Protocol.formatDuration(process.optInt("elapsed"))} · " +
                         "${process.optDouble("memory")}% of memory")
-                    if (!process.optBoolean("mine")) Muted("It belongs to ${process.optString("user")}: it cannot be stopped from here.")
+                    if (!mine) {
+                        Muted("It belongs to ${process.optString("user")}: it cannot be changed from here.")
+                    } else {
+                        Spacer(Modifier.height(8.dp))
+                        Muted("Priority")
+                        val nice = process.optInt("nice")
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(selected = nice <= 0, onClick = { act("normal") }, label = { Text("Normal") })
+                            FilterChip(selected = nice in 1..18, onClick = { act("low") }, label = { Text("Low") })
+                            FilterChip(selected = nice >= 19, onClick = { act("lowest") }, label = { Text("Lowest") })
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Muted("And everything it started", Modifier.weight(1f))
+                            Switch(checked = tree, onCheckedChange = { tree = it })
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Row {
-                    TextButton(onClick = { act("pause") }) { Text("Pause") }
-                    TextButton(onClick = { act("resume") }) { Text("Resume") }
+                if (mine) Row {
+                    if (process.optBoolean("paused")) TextButton(onClick = { act("resume") }) { Text("Resume") }
+                    else TextButton(onClick = { act("pause") }) { Text("Pause") }
                     TextButton(onClick = { act("stop") }) { Text("End") }
                     TextButton(onClick = { act("kill") }) { Text("Kill", color = MaterialTheme.colorScheme.error) }
                 }
@@ -203,17 +243,37 @@ fun DevicesPage(client: LinkClient, onBack: () -> Unit, onBrowse: (String) -> Un
     var usb by remember { mutableStateOf(listOf<JSONObject>()) }
     var drives by remember { mutableStateOf(listOf<JSONObject>()) }
     var note by remember { mutableStateOf("Looking…") }
+    var said by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    suspend fun load() {
+        val reply = client.get("/v1/devices")
+        val problem = refused(reply)
+        if (problem != null) note = problem else {
+            note = ""
+            usb = reply!!.optJSONArray("usb").objects()
+            drives = reply.optJSONArray("drives").objects()
+        }
+    }
+
+    fun act(action: String, target: String) {
+        if (busy) return
+        busy = true
+        said = "Working…"
+        scope.launch {
+            val reply = client.post("/v1/devices", JSONObject().put("action", action).put("target", target))
+            said = if (reply == null || reply.optBoolean("ok")) keep(client, reply) ?: reply?.optString("text").orEmpty()
+            else refused(reply) ?: "It did not work"
+            busy = false
+            load()
+        }
+    }
 
     // Plugging something in shows up without leaving the screen.
     LaunchedEffect(Unit) {
         while (true) {
-            val reply = client.get("/v1/devices")
-            val problem = refused(reply)
-            if (problem != null) note = problem else {
-                note = ""
-                usb = reply!!.optJSONArray("usb").objects()
-                drives = reply.optJSONArray("drives").objects()
-            }
+            load()
             delay(3000)
         }
     }
@@ -222,17 +282,29 @@ fun DevicesPage(client: LinkClient, onBack: () -> Unit, onBrowse: (String) -> Un
         TopBar("Devices", onBack)
         Column(Modifier.padding(horizontal = 14.dp).verticalScroll(rememberScrollState())) {
             if (note.isNotEmpty()) Muted(note)
+            if (said.isNotEmpty()) Muted(said)
             Heading("USB")
             if (usb.isEmpty() && note.isEmpty()) Muted("Nothing is plugged in.")
             usb.forEach { device ->
+                val on = device.optBoolean("on", true)
                 Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                    Column {
-                        Text(device.optString("name"), fontWeight = FontWeight.SemiBold)
-                        Muted(listOf(device.optString("kind"), device.optString("maker"), device.optString("speed"))
-                            .filter { it.isNotBlank() }.joinToString(" · "))
-                        Muted("${device.optString("id")} · port ${device.optString("port")}")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(device.optString("name"), fontWeight = FontWeight.SemiBold)
+                            Muted(listOf(device.optString("kind"), device.optString("maker"), device.optString("speed"),
+                                if (on) "" else "Switched off").filter { it.isNotBlank() }.joinToString(" · "))
+                            Muted("${device.optString("id")} · port ${device.optString("port")}")
+                        }
+                        // Off is as if it were unplugged; on plugs it back in.
+                        if (device.optBoolean("switchable")) Switch(
+                            checked = on, enabled = !busy,
+                            onCheckedChange = { act(if (it) "usb-on" else "usb-off", device.optString("port")) },
+                        )
                     }
                 }
+            }
+            if (usb.isNotEmpty() && usb.none { it.optBoolean("switchable") }) {
+                Muted("To switch USB devices off and on from here, run scripts/install-link-usb.sh on the computer once.")
             }
             Heading("Drives")
             drives.forEach { drive ->
@@ -246,12 +318,24 @@ fun DevicesPage(client: LinkClient, onBack: () -> Unit, onBrowse: (String) -> Un
                         )
                         Muted(listOf(drive.optString("device"), Protocol.formatSize(drive.optLong("size")),
                             drive.optString("format"), drive.optString("over")).filter { it.isNotBlank() }.joinToString(" · "))
+                        val device = drive.optString("device")
+                        val system = drive.optBoolean("system")
                         if (mount.isNotEmpty()) {
                             Muted("At $mount" + if (drive.has("free")) ", ${Protocol.formatSize(drive.optLong("free"))} free" else "")
-                            Spacer(Modifier.height(6.dp))
-                            OutlinedButton(onClick = { onBrowse(mount) }) { Text("Browse") }
                         } else {
                             Muted("Not mounted")
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (mount.isNotEmpty()) OutlinedButton(onClick = { onBrowse(mount) }) { Text("Browse") }
+                            // The drive the computer runs from stays where it is.
+                            if (mount.isNotEmpty() && !system) OutlinedButton(enabled = !busy, onClick = { act("unmount", device) }) { Text("Unmount") }
+                            if (mount.isEmpty() && drive.optString("format").let { it.isNotBlank() && it != "swap" }) {
+                                OutlinedButton(enabled = !busy, onClick = { act("mount", device) }) { Text("Mount") }
+                            }
+                            if (drive.optBoolean("removable") && !system) {
+                                OutlinedButton(enabled = !busy, onClick = { act("eject", device) }) { Text("Safely remove") }
+                            }
                         }
                     }
                 }
@@ -271,21 +355,55 @@ fun NetworkPage(client: LinkClient, onBack: () -> Unit) {
     var before by remember { mutableStateOf<JSONObject?>(null) }
     var latest by remember { mutableStateOf<JSONObject?>(null) }
     var note by remember { mutableStateOf("Looking…") }
+    var said by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    // A change that could cut the phone off is asked about first.
+    var asking by remember { mutableStateOf<Triple<String, String, () -> Unit>?>(null) }
+    var joining by remember { mutableStateOf<String?>(null) }
+    var password by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    suspend fun load() {
+        val reply = client.get("/v1/network")
+        val problem = refused(reply)
+        if (problem != null) note = problem else {
+            note = ""
+            before = latest
+            latest = reply
+            interfaces = reply!!.optJSONArray("interfaces").objects()
+            dns = reply.optJSONArray("dns").let { list -> if (list == null) emptyList() else List(list.length()) { list.optString(it) } }
+        }
+    }
+
+    fun act(action: String, value: String = "", secret: String = "") {
+        if (busy) return
+        busy = true
+        said = "Working…"
+        scope.launch {
+            val body = JSONObject().put("action", action).put("value", value)
+            if (secret.isNotEmpty()) body.put("secret", secret)
+            val reply = client.post("/v1/network", body)
+            said = if (reply == null || reply.optBoolean("ok")) {
+                if (reply == null || reply.optInt("keep") > 0) said = "Checking the computer can still be reached…"
+                keep(client, reply) ?: reply?.optString("text").orEmpty()
+            } else refused(reply) ?: "It did not work"
+            busy = false
+            load()
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
-            val reply = client.get("/v1/network")
-            val problem = refused(reply)
-            if (problem != null) note = problem else {
-                note = ""
-                before = latest
-                latest = reply
-                interfaces = reply!!.optJSONArray("interfaces").objects()
-                dns = reply.optJSONArray("dns").let { list -> if (list == null) emptyList() else List(list.length()) { list.optString(it) } }
-            }
+            if (!busy) load()
             delay(2000)
         }
     }
+
+    val canControl = latest?.optBoolean("control") == true
+    val wifiOn = latest?.optBoolean("wifi_on") == true
+    val networks = latest?.optJSONArray("networks").objects()
+    val vpns = latest?.optJSONArray("vpns").objects()
+    val undone = "If the phone cannot reach the computer afterwards, the computer puts it back within a minute."
 
     fun rate(name: String, key: String): String {
         val old = before?.optJSONArray("interfaces").objects().firstOrNull { it.optString("name") == name } ?: return "…"
@@ -297,6 +415,7 @@ fun NetworkPage(client: LinkClient, onBack: () -> Unit) {
         TopBar("Network", onBack)
         Column(Modifier.padding(horizontal = 14.dp).verticalScroll(rememberScrollState())) {
             if (note.isNotEmpty()) Muted(note)
+            if (said.isNotEmpty()) Muted(said, Modifier.padding(bottom = 6.dp))
             if (interfaces.isEmpty() && note.isEmpty()) Muted("The computer has no network connection.")
             interfaces.forEach { link ->
                 val name = link.optString("name")
@@ -341,8 +460,69 @@ fun NetworkPage(client: LinkClient, onBack: () -> Unit) {
                         link.optString("gateway").takeIf { it.isNotBlank() }?.let { Muted("Router $it") }
                         link.optString("speed").takeIf { it.isNotBlank() }?.let { Muted("Link speed $it") }
                         link.optString("mac").takeIf { it.isNotBlank() }?.let { Muted("Hardware address $it") }
+                        if (canControl && link.optBoolean("managed") && link.optString("kind") in listOf("Wi-Fi", "Ethernet")) {
+                            Spacer(Modifier.height(6.dp))
+                            if (link.optString("connection").isNotBlank()) {
+                                OutlinedButton(enabled = !busy, onClick = {
+                                    asking = Triple("Disconnect $name?", undone) { act("disconnect", name) }
+                                }) { Text("Disconnect") }
+                            } else {
+                                OutlinedButton(enabled = !busy, onClick = { act("connect", name) }) { Text("Connect") }
+                            }
+                        }
                     }
                 }
+            }
+            if (canControl) {
+                Heading("Wi-Fi")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Muted("Wi-Fi on the computer", Modifier.weight(1f))
+                    Switch(checked = wifiOn, enabled = !busy, onCheckedChange = { on ->
+                        if (on) act("wifi", "on")
+                        else asking = Triple("Turn Wi-Fi off?", undone) { act("wifi", "off") }
+                    })
+                }
+                if (wifiOn) {
+                    networks.forEach { network ->
+                        val ssid = network.optString("name")
+                        val secured = network.optString("security").isNotBlank()
+                        val active = network.optBoolean("active")
+                        Row(
+                            Modifier.fillMaxWidth().clickable(enabled = !busy && !active) {
+                                if (secured && !network.optBoolean("known")) { password = ""; joining = ssid }
+                                else asking = Triple("Join $ssid?", undone) { act("join", ssid) }
+                            }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(ssid, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
+                                Muted(listOf(if (active) "Connected" else if (network.optBoolean("known")) "Saved" else "",
+                                    if (secured) network.optString("security") else "Open").filter { it.isNotBlank() }.joinToString(" · "))
+                            }
+                            Muted("${network.optInt("signal")}%")
+                        }
+                    }
+                    OutlinedButton(enabled = !busy, onClick = { act("scan") }) { Text("Look for networks") }
+                }
+                if (vpns.isNotEmpty()) {
+                    Heading("VPN")
+                    vpns.forEach { vpn ->
+                        val vpnName = vpn.optString("name")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(vpnName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Muted(vpn.optString("kind"))
+                            }
+                            Switch(checked = vpn.optBoolean("active"), enabled = !busy, onCheckedChange = { on ->
+                                if (on) asking = Triple("Connect $vpnName?", undone) { act("up", vpnName) }
+                                else act("down", vpnName)
+                            })
+                        }
+                    }
+                }
+            } else if (latest != null) {
+                Muted("The computer's network is not run by NetworkManager, so it can be seen from here but not changed.")
             }
             if (dns.isNotEmpty()) {
                 Heading("DNS")
@@ -350,6 +530,38 @@ fun NetworkPage(client: LinkClient, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(16.dp))
         }
+    }
+
+    asking?.let { (title, text, go) ->
+        AlertDialog(
+            onDismissRequest = { asking = null },
+            title = { Text(title) },
+            text = { Text(text) },
+            confirmButton = { TextButton(onClick = { asking = null; go() }) { Text("Go ahead") } },
+            dismissButton = { TextButton(onClick = { asking = null }) { Text("Cancel") } },
+        )
+    }
+
+    joining?.let { ssid ->
+        AlertDialog(
+            onDismissRequest = { joining = null },
+            title = { Text("Join $ssid") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = password, onValueChange = { password = it }, singleLine = true,
+                        placeholder = { Text("Password") }, visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Muted(undone)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = password.length in 8..63, onClick = { joining = null; act("join", ssid, password); password = "" }) { Text("Join") }
+            },
+            dismissButton = { TextButton(onClick = { joining = null; password = "" }) { Text("Cancel") } },
+        )
     }
 }
 

@@ -162,6 +162,40 @@ def pure_checks(check):
         check(cloud.load_project(folder) is None, "account: an incomplete project is no project")
     check(cloud.device_id("ab" * 32) == "ab" * 10, "account: a device is named by the start of its fingerprint")
     check(desktop.parse_volume("Volume: front-left: 32768 /  50% / -18.06 dB") == 50, "sound: volume is read")
+
+    import system
+    check(system._fields(r"*:Cafe\: Open:55") == ["*", "Cafe: Open", "55"], "network: a name with a colon in it is read whole")
+    with tempfile.TemporaryDirectory() as folder:
+        usb = Path(folder)
+        for port, kind in (("1-2", "00"), ("usb1", "09")):
+            (usb / port).mkdir()
+            for name, text in (("idVendor", "1234"), ("idProduct", "abcd"), ("bDeviceClass", kind), ("authorized", "1")):
+                (usb / port / name).write_text(text + "\n")
+        listed = system.usb_devices(usb)
+        check([d["port"] for d in listed] == ["1-2"] and listed[0]["on"] and listed[0]["switchable"],
+              "devices: a USB device is listed with its switch, a hub is not")
+        done, _text, change = system.usb_switch("1-2", False, usb)
+        check(done and (usb / "1-2/authorized").read_text() == "0" and change == ("usb", "1-2")
+              and not system.usb_devices(usb)[0]["on"], "devices: a USB device is switched off, and can be undone")
+        check(not system.usb_switch("usb1", False, usb)[0] and not system.usb_switch("../1-2", False, usb)[0],
+              "devices: only a listed device can be switched")
+    real = (system.drives, system._udisks)
+    asked = []
+    stick = {"device": "/dev/sdz1", "disk": "/dev/sdz", "mount": "/media/stick", "removable": True}
+    system.drives = lambda: [stick, dict(stick, device="/dev/sdz2", mount=""),
+                             {"device": "/dev/sdy1", "disk": "/dev/sdy", "mount": "/", "removable": False}]
+    system._udisks = lambda *args: (asked.append(args), (True, "Mounted /dev/sdz2 at /media/two"))[1]
+    try:
+        check(system.drive_action("/dev/sdz2", "mount") == (True, "Mounted at /media/two"), "devices: a drive is mounted")
+        check(system.drive_action("/dev/sdz1", "eject")[0]
+              and asked[-2:] == [("unmount", "-b", "/dev/sdz1"), ("power-off", "-b", "/dev/sdz")],
+              "devices: a removable drive is unmounted, then made safe to pull out")
+        before = len(asked)
+        check(not system.drive_action("/dev/sdy1", "unmount")[0] and not system.drive_action("/dev/sdy1", "eject")[0]
+              and not system.drive_action("/dev/sdx", "mount")[0] and len(asked) == before,
+              "devices: the drive the computer runs from, and one that is not there, are left alone")
+    finally:
+        system.drives, system._udisks = real
     check(set(desktop.POWER_ACTIONS) == {"lock", "unlock", "screen-off", "suspend", "reboot", "poweroff"},
           "power: a fixed list of actions")
 
@@ -173,6 +207,11 @@ async def daemon_checks(sandbox, check):
     home = Path.home()
     link_dir = home / ".config/adaptive-desktop/link"
     env = dict(os.environ, ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT))
+    # The network and the drives the daemon changes are stand-ins, not this machine's.
+    import fake_system_tools
+    tools = sandbox / "tools"
+    env.update(PATH=f"{fake_system_tools.install(tools / 'bin')}:{env['PATH']}", FAKE_TOOLS_DIR=str(tools),
+               ADAPTIVE_LINK_KEEP_S="3")
     # Google, as far as these checks go (scripts/fake_cloud.py).
     google = subprocess.Popen([sys.executable, str(REPO / "scripts/fake_cloud.py"), str(CLOUD_PORT)],
                               stdout=subprocess.DEVNULL, stderr=open(sandbox / "cloud.log", "w"))
@@ -421,6 +460,30 @@ async def daemon_checks(sandbox, check):
                 check(not (await reply.json())["ok"], "tasks: the system's own processes cannot")
             async with phone.post(f"{link_url}/v1/tasks/signal", json={"pid": daemon.pid, "action": "kill"}) as reply:
                 check(not (await reply.json())["ok"] and daemon.poll() is None, "tasks: nor can the link itself")
+            victim = subprocess.Popen(["sleep", "300"])
+            async with phone.post(f"{link_url}/v1/tasks/signal", json={"pid": victim.pid, "action": "low"}) as reply:
+                lowered = await reply.json()
+            async with phone.post(f"{link_url}/v1/tasks/signal", json={"pid": victim.pid, "action": "pause"}) as reply:
+                await reply.json()
+            async with phone.get(f"{link_url}/v1/tasks?q={victim.pid}") as reply:
+                seen = [p for p in (await reply.json())["processes"] if p["pid"] == victim.pid]
+            check(lowered["ok"] and seen and seen[0]["nice"] == 10 and seen[0]["paused"],
+                  "tasks: a process is made less important, and paused")
+            async with phone.post(f"{link_url}/v1/tasks/signal", json={"pid": victim.pid, "action": "normal"}) as reply:
+                raised = await reply.json()
+            check(raised["ok"] or "system" in raised["error"], "tasks: making it important again is the system's to allow")
+            victim.kill()
+            victim.wait()
+            parent = subprocess.Popen(["sh", "-c", "sleep 300 & sleep 300 & wait"])
+            await asyncio.sleep(0.5)
+            started = subprocess.run(["pgrep", "-P", str(parent.pid)], capture_output=True, text=True).stdout.split()
+            async with phone.post(f"{link_url}/v1/tasks/signal",
+                                  json={"pid": parent.pid, "action": "kill", "tree": True}) as reply:
+                await reply.json()
+            parent.wait(timeout=5)
+            await asyncio.sleep(0.3)
+            check(len(started) == 2 and not any(Path(f"/proc/{pid}").exists() for pid in started),
+                  "tasks: a process is ended with everything it started")
             control.call("POST", "/configure", {"allow_exec": False})
             async with phone.get(f"{link_url}/v1/tasks") as reply:
                 check(reply.status == 403, "tasks: not shown when commands are turned off")
@@ -437,6 +500,88 @@ async def daemon_checks(sandbox, check):
                   and all(i["name"] != "lo" and i["received"] >= 0 and isinstance(i["addresses"], list)
                           for i in net["interfaces"]),
                   "network: the interfaces, their addresses and their traffic are listed")
+
+            async def change(path, **body):
+                async with phone.post(f"{link_url}{path}", json=body) as reply:
+                    return await reply.json()
+
+            def network_now():
+                return json.loads((tools / "network.json").read_text())
+
+            def asked():
+                return [json.loads(line) for line in (tools / "calls.log").read_text().splitlines()]
+
+            root = next(d for d in devices["drives"] if d["mount"] == "/")
+            refusals = [await change("/v1/devices", action="unmount", target=root["device"]),
+                        await change("/v1/devices", action="eject", target=root["device"]),
+                        await change("/v1/devices", action="mount", target="/dev/../etc/passwd"),
+                        await change("/v1/devices", action="format", target=root["device"]),
+                        await change("/v1/devices", action="usb-off", target="../../etc")]
+            check(root["system"] and not any(r["ok"] for r in refusals) and all(r["keep"] == 0 for r in refusals)
+                  and not any(call[0] == "udisksctl" for call in asked()),
+                  "devices: the drive the computer runs from cannot be unmounted, nor anything not listed touched")
+            if devices["usb"] and not devices["usb"][0]["switchable"]:
+                switched = await change("/v1/devices", action="usb-off", target=devices["usb"][0]["port"])
+                check(not switched["ok"] and "install-link-usb.sh" in switched["error"],
+                      "devices: says what to run when the USB switches are still the system's")
+
+            check(net["control"] and net["wifi_on"] and [v["name"] for v in net["vpns"]] == ["Work VPN"]
+                  and [(n["name"], n["active"], n["known"], n["security"]) for n in net["networks"]]
+                  == [("Home", True, True, "WPA2"), ("Cafe: Open", False, False, ""), ("Other", False, False, "WPA2")],
+                  "network: Wi-Fi, the networks in range and the VPNs are listed")
+            off = await change("/v1/network", action="wifi", value="off")
+            check(off["ok"] and off["keep"] == 3 and not network_now()["radio"], "network: Wi-Fi is turned off from the phone")
+            await asyncio.sleep(4.5)
+            async with phone.get(f"{link_url}/v1/log") as reply:
+                undone = [e for e in (await reply.json())["entries"] if e["action"] == "undone"]
+            check(network_now()["radio"] and len(undone) == 1,
+                  "network: and turned back on when the phone does not come back to keep it")
+            off = await change("/v1/network", action="wifi", value="off")
+            kept = await change("/v1/keep")
+            await asyncio.sleep(4)
+            check(off["ok"] and kept["kept"] and not network_now()["radio"], "network: a change the phone keeps is kept")
+            await change("/v1/network", action="wifi", value="on")
+            await change("/v1/network", action="connect", value="wlan-check")
+
+            joined = await change("/v1/network", action="join", value="Cafe: Open")
+            check(joined["ok"] and joined["keep"] == 3 and network_now()["active"] == "Cafe: Open",
+                  "network: an open network is joined")
+            await asyncio.sleep(4.5)
+            check(network_now()["active"] == "Home", "network: and left for the one before when the phone is lost")
+            wrong = await change("/v1/network", action="join", value="Other", secret="wrong-horse")
+            check(not wrong["ok"] and "password" in wrong["error"] and "Other" not in network_now()["saved"],
+                  "network: a wrong password is refused and leaves nothing behind")
+            right = await change("/v1/network", action="join", value="Other", secret="correct-horse")
+            await change("/v1/keep")
+            check(right["ok"] and network_now()["active"] == "Other"
+                  and not any("horse" in word for call in asked() for word in call),
+                  "network: a network is joined with its password, which no other program could read")
+            back = await change("/v1/network", action="join", value="Home")
+            await change("/v1/keep")
+            check(back["ok"] and network_now()["active"] == "Home", "network: a saved network needs no password")
+            refusals = [await change("/v1/network", action="join", value="Other"),      # saved by now: no refusal
+                        await change("/v1/network", action="join", value="--help"),
+                        await change("/v1/network", action="join", value="Nowhere"),
+                        await change("/v1/network", action="disconnect", value="lo"),
+                        await change("/v1/network", action="up", value="Home"),
+                        await change("/v1/network", action="wifi", value="on; reboot"),
+                        await change("/v1/network", action="delete", value="Home")]
+            await change("/v1/keep")
+            check(refusals[0]["ok"] and not any(r["ok"] for r in refusals[1:]),
+                  "network: only what is listed can be asked for")
+            up = await change("/v1/network", action="up", value="Work VPN")
+            check(up["ok"] and up["keep"] == 3 and network_now()["vpn"], "network: a VPN is brought up")
+            down = await change("/v1/network", action="down", value="Work VPN")
+            await asyncio.sleep(4)
+            check(down["ok"] and down["keep"] == 0 and not network_now()["vpn"],
+                  "network: and down again, which settles the change before it")
+            control.call("POST", "/configure", {"allow_input": False})
+            async with phone.post(f"{link_url}/v1/network", json={"action": "wifi", "value": "off"}) as reply:
+                refused_network = reply.status
+            async with phone.post(f"{link_url}/v1/devices", json={"action": "unmount", "target": "/dev/sda1"}) as reply:
+                check(reply.status == 403 and refused_network == 403 and network_now()["radio"],
+                      "network and devices: nothing is changed in view-only")
+            control.call("POST", "/configure", {"allow_input": True})
 
             async with phone.get(f"{link_url}/v1/desktop") as reply:
                 check(isinstance((await reply.json())["projects"], list), "desktop: the projects are listed (none here)")

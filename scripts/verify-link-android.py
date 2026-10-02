@@ -81,6 +81,10 @@ def stand_in(email="me@example.com"):
         "test_identity": f"google:{email}", "stun": ""}).encode()).decode()
 
 
+# How long the daemon waits for the phone to keep a change to the network.
+KEEP_S = 12
+
+
 def screens(check, adb, device, control, build_env, sandbox):
     """Use the app itself, the way its owner does: every button.
 
@@ -353,7 +357,9 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(has("xvfb-run"), "tasks: a process is found by name")
     tap("xvfb-run", wait=1.5)
     step(has("End", "Kill", "Pause"), "tasks: a process can be paused, ended or killed")
-    tap("Close", wait=1)
+    step(has("Priority", "And everything it started"), "tasks: its priority, and whether to act on what it started")
+    tap("Low", wait=5)
+    step(has("low priority"), "tasks: a process is made less important from the phone")
     home()
 
     tap("Devices", wait=4)
@@ -367,8 +373,37 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(has("Send a file to the computer"), "devices: a drive opens in Files")
     home()
 
+    def reach(label):
+        """Scroll down until `label` is on screen."""
+        for _ in range(6):
+            if has(label):
+                return True
+            sh("shell", "input", "swipe", "540", "1700", "540", "900", "300")
+            time.sleep(1)
+        return has(label)
+
+    def network_now():
+        return json.loads((sandbox / "tools/network.json").read_text())
+
     tap("Network", wait=5)
-    step(has("Received", "Sent") and has("DNS"), "network: the connections and what they carry")
+    step(has("Received", "Sent"), "network: the connections and what they carry")
+    step(reach("Look for networks") and has("Wi-Fi on the computer", "Cafe: Open", "Other"),
+         "network: Wi-Fi and the networks in range")
+    tap("Cafe: Open", wait=1.5)
+    step(has("Join Cafe: Open?", "puts it back"), "network: a change that could cut the phone off is asked about first")
+    tap("Go ahead", wait=6)
+    time.sleep(KEEP_S + 3)
+    step(network_now()["active"] == "Cafe: Open",
+         "network: a network is joined from the phone, and kept because the phone still reaches the computer")
+    reach("Other")
+    tap("Other", wait=1.5)
+    if tap("Password", wait=1):
+        sh("shell", "input", "text", "correct-horse")
+        time.sleep(1)
+    tap("Join", wait=8)
+    step(network_now()["active"] == "Other", "network: a network is joined with its password")
+    reach("Work VPN")
+    step(reach("DNS"), "network: the VPNs and the DNS servers")
     home()
 
     tap("Desktop", wait=4)
@@ -490,6 +525,11 @@ def main():
     env = dict(os.environ, HOME=str(sandbox / "home"), XDG_RUNTIME_DIR=str(sandbox / "run"),
                ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT),
                PYTHONPATH=site.getusersitepackages())
+    # The network the app turns off and on is a stand-in, not this machine's.
+    import fake_system_tools
+    tools = sandbox / "tools"
+    env.update(PATH=f"{fake_system_tools.install(tools / 'bin')}:{env['PATH']}", FAKE_TOOLS_DIR=str(tools),
+               ADAPTIVE_LINK_KEEP_S=str(KEEP_S))
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     daemon = subprocess.Popen(
         ["xvfb-run", "-a", "-s", "-screen 0 1280x800x24", "dbus-run-session", "--",

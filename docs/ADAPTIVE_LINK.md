@@ -227,6 +227,7 @@ and if it is active, `sudo ufw allow 47823/tcp` and, for pairing,
 scripts/build-link-app.sh         # the app: dist/adaptive-link.apk
 scripts/build-link-app.sh --install   # ...and onto the phone over USB
 scripts/install-link-camera.sh    # once, sudo: the virtual webcam
+scripts/install-link-usb.sh       # once, sudo: switching USB devices off and on
 scripts/link-cli.py setup         # once, with a Google project: its five values
 scripts/link-cli.py signin        # ...and sign in; or, with no account:
 scripts/link-cli.py pair
@@ -254,13 +255,18 @@ on the local network only.
 | Run | A command, with its output; or started and left running (a player, an app) |
 | Files | Browse, open a file on the computer (play a movie), download to the phone, send a file to `~/Downloads/Phone` |
 | Webcam | The phone's camera as "Phone Camera" in any app that takes a webcam |
+| Tasks | Load, memory and disks; the processes, found by name; pause, resume, end or kill one of yours, alone or with everything it started; make it less important |
+| Devices | What is plugged in over USB, each switched off and on (as if unplugged); the drives: browse, mount, unmount, safely remove |
+| Network | Each connection with its addresses and its speed; Wi-Fi on and off, the networks in range and joining one (with its password if it is new), connecting and disconnecting, VPNs up and down |
+| Desktop | Projects, focus, window placement, reports, quick notes, appearance, saving the session |
 | More | Clipboard both ways, lock, unlock, screen off, suspend, restart, shut down, the phone's notifications on the computer, unpair |
 
 Switches on the computer narrow that, each taking effect at once:
 
 ```sh
-scripts/link-cli.py allow input off    # watch only: no pointer, keyboard or launching apps
-scripts/link-cli.py allow exec off     # no Run screen
+scripts/link-cli.py allow input off    # watch only: no pointer, keyboard or launching apps,
+                                       # and no change to the network, the drives, USB or the desktop
+scripts/link-cli.py allow exec off     # no Run screen and no Tasks screen
 scripts/link-cli.py allow files off    # no file access
 scripts/link-cli.py allow power off    # no lock, unlock, suspend, restart
 scripts/link-cli.py off                # nothing at all, until "on"
@@ -273,6 +279,29 @@ and a keyboard can type a command into a terminal or open a file, whatever
 `input` off as well. The clipboard, media controls and the phone's
 notifications are always available to the paired phone.
 
+### Changes that could cut the phone off
+
+The phone reaches the computer over the network, so some of what it can now
+change would end the conversation: turning Wi-Fi off, joining another
+network, disconnecting, bringing a VPN up, switching off the USB adapter the
+network comes through. The app asks before each of these, and the computer
+does not take the phone's word that it went well. After such a change the
+phone has 45 seconds to come back over the link and say it can still reach
+the computer; if it does not, the computer undoes the change and records
+that in the audit log. A phone that was on the old network and finds the
+computer on the new one (through the account, see *Local and away*) counts
+as coming back.
+
+What the computer is changed through is what it would be changed through at
+its own keyboard: NetworkManager for the network, UDisks for the drives, the
+owner's own permissions for processes. So the phone cannot do what the owner
+could not: stop another user's process, make a process more important than
+it was, or unmount the drive the computer runs from (that one is refused
+before anything is asked). USB devices are the exception - their switch is
+the system's until `scripts/install-link-usb.sh` hands it to the owner.
+A Wi-Fi password typed on the phone is given to NetworkManager as input,
+never as part of a command line that other programs could read.
+
 ## How it is checked
 
 - `scripts/verify-link.py` — the decisions as functions, then the real daemon
@@ -282,7 +311,9 @@ notifications are always available to the paired phone.
   (`scripts/fake_cloud.py`) that enforces the database's rule: signing in by
   code, a phone of the account asking and being approved, a phone of another
   account seeing nothing, and the link used through a direct connection. It
-  never locks, suspends or changes the volume of the machine it runs on.
+  never locks, suspends or changes the volume of the machine it runs on, and
+  the network and drives it changes are stand-ins
+  (`scripts/fake_system_tools.py`), not the machine's own.
 - `scripts/verify-link-android.py` — the Android code itself, on an emulator
   (`scripts/link-emulator.sh`): the keystore key, pairing, mutual TLS, a
   screen frame, a command, the computer reached through a direct connection
@@ -295,7 +326,9 @@ notifications are always available to the paired phone.
 What that leaves for a real phone is in `record-live-verification.py`: your
 own device, Google's real sign-in (the emulator has no Google account, so the
 checks hand the app a stand-in's answer), the direct connection from mobile
-data, and the camera.
+data, the camera, and the real NetworkManager and UDisks: turning Wi-Fi off
+and having it come back, joining a network with its password, and removing a
+real drive.
 
 ## Known limits
 

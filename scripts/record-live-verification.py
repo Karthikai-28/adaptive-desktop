@@ -146,6 +146,11 @@ CHECKS = [
         "prompt": "After install-link-camera.sh, does a browser or meeting app list \"Phone Camera\" and show the phone's picture?",
     },
     {
+        "id": "link_system_control",
+        "backlog": "Adaptive Link changing the real network and drives.",
+        "prompt": "From the phone: does joining another Wi-Fi network with its password work, does Wi-Fi turned off come back on by itself within a minute, and does Safely remove release a real USB drive?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",

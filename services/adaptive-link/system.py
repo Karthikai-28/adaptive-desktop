@@ -3,14 +3,24 @@
 What the phone's Tasks, Devices, Network and Desktop screens show and do:
 
   tasks     what is running, how busy the machine is, and stopping a process
-  devices   what is plugged in over USB, and the drives
-  network   how the machine is connected, and how much is going through
+            or making it less important
+  devices   what is plugged in over USB, and the drives: mounting, unmounting
+            and safely removing a drive, switching a USB device off and on
+  network   how the machine is connected and how much is going through;
+            Wi-Fi on and off, joining a network, connecting and disconnecting
   desktop   the things Adaptive Desktop adds - projects, focus, window
             placement, quick notes - through the same command-line tools the
             desktop's own keys and palette use (scripts/*-cli.py)
 
-Everything here is read with the owner's own permissions: a process can be
-stopped only if it is the owner's, exactly as in a terminal.
+Everything here is done with the owner's own permissions: a process can be
+stopped only if it is the owner's, exactly as in a terminal, and the network
+and the drives are changed through NetworkManager and UDisks, which allow the
+person at the computer what they would allow from its own settings.
+
+A change that could cut the phone off from the computer - turning Wi-Fi off,
+leaving a network, switching a USB device off - comes back with how to undo
+it. The daemon undoes it unless the phone says, over the link, that it can
+still reach the computer (server.py, /v1/keep).
 """
 
 import json
@@ -33,6 +43,7 @@ USB_CLASSES = {
     "0b": "Smart card", "0e": "Camera", "e0": "Wireless", "ef": "Composite", "ff": "Other",
 }
 SIGNALS = {"stop": signal.SIGTERM, "kill": signal.SIGKILL, "pause": signal.SIGSTOP, "resume": signal.SIGCONT}
+PRIORITIES = {"normal": 0, "low": 10, "lowest": 19}
 PROCESS_LIMIT = 80
 
 
@@ -75,7 +86,7 @@ def processes(sort="cpu", query=""):
     order = "-rss" if sort == "memory" else "-pcpu"
     try:
         out = subprocess.run(
-            ["ps", "-eo", "pid=,user:20=,pcpu=,pmem=,rss=,etimes=,comm:32=,args=", f"--sort={order}"],
+            ["ps", "-eo", "pid=,user:20=,pcpu=,pmem=,rss=,etimes=,ni=,s=,comm:32=,args=", f"--sort={order}"],
             capture_output=True, text=True, timeout=10, check=False).stdout
     except (OSError, subprocess.SubprocessError):
         return []
@@ -83,13 +94,15 @@ def processes(sort="cpu", query=""):
     wanted = query.strip().lower()
     found = []
     for line in out.splitlines():
-        parts = line.split(None, 7)
-        if len(parts) < 7:
+        parts = line.split(None, 9)
+        if len(parts) < 9:
             continue
         try:
             entry = {"pid": int(parts[0]), "user": parts[1], "cpu": float(parts[2]), "memory": float(parts[3]),
-                     "rss": int(parts[4]) * 1024, "elapsed": int(parts[5]), "name": parts[6],
-                     "command": (parts[7] if len(parts) > 7 else parts[6])[:300]}
+                     "rss": int(parts[4]) * 1024, "elapsed": int(parts[5]),
+                     "nice": int(parts[6]) if parts[6].lstrip("-").isdigit() else 0,   # "-" for a realtime one
+                     "paused": parts[7] in ("T", "t"), "name": parts[8],
+                     "command": (parts[9] if len(parts) > 9 else parts[8])[:300]}
         except ValueError:
             continue
         if entry["pid"] == os.getpid() or entry["name"] == "ps":
@@ -108,22 +121,67 @@ def _user():
     return pwd.getpwuid(os.getuid()).pw_name
 
 
-def signal_process(pid, action):
-    """Stop, kill, pause or resume one of the owner's processes.
-    Returns (done, why not)."""
-    if action not in SIGNALS:
-        return False, "unknown action"
-    if not isinstance(pid, int) or pid <= 1:
-        return False, "not a process"
-    if pid in (os.getpid(), os.getppid()):
-        return False, "that is Adaptive Link itself; turn it off from the computer"
+def _started_by(pid):
+    """The processes a process started, and the ones those started."""
     try:
-        os.kill(pid, SIGNALS[action])
+        out = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True, text=True, timeout=10, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    children = {}
+    for line in out.split("\n"):
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+    found, queue = [], [pid]
+    while queue:
+        for child in children.get(queue.pop(), []):
+            if child not in found:
+                found.append(child)
+                queue.append(child)
+    return found
+
+
+def signal_process(pid, action, tree=False):
+    """Stop, kill, pause or resume one of the owner's processes, or change
+    how important it is; with `tree`, the processes it started as well.
+    Returns (done, why not)."""
+    if action not in SIGNALS and action not in PRIORITIES:
+        return False, "unknown action"
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+        return False, "not a process"
+    ours = (os.getpid(), os.getppid())
+    if pid in ours:
+        return False, "that is Adaptive Link itself; turn it off from the computer"
+
+    def one(target):
+        if action in SIGNALS:
+            os.kill(target, SIGNALS[action])
+        else:
+            os.setpriority(os.PRIO_PROCESS, target, PRIORITIES[action])
+
+    # The ones it started first, so that none is left behind without it.
+    for child in reversed(_started_by(pid)) if tree else ():
+        if child not in ours:
+            try:
+                one(child)
+            except OSError:
+                pass   # ended in the meantime, or not the owner's
+    try:
+        one(pid)
     except ProcessLookupError:
         return False, "it has already ended"
     except PermissionError:
+        if action in PRIORITIES and _owner(pid) == os.getuid():
+            return False, "only the system can make a process more important again"
         return False, "it belongs to another user or to the system"
     return True, ""
+
+
+def _owner(pid):
+    try:
+        return os.stat(f"/proc/{pid}").st_uid
+    except OSError:
+        return -1
 
 
 # ----------------------------------------------------------------- devices
@@ -174,7 +232,11 @@ def usb_devices(root=USB_ROOT):
             continue   # hubs and the machine's own ports
         vendor, product = _read(device / "idVendor"), _read(device / "idProduct")
         speed = _read(device / "speed")
+        switch = device / "authorized"
         found.append({
+            "on": _read(switch) != "0",
+            # The switch is the system's unless install-link-usb.sh handed it to the owner.
+            "switchable": os.access(switch, os.W_OK),
             "name": _read(device / "product") or named.get(f"{vendor}:{product}") or f"USB device {vendor}:{product}",
             "maker": _read(device / "manufacturer"),
             "id": f"{vendor}:{product}",
@@ -183,6 +245,76 @@ def usb_devices(root=USB_ROOT):
             "port": device.name,
         })
     return found
+
+
+def usb_switch(port, on, root=USB_ROOT):
+    """Switch a USB device off (as if unplugged) or on again.
+    Returns (done, what to say, how to undo it)."""
+    if not any(device["port"] == port for device in usb_devices(root)):
+        return False, "no such device", None
+    try:
+        (root / port / "authorized").write_text("1" if on else "0")
+    except PermissionError:
+        return False, "the computer has not been set up for this: run scripts/install-link-usb.sh on it once", None
+    except OSError as error:
+        return False, str(error), None
+    return True, "", None if on else ("usb", port)
+
+
+def _system_mount(mount):
+    """A place the system or the owner's own files live: never unmounted from the phone."""
+    if not mount:
+        return False
+    if mount == "/" or mount.startswith(("/boot", "/usr", "/var", "/etc", "/snap")):
+        return True
+    return any(str(place).startswith(mount.rstrip("/") + "/") or str(place) == mount
+               for place in (Path.home(), REPO))
+
+
+def _udisks(*args):
+    try:
+        done = subprocess.run(["udisksctl", *args, "--no-user-interaction"],
+                              capture_output=True, text=True, timeout=40, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, str(error)
+    text = (done.stdout + done.stderr).strip()
+    # "Error unmounting /dev/sdb1: GDBus.Error:...: target is busy" - the last part is the reason.
+    return done.returncode == 0, text.rsplit(": ", 1)[-1][:300]
+
+
+def drive_action(device, action):
+    """Mount or unmount a drive, or make a removable one safe to pull out.
+    Returns (done, what to say)."""
+    known = drives()
+    drive = next((d for d in known if d["device"] == device), None)
+    if drive is None:
+        return False, "no such drive"
+    if action == "mount":
+        if drive["mount"]:
+            return True, f"Already at {drive['mount']}"
+        done, text = _udisks("mount", "-b", device)
+        return done, (f"Mounted at {text.rsplit(' at ', 1)[-1].rstrip('.')}" if done and " at " in text else text)
+    if action == "unmount":
+        if not drive["mount"]:
+            return True, "It is not mounted"
+        if _system_mount(drive["mount"]):
+            return False, "the computer is running from that drive"
+        done, text = _udisks("unmount", "-b", device)
+        return done, ("Unmounted" if done else text)
+    if action == "eject":
+        if not drive["removable"]:
+            return False, "that drive is built in"
+        parts = [d for d in known if d["disk"] == drive["disk"]]
+        if any(_system_mount(part["mount"]) for part in parts):
+            return False, "the computer is running from that drive"
+        for part in parts:
+            if part["mount"]:
+                done, text = _udisks("unmount", "-b", part["device"])
+                if not done:
+                    return False, text
+        done, text = _udisks("power-off", "-b", drive["disk"])
+        return done, ("It is safe to pull out" if done else text)
+    return False, "unknown action"
 
 
 def drives():
@@ -210,7 +342,9 @@ def drives():
                 return
             entry = {"name": node.get("label") or (parent or node).get("model") or node.get("name") or "",
                      "device": "/dev/" + str(node.get("name")), "size": int(node.get("size") or 0),
+                     "disk": "/dev/" + str((parent or node).get("name")),
                      "mount": mount, "removable": removable, "format": node.get("fstype") or "",
+                     "system": _system_mount(mount),
                      "over": (parent or node).get("tran") or ""}
             if mount:
                 try:
@@ -229,6 +363,7 @@ def drives():
 # ----------------------------------------------------------------- network
 
 NET_ROOT = Path("/sys/class/net")
+WIFI_LIMIT = 30
 
 
 def _json_from(*command):
@@ -239,21 +374,143 @@ def _json_from(*command):
         return []
 
 
-def _wifi():
-    """The Wi-Fi network in use, as NetworkManager knows it."""
+def _nmcli(*args, wait=0, feed=None):
+    """Ask NetworkManager. Returns (ok, its words)."""
+    command = ["nmcli", *(("--wait", str(wait)) if wait else ()), *args]
     try:
-        out = subprocess.run(
-            ["nmcli", "-t", "-f", "ACTIVE,SIGNAL,FREQ,RATE,SECURITY,SSID", "dev", "wifi", "list", "--rescan", "no"],
-            capture_output=True, text=True, timeout=5, check=False).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    for line in out.splitlines():
-        # The name comes last because it is the one part that may hold a colon.
-        parts = line.split(":", 5)
-        if len(parts) == 6 and parts[0] == "yes":
-            return {"name": parts[5].replace("\\:", ":"), "signal": int(parts[1]) if parts[1].isdigit() else 0,
-                    "frequency": parts[2], "rate": parts[3], "security": parts[4]}
-    return None
+        done = subprocess.run(command, capture_output=True, text=True, input=feed,
+                              timeout=wait + 10 if wait else 8, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, str(error)
+    return done.returncode == 0, (done.stdout if done.returncode == 0 else done.stderr or done.stdout).strip()
+
+
+def _fields(line):
+    """One line of nmcli's terse output: fields apart at ':', which a name
+    that holds one has as '\\:'."""
+    return [part.replace("\\:", ":").replace("\\\\", "\\") for part in re.split(r"(?<!\\):", line)]
+
+
+def _rows(*args, width):
+    ok, out = _nmcli("-t", *args)
+    return [row for row in map(_fields, out.splitlines()) if len(row) == width] if ok else []
+
+
+def _saved():
+    """The connections NetworkManager remembers: (name, kind, in use)."""
+    return _rows("-f", "NAME,TYPE,ACTIVE", "con", "show", width=3)
+
+
+def wifi_networks(saved=None):
+    """The Wi-Fi networks in range, strongest first, one line per name."""
+    known = {name for name, kind, _active in (_saved() if saved is None else saved) if kind == "802-11-wireless"}
+    best = {}
+    for used, name, strength, frequency, rate, security in _rows(
+            "-f", "IN-USE,SSID,SIGNAL,FREQ,RATE,SECURITY", "dev", "wifi", "list", "--rescan", "no", width=6):
+        if not name:
+            continue   # a hidden one has no name to join it by
+        entry = {"name": name, "signal": int(strength) if strength.isdigit() else 0, "frequency": frequency,
+                 "rate": rate, "security": "" if security in ("", "--") else security,
+                 "active": used.strip() == "*", "known": name in known}
+        kept = best.get(name)
+        if kept is None or (entry["active"], entry["signal"]) > (kept["active"], kept["signal"]):
+            best[name] = entry
+    return sorted(best.values(), key=lambda n: (not n["active"], -n["signal"], n["name"]))[:WIFI_LIMIT]
+
+
+def _nm_devices():
+    """What NetworkManager says of each interface it looks after."""
+    return {device: {"state": state.split(" ")[0], "connection": connection}
+            for device, state, connection in _rows("-f", "DEVICE,STATE,CONNECTION", "dev", width=3)
+            if state != "unmanaged"}
+
+
+def _tunnels(saved=None):
+    """The saved VPNs, which can be brought up and down."""
+    return [{"name": name, "kind": "WireGuard" if kind == "wireguard" else "VPN", "active": active == "yes"}
+            for name, kind, active in (_saved() if saved is None else saved) if kind in ("vpn", "wireguard")]
+
+
+def network_action(action, value="", secret=""):
+    """Change how the machine is connected.
+    Returns (done, what to say, how to undo it): the last is None where the
+    change cannot cut the phone off."""
+    value = value if isinstance(value, str) else ""
+    if not shutil.which("nmcli"):
+        return False, "the computer's network is not run by NetworkManager", None
+    if action == "wifi":
+        if value not in ("on", "off"):
+            return False, "on or off", None
+        done, text = _nmcli("radio", "wifi", value)
+        return done, text, ("wifi", "on") if done and value == "off" else None
+    if action == "scan":
+        done, text = _nmcli("dev", "wifi", "rescan")
+        # Asked twice in a few seconds it says so; the list is fresh either way.
+        return done or "not allowed" in text, "" if done else text, None
+    if action == "join":
+        seen = next((n for n in wifi_networks() if n["name"] == value), None)
+        if seen is None:
+            return False, "that network is not in range", None
+        before = next((n["name"] for n in wifi_networks() if n["active"]), "")
+        if seen["known"]:
+            done, text = _nmcli("con", "up", "id", value, wait=20)
+        elif not seen["security"]:
+            done, text = _nmcli("dev", "wifi", "connect", value, wait=20)
+        elif not isinstance(secret, str) or not 8 <= len(secret) <= 63:
+            return False, "it needs its password (8 to 63 characters)", None
+        else:
+            # Typed in rather than given as an argument, where every program
+            # on the computer could read it.
+            done, text = _nmcli("--ask", "dev", "wifi", "connect", value, wait=20, feed=secret + "\n")
+            if not done:
+                _nmcli("con", "delete", "id", value)   # the half-made one would never connect
+                text = "it did not accept that password" if "ecret" in text or "assword" in text else text
+        if not done:
+            return False, _last_line(text), None
+        if before == value:
+            return True, f"Already on {value}", None
+        return True, f"Connected to {value}", ("join", before) if before else ("wifi-leave", value)
+    if action in ("connect", "disconnect"):
+        if value not in _nm_devices():
+            return False, "no such connection", None
+        done, text = _nmcli("dev", action, value, wait=20)
+        return done, "" if done else _last_line(text), ("connect", value) if done and action == "disconnect" else None
+    if action in ("up", "down"):
+        if not any(tunnel["name"] == value for tunnel in _tunnels()):
+            return False, "no such VPN", None
+        done, text = _nmcli("con", action, "id", value, wait=20)
+        # A VPN that does not carry the link cuts the phone off when it comes up.
+        return done, "" if done else _last_line(text), ("down", value) if done and action == "up" else None
+    return False, "unknown action", None
+
+
+def _last_line(text):
+    return (text.strip().splitlines() or [""])[-1][:300]
+
+
+def undo(change):
+    """Take back a change the phone did not come back from. `change` is what
+    network_action or usb_switch returned. Returns what was done, in words."""
+    kind, value = change
+    if kind == "wifi":
+        _nmcli("radio", "wifi", value)
+        return "Wi-Fi turned back on"
+    if kind == "join":
+        _nmcli("con", "up", "id", value, wait=20)
+        return f"back on {value}"
+    if kind == "wifi-leave":
+        _nmcli("con", "down", "id", value, wait=20)
+        return f"left {value}"
+    if kind == "connect":
+        _nmcli("dev", "connect", value, wait=20)
+        return f"{value} connected again"
+    if kind == "down":
+        _nmcli("con", "down", "id", value, wait=20)
+        return f"{value} brought down again"
+    if kind == "usb":
+        usb_switch(value, True)
+        return f"USB device {value} switched back on"
+    return ""
 
 
 def _dns():
@@ -292,7 +549,10 @@ def network(root=NET_ROOT):
     how much it has carried. The phone works the speed out from two readings,
     so `time` says when this one was taken."""
     gateways = {route.get("dev"): route.get("gateway", "") for route in reversed(_json_from("ip", "-j", "route", "show", "default"))}
-    wifi = _wifi()
+    saved = _saved()
+    networks = wifi_networks(saved)
+    wifi = next((n for n in networks if n["active"]), None)
+    managed = _nm_devices()
     found = []
     for link in _json_from("ip", "-j", "addr"):
         name = link.get("ifname", "")
@@ -312,13 +572,18 @@ def network(root=NET_ROOT):
             "speed": f"{speed} Mb/s" if speed else "",
             "received": _count(root / name / "statistics/rx_bytes"),
             "sent": _count(root / name / "statistics/tx_bytes"),
+            # Whether it is NetworkManager's to connect and disconnect, and what it is on.
+            "managed": name in managed, "connection": managed.get(name, {}).get("connection", ""),
         }
         if kind == "Wi-Fi" and up and wifi:
             entry["wifi"] = wifi
         found.append(entry)
     # The one the machine reaches the internet through first, then the rest that are up.
     found.sort(key=lambda entry: (not entry["default"], not entry["up"], entry["name"]))
-    return {"interfaces": found, "dns": _dns(), "time": round(time.monotonic(), 3)}
+    radio = _nmcli("radio", "wifi")
+    return {"interfaces": found, "dns": _dns(), "time": round(time.monotonic(), 3),
+            "control": bool(managed), "wifi_on": radio[0] and radio[1] == "enabled",
+            "networks": networks, "vpns": _tunnels(saved)}
 
 
 # ----------------------------------------------------------------- desktop

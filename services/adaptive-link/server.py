@@ -44,6 +44,9 @@ import system
 
 VERSION = 1
 CONNECT_NOTICE_EVERY_S = 600
+# How long the phone has to say it can still reach the computer after a
+# change that may have cut it off.
+KEEP_S = int(os.environ.get("ADAPTIVE_LINK_KEEP_S", "45"))
 EXEC_OUTPUT_CHUNK = 4096
 PAIR_ASKS_PER_MINUTE = 60
 # How old a request made through the account may be and still be acted on.
@@ -103,6 +106,7 @@ class Link:
         # Every open socket to the phone, so that switching the link off or
         # unpairing ends what the phone is doing now, not at its next request.
         self._sockets = set()
+        self._undo = None   # a change waiting for the phone to keep it
         self._pair_asks = {}
 
     # ------------------------------------------------------------ listeners
@@ -250,7 +254,10 @@ class Link:
         add.add_get("/v1/tasks", self.h_tasks)
         add.add_post("/v1/tasks/signal", self.h_task_signal)
         add.add_get("/v1/devices", self.h_devices)
+        add.add_post("/v1/devices", self.h_device_action)
         add.add_get("/v1/network", self.h_network)
+        add.add_post("/v1/network", self.h_network_action)
+        add.add_post("/v1/keep", self.h_keep)
         add.add_get("/v1/desktop", self.h_desktop)
         add.add_get("/v1/desktop/report", self.h_desktop_report)
         add.add_post("/v1/desktop", self.h_desktop_action)
@@ -495,17 +502,67 @@ class Link:
         if not self._allowed("allow_exec"):
             return json_error(403, "commands are turned off on the computer")
         body = await read_json(request)
-        pid, action = body.get("pid"), body.get("action")
-        done, why = await asyncio.to_thread(system.signal_process, pid, action)
-        self.audit.write(request["peer"], "task", f"{action} {pid}" + ("" if done else f" - {why}"))
+        pid, action, tree = body.get("pid"), body.get("action"), body.get("tree") is True
+        done, why = await asyncio.to_thread(system.signal_process, pid, action, tree)
+        self.audit.write(request["peer"], "task",
+                         f"{action} {pid}" + (" and what it started" if tree else "") + ("" if done else f" - {why}"))
         return web.json_response({"ok": done, "error": why})
 
     async def h_devices(self, _request):
         return web.json_response({"usb": await asyncio.to_thread(system.usb_devices),
                                   "drives": await asyncio.to_thread(system.drives)})
 
+    async def h_device_action(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
+        body = await read_json(request)
+        action, target = str(body.get("action", ""))[:20], str(body.get("target", ""))[:80]
+        change = None
+        if action in ("usb-on", "usb-off"):
+            done, text, change = await asyncio.to_thread(system.usb_switch, target, action == "usb-on")
+        else:
+            done, text = await asyncio.to_thread(system.drive_action, target, action)
+        self.audit.write(request["peer"], "device", f"{action} {target}" + ("" if done else f" - {text}"))
+        return web.json_response({"ok": done, "text" if done else "error": text, "keep": self._hold(change)})
+
     async def h_network(self, _request):
         return web.json_response(await asyncio.to_thread(system.network))
+
+    async def h_network_action(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
+        body = await read_json(request)
+        action, value = str(body.get("action", ""))[:20], str(body.get("value", ""))[:80]
+        # One change at a time: the one before is settled, kept, first.
+        self._hold(None)
+        done, text, change = await asyncio.to_thread(system.network_action, action, value, body.get("secret", ""))
+        if action != "scan":
+            self.audit.write(request["peer"], "network", f"{action} {value}".strip() + ("" if done else f" - {text}"))
+        return web.json_response({"ok": done, "text" if done else "error": text, "keep": self._hold(change)})
+
+    # A change that may have cut the phone off is undone unless the phone
+    # comes back, over the link, to say it can still reach the computer.
+
+    def _hold(self, change):
+        """Wait for the phone to keep `change`. Returns how long it has."""
+        if self._undo is not None:
+            self._undo.cancel()   # what was waiting is kept: the phone got through to ask for this
+            self._undo = None
+        if change is None:
+            return 0
+        self._undo = asyncio.get_running_loop().create_task(self._undo_later(change))
+        return KEEP_S
+
+    async def _undo_later(self, change):
+        await asyncio.sleep(KEEP_S)
+        self._undo = None
+        said = await asyncio.to_thread(system.undo, change)
+        self.audit.write("-", "undone", f"{said}: the phone did not come back")
+
+    async def h_keep(self, _request):
+        waiting = self._undo is not None
+        self._hold(None)
+        return web.json_response({"ok": True, "kept": waiting})
 
     async def h_desktop(self, _request):
         return web.json_response(await asyncio.to_thread(system.desktop_state))
