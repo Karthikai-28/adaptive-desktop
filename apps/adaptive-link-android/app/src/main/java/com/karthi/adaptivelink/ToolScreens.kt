@@ -240,7 +240,7 @@ fun FilesPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
     }
 
     TopBar("Files", onBack) {
-        IconButton(onClick = { picker.launch("*/*") }) { Icon(Icons.Filled.Upload, "Send a file to the computer") }
+        IconButton(onClick = { activity.awayOnPurpose = true; picker.launch("*/*") }) { Icon(Icons.Filled.Upload, "Send a file to the computer") }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
         Muted(path)
@@ -304,7 +304,12 @@ fun CameraPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
     var front by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("Starting…") }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
-    LaunchedEffect(Unit) { if (!granted) permission.launch(Manifest.permission.CAMERA) }
+    LaunchedEffect(Unit) {
+        if (!granted) {
+            activity.awayOnPurpose = true
+            permission.launch(Manifest.permission.CAMERA)
+        }
+    }
 
     TopBar("Webcam", onBack) {
         IconButton(onClick = { front = !front }) { Icon(Icons.Filled.Cameraswitch, "Switch camera") }
@@ -407,6 +412,7 @@ fun MorePage(
                     relay = wanted && notificationAccessGranted(activity)
                     if (wanted && !notificationAccessGranted(activity)) {
                         note = "Allow Adaptive Link in the list that opens, then come back."
+                        activity.awayOnPurpose = true
                         activity.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     }
                 })

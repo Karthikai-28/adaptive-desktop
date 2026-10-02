@@ -43,7 +43,54 @@ What this does not protect against: someone who has your unlocked phone and
 can pass its screen lock has what you have. Unpair from the computer
 (`link-cli.py unpair`) if the phone is lost; it takes effect at once.
 
-## Pairing
+## Signing in, instead of pairing
+
+The way Apple's devices find each other through an iCloud account, these find
+each other through the account both are signed in to on Tailscale - which can
+be a Google account, so in practice: your Gmail.
+
+1. On the computer, once: `scripts/install-link-tailnet.sh`, and sign in.
+2. On the phone, once: install Tailscale, sign in with the same account.
+3. In Adaptive Link on the phone: **Find my computer**.
+
+No code is scanned or typed. The phone looks the computer up by its name on
+your private network (`adaptive-link`), the computer asks Tailscale who is
+calling, and if it is a device signed in to the computer's own account it may
+ask to connect. The first time, a window on the computer shows the device,
+the account and six digits, and you press **Pair**; after that it just
+connects.
+
+What makes this trustworthy:
+
+- **The account is Tailscale's word, not the phone's.** The computer never
+  believes what a device says about itself. It asks its own Tailscale node
+  who is on the other end of the connection, and Tailscale answers from the
+  keys that device signed in with.
+- **Another account gets nothing.** A device on someone else's account, or
+  not on Tailscale at all, is refused before it learns the computer's name or
+  certificate, and no request ever reaches you.
+- **Being on your account is permission to ask, not to enter.** You still
+  approve each new device once, on the computer. If you want devices of your
+  own account accepted without asking - closer to how Apple's behave once you
+  are signed in - turn it on:
+  `scripts/link-cli.py allow auto-approve on`. Then your Google account's
+  security (its password and two-step verification) is what stands between
+  anyone and this computer, so only do that with two-step verification on.
+- **The phone only asks inside Tailscale.** The one question the app asks a
+  computer it does not know yet ("who are you?") is only ever sent to an
+  address in Tailscale's own range, so an ordinary network can never answer
+  in the computer's place.
+- **After that, nothing changes.** The phone's hardware key and mutual TLS
+  are exactly as before; the account only replaces the pairing code.
+
+`scripts/link-cli.py allow account off` turns sign-in off and leaves pairing
+codes as the only way in.
+
+The difference from Apple that remains: Apple runs the account, the network
+and the devices. Here the account is Google's, the private network is
+Tailscale's, and the trust between your devices is this project's.
+
+## Pairing by code
 
 1. On the computer: Command palette (Alt+Space) → **Pair Phone**, or
    `scripts/link-cli.py pair`. A window shows a QR code for two minutes.

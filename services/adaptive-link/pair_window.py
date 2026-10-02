@@ -124,9 +124,14 @@ class PairWindow(Gtk.ApplicationWindow):
             copy.connect("clicked", self._copy_text)
             self.box.append(copy)
 
-    def _show_request(self, name, code):
+    def _show_request(self, name, code, account=""):
         self._clear()
         self.box.append(self._label(f"{name} wants to pair", "pair-title"))
+        if account:
+            # Tailscale's word for who this device is signed in as, not the
+            # device's own claim.
+            self.box.append(self._label(f"Signed in as {account}, the same account as this computer.",
+                                        "pair-muted"))
         self.box.append(self._label("Check that the phone shows the same six digits.", "pair-muted"))
         self.box.append(self._label(f"{code[:3]} {code[3:]}", "pair-code", wrap=False))
         self.box.append(self._label(
@@ -175,7 +180,7 @@ class PairWindow(Gtk.ApplicationWindow):
             if not self.attached:
                 self.remaining.set_text(f"Waiting for the phone - {state.get('seconds_left', 0)} s left")
         elif current == "pending" and self.state != "pending":
-            self._show_request(state["name"], state["code"])
+            self._show_request(state["name"], state["code"], state.get("account", ""))
         elif current == "paired":
             self.state = current
             self._message("Paired", "The phone can now connect to this computer.")

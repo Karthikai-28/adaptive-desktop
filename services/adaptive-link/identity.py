@@ -49,6 +49,11 @@ DEFAULT_CONFIG = {
     "allow_files": True,
     "allow_power": True,
     "notify_on_connect": True,
+    # A device signed in to the same account as this computer (on the link's
+    # Tailscale network) may ask to connect without a pairing code. It still
+    # has to be approved here, once, unless auto_approve_account is on.
+    "account_enroll": True,
+    "auto_approve_account": False,
 }
 
 
@@ -355,6 +360,79 @@ def tailnet():
     except (OSError, ValueError):
         return None
     return parse_tailnet_status(out)
+
+
+# For verify-link.py only: a file naming the account this computer and its
+# peers are signed in with, in place of asking Tailscale. Whoever can set the
+# daemon's environment already is the user, so this opens nothing.
+_TEST_ACCOUNTS = "ADAPTIVE_LINK_TEST_ACCOUNTS"
+
+
+def _test_accounts():
+    path = os.environ.get(_TEST_ACCOUNTS)
+    if not path:
+        return None
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _tailscale_json(*args):
+    socket_path = tailnet_socket()
+    if not socket_path.exists():
+        return None
+    try:
+        import subprocess
+        done = subprocess.run(["tailscale", f"--socket={socket_path}", *args],
+                              capture_output=True, text=True, timeout=4)
+        return json.loads(done.stdout) if done.returncode == 0 else None
+    except (OSError, ValueError):
+        return None
+
+
+def own_account():
+    """The account this computer is signed in with (an email address), or ""."""
+    fake = _test_accounts()
+    if fake is not None:
+        return str(fake.get("own", ""))
+    status = _tailscale_json("status", "--json")
+    if not isinstance(status, dict) or status.get("BackendState") != "Running":
+        return ""
+    user = (status.get("User") or {}).get(str((status.get("Self") or {}).get("UserID")), {})
+    return str(user.get("LoginName") or "")
+
+
+def parse_whois(data):
+    """{"account", "device"} from `tailscale whois --json`, or None."""
+    if not isinstance(data, dict):
+        return None
+    account = str((data.get("UserProfile") or {}).get("LoginName") or "")
+    node = data.get("Node") or {}
+    device = str(node.get("ComputedName") or node.get("Name") or "").split(".")[0]
+    return {"account": account, "device": clean_name(device)} if account else None
+
+
+def whois(address, port):
+    """Who is on the other end of a connection: {"account", "device"} if it
+    is a device on this computer's Tailscale network, otherwise None.
+
+    This is Tailscale's own answer, tied to the keys that device signed in
+    with, not anything the device says about itself. The link's node hands
+    connections on from this machine, so they are looked up by the local
+    address and port they arrived from.
+    """
+    fake = _test_accounts()
+    if fake is not None:
+        account = str(fake.get("peer", ""))
+        return {"account": account, "device": str(fake.get("device", "Test device"))} if account else None
+    return parse_whois(_tailscale_json("whois", "--json", f"{address}:{port}")) or \
+        (parse_whois(_tailscale_json("whois", "--json", str(address))) if is_tailscale(address) else None)
+
+
+def same_account(peer, own):
+    """Whether a peer is signed in to this computer's own account."""
+    return bool(own) and bool(peer) and peer.get("account", "").casefold() == own.casefold()
 
 
 def local_addresses():

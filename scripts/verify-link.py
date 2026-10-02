@@ -146,7 +146,9 @@ async def daemon_checks(sandbox, check):
 
     home = Path.home()
     link_dir = home / ".config/adaptive-desktop/link"
-    env = dict(os.environ, ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT))
+    accounts = sandbox / "accounts.json"
+    env = dict(os.environ, ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT),
+               ADAPTIVE_LINK_TEST_ACCOUNTS=str(accounts))
     log = open(sandbox / "daemon.log", "w")
     daemon = subprocess.Popen([sys.executable, str(LINK / "server.py")], env=env, stdout=log, stderr=subprocess.STDOUT)
     sys.path.insert(0, str(LINK))
@@ -433,6 +435,68 @@ async def daemon_checks(sandbox, check):
         check(control.call("POST", "/unpair")["ok"] and not tcp_open(PORT), "unpair: the port closes")
         check((await try_status(pinned(new_crt, new_key)))[0] != 200, "unpair: the phone can no longer connect")
         check(not Path("/tmp/pwned").exists(), "input: the hostile key name ran nothing")
+
+        # ------------------------------------------------ sign-in, no code
+        # This computer signed in to an account. A device Tailscale vouches
+        # for as the same account may ask to connect without a code; anyone
+        # else is told nothing. (The accounts file stands in for Tailscale.)
+        def signed_in(own, peer):
+            accounts.write_text(json.dumps({"own": own, "peer": peer, "device": "pixel-9"}))
+            control.call("POST", "/configure", {})
+
+        signed_in("me@example.com", "someone-else@example.com")
+        check(tcp_open(PAIRING_PORT) and control.status()["account"] == "me@example.com",
+              "account: signed in, the computer keeps a door open for its own account")
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
+            async with http.get(f"{pair_url}/hello") as reply:
+                body = await reply.text()
+                check(reply.status == 403 and "fingerprint" not in body,
+                      "account: a device of another account learns nothing about this computer")
+            async with http.post(f"{pair_url}/pair", json={"cert": phone_cert, "name": "Other"}) as reply:
+                check(reply.status == 403, "account: and cannot ask to connect")
+            check(control.call("GET", "/pair/state")["state"] != "pending", "account: no request reached the owner")
+
+            signed_in("me@example.com", "")
+            async with http.get(f"{pair_url}/hello") as reply:
+                check(reply.status == 403, "account: a device not on the account's network at all is refused too")
+
+            signed_in("me@example.com", "ME@example.com")
+            async with http.get(f"{pair_url}/hello") as reply:
+                hello = await reply.json()
+            check(hello.get("account") == "me@example.com" and hello.get("fingerprint") == qr["f"],
+                  "account: a device of the same account finds the computer and its fingerprint")
+            async with http.post(f"{pair_url}/pair", json={"cert": phone_cert, "name": "Pixel 9"}) as reply:
+                answer = await reply.json()
+            state = control.call("GET", "/pair/state")
+            check(reply.status == 200 and state["state"] == "pending" and state["account"] == "ME@example.com"
+                  and state["code"] == answer["code"],
+                  "account: it can ask to connect with no code, and the owner sees which account it is")
+            check(control.status()["phone"] is None, "account: asking is not being trusted; the owner still decides")
+            waiting = asyncio.ensure_future(http.get(f"{pair_url}/pair/wait"))
+            await asyncio.sleep(0.3)
+            control.call("POST", "/pair/decide", {"accept": True})
+            check((await (await waiting).json())["state"] == "paired", "account: approved on the computer, it is paired")
+        await asyncio.sleep(1.5)
+        check((await try_status(pinned(phone_crt, phone_key)))[0] == 200 and tcp_open(PAIRING_PORT),
+              "account: the device connects, and the door stays open for the account's other devices")
+
+        control.call("POST", "/configure", {"auto_approve_account": True})
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
+            async with http.post(f"{pair_url}/pair", json={"cert": new_cert, "name": "Tablet"}) as reply:
+                answer = await reply.json()
+        await asyncio.sleep(1.5)
+        check(answer.get("state") == "paired" and (await try_status(pinned(new_crt, new_key)))[0] == 200,
+              "account: with auto-approve on, a device of the account is accepted without asking")
+        signed_in("me@example.com", "someone-else@example.com")
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=pinned())) as http:
+            async with http.post(f"{pair_url}/pair", json={"cert": phone_cert, "name": "Other"}) as reply:
+                check(reply.status == 403, "account: auto-approve still accepts nobody from another account")
+        control.call("POST", "/configure", {"auto_approve_account": False, "account_enroll": False})
+        check(not tcp_open(PAIRING_PORT) and control.status()["account"] == "",
+              "account: turned off, the door closes")
+        accounts.unlink()
+        control.call("POST", "/configure", {"account_enroll": True})
+        control.call("POST", "/unpair")
 
         # ------------------------------------------------- the pairing window
         window = subprocess.Popen([sys.executable, str(LINK / "pair_window.py")],

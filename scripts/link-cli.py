@@ -7,6 +7,11 @@
     link-cli.py on | off       start or stop accepting the phone
     link-cli.py allow exec|files|power on|off
                                what the phone may do
+    link-cli.py allow account on|off
+                               whether a device signed in to your account may
+                               ask to connect without a pairing code
+    link-cli.py allow auto-approve on|off
+                               whether such a device is accepted without asking
     link-cli.py log            what the phone has done
 
 The daemon is services/adaptive-link (systemd unit adaptive-link.service).
@@ -34,6 +39,9 @@ def describe(state):
         lines.append("Adaptive Link is on, with no phone paired (link-cli.py pair).")
     else:
         lines.append(f"Adaptive Link is on, port {state['port']}.")
+    if state.get("account"):
+        approval = "connect without asking" if state["config"].get("auto_approve_account") else "ask to connect, without a code"
+        lines.append(f"Signed in as {state['account']}: your other devices on this account can {approval}.")
     phone = state["phone"]
     if phone:
         when = time.strftime("%Y-%m-%d", time.localtime(phone["paired_at"]))
@@ -60,7 +68,7 @@ def main(argv=None):
     for name in ("status", "pair", "unpair", "on", "off", "log"):
         sub.add_parser(name)
     allow = sub.add_parser("allow")
-    allow.add_argument("what", choices=["exec", "files", "power"])
+    allow.add_argument("what", choices=["exec", "files", "power", "account", "auto-approve"])
     allow.add_argument("state", choices=["on", "off"])
     args = parser.parse_args(argv)
 
@@ -77,7 +85,9 @@ def main(argv=None):
             # One line: this is also what the palette shows in a notification.
             print(describe(state)[0])
         elif args.action == "allow":
-            state = control.call("POST", "/configure", {f"allow_{args.what}": args.state == "on"})
+            key = {"account": "account_enroll", "auto-approve": "auto_approve_account"}.get(
+                args.what, f"allow_{args.what}")
+            state = control.call("POST", "/configure", {key: args.state == "on"})
             print("\n".join(describe(state)))
         elif args.action == "log":
             for entry in control.call("GET", "/log")["entries"]:

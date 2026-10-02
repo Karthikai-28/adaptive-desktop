@@ -74,6 +74,8 @@ class Link:
         self._pair_reached = {"hellos": 0, "alerts": []}
         self._pair_decided = asyncio.Event()
         self._pair_timer = None
+        # The account this computer is signed in with, or "" (see sync_account).
+        self.account = ""
         self._last_notice = 0.0
         self.problem = ""
         self._sessions = 0
@@ -96,8 +98,12 @@ class Link:
         await self.input.start()
         await self._start_control()
         await self.restart_link()
+        self._account_watch = asyncio.ensure_future(self._watch_account())
 
     async def stop(self):
+        watch = getattr(self, "_account_watch", None)
+        if watch is not None:
+            watch.cancel()
         for process in list(self._children):
             self._kill(process)
         await self.input.stop()
@@ -521,21 +527,12 @@ class Link:
         except OSError:
             pass
 
-    async def start_pairing(self, seconds=None, ui=False):
-        """Open the pairing window. Returns what the QR code holds.
-
-        Two minutes by default. A typed code takes longer than a scan, so the
-        owner can ask for up to ten.
-        """
-        try:
-            window = max(30, min(int(seconds), identity.PAIRING_WINDOW_MAX_S))
-        except (TypeError, ValueError):
-            window = identity.PAIRING_WINDOW_S
-        await self.cancel_pairing()
-        token = identity.new_pairing_token()
-        hosts = [address for address, _kind in identity.local_addresses()]
-
+    async def _open_pair_listener(self):
+        """The port a device that is not yet trusted talks to. Idempotent."""
+        if self._pair_runner is not None:
+            return
         app = web.Application(client_max_size=64 * 1024)
+        app.router.add_get("/hello", self.h_hello)
         app.router.add_post("/pair", self.h_pair)
         app.router.add_get("/pair/wait", self.h_pair_wait)
         runner = web.AppRunner(app, access_log=None, shutdown_timeout=1.0)
@@ -555,14 +552,61 @@ class Link:
 
         if hasattr(context, "_msg_callback"):
             context._msg_callback = tls_event
-        await web.TCPSite(runner, host="0.0.0.0", port=self.pairing_port, ssl_context=context).start()
+        try:
+            await web.TCPSite(runner, host="0.0.0.0", port=self.pairing_port, ssl_context=context).start()
+        except OSError as error:
+            await runner.cleanup()
+            self.problem = f"cannot listen on port {self.pairing_port}: {error.strerror or error}"
+            return
         self._pair_runner = runner
+
+    async def _close_pair_listener(self, delay):
+        runner, self._pair_runner = self._pair_runner, None
+        if runner is not None:
+            # A moment for the phone to collect the answer it is waiting on.
+            await asyncio.sleep(delay)
+            await runner.cleanup()
+
+    async def sync_account(self):
+        """Keep the sign-in door in step with whether this computer is signed in.
+
+        Signed in to an account (and account_enroll on), the pairing port
+        stays open: it answers devices of the same account and nobody else.
+        Otherwise it is open only during a pairing by code.
+        """
+        self.account = await asyncio.to_thread(identity.own_account) if self.config["account_enroll"] else ""
+        if self.account and self.config["enabled"]:
+            await self._open_pair_listener()
+        elif self._pairing.get("state") not in ("waiting", "pending"):
+            await self._close_pair_listener(0)
+
+    async def _watch_account(self):
+        while True:
+            try:
+                await self.sync_account()
+            except Exception as error:  # noqa: BLE001 - keep watching
+                print(f"Adaptive Link: account check failed: {error}", flush=True)
+            await asyncio.sleep(60)
+
+    async def start_pairing(self, seconds=None, ui=False):
+        """Start pairing by code. Returns what the QR code holds.
+
+        Two minutes by default. A typed code takes longer than a scan, so the
+        owner can ask for up to ten.
+        """
+        try:
+            window = max(30, min(int(seconds), identity.PAIRING_WINDOW_MAX_S))
+        except (TypeError, ValueError):
+            window = identity.PAIRING_WINDOW_S
+        await self.cancel_pairing()
+        token = identity.new_pairing_token()
+        hosts = [address for address, _kind in identity.local_addresses()]
+        await self._open_pair_listener()
 
         self._pairing = {"state": "waiting", "token": token, "attempts": 0, "ui": bool(ui),
                          "expires": time.time() + window}
         self._pair_decided = asyncio.Event()
-        self._pair_timer = asyncio.get_running_loop().call_later(
-            window, lambda: asyncio.ensure_future(self._expire_pairing()))
+        self._arm_pair_timer(window)
         payload = identity.pairing_payload(socket.gethostname(), hosts, self.port,
                                            self.pairing_port, self.fingerprint, token)
         return {
@@ -570,6 +614,12 @@ class Link:
             "hosts": hosts, "fingerprint": self.fingerprint,
             "seconds": window,
         }
+
+    def _arm_pair_timer(self, seconds):
+        if self._pair_timer is not None:
+            self._pair_timer.cancel()
+        self._pair_timer = asyncio.get_running_loop().call_later(
+            seconds, lambda: asyncio.ensure_future(self._expire_pairing()))
 
     async def _expire_pairing(self):
         if self._pairing.get("state") in ("waiting", "pending"):
@@ -581,34 +631,68 @@ class Link:
             self._pair_timer = None
         self._pairing = {"state": state}
         self._pair_decided.set()
-        runner, self._pair_runner = self._pair_runner, None
-        if runner is not None:
-            # A moment for the phone to collect the answer it is waiting on.
-            await asyncio.sleep(0.5 if state in ("idle", "expired") else 3)
-            await runner.cleanup()
+        if not self.account:
+            await self._close_pair_listener(0.5 if state in ("idle", "expired") else 3)
 
     async def cancel_pairing(self):
-        if self._pair_runner is not None or self._pairing.get("state") != "idle":
+        if self._pairing.get("state") != "idle" or (self._pair_runner is not None and not self.account):
             await self._close_pairing("idle")
 
     def _pair_peer(self, request):
         peer = request.transport.get_extra_info("peername") if request.transport else None
-        return peer[0] if peer else ""
+        return (peer[0], peer[1]) if peer else ("", 0)
 
-    async def h_pair(self, request):
-        address = self._pair_peer(request)
+    async def _signed_in_peer(self, request):
+        """The peer's {"account", "device"} if it is signed in to this
+        computer's own account; None for anyone else."""
+        if not self.account:
+            return None
+        address, port = self._pair_peer(request)
+        peer = await asyncio.to_thread(identity.whois, address, port)
+        if identity.same_account(peer, self.account):
+            return peer
+        # On record, because "why can my own phone not find the computer" is
+        # answered here: it is not on the network, or on another account.
+        self.audit.write(address, "account-refused",
+                         f"signed in as {peer['account']}" if peer else "not a device on this computer's Tailscale network")
+        return None
+
+    async def h_hello(self, request):
+        """Who this computer is, for a device of the same account that is
+        looking for it. Anyone else is told nothing."""
+        address, _port = self._pair_peer(request)
         if not identity.peer_allowed(address, self.config["allow_public"]):
             return json_error(403, "this network is not allowed")
-        if self._pairing.get("state") != "waiting":
-            return json_error(409, "not waiting for a phone")
+        peer = await self._signed_in_peer(request)
+        if peer is None:
+            return json_error(403, "sign in to the same account as this computer, or use a pairing code")
+        return web.json_response({
+            "ok": True, "name": socket.gethostname(), "account": self.account,
+            "fingerprint": self.fingerprint, "port": self.port, "pairing_port": self.pairing_port,
+            "hosts": [a for a, _kind in await asyncio.to_thread(identity.local_addresses)],
+        })
+
+    async def h_pair(self, request):
+        address, _port = self._pair_peer(request)
+        if not identity.peer_allowed(address, self.config["allow_public"]):
+            return json_error(403, "this network is not allowed")
+        state = self._pairing.get("state")
+        if state == "pending":
+            return json_error(409, "another device is waiting to be answered")
 
         data = await read_json(request)
-        if not identity.tokens_match(data.get("t"), self._pairing["token"]):
-            self._pairing["attempts"] += 1
-            self.audit.write(address, "pairing-refused", "wrong code")
-            if self._pairing["attempts"] >= identity.PAIRING_MAX_ATTEMPTS:
-                asyncio.ensure_future(self._close_pairing("expired"))
-            return json_error(403, "wrong pairing code")
+        by_code = state == "waiting" and identity.tokens_match(data.get("t"), self._pairing["token"])
+        peer = None if by_code else await self._signed_in_peer(request)
+        if not by_code and peer is None:
+            if state == "waiting" and data.get("t"):
+                self._pairing["attempts"] += 1
+                self.audit.write(address, "pairing-refused", "wrong code")
+                if self._pairing["attempts"] >= identity.PAIRING_MAX_ATTEMPTS:
+                    asyncio.ensure_future(self._close_pairing("expired"))
+                return json_error(403, "wrong pairing code")
+            if state != "waiting" and not self.account:
+                return json_error(409, "not waiting for a phone")
+            return json_error(403, "sign in to the same account as this computer, or use a pairing code")
         try:
             pem, _der, digest = identity.check_phone_certificate(data.get("cert", ""))
         except identity.BadCertificate as error:
@@ -616,17 +700,30 @@ class Link:
 
         name = identity.clean_name(data.get("name"))
         code = identity.pairing_code(self.fingerprint, digest)
-        self._pairing.update({"state": "pending", "name": name, "code": code,
-                              "cert_pem": pem.decode(), "fingerprint": digest, "from": address})
-        self.audit.write(address, "pairing-requested", name)
-        desktop.notify("A phone wants to pair", f"{name} - check that it shows {code[:3]} {code[3:]}")
+        ui = self._pairing.get("ui", False) if state == "waiting" else False
+        self._pairing = {"state": "pending", "name": name, "code": code, "ui": ui,
+                         "cert_pem": pem.decode(), "fingerprint": digest, "from": address,
+                         "account": peer["account"] if peer else "",
+                         "device": peer["device"] if peer else "",
+                         "token": self._pairing.get("token", "") if by_code else "",
+                         "expires": time.time() + identity.PAIRING_WINDOW_S}
+        self._pair_decided = asyncio.Event()
+        self._arm_pair_timer(identity.PAIRING_WINDOW_S)
+        who = f"{name} ({peer['account']})" if peer else name
+        self.audit.write(address, "pairing-requested", who)
+
+        if peer and self.config["auto_approve_account"]:
+            await self.decide_pairing(True)
+            return web.json_response({"ok": True, "code": code, "host": socket.gethostname(), "state": "paired"})
+        desktop.notify("A phone wants to connect", f"{who} - check that it shows {code[:3]} {code[3:]}")
         self._show_pairing_request()
         return web.json_response({"ok": True, "code": code, "host": socket.gethostname()})
 
     async def h_pair_wait(self, request):
         """The phone waits here for the owner's answer on the computer."""
-        if not identity.tokens_match(request.query.get("t"), self._pairing.get("token", "")) \
-                and self._pairing.get("state") not in ("paired", "rejected", "expired"):
+        decided = self._pairing.get("state") in ("paired", "rejected", "expired")
+        by_code = identity.tokens_match(request.query.get("t"), self._pairing.get("token", ""))
+        if not decided and not by_code and await self._signed_in_peer(request) is None:
             return json_error(403, "wrong pairing code")
         try:
             await asyncio.wait_for(self._pair_decided.wait(), 25)
@@ -659,6 +756,7 @@ class Link:
         self.config["enabled"] = bool(enabled)
         identity.save_config(self.config, self.link_dir)
         await self.restart_link()
+        await self.sync_account()
         self.audit.write("", "enabled" if enabled else "disabled")
 
     # -------------------------------------------------------------- control
@@ -679,6 +777,7 @@ class Link:
             "config": {k: self.config[k] for k in identity.DEFAULT_CONFIG},
             "camera": camera.find_device(),
             "pairing": self.pairing_state(),
+            "account": self.account,
         }
 
     async def _start_control(self):
@@ -713,10 +812,12 @@ class Link:
 
         async def configure(request):
             data = await read_json(request)
-            for key in ("allow_exec", "allow_files", "allow_power", "allow_public", "notify_on_connect"):
+            for key in ("allow_exec", "allow_files", "allow_power", "allow_public", "notify_on_connect",
+                        "account_enroll", "auto_approve_account"):
                 if isinstance(data.get(key), bool):
                     self.config[key] = data[key]
             identity.save_config(self.config, self.link_dir)
+            await self.sync_account()
             return web.json_response(self.describe())
 
         async def log(_request):

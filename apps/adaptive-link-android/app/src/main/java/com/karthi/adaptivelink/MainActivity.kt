@@ -54,6 +54,16 @@ class MainActivity : FragmentActivity() {
     private var unlocked by mutableStateOf(false)
     private var lockMessage by mutableStateOf("")
 
+    /**
+     * Set while the app itself has sent the owner somewhere and is waiting
+     * for them to come back: the QR scanner, the file picker, Android's
+     * notification-access screen. Leaving for one of those is not leaving
+     * the app, and must not lock it - locking discards the screen that is
+     * waiting for the answer, and with it the code that was just scanned.
+     */
+    var awayOnPurpose = false
+    private var stoppedAt = 0L
+
     /** While presenting, the volume buttons turn the pages. */
     var volumeKeys: ((up: Boolean) -> Unit)? = null
 
@@ -74,13 +84,19 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Coming back locks the app again if it was really left: not for a
+        // screen it opened itself, and not for a glance away of a few seconds.
+        val away = System.currentTimeMillis() - stoppedAt
+        if (unlocked && stoppedAt != 0L && !awayOnPurpose && away > LOCK_AFTER_MS && Store(this).lockOnOpen)
+            unlocked = false
+        awayOnPurpose = false
+        stoppedAt = 0L
         if (!unlocked) unlock()
     }
 
     override fun onStop() {
         super.onStop()
-        // Leaving the app locks it again, unless the owner turned that off.
-        if (Store(this).lockOnOpen && !isChangingConfigurations) unlocked = false
+        if (!isChangingConfigurations) stoppedAt = System.currentTimeMillis()
     }
 
     private fun unlock() {
@@ -131,6 +147,11 @@ class MainActivity : FragmentActivity() {
         if (volumeKeys != null && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN))
             return true
         return super.onKeyUp(keyCode, event)
+    }
+
+    companion object {
+        /** Away for longer than this, the app asks to be unlocked again. */
+        const val LOCK_AFTER_MS = 15_000L
     }
 
     fun phoneName(): String = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"

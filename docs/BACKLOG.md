@@ -609,8 +609,20 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   `scripts/install-link-camera.sh` (sudo), and the emulator's camera is not a
   test of a real one. Phone notifications on the computer are in the same
   state: the request is checked, the listener service needs a real phone.
+- ✅ **Reached by name, from anywhere.** The link has its own Tailscale node
+  (userspace, no root: `install-link-tailnet.sh`), named `adaptive-link`.
+  The computer tells the phone its current addresses on every connection.
+- ✅ **Sign-in instead of pairing.** A device signed in to the computer's own
+  account may ask to connect with no code ("Find my computer"); the computer
+  takes Tailscale's word for who is calling. Approved once per device on the
+  computer, or automatically with `allow auto-approve on`. Checked with a
+  stand-in for Tailscale (same account, another account, none) in
+  `verify-link.py`, and through the app's own screens on an emulator.
+  🔬 Against real Tailscale the account lookup has been seen to work for a
+  device by its address; a live sign-in from the phone is the remaining check.
 - ⬜ Not there: sound from the computer on the phone, waking a suspended
-  computer, Wayland, iOS.
+  computer, Wayland, iOS, and finding each other with no network at all
+  (Apple's Bluetooth and peer-to-peer Wi-Fi).
 
 ## Immediate next work
 

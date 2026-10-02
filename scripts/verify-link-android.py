@@ -30,6 +30,7 @@ SDK = REPO / ".local" / "android-sdk"
 APP = REPO / "apps" / "adaptive-link-android"
 LINK = REPO / "services" / "adaptive-link"
 PORT, PAIRING_PORT = 47933, 47934
+PIN = "2580"
 # How an Android emulator reaches the machine it runs on.
 EMULATOR_HOST = "10.0.2.2"
 
@@ -135,7 +136,8 @@ def screens(check, adb, device, control, build_env, sandbox):
         return sh("shell", "dumpsys", "window", "displays").split("mCurrentFocus=")[-1].split("\n")[0]
 
     def crashed():
-        return "FATAL EXCEPTION" in sh("logcat", "-d", "-s", "AndroidRuntime:E")
+        # The app's own crashes only: the test tools log theirs in the same place.
+        return "Process: com.karthi.adaptivelink" in sh("logcat", "-d", "-s", "AndroidRuntime:E")
 
     def step(ok, message):
         """A check that also fails if the app has crashed since the last one."""
@@ -155,7 +157,7 @@ def screens(check, adb, device, control, build_env, sandbox):
         for _ in range(5):
             if "adaptivelink" not in focused():
                 sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
-                time.sleep(2.5)
+                unlock_app()
             if has("Webcam", "Presenter"):
                 return True
             back()
@@ -167,58 +169,71 @@ def screens(check, adb, device, control, build_env, sandbox):
                 return True
         return False
 
+    # A real screen lock, so the app's own lock is exercised as it is on a
+    # phone: with none set, the app has nothing to ask for and stays open.
+    sh("shell", "locksettings", "set-pin", PIN)
+    sh("shell", "svc", "power", "stayon", "true")
+
+    def unlock_app():
+        """Answer the app's unlock prompt with the PIN, if it is showing."""
+        time.sleep(2)
+        if not has("Find my computer") and not has("Connected") and not has("Not connected"):
+            sh("shell", "input", "text", PIN)
+            sh("shell", "input", "keyevent", "KEYCODE_ENTER")
+            time.sleep(3)
+
     sh("logcat", "-c")
     sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
-    time.sleep(4)
-    step(has("Scan pairing code"), "first run: the pairing screen")
+    unlock_app()
+    step(has("Find my computer", "Use a pairing code instead"),
+         "first run: unlocked with the screen lock, then sign-in first and a pairing code as the other way")
 
-    # ------------------------------------------------------- the scanner
-    tap("Scan pairing code", wait=3)
-    asked = "permission" in focused().lower()
-    if asked:
-        allow_permission()
-    for _ in range(10):
-        if "CaptureActivity" in focused():
-            break
-        time.sleep(1)
-    step("CaptureActivity" in focused(),
-         f"pairing: Scan pairing code opens the camera scanner{', after asking for the camera' if asked else ''}")
-    back(2)
-    step("MainActivity" in focused() and has("Scan pairing code"),
-         "pairing: leaving the scanner returns to the app")
-
-    # --------------------------------------------- pairing, by typed code
     # The computer's owner, pressing Pair when the phone asks.
-    def owner():
-        for _ in range(240):
-            if control.call("GET", "/pair/state").get("state") == "pending":
-                time.sleep(2)
-                owner.seen = has(control.call("GET", "/pair/state")["code"][:3])
+    def approve():
+        """The owner's part, done here on the computer's side: wait for the
+        phone's request, check the phone shows the same digits, press Pair.
+        Returns (digits matched, the account the computer saw)."""
+        for _ in range(120):
+            state = control.call("GET", "/pair/state")
+            if state.get("state") == "pending":
+                time.sleep(1.5)
+                matched = has(state["code"][:3])
                 control.call("POST", "/pair/decide", {"accept": True})
-                return
+                return matched, state.get("account", "")
             time.sleep(0.5)
-    owner.seen = False
+        return False, ""
 
-    started = control.call("POST", "/pair/start")
-    offer = json.loads(started["payload"])
-    if device.startswith("emulator-"):
-        offer["h"] = [EMULATOR_HOST]
-    text_code = "ALINK1." + base64.urlsafe_b64encode(json.dumps(offer).encode()).decode().rstrip("=")
-    threading.Thread(target=owner, daemon=True).start()
+    def signed_in(own, peer):
+        """Stand in for Tailscale: which account the computer and the phone are on."""
+        (sandbox / "accounts.json").write_text(json.dumps({"own": own, "peer": peer, "device": "test-phone"}))
+        control.call("POST", "/configure", {})
 
-    step(tap("Enter the code as text instead"), "pairing: a code can be typed instead of scanned")
-    tap("ALINK1\u2026", wait=1)
-    for start in range(0, len(text_code), 120):   # in pieces: adb drops long input
-        sh("shell", "input", "text", text_code[start:start + 120])
-    sh("shell", "input", "keyevent", "KEYCODE_BACK")   # hide the keyboard
-    time.sleep(1)
-    tap("Pair with this code", wait=1)
+    here = f"{EMULATOR_HOST if device.startswith('emulator-') else '127.0.0.1'}:{PAIRING_PORT}"
+
+    def type_into(placeholder, text):
+        tap(placeholder, wait=1)
+        for start in range(0, len(text), 120):   # in pieces: adb drops long input
+            sh("shell", "input", "text", text[start:start + 120])
+        sh("shell", "input", "keyevent", "KEYCODE_BACK")   # hide the keyboard
+        time.sleep(1)
+
+    # ------------------------------------------------ by account, no code
+    signed_in("me@example.com", "someone-else@example.com")
+    type_into("Computer name (optional)", here)
+    tap("Find my computer", wait=6)
+    step(has("same account"), "sign-in: a phone on another account is told so, and gets no further")
+    step(control.call("GET", "/pair/state").get("state") != "pending", "sign-in: and the computer's owner is not asked")
+
+    signed_in("me@example.com", "me@example.com")
+    tap("Look again", wait=1)
+    matched, account = approve()
     for _ in range(40):
         if has("Connected"):
             break
         time.sleep(1)
-    step(owner.seen, "pairing: the phone shows the same six digits as the computer")
-    step(has("Connected", "Screen", "Trackpad", "Presenter", "Webcam"), "pairing: paired through the app, and connected")
+    step(matched and account == "me@example.com",
+         "sign-in: with the same account the phone asks without a code, and shows the same six digits")
+    step(has("Connected", "Screen", "Trackpad", "Presenter", "Webcam"), "sign-in: approved on the computer, connected")
 
     # Power buttons are pressed below. With power turned off on the computer
     # they are refused, which is what is checked - a real lock or suspend
@@ -322,9 +337,54 @@ def screens(check, adb, device, control, build_env, sandbox):
     time.sleep(1)
     step(tap("Unpair this phone", wait=1.5) and has("Unpair this phone?"), "more: unpairing asks first")
     tap("Unpair", wait=3)
-    step(has("Scan pairing code"), "more: unpaired, the app is back at pairing")
+    step(has("Find my computer"), "more: unpaired, the app is back at pairing")
+
+    # ------------------------------------------------- by pairing code
+    step(tap("Use a pairing code instead"), "code: the other way to pair is offered")
+    tap("Scan pairing code", wait=3)
+    if "permission" in focused().lower():
+        allow_permission()
+    for _ in range(10):
+        if "CaptureActivity" in focused():
+            break
+        time.sleep(1)
+    step("CaptureActivity" in focused(), "code: Scan pairing code opens the camera scanner")
+    back(2)
+    step("MainActivity" in focused() and has("Scan pairing code"),
+         "code: coming back from the scanner, the app is still open where it was (not locked, nothing lost)")
+
+    # A phone that is not on the account can still pair by code.
+    signed_in("me@example.com", "")
+    control.call("POST", "/unpair")
+    started = control.call("POST", "/pair/start")
+    offer = json.loads(started["payload"])
+    if device.startswith("emulator-"):
+        offer["h"] = [EMULATOR_HOST]
+    text_code = "ALINK1." + base64.urlsafe_b64encode(json.dumps(offer).encode()).decode().rstrip("=")
+    type_into("ALINK1\u2026", text_code)
+    tap("Pair with this code", wait=1)
+    matched, _account = approve()
+    for _ in range(40):
+        if has("Connected"):
+            break
+        time.sleep(1)
+    step(matched and has("Connected"), "code: a typed pairing code pairs a phone that is not on the account")
+
+    # ------------------------------------------------------ the app lock
+    # Left for longer than the grace period, the app asks for the screen
+    # lock again before it shows anything.
+    sh("shell", "input", "keyevent", "KEYCODE_HOME")
+    time.sleep(18)
+    sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
+    time.sleep(3)
+    step(not has("Screen", "Trackpad"), "lock: after being left, the app shows nothing until it is unlocked")
+    sh("shell", "input", "text", PIN)
+    sh("shell", "input", "keyevent", "KEYCODE_ENTER")
+    time.sleep(3)
+    step(has("Screen", "Trackpad"), "lock: the phone's own screen lock opens it")
 
     sh("shell", "am", "force-stop", "com.karthi.adaptivelink")
+    sh("shell", "locksettings", "clear", "--old", PIN)
 
 
 def main():
@@ -349,7 +409,9 @@ def main():
     (sandbox / "run").mkdir(mode=0o700)
     (sandbox / "home" / "Downloads").mkdir(parents=True)
     (sandbox / "home" / "Downloads" / "movie.mkv").write_bytes(b"x" * 2048)
+    accounts = sandbox / "accounts.json"
     env = dict(os.environ, HOME=str(sandbox / "home"), XDG_RUNTIME_DIR=str(sandbox / "run"),
+               ADAPTIVE_LINK_TEST_ACCOUNTS=str(accounts),
                ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT),
                PYTHONPATH=site.getusersitepackages())
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)

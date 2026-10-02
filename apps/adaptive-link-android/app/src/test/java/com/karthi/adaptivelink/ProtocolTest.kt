@@ -70,6 +70,15 @@ class ProtocolTest {
         assertEquals("hello", JSONObject(Protocol.text("hello")).getString("s"))
     }
 
+    @Test fun onlyTailscaleAddressesAreAskedWhoTheyAre() {
+        fun at(text: String) = java.net.InetAddress.getByName(text)
+        for (inside in listOf("100.64.0.1", "100.72.122.90", "100.127.255.254", "fd7a:115c:a1e0::5329:ed70"))
+            assert(Discovery.onTailnet(at(inside))) { inside }
+        for (outside in listOf("100.63.255.255", "100.128.0.1", "192.168.0.106", "10.0.2.2", "8.8.8.8",
+            "127.0.0.1", "fd7a:115c:a1e1::1", "2001:db8::1"))
+            assert(!Discovery.onTailnet(at(outside))) { outside }
+    }
+
     @Test fun sizesAndDurationsReadNaturally() {
         assertEquals("912 B", Protocol.formatSize(912))
         assertEquals("340 KB", Protocol.formatSize(348160))

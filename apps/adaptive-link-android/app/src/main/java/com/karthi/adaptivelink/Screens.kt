@@ -100,17 +100,14 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
     var computerName by remember { mutableStateOf("") }
     var problem by remember { mutableStateOf("") }
 
-    var typing by remember { mutableStateOf(false) }
     var typed by remember { mutableStateOf("") }
 
-    /** Scanned or typed, the code is handled the same way from here. */
-    fun begin(scanned: String) {
-        val offer = PairingOffer.parse(scanned)
-        if (offer == null) {
-            problem = "That is not an Adaptive Link pairing code."
-            stage = "failed"
-            return
-        }
+    var account by remember { mutableStateOf("") }
+    var withCode by remember { mutableStateOf(false) }
+    var named by remember { mutableStateOf("") }
+
+    /** By code or by account, asking the computer is the same from here. */
+    fun ask(offer: PairingOffer) {
         stage = "asking"
         scope.launch {
           try {
@@ -132,7 +129,9 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
                     code = expected
                     computerName = answer.optString("host", offer.computer.name)
                     stage = "confirm"
-                    when (client.awaitPairing(offer.token)) {
+                    // A computer set to accept its own account's devices
+                    // answers "paired" straight away.
+                    when (answer.optString("state").ifEmpty { client.awaitPairing(offer.token) }) {
                         "paired" -> {
                             Store(activity).computer = offer.computer
                             Link.forget()
@@ -149,6 +148,33 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
             problem = "Pairing failed: ${e.javaClass.simpleName}: ${e.message}"
             stage = "failed"
           }
+        }
+    }
+
+    /** Scanned or typed, a pairing code is handled the same way. */
+    fun begin(scanned: String) {
+        val offer = PairingOffer.parse(scanned)
+        if (offer == null) {
+            problem = "That is not an Adaptive Link pairing code."
+            stage = "failed"
+            return
+        }
+        account = ""
+        ask(offer)
+    }
+
+    /** No code: find the computer on the account's own network and ask it. */
+    fun signIn() {
+        stage = "asking"
+        scope.launch {
+            val (found, why) = Discovery.find(named)
+            if (found == null) {
+                problem = why
+                stage = "failed"
+            } else {
+                account = found.account
+                ask(PairingOffer(found.computer, ""))
+            }
         }
     }
 
@@ -169,6 +195,7 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
                 Muted("Contacting the computer…")
             }
             "confirm" -> {
+                if (account.isNotEmpty()) Muted("Signed in as $account", Modifier.padding(bottom = 4.dp))
                 Muted("Check that $computerName shows the same digits, then press Pair there.", Modifier.padding(8.dp))
                 Spacer(Modifier.height(16.dp))
                 Text("${code.take(3)} ${code.drop(3)}", fontSize = 44.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
@@ -178,26 +205,35 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
             else -> {
                 Text(
                     if (stage == "failed") problem
-                    else "On your computer, open Command (Alt+Space) and choose Pair Phone. Then scan the code it shows.",
+                    else "Connect to your computer with your account. Tailscale has to be on, on this phone and the computer, signed in with the same account.",
                     textAlign = TextAlign.Center,
                     color = if (stage == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(24.dp))
-                Button(onClick = {
-                    scanner.launch(
-                        ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                            .setPrompt("Scan the code on your computer").setBeepEnabled(false).setOrientationLocked(true)
-                    )
-                }) { Text(if (stage == "failed") "Scan again" else "Scan pairing code") }
+                Button(onClick = { signIn() }) { Text(if (stage == "failed") "Look again" else "Find my computer") }
                 Spacer(Modifier.height(8.dp))
-                if (!typing) {
-                    TextButton(onClick = { typing = true }) { Text("Enter the code as text instead") }
+                OutlinedTextField(
+                    value = named, onValueChange = { named = it },
+                    placeholder = { Text("Computer name (optional)") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                if (!withCode) {
+                    TextButton(onClick = { withCode = true }) { Text("Use a pairing code instead") }
                 } else {
+                    OutlinedButton(onClick = {
+                        activity.awayOnPurpose = true
+                        scanner.launch(
+                            ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                .setPrompt("Scan the code on your computer").setBeepEnabled(false).setOrientationLocked(true)
+                        )
+                    }) { Text("Scan pairing code") }
+                    Spacer(Modifier.height(8.dp))
                     // The same code the QR holds, for when it cannot be
                     // scanned: the computer shows it under the QR code.
                     OutlinedTextField(
                         value = typed, onValueChange = { typed = it },
-                        placeholder = { Text("ALINK1…") }, singleLine = true,
+                        placeholder = { Text("ALINK1\u2026") }, singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(8.dp))

@@ -50,7 +50,9 @@ if ts status >/dev/null 2>&1; then
     ts status | head -5
 else
     # Prints a link to open; returns once the sign-in is done.
-    ts up --qr=false --hostname="$(hostname)-link" --accept-dns=false
+    # "adaptive-link" is the name the phone looks for (Tailscale adds -1, -2
+    # for a second and third computer on the same account).
+    ts up --qr=false --hostname=adaptive-link --accept-dns=false
 fi
 # So the node keeps running after you log out of the desktop.
 loginctl enable-linger "$USER" 2>/dev/null || true
