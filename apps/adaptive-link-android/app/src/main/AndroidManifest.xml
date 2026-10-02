@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Recording this phone's screen to show it on the computer; Android asks its owner each time. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- An approval asked for by the computer is shown over the lock screen. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -99,7 +101,25 @@
         <!-- One-tap actions without opening the app: a home-screen widget
              and quick-settings tiles (QuickActions.kt). -->
         <receiver android:name=".QuickReceiver" android:exported="false" />
-        <receiver android:name=".LinkWidget" android:exported="true" android:label="Adaptive Link">
+        <receiver android:name=".StatusWidget" android:exported="true" android:label="Computer status">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_status_info" />
+        </receiver>
+        <receiver android:name=".MediaWidget" android:exported="true" android:label="Computer media">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_media_info" />
+        </receiver>
+        <receiver android:name=".ControlsWidget" android:exported="true" android:label="Computer controls">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_controls_info" />
+        </receiver>
+        <receiver android:name=".LinkWidget" android:exported="true" android:label="Computer quick actions">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -156,6 +176,27 @@
                 <data android:scheme="adaptivelink" android:host="do" />
             </intent-filter>
         </activity>
+
+        <!-- This phone's screen, shown and used on the computer (Cast.kt). -->
+        <activity
+            android:name=".CastActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service
+            android:name=".CastService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+        <service
+            android:name=".PhoneControl"
+            android:exported="true"
+            android:label="Adaptive Link: use this phone from the computer"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/phone_control" />
+        </service>
 
         <!-- Answering the computer's question with a fingerprint. -->
         <activity

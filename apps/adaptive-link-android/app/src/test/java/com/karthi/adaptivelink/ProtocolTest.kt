@@ -241,4 +241,17 @@ class ProtocolTest {
     fun whatThePhoneSignsToApprove() {
         assertEquals("adaptive-link approve\nsudo\nabcd", String(Protocol.approvalMessage("sudo", "abcd")))
     }
+
+    @Test
+    fun whatWaitsForTheComputerIsKeptAsItWas() {
+        val items = listOf(JSONObject().put("path", "/v1/open-url").put("body", JSONObject().put("url", "https://example.org")),
+            JSONObject().put("file", "/data/outbox/1-photo.jpg").put("name", "photo.jpg"))
+        val back = Protocol.outboxFromJson(Protocol.outboxToJson(items))
+        assertEquals(2, back.size)
+        assertEquals("https://example.org", back[0].getJSONObject("body").getString("url"))
+        assertEquals("photo.jpg", back[1].getString("name"))
+        // Only something for the link, or a file, is ever kept to be sent.
+        assertEquals(0, Protocol.outboxFromJson("""[{"path":"https://elsewhere.example/steal"},{"x":1}]""").size)
+        assertEquals(0, Protocol.outboxFromJson("not json").size)
+    }
 }

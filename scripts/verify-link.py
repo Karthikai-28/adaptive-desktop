@@ -272,6 +272,100 @@ def pure_checks(check):
               "https://example.org/\n--help", "-version", "", None, "x" * 3000)),
           "share: only a web address is opened, never a file, a script or an option")
 
+    import actions
+    import scenes
+    done_things = []
+    toy = [actions.Action("lamp", ["lamp", "light"], lambda a: (done_things.append(("lamp", a["state"])) or True, f"lamp {a['state']}",
+                                                               ("lamp", {"state": "off" if a["state"] == "on" else "on"})),
+                          lambda a: f"Turn the lamp {a['state']}", "changes", "allow_input",
+                          args=lambda asked, c: {"state": actions.on_or_off(asked)} if actions.on_or_off(asked) else None),
+           actions.Action("play", ["play", "play music"], lambda a: (done_things.append(("play", a["name"])) or True, a["name"]),
+                          lambda a: f"Play {a['name']}", choices=lambda: [("1", "Morning Jazz"), ("2", "Deep Focus Mix")],
+                          args=lambda asked, chosen: {"song": chosen[0], "name": chosen[1]}),
+           actions.Action("wipe", ["wipe", "erase everything"], lambda a: (True, "wiped"), "Erase everything", "destroys", "allow_exec")]
+    with tempfile.TemporaryDirectory() as folder:
+        plugins = Path(folder) / "actions.d"
+        plugins.mkdir()
+        (plugins / "hello.json").write_text(json.dumps({"id": "hello", "title": "Say hello", "words": ["hello", "greet"],
+                                                        "command": ["echo", "hello from a plug-in"]}))
+        (plugins / "bad.json").write_text(json.dumps({"id": "../x", "title": "x", "command": "rm -rf ~"}))
+        (plugins / "worse.json").write_text("not json")
+        book = actions.Book(folder, plugins, toy)
+        first = book.ask("please switch the lamp on")
+        check(first[0]["id"] == "lamp" and first[0]["args"] == {"state": "on"} and first[0]["say"] == "Turn the lamp on"
+              and first[0]["risk"] == "changes" and first[0]["sure"], "ask: a request in ordinary words is the action it means")
+        check(book.ask("play the deep focus")[0]["args"]["name"] == "Deep Focus Mix"
+              and book.ask("play some jazz")[0]["say"] == "Play Morning Jazz" and book.ask("play the polka") == [],
+              "ask: one of several things is chosen by the part of its name that was said")
+        check(book.ask("flibber the wotsit") == [] and book.ask("") == [] and book.ask("lamp") == [],
+              "ask: what means nothing, or does not say enough, matches nothing")
+        check(book.ask("wipe", lambda switch: switch != "allow_exec") == [] and book.ask("wipe")[0]["risk"] == "destroys"
+              and book.run("wipe", {}, lambda switch: False) == (False, "that is turned off on the computer"),
+              "ask: an action whose switch is off is neither offered nor done, and one that destroys says so")
+        check(book.run("lamp", {"state": "on"}) == (True, "lamp on") and book.ask("undo")[0]["say"].startswith("Undo “Turn the lamp on”")
+              and book.run("undo", {}) == (True, "lamp off") and done_things == [("lamp", "on"), ("lamp", "off")]
+              and book.run("undo", {})[0] is False, "undo: the last thing done is put back, once")
+        book.run("lamp", {"state": "on"})
+        book.run("play", {"song": "2", "name": "Deep Focus Mix"})
+        check(book.remember("start work", 2) and actions.Book(folder, plugins, toy).chains["start work"]
+              == [{"id": "lamp", "args": {"state": "on"}}, {"id": "play", "args": {"song": "2", "name": "Deep Focus Mix"}}],
+              "chains: the last things done are kept under a name")
+        done_things.clear()
+        found = book.ask("start work")
+        check(found[0]["id"] == "chain" and found[0]["say"] == "start work: Turn the lamp on, then Play Deep Focus Mix"
+              and book.run("chain", {"name": "start work"})[0] and done_things == [("lamp", "on"), ("play", "Deep Focus Mix")],
+              "chains: asked for by name, each step is done in turn")
+        check(book.forget("start work") and not book.forget("start work") and book.run("chain", {"name": "start work"})[0] is False,
+              "chains: forgotten when the owner says so")
+        check(book.ask("say hello")[0]["id"] == "x-hello" and book.run("x-hello", {}) == (True, "hello from a plug-in")
+              and [a for a in book.actions() if a.startswith("x-")] == ["x-hello"],
+              "plug-ins: a program adds an action with a small file; a file that is not one is ignored")
+        check(actions.tidy("Could you switch the Wi-Fi OFF, please?") == "turn wifi off"
+              and actions.closeness("put it on the emberton", "EMBERTON II") > 0.6
+              and actions.closeness("note buy milk", "busy") == 0, "ask: the plain words of a request, and names said in part")
+
+        kept = scenes.Scenes(folder)
+        desk = {"wifi": "Home", "displays": 2, "power": "mains", "phone": True, "project": "x"}
+        away = dict(desk, wifi="Cafe", displays=1, power="battery")
+        check(kept.entered(desk) == [] and kept.save("At the desk", desk, [{"id": "lamp", "args": {"state": "on"}}])["when"]
+              == {"wifi": "Home", "displays": 2, "power": "mains", "phone": True},
+              "scenes: how things are is kept as the scene for the situation as it is")
+        kept.active = set()
+        check([s["name"] for s in kept.entered(desk)] == ["At the desk"] and kept.entered(desk) == []
+              and kept.entered(away) == [] and [s["name"] for s in kept.entered(desk)] == ["At the desk"],
+              "scenes: a scene is entered when its situation comes round, once each time")
+        check(scenes.Scenes(folder).find("At the desk")["do"] == [{"id": "lamp", "args": {"state": "on"}}]
+              and kept.forget("At the desk") and not kept.forget("At the desk") and not scenes.fits({"when": {}}, desk),
+              "scenes: kept between restarts, forgotten when asked, and a scene for no situation never fits")
+    state = {"enabled": True, "problem": "", "phones": [], "listening": False, "port": 1, "cloud": "signed out", "account": ""}
+    found = scenes.doctor(state)
+    check(found[0]["ok"] is False and any(item["name"] == "A phone" and item["fix"] == "scripts/link-cli.py pair" for item in found)
+          and all(item["fix"] == "" for item in found if item["ok"]) and all(item["fix"] for item in found if not item["ok"]),
+          "doctor: what is wrong comes first, each with the one thing that puts it right")
+
+    import phone_screen
+    check(phone_screen.clean_input({"t": "tap", "x": 0.5, "y": "0.25"}) == {"t": "tap", "x": 0.5, "y": 0.25}
+          and phone_screen.clean_input({"t": "swipe", "x": -3, "y": 0, "x2": 9, "y2": 1, "ms": 99999})
+          == {"t": "swipe", "x": 0.0, "y": 0.0, "x2": 1.0, "y2": 1.0, "ms": 3000}
+          and phone_screen.clean_input({"t": "key", "k": "home"}) == {"t": "key", "k": "home"}
+          and phone_screen.clean_input({"t": "text", "s": "hi"}) == {"t": "text", "s": "hi"}
+          and all(phone_screen.clean_input(bad) is None for bad in (
+              {"t": "tap", "x": 0.5}, {"t": "tap", "x": float("nan"), "y": 0}, {"t": "key", "k": "power-off"},
+              {"t": "text", "s": ""}, {"t": "shell", "s": "rm"}, "tap", None, {})),
+          "phone screen: only a touch, one of the phone's own keys, or text is passed on to the phone")
+    import machine
+    import virtual_display
+    timings = virtual_display.modeline(2400, 1080)
+    described = virtual_display.edid(2400, 1080, timings) if timings else b""
+    check(timings is not None and len(described) == 128 and sum(described) % 256 == 0
+          and virtual_display.read_edid(described) == (2400, 1080)
+          and virtual_display.read_edid(virtual_display.edid(1280, 720, virtual_display.modeline(1280, 720))) == (1280, 720)
+          and virtual_display.read_edid(described[:-1] + bytes([(described[-1] + 1) % 256])) is None,
+          "display: the monitor the phone is described as is one of exactly its size, in the form every monitor uses")
+    check(machine.extend("2400x1080")[0] == virtual_display.available() and not machine.extend("huge")[0]
+          and (virtual_display.available() or "install-link-display.sh" in machine.extend("2400x1080")[1]),
+          "display: without the means to make a display, the phone is told what to install")
+
     import alerts
     import companion
     check(companion.find_code("Your verification code is 482913. Do not share it.") == "482913"
@@ -494,6 +588,8 @@ async def daemon_checks(sandbox, check):
     env.update(PATH=f"{fake_system_tools.install(tools / 'bin')}:{env['PATH']}", FAKE_TOOLS_DIR=str(tools),
                ADAPTIVE_LINK_KEEP_S="3", ADAPTIVE_LINK_ALERT_EVERY_S="1",
                ADAPTIVE_LINK_PROXIMITY_S="2", ADAPTIVE_LINK_PROXIMITY_PROBE="0",
+               # The checks' pairing is not to be offered to every phone on this network.
+               ADAPTIVE_LINK_NEARBY="0",
                # No sound server here, and none is to be started by asking for one.
                PULSE_SERVER="unix:/nonexistent/pulse")
     # Google, as far as these checks go (scripts/fake_cloud.py).
@@ -1179,6 +1275,98 @@ async def daemon_checks(sandbox, check):
                           "presence: when it comes back it is asked, and its fingerprint unlocks the computer")
                 control.call("POST", "/configure", {"proximity_lock": False})
             control.call("POST", "/configure", {"sync_clipboard": False})
+
+            # One way in: asking, doing, undoing, chains, being kept told.
+            asked_for = await change("/v1/ask", text="make it a bit quieter")
+            check(asked_for["matches"][0]["id"] == "quieter" and asked_for["matches"][0]["risk"] == "safe",
+                  "ask: the phone asks in words and is told what that would do")
+            before = machine_now()["volume"][machine_now()["sink"]]
+            did = await change("/v1/do", id="volume", args={"to": 12})
+            check(did["ok"] and machine_now()["volume"][machine_now()["sink"]] == 12, "do: the action asked for is done")
+            undone = await change("/v1/do", id="undo")
+            check(undone["ok"] and machine_now()["volume"][machine_now()["sink"]] == before, "undo: and put back")
+            await change("/v1/do", id="volume", args={"to": 20})
+            await change("/v1/do", id="mute")
+            named = await change("/v1/chains", name="quiet time", count=2)
+            listed = await (await phone.get(f"{link_url}/v1/actions")).json()
+            check(named["ok"] and listed["chains"] == ["quiet time"] and any(a["id"] == "lock" for a in listed["actions"]),
+                  "chains: the phone names the last things done, and they are listed with everything else")
+            await change("/v1/do", id="mute")
+            chained = await change("/v1/do", id="chain", args={"name": "quiet time"})
+            check(chained["ok"] and machine_now()["volume"][machine_now()["sink"]] == 20 and machine_now()["sink"] in machine_now()["muted"],
+                  "chains: run by name, every step is done")
+            await change("/v1/do", id="mute")
+            cut = await change("/v1/do", id="wifi", args={"state": "off"})
+            check(cut["ok"] and cut["keep"] == 3 and not network_now()["radio"], "do: a change that could cut the phone off is still held to be kept")
+            await asyncio.sleep(4.5)
+            check(network_now()["radio"], "do: and undone when the phone does not come back")
+            control.call("POST", "/configure", {"allow_power": False})
+            refused = await change("/v1/do", id="lock")
+            offered = await change("/v1/ask", text="lock the computer")
+            check(not refused["ok"] and offered["matches"] == [], "ask: what the owner has turned off is not offered, and not done")
+            control.call("POST", "/configure", {"allow_power": True})
+            check(not (await change("/v1/do", id="nothing-like-it"))["ok"] and not (await change("/v1/do", id="volume", args={"to": "loud"}))["ok"],
+                  "do: only an action there is, with what it needs")
+
+            async with phone.ws_connect(f"{link_url}/v1/watch") as watching:
+                await watching.send_json({"watch": ["sound", "status", "secrets"]})
+                first = [await asyncio.wait_for(watching.receive_json(), 10) for _ in range(2)]
+                await change("/v1/machine/sound", action="output-volume", target=machine_now()["sink"], value="33")
+                told = await asyncio.wait_for(watching.receive_json(), 10)
+                check(sorted(item["part"] for item in first) == ["sound", "status"] and told["part"] == "sound"
+                      and any(d["volume"] == 33 for d in told["data"]["outputs"]),
+                      "watch: the phone is told what it is looking at, at once and again when it changes - not otherwise")
+
+            checks = (await (await phone.get(f"{link_url}/v1/doctor")).json())["checks"]
+            check(any(item["name"] == "The link" and item["ok"] for item in checks) and all("name" in item for item in checks),
+                  "doctor: the link reports on itself to the phone")
+            front = await (await phone.get(f"{link_url}/v1/front")).json()
+            check(set(front) == {"window", "playing", "project"}, "front: what is in front on the computer, for the phone to carry on with")
+
+            saved = control.call("POST", "/scene", {"save": "Checking"})
+            check(saved["ok"] and saved["scene"]["when"]["power"] in ("mains", "battery") and len(saved["scene"]["do"]) >= 2,
+                  "scenes: the owner saves how things are for the situation as it is")
+            await change("/v1/do", id="volume", args={"to": 5})
+            applied = control.call("POST", "/scene", {"apply": "Checking"})
+            check(applied["ok"] and control.call("POST", "/scene", {})["scenes"][0]["name"] == "Checking"
+                  and control.call("POST", "/scene", {"forget": "Checking"})["ok"], "scenes: applied, listed and forgotten")
+
+            # The phone's own screen, shown here in a window and used from it.
+            from aiortc import VideoStreamTrack
+            caster = RTCPeerConnection(rtc.configuration(stun=None))
+            caster.addTrack(VideoStreamTrack())
+            await caster.setLocalDescription(await caster.createOffer())
+            async with phone.ws_connect(f"{link_url}/v1/events?kinds=phone-input,cast") as listening:
+                shown = await change("/v1/phone/screen", offer=caster.localDescription.sdp)
+                await caster.setRemoteDescription(RTCSessionDescription(sdp=shown["answer"], type="answer"))
+                for _ in range(60):
+                    seen = control.status()["phone_screen"]
+                    if seen and seen["frames"] > 3:
+                        break
+                    await asyncio.sleep(0.5)
+                check(shown["ok"] and seen["showing"] and seen["frames"] > 3 and seen["size"] == [640, 480],
+                      f"phone screen: the phone's screen arrives on the computer ({seen})")
+                # A click in the window, made on this check's own screen, is a tap for the phone.
+                await asyncio.sleep(2)
+                async with phone.ws_connect(f"{link_url}/v1/input") as pointer:
+                    for event in ({"t": "move", "x": 200 / 1280, "y": 300 / 800}, {"t": "click", "b": 1}):
+                        await pointer.send_json(event)
+                    try:
+                        told = await asyncio.wait_for(listening.receive_json(), 8)
+                    except asyncio.TimeoutError:
+                        told = {}
+                check(told.get("kind") == "phone-input" and told.get("input", {}).get("t") == "tap"
+                      and 0 <= told["input"]["x"] <= 1, f"phone screen: a click in its window is sent to the phone as a touch ({told})")
+                stopped = control.call("POST", "/cast", {"stop": True})
+                ended = await asyncio.wait_for(listening.receive_json(), 8)
+                check(stopped["ok"] and ended["kind"] == "cast" and ended["title"] == "stop"
+                      and not control.status()["phone_screen"]["showing"],
+                      "phone screen: closed from the computer, the phone is told to stop sending")
+                asked = control.call("POST", "/cast", {})
+                check(asked["ok"] and (await asyncio.wait_for(listening.receive_json(), 8))["title"] == "start",
+                      "phone screen: the computer can ask a listening phone to show its screen")
+            await caster.close()
+            check(not (await change("/v1/phone/screen", offer="v=0")).get("ok"), "phone screen: something that is not an offer shows nothing")
 
             # The microphone, held keys, one display, and where files go.
             async with phone.get(f"{link_url}/v1/mic") as reply:

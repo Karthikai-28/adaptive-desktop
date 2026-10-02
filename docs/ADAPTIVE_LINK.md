@@ -181,7 +181,10 @@ yours, which is why they are not in the repository.
 
 1. On the computer: Command palette (Alt+Space) → **Pair Phone**, or
    `scripts/link-cli.py pair`. A window shows a QR code for two minutes.
-2. In the app: **Scan pairing code**.
+2. In the app: **Scan pairing code** - or, on the same network, tap the
+   computer where the app shows it as *nearby*. For those two minutes the
+   computer says on its own network what the QR code holds, so nothing needs
+   scanning; it is still the next step that decides.
 3. Both screens show the same six digits. They are derived from both
    certificates, so if anything sat between the two devices the digits would
    differ. Press **Pair** on the computer.
@@ -268,6 +271,8 @@ scripts/build-link-app.sh         # the app: dist/adaptive-link.apk
 scripts/build-link-app.sh --install   # ...and onto the phone over USB
 scripts/install-link-camera.sh    # once, sudo: the virtual webcam
 scripts/install-link-usb.sh       # once, sudo: switching USB devices off and on
+scripts/install-link-display.sh   # once, sudo: the phone as another display
+scripts/install-link-sudo.sh      # optional, sudo: sudo approved by the phone
 scripts/link-cli.py setup         # once, with a Google project: its five values
 scripts/link-cli.py signin        # ...and sign in; or, with no account:
 scripts/link-cli.py pair
@@ -312,10 +317,14 @@ And without opening the app:
 - **Share** in any other app → *Send to computer*: a link opens in the
   computer's browser, text goes to its clipboard or the project's notes,
   files go to `~/Downloads/Phone`.
-- **A home-screen widget and quick-settings tiles**: lock the computer,
-  play/pause, next, mute, focus. Only what is harmless to do by accident:
-  nothing that unlocks the computer, runs a command or turns it off is
-  reachable without the app's own lock.
+- **Home-screen widgets and quick-settings tiles.** Four widgets: quick
+  actions (lock, play/pause, next, mute, focus), the computer's status at a
+  glance, what it is playing with previous/play/next, and six of your own
+  buttons from the Controls screen. The quick actions and the tiles do only
+  what is harmless by accident. The Controls widget runs your own buttons -
+  including commands - from the home screen, without the app's lock: put on
+  it only what you would be content for anyone holding the unlocked phone to
+  press.
 - **Alerts** (More → *The computer's alerts and notifications*): a disk
   nearly full, memory running out, a low battery, a hot processor, a device
   plugged in or taken out, a service that failed, a command you started from
@@ -343,6 +352,39 @@ and a keyboard can type a command into a terminal or open a file, whatever
 `exec` and `files` say. To stop the phone acting on the computer, turn
 `input` off as well. The clipboard, media controls and the phone's
 notifications are always available to the paired phone.
+
+### Asking for it
+
+Every screen above is one door to one thing. There is also a single door to
+all of them: the box at the top of the app's home screen, `link-cli.py ask`,
+and the desktop's command palette all take ordinary words - "turn off
+bluetooth", "put the sound on the headset", "what's using the memory",
+"switch to the website project" - typed, or spoken on the phone.
+
+- **The matching is the computer's own** (`services/adaptive-link/actions.py`):
+  the words of a request against the words each action goes by, and the names
+  of the things it could be about (your networks, devices, windows,
+  projects). No service is asked, and nothing leaves the computer.
+- **Each answer is a sentence that says exactly what will happen.** What
+  changes nothing is done at once. What changes something is shown first;
+  what may disconnect the phone, or cannot be undone, says so.
+- **Undo** puts the last thing back, for everything that can be put back.
+- **Chains.** Do two or more things in a row, then *Keep as one* and give it
+  a name - "start the meeting". Asking for the name does each in turn.
+- **Scenes.** `link-cli.py scene save "At the desk"` keeps how things are set
+  now (sound output, power profile, focus, appearance, brightness) as what
+  you do in this situation (this Wi-Fi, this many displays, mains or
+  battery, the phone here or not). When the situation comes round again the
+  phone offers it with one button; `--auto` applies it without asking.
+- **Other programs can add actions**: a small file in
+  `~/.config/adaptive-desktop/actions.d/` naming a command and the words for
+  it, and it can be asked for like anything else.
+- The owner's switches apply as everywhere: an action whose switch is off is
+  neither offered nor done.
+
+`link-cli.py doctor` is the link looking at itself: each thing it depends on,
+whether it is in place, and for what is not, the one command that puts it
+right. The app shows the same under More.
 
 ### The phone and the computer together
 
@@ -392,6 +434,15 @@ for them and says so in its notification shade.
   the phone shows them too, which makes it a remote. There is no separate
   watch app.
 
+- **This phone's screen on the computer.** *Show it there now* (or
+  `link-cli.py phone-screen` on the computer, which asks the phone) opens the
+  phone's screen in a window. Android asks before recording the screen, every
+  time, and shows that it is recording. To use the phone from that window -
+  click, drag, type, back and home - allow *Adaptive Link* in Android's
+  accessibility settings; without that the window shows and does not act.
+- **Nothing lost.** A link, text or files shared to the computer while it
+  cannot be reached are kept on the phone and sent when it can.
+
 Several computers can be paired with one phone (the computer icon on the home
 screen); what listens in the background listens to the one chosen. On a
 tablet, or a phone unfolded, the list and what was chosen from it sit side by
@@ -407,11 +458,18 @@ The offer and the answer travel over the link, so only a paired device can
 set it up, and the media is encrypted between the two with keys agreed in
 that exchange. Pointer and keyboard keep their own socket.
 
-The screen's menu can also show one display instead of all of them, and
-*Use this phone as another display* asks the computer to turn on an output
-with nothing plugged into it, at the phone's size, to the right of the main
-one - which then is that display. It needs such an output, and a driver that
-will light one with nothing attached; where there is none the app says so.
+The screen's menu can also show one display instead of all of them.
+
+*Use this phone as another display* extends the desktop onto the phone. The
+desktop only extends onto displays the graphics driver has, and a driver
+will not light an output with nothing plugged into it (tried on this
+project's own laptop: it refuses). So the display is made: `evdi`, the kernel
+module DisplayLink docks use, adds a display that is whatever a program says
+it is, and the link tells it a monitor of the phone's size has been plugged
+in (`virtual_display.py`). The desktop then treats it as any other display,
+windows can be dragged onto it, and that part of the screen is what the
+phone shows. It needs `scripts/install-link-display.sh` once (sudo, a kernel
+module); until then the app says so.
 
 If the two cannot make that connection the app says so and falls back to
 JPEG frames by itself; *Video: off* in the screen's menu chooses that

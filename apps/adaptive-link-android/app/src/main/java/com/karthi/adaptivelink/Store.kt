@@ -98,10 +98,15 @@ class Store(context: Context) {
         get() = prefs.getBoolean("remote_notification", false)
         set(value) { prefs.edit().putBoolean("remote_notification", value).commit() }
 
+    /** The computer may ask for this phone's screen, and what is done in its window there is done here. */
+    var castFromComputer: Boolean
+        get() = prefs.getBoolean("cast_from_computer", false)
+        set(value) { prefs.edit().putBoolean("cast_from_computer", value).commit() }
+
     /** Whether anything needs the phone to stay connected to the computer. */
     val listens: Boolean
         get() = computerAlerts || computerNotifications || syncClipboard || findPhone || approvals || presence ||
-            phoneMessages || copyPhotos || remoteNotification
+            phoneMessages || copyPhotos || remoteNotification || castFromComputer
 
     /** The last thing the computer said that this phone has shown. */
     var lastEvent: Long
@@ -146,6 +151,11 @@ class Store(context: Context) {
         get() = prefs.getString("tag_secret", null) ?: java.util.UUID.randomUUID().toString().replace("-", "").also {
             prefs.edit().putString("tag_secret", it).commit()
         }
+
+    /** What is waiting to be sent to the computer when it can next be reached (Outbox). */
+    var outbox: String
+        get() = prefs.getString("outbox", "[]") ?: "[]"
+        set(value) { prefs.edit().putString("outbox", value).commit() }
 
     var commandHistory: List<String>
         get() = prefs.getString("history", "")!!.split('\n').filter { it.isNotBlank() }

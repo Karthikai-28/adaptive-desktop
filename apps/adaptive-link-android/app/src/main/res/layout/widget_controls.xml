@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Six of the owner's own buttons from the Controls screen. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/controls_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:id="@+id/controls_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="Controls"
+        android:textColor="#98989D"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/control_0"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_button"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text=""
+            android:textColor="#F5F5F7"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/control_1"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_button"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text=""
+            android:textColor="#F5F5F7"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/control_2"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_button"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text=""
+            android:textColor="#F5F5F7"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/control_3"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_button"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text=""
+            android:textColor="#F5F5F7"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/control_4"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_button"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text=""
+            android:textColor="#F5F5F7"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/control_5"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_button"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text=""
+            android:textColor="#F5F5F7"
+            android:textSize="13sp" />
+    </LinearLayout>
+</LinearLayout>

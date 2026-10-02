@@ -147,6 +147,31 @@ class LinkInstrumentedTest {
         Link.forget()
         assertEquals("Mute", QuickActions.run(context, "mute"))
         assertEquals("Unknown", QuickActions.run(context, "poweroff"))
+        // The home-screen widgets, drawn as the launcher would draw them.
+        fun shown(views: android.widget.RemoteViews): String {
+            val drawn = views.apply(context, android.widget.FrameLayout(context))
+            val words = mutableListOf<String>()
+            fun read(view: android.view.View) {
+                if (view is android.widget.TextView && view.visibility == android.view.View.VISIBLE) words += view.text.toString()
+                if (view is android.view.ViewGroup) for (index in 0 until view.childCount) read(view.getChildAt(index))
+            }
+            read(drawn)
+            return words.joinToString(" | ")
+        }
+        val paired = Link.client(context)!!
+        assertNotNull(paired.connect())
+        val glance = shown(StatusWidget().draw(context, paired))
+        assertTrue("the status widget does not say the computer is connected: $glance",
+            glance.contains(offer.computer.name) && glance.contains("Connected"))
+        assertTrue(shown(StatusWidget().draw(context, null)).contains("Cannot be reached"))
+        assertTrue(shown(MediaWidget().draw(context, paired)).contains("Nothing is playing"))
+        Store(context).controls = listOf(Control("Hush", "action", "mute"))
+        val buttons = ControlsWidget()
+        assertTrue(shown(buttons.draw(context, paired)).contains("Hush"))
+        assertEquals("Mute", buttons.tapped(context, paired, "press:Hush"))
+        assertNull(buttons.tapped(context, paired, "press:Nothing"))
+        Store(context).controls = emptyList()
+
         Store(context).computer = null
         Link.forget()
 

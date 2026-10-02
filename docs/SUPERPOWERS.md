@@ -198,6 +198,18 @@ failure.** It is shown as what was done.
   in plain words, as the link's messages already try to. A review of every
   message in the app against that rule is part of this.
 
+## What has been built so far
+
+A first pass over most of the parts, working and checked, not finished:
+
+| Part | There now | Still to do |
+| --- | --- | --- |
+| 1. One way in | The action registry, asking in words from the phone, the CLI and the desktop palette, speech on the phone, undo, chains kept by doing, plug-in actions | Speech on the desktop (it needs a recogniser on the device, which is not installed); ranking by what you use |
+| 2. Anticipation | The situation as one object, scenes saved and offered or applied, a backup offered when the drive is plugged in, "on the computer now" on the phone | Scenes learnt rather than saved; activity handoff beyond what is playing; published on the session bus for the shell |
+| 3. Zero setup | Pairing by being near; the phone as another display through a made display; `doctor` naming each missing piece and its one command | The one setup screen in Settings; cards for new devices; Wayland; iOS |
+| 4. Smoothness | State pushed to the screens that are open; switches that move at once; the budgets written down | One multiplexed connection; hardware video encoding; the budgets measured and enforced |
+| 5. Workarounds | Video falling back to pictures; reaching the computer by network, account, relay and waking; an outbox for what could not be sent; `doctor`; undo | The undo journal across restarts; a review of every message against "cause and remedy" |
+
 ## Order of work
 
 Each stage leaves the system better on its own; none depends on finishing

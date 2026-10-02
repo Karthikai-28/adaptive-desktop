@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="widget_description">Lock the computer, control what is playing and turn focus on, with one tap.</string>
+    <string name="phone_control_description">Lets you use this phone from its window on your own computer, while Adaptive Link is showing the phone\'s screen there: what you click and type in that window is done here. It does nothing at any other time, and reads nothing from the screen.</string>
+    <string name="widget_status_description">The computer at a glance: whether it can be reached, its battery and volume.</string>
+    <string name="widget_media_description">What the computer is playing, with previous, play and next.</string>
+    <string name="widget_controls_description">Your own buttons from the Controls screen.</string>
 </resources>

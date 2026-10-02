@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -124,44 +125,75 @@ def region(name):
     return None
 
 
-EXTENDED_MODE = "adaptive-phone"
+_made = None   # the display made for the phone, while there is one (virtual_display.py)
 
 
-def modeline(width, height):
-    """The timings for a display of this size, as xrandr wants them."""
-    ok, out = _run("cvt", str(width), str(height), "60", timeout=3)
-    match = re.search(r'^Modeline\s+"[^"]*"\s+(.+)$', out, re.MULTILINE) if ok else None
-    return match.group(1).split() if match else []
+def _outputs_now():
+    ok, out = _run("xrandr", "--query")
+    return [line.split()[0] for line in out.splitlines() if ok and " connected" in line]
 
 
 def extend(size):
-    """Make room for the phone as another display: an output with nothing
-    plugged into it is turned on at the phone's size, to the right of the
-    main one. Returns (done, the output's name or why not)."""
+    """Make the phone another display, to the right of the main one.
+    Returns (done, the new display's name or why not).
+
+    The display is one made for the purpose (the evdi module, where it is
+    installed): the desktop is told a monitor of the phone's size has been
+    plugged in, and extends onto it as it would onto any other.
+    """
+    global _made
     match = re.fullmatch(r"(\d{3,4})x(\d{3,4})", str(size))
     if not match:
         return False, "a size like 1280x800"
-    ok, out = _run("xrandr", "--query")
-    spare = [line.split()[0] for line in out.splitlines() if ok and " disconnected" in line and "+" not in line.split("(")[0]]
-    lit = [output for output in parse_xrandr(out) if output["on"]] if ok else []
-    if not spare or not lit:
-        return False, "this computer has no spare display output to use"
-    timings = modeline(int(match.group(1)), int(match.group(2)))
-    if not timings:
-        return False, "the size could not be worked out"
-    main = next((output["name"] for output in lit if output["primary"]), lit[0]["name"])
-    _run("xrandr", "--newmode", EXTENDED_MODE, *timings)   # already there if this is not the first time
-    _run("xrandr", "--addmode", spare[0], EXTENDED_MODE)
-    done, text = _run("xrandr", "--output", spare[0], "--mode", EXTENDED_MODE, "--right-of", main)
-    return done, spare[0] if done else _last_line(text)
+    width, height = int(match.group(1)), int(match.group(2))
+    import virtual_display
+    if not virtual_display.available():
+        return False, ("this computer has no display to spare: run scripts/install-link-display.sh on it once, "
+                       "then restart the link")
+    if _made is not None:
+        unextend("")
+    before = set(_outputs_now())
+    lit = [output for output in display()["outputs"] if output["on"]]
+    made = virtual_display.VirtualDisplay()
+    if not made.plug_in(width, height):
+        return False, "the display could not be made"
+    _made = made
+    # The new card's output is the driver's to draw on once it is told so;
+    # then it appears as one more connected display.
+    name = ""
+    for _ in range(20):
+        providers = _run("xrandr", "--listproviders")[1]
+        for line in providers.splitlines():
+            found = re.match(r"Provider (\d+):.*name:(\S+)", line)
+            if found and "evdi" in found.group(2).lower() or (found and found.group(1) != "0" and "Sink Output" in line):
+                _run("xrandr", "--setprovideroutputsource", found.group(1), "0")
+        new = [output for output in _outputs_now() if output not in before]
+        if new:
+            name = new[0]
+            break
+        time.sleep(0.25)
+    if not name:
+        unextend("")
+        return False, "the display was made, but the desktop did not see it"
+    main = next((output["name"] for output in lit if output["primary"]), lit[0]["name"] if lit else "")
+    done, text = _run("xrandr", "--output", name, "--auto", *(("--right-of", main) if main else ()))
+    if not done:
+        unextend("")
+        return False, _last_line(text)
+    return True, name
 
 
 def unextend(name):
-    """Take the phone's display away again."""
-    done, text = _run("xrandr", "--output", name, "--off")
-    _run("xrandr", "--delmode", name, EXTENDED_MODE)
-    _run("xrandr", "--rmmode", EXTENDED_MODE)
-    return done, "" if done else _last_line(text)
+    """Take the phone's display away again: the monitor is unplugged, and
+    the desktop closes up as it does when any display goes."""
+    global _made
+    if _made is None:
+        return False, "the phone is not a display just now"
+    if name and re.fullmatch(r"[A-Za-z0-9-]{1,30}", name):
+        _run("xrandr", "--output", name, "--off")
+    _made.unplug()
+    _made = None
+    return True, ""
 
 
 def _brightness():
@@ -188,7 +220,7 @@ def display_action(action, target="", value=""):
     if action == "extend":
         return extend(value)
     if action == "unextend":
-        return unextend(target) if re.fullmatch(r"[A-Za-z0-9-]{1,30}", target) else (False, "no such display")
+        return unextend(target)
     outputs = display()["outputs"]
     output = next((o for o in outputs if o["name"] == target), None)
     if output is None:

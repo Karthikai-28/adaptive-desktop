@@ -72,19 +72,33 @@ class ShareActivity : ComponentActivity() {
         var done by remember { mutableStateOf(false) }
         val address = remember(text) { Protocol.sharedAddress(text) }
 
-        /** Reach the computer, do one thing, and say how it went. */
-        fun send(doing: String, finished: String, work: suspend (LinkClient) -> String?) {
+        /**
+         * Reach the computer, do one thing, and say how it went. If it
+         * cannot be reached, `later` keeps the thing to be sent when it can.
+         */
+        fun send(doing: String, finished: String, later: (() -> Boolean)? = null, work: suspend (LinkClient) -> String?) {
             val link = client ?: return
             busy = true
             said = doing
             scope.launch {
-                val problem = if (link.host == null && link.connect() == null) "Cannot reach ${link.computer.name}."
-                else work(link)
+                val reached = link.connect() != null
+                val problem = when {
+                    reached -> work(link)
+                    later != null && later() -> null.also {
+                        said = "${link.computer.name} cannot be reached just now. Kept: it will go when it can (${Outbox.waiting(this@ShareActivity)} waiting)."
+                        done = true
+                        busy = false
+                        return@launch
+                    }
+                    else -> "Cannot reach ${link.computer.name}."
+                }
                 said = problem ?: finished
                 done = problem == null
                 busy = false
             }
         }
+
+        fun later(path: String, body: JSONObject): () -> Boolean = { Outbox.keep(this@ShareActivity, path, body) }
 
         fun answer(reply: JSONObject?): String? = when {
             reply == null -> "The computer did not answer."
@@ -106,7 +120,8 @@ class ShareActivity : ComponentActivity() {
                         }
                     }
                     Button(enabled = !busy && !done, modifier = Modifier.fillMaxWidth(), onClick = {
-                        send("Sending…", if (files.size == 1) "It is in Downloads/Phone on the computer." else "They are in Downloads/Phone on the computer.") { link ->
+                        send("Sending…", if (files.size == 1) "It is in Downloads/Phone on the computer." else "They are in Downloads/Phone on the computer.",
+                            later = { files.all { Outbox.keepFile(this@ShareActivity, displayName(this@ShareActivity, it), it) } }) { link ->
                             var problem: String? = null
                             for ((index, uri) in files.withIndex()) {
                                 said = "Sending ${index + 1} of ${files.size}…"
@@ -122,16 +137,19 @@ class ShareActivity : ComponentActivity() {
                     Card(Modifier.fillMaxWidth()) { Text(text, maxLines = 8, overflow = TextOverflow.Ellipsis) }
                     if (address != null) {
                         Button(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = {
-                            send("Opening…", "Opened on the computer.") { answer(it.post("/v1/open-url", JSONObject().put("url", address))) }
+                            send("Opening…", "Opened on the computer.", later("/v1/open-url", JSONObject().put("url", address))) {
+                                answer(it.post("/v1/open-url", JSONObject().put("url", address)))
+                            }
                         }) { Text("Open on the computer") }
                     }
                     OutlinedButton(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = {
-                        send("Copying…", "It is on the computer's clipboard.") {
+                        send("Copying…", "It is on the computer's clipboard.", later("/v1/clipboard", JSONObject().put("text", address ?: text))) {
                             answer(it.post("/v1/clipboard", JSONObject().put("text", address ?: text)))
                         }
                     }) { Text("Copy to its clipboard") }
                     OutlinedButton(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = {
-                        send("Noting…", "Added to the project's inbox.") {
+                        send("Noting…", "Added to the project's inbox.",
+                            later("/v1/desktop", JSONObject().put("action", "note").put("value", text))) {
                             answer(it.post("/v1/desktop", JSONObject().put("action", "note").put("value", text)))
                         }
                     }) { Text("Add to the project's notes") }

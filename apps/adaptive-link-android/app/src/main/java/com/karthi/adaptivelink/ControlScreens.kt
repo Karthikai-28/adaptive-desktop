@@ -178,6 +178,7 @@ fun ControlsPage(activity: MainActivity, client: LinkClient, store: Store, onBac
     if (adding) AddControl(onDismiss = { adding = false }) { made ->
         controls = (controls + made).take(Control.LIMIT)
         store.controls = controls
+        LinkWidgetBase.refreshAll(activity)
         adding = false
     }
 
@@ -196,7 +197,7 @@ fun ControlsPage(activity: MainActivity, client: LinkClient, store: Store, onBac
                     if (NfcAdapter.getDefaultAdapter(activity) != null) {
                         TextButton(onClick = { writing = control; chosen = null }) { Text("Write to a tag") }
                     }
-                    TextButton(onClick = { controls = controls - control; store.controls = controls; chosen = null }) {
+                    TextButton(onClick = { controls = controls - control; store.controls = controls; LinkWidgetBase.refreshAll(activity); chosen = null }) {
                         Text("Remove", color = MaterialTheme.colorScheme.error)
                     }
                 }

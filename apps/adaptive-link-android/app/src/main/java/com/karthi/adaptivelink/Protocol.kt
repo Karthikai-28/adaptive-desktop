@@ -262,6 +262,15 @@ object Protocol {
         return bare + (if ('?' in bare) "&" else "?") + "t=${position}s"
     }
 
+    /** What is waiting to be sent to the computer, as it is stored. */
+    fun outboxToJson(items: List<JSONObject>): String = JSONArray(items).toString()
+
+    fun outboxFromJson(text: String): List<JSONObject> = runCatching {
+        val array = JSONArray(text)
+        List(array.length()) { array.optJSONObject(it) }.filterNotNull()
+            .filter { (it.has("path") && it.optString("path").startsWith("/v1/")) || it.has("file") }
+    }.getOrDefault(emptyList())
+
     /** What the phone signs to approve something on the computer: this request and no other. */
     fun approvalMessage(what: String, nonce: String): ByteArray = "adaptive-link approve\n$what\n$nonce".toByteArray()
 
@@ -284,6 +293,19 @@ object Protocol {
     fun sharedAddress(text: String): String? {
         val last = text.trim().split(Regex("\\s+")).lastOrNull() ?: return null
         return last.takeIf { Regex("^https?://[^\\s/]+\\S*$", RegexOption.IGNORE_CASE).matches(it) && it.length <= 2000 }
+    }
+
+    /** The computer's status in a line: battery, volume, project - what a glance wants. */
+    fun statusLine(status: JSONObject): String {
+        val parts = mutableListOf<String>()
+        status.optJSONObject("battery")?.let {
+            parts += "Battery ${it.optInt("percent")}%" + if (it.optBoolean("charging")) " charging" else ""
+        }
+        status.optJSONObject("volume")?.let { volume ->
+            if (!volume.isNull("percent")) parts += if (volume.optBoolean("muted")) "Muted" else "Volume ${volume.optInt("percent")}%"
+        }
+        status.optString("project").takeIf { it.isNotBlank() }?.let { parts += "Project $it" }
+        return parts.joinToString("  ·  ").ifBlank { "Ready" }
     }
 
     fun formatMinutes(minutes: Int): String =

@@ -202,8 +202,12 @@ class LinkClient(
         found?.second
     }
 
+    /** What the computer keeps this phone told about, for the screens that are open (Watch). */
+    val watch by lazy { Watch(this) }
+
     /** Let go of the direct connection (unpairing, signing out). */
     fun close() {
+        watch.close()
         tunnel?.close()
         tunnel = null
         if (tunnelled) host = null
@@ -394,4 +398,70 @@ private class PhoneKey(private val context: Context) : X509ExtendedKeyManager() 
     override fun getClientAliases(keyType: String?, issuers: Array<Principal>?) = arrayOf(alias)
     override fun getServerAliases(keyType: String?, issuers: Array<Principal>?): Array<String>? = null
     override fun chooseServerAlias(keyType: String?, issuers: Array<Principal>?, socket: Socket?): String? = null
+}
+
+/**
+ * Being kept told. Each screen that is open names the part of the computer
+ * it shows; the computer sends that part at once and again whenever it
+ * changes (the daemon's /v1/watch). One socket carries all of them, so a
+ * screen shows the present state without asking for it over and over, and
+ * a change made anywhere is seen everywhere at once.
+ */
+class Watch(private val client: LinkClient) {
+    private val listeners = java.util.concurrent.ConcurrentHashMap<String, MutableSet<(JSONObject) -> Unit>>()
+    @Volatile private var socket: WebSocket? = null
+    @Volatile private var closed = false
+
+    /** Be told about `part`. Returns how to stop being told. */
+    fun subscribe(part: String, listener: (JSONObject) -> Unit): () -> Unit {
+        closed = false
+        listeners.getOrPut(part) { java.util.concurrent.ConcurrentHashMap.newKeySet() }.add(listener)
+        sync()
+        return {
+            listeners[part]?.remove(listener)
+            if (listeners[part].isNullOrEmpty()) listeners.remove(part)
+            sync()
+        }
+    }
+
+    private fun wanted() = JSONObject().put("watch", org.json.JSONArray(listeners.keys.toList())).toString()
+
+    @Synchronized
+    private fun sync() {
+        if (listeners.isEmpty()) {
+            socket?.close(1000, null)
+            socket = null
+            return
+        }
+        socket?.let { it.send(wanted()); return }
+        if (client.host == null) return   // nothing reached yet: the screens ask for themselves until it is
+        socket = client.socket("/v1/watch", object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) { webSocket.send(wanted()) }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val told = runCatching { JSONObject(text) }.getOrNull() ?: return
+                val data = told.optJSONObject("data") ?: return
+                listeners[told.optString("part")]?.forEach { runCatching { it(data) } }
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = lost(webSocket)
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = lost(webSocket)
+        })
+    }
+
+    private fun lost(which: WebSocket) {
+        if (socket !== which) return
+        socket = null
+        // The screens' own asking covers the gap; this tries again shortly.
+        if (!closed && listeners.isNotEmpty()) kotlin.concurrent.thread(isDaemon = true) {
+            Thread.sleep(3000)
+            if (!closed) sync()
+        }
+    }
+
+    fun close() {
+        closed = true
+        socket?.close(1000, null)
+        socket = null
+    }
 }

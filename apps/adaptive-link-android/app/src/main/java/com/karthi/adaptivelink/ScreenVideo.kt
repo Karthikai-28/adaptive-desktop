@@ -10,6 +10,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.webrtc.DataChannel
 import org.webrtc.DefaultVideoDecoderFactory
+import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.EglRenderer
 import org.webrtc.GlRectDrawer
@@ -56,6 +57,8 @@ object Rtc {
             PeerConnectionFactory.builder()
                 .setAudioDeviceModule(audio)
                 .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
+                // For sending this phone's own screen to the computer (Cast.kt).
+                .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
                 .createPeerConnectionFactory().also { shared = it }
         }
     }

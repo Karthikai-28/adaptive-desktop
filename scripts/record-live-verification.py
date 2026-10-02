@@ -196,6 +196,26 @@ CHECKS = [
         "prompt": "Does \"Use this phone as another display\" give a display to the right of the main one that windows can be dragged onto, and does it go away on leaving the screen?",
     },
     {
+        "id": "link_ask",
+        "backlog": "Adaptive Link: asking in words, on the real machine.",
+        "prompt": "From the phone's ask box and from the palette: do \"turn off bluetooth\", \"what's using the memory\" and Undo each do what they say on the real machine?",
+    },
+    {
+        "id": "link_phone_window",
+        "backlog": "Adaptive Link: the phone's screen in a window on the computer.",
+        "prompt": "Does \"Show it there now\" open your phone's screen in a window, and with accessibility allowed, do clicks, drags and typing in it act on the phone?",
+    },
+    {
+        "id": "link_extended_display",
+        "backlog": "Adaptive Link: the phone as another display (evdi).",
+        "prompt": "After install-link-display.sh and restarting the link: does \"Use this phone as another display\" add a display you can drag windows onto, shown on the phone?",
+    },
+    {
+        "id": "link_widgets_nearby",
+        "backlog": "Adaptive Link: widgets, and pairing by being near.",
+        "prompt": "Do the four widgets work on your home screen, and does a second phone on the Wi-Fi see the computer as nearby while the pairing window is open?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",

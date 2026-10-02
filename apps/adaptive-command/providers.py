@@ -279,3 +279,41 @@ def clipboard_entries(history, wanted, limit=10):
     # Stable: the shell already has them newest first.
     entries.sort(key=lambda e: not e.get("pinned"))
     return entries[:limit]
+
+
+# ------------------------------------------------------------- the computer
+
+def _link():
+    """The link daemon's own socket (services/adaptive-link/control.py)."""
+    import sys
+    from pathlib import Path
+    folder = str(Path(__file__).resolve().parent.parent.parent / "services" / "adaptive-link")
+    if folder not in sys.path:
+        sys.path.append(folder)
+    import control
+    return control
+
+
+def ask_link(text, timeout=2):
+    """What `text` could mean as something for the computer to do: the
+    link's one way in (services/adaptive-link/actions.py), asked for here in
+    ordinary words. [{"id", "args", "say", "risk", "sure"}], or [] if the
+    link is not running or the words mean nothing to it."""
+    if len(text.split()) < 1 or len(text) < 3:
+        return []
+    try:
+        answer = _link().call("POST", "/ask", {"text": text}, timeout)
+    except Exception:  # noqa: BLE001 - the palette works without the link
+        return []
+    matches = answer.get("matches") if isinstance(answer, dict) else None
+    return [match for match in matches if isinstance(match, dict) and "say" in match] if isinstance(matches, list) else []
+
+
+def do_link(ident, args, timeout=120):
+    """Do one of those. (done, what it said)."""
+    try:
+        answer = _link().call("POST", "/ask", {"id": ident, "args": args}, timeout)
+    except Exception as error:  # noqa: BLE001
+        return False, str(error) or "Adaptive Link is not running"
+    return bool(answer.get("ok")), str(answer.get("text") or "")
+

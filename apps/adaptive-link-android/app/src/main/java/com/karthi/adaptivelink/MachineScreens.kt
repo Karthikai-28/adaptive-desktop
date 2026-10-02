@@ -25,6 +25,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,9 +66,15 @@ private class Part(private val client: LinkClient, private val what: String, pri
         }
     }
 
-    fun act(action: String, target: String = "", value: String = "") {
+    /**
+     * Ask for a change. `guess` is how things will look if it works: shown
+     * at once, so that a switch moves under the finger, and put right by
+     * what the computer answers.
+     */
+    fun act(action: String, target: String = "", value: String = "", guess: ((JSONObject) -> Unit)? = null) {
         if (busy) return
         busy = true
+        if (guess != null) now?.let { shown -> now = JSONObject(shown.toString()).also(guess) }
         scope.launch {
             val reply = client.post("/v1/machine/$what",
                 JSONObject().put("action", action).put("target", target).put("value", value))
@@ -82,10 +89,21 @@ private class Part(private val client: LinkClient, private val what: String, pri
 private fun rememberPart(client: LinkClient, what: String, every: Long): Part {
     val scope = rememberCoroutineScope()
     val part = remember(client, what) { Part(client, what, scope) }
+    // Told by the computer whenever it changes...
+    DisposableEffect(part) {
+        val stop = client.watch.subscribe(what) { told ->
+            if (!part.busy) {
+                part.now = told
+                if (part.said == "Looking…") part.said = ""
+            }
+        }
+        onDispose { stop() }
+    }
+    // ...and asked for now and then all the same, should that telling stop.
     LaunchedEffect(part) {
         while (true) {
             if (!part.busy) part.load()
-            delay(every)
+            delay(every * 4)
         }
     }
     return part
@@ -107,7 +125,9 @@ fun BluetoothPage(client: LinkClient, onBack: () -> Unit) {
                 val on = now.optBoolean("on")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Muted("Bluetooth on the computer", Modifier.weight(1f))
-                    Switch(checked = on, enabled = !part.busy, onCheckedChange = { part.act("power", if (it) "on" else "off") })
+                    Switch(checked = on, enabled = !part.busy, onCheckedChange = { wanted ->
+                        part.act("power", if (wanted) "on" else "off") { it.put("on", wanted) }
+                    })
                 }
                 Heading("Devices")
                 val devices = now.optJSONArray("devices").objects()

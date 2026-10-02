@@ -74,6 +74,7 @@ SYSTEM_TREES = (
 # Section order, and the accent each one carries on its left edge.
 GROUPS = [
     ("Calculator", "accent"),
+    ("Computer", "accent"),
     ("Clipboard", "violet"),
     ("Emoji", "accent"),
     ("Snippets", "accent"),
@@ -431,7 +432,10 @@ class Palette(Gtk.ApplicationWindow):
                 if shutil.which("plocate"):
                     found += self._fresh_index(query) + self._plocate(query)
             slow = self._slow_mode_rows(mode, rest)
-            GLib.idle_add(self._file_search_done, serial, self._dedupe(found), slow)
+            # Said in ordinary words, something for the computer to do
+            # ("turn off bluetooth", "what's using the memory").
+            asked = P.ask_link(query.raw) if mode is None else []
+            GLib.idle_add(self._file_search_done, serial, self._dedupe(found), slow, asked)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -597,13 +601,33 @@ class Palette(Gtk.ApplicationWindow):
         found.sort(key=lambda r: -r.score)
         return found[: FILE_RESULTS * 4]
 
-    def _file_search_done(self, serial, found, slow_rows=()):
+    def _ask_rows(self, asked):
+        """What the words typed could mean for the computer to do, each as a
+        row that says exactly what Enter will do."""
+        rows = []
+        for match in asked[:3]:
+            careful = {"cuts": "May disconnect the phone", "destroys": "Cannot be undone"}.get(match.get("risk"), "")
+            rows.append(Result(
+                title=match["say"], subtitle=careful or "Enter does it", group="Computer",
+                icon="system-run-symbolic", badge="Careful" if careful else "Do",
+                action=lambda m=match: self._do_asked(m),
+                # Clearly meant: above everything. Only possibly meant: among the rest.
+                score=WEIGHT_ANSWER - 10 if match.get("sure") else 30))
+        return rows
+
+    def _do_asked(self, match):
+        def work():
+            done, said = P.do_link(match["id"], match.get("args") or {})
+            GLib.idle_add(self._notify, said or (match["say"] if done else "It did not work"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _file_search_done(self, serial, found, slow_rows=(), asked=()):
         if serial != self._search_serial:
             return GLib.SOURCE_REMOVE
 
         self._file_results = found
-        self._mode_results = [self._as_result(r) for r in slow_rows]
-        slow_groups = {"Git", "In Files"}
+        self._mode_results = [self._as_result(r) for r in slow_rows] + self._ask_rows(list(asked))
+        slow_groups = {"Git", "In Files", "Computer"}
         merged = [r for r in self.results
                   if r.group != "Files & Folders" and r.group not in slow_groups]
         merged += found + self._mode_results

@@ -213,7 +213,7 @@ private fun App(activity: MainActivity) {
     // Where the Files screen opens: home, or a drive chosen under Devices.
     var folder by remember { mutableStateOf("~") }
 
-    LaunchedEffect(computer) { LinkWidget.refresh(activity) }
+    LaunchedEffect(computer) { LinkWidget.refresh(activity); LinkWidgetBase.refreshAll(activity) }
 
     // Pairing with another computer, beside the ones there already are.
     var adding by remember { mutableStateOf(false) }

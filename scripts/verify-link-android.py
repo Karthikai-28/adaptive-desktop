@@ -145,14 +145,21 @@ def screens(check, adb, device, control, build_env, sandbox):
         labels = [label for label, _x, _y in nodes()]
         return all(any(w in label for label in labels) for w in wanted)
 
+    # The home screen's tiles: more of them than fit, so one may need scrolling to.
+    TILES = {"Screen", "Trackpad", "Media", "Presenter", "Run", "Files", "Webcam", "Tasks", "Devices", "Network", "Desktop",
+             "Controls", "Scan", "Windows", "Display", "Bluetooth", "Services", "More"}
+
     def tap(label, wait=1.5, exact=True):
-        for found, x, y in nodes():
-            # Android's own dialogs spell their buttons differently between
-            # versions ("While using the app", "WHILE USING THE APP").
-            if found.casefold() == label.casefold() or (not exact and label.casefold() in found.casefold()):
-                sh("shell", "input", "tap", str(x), str(y))
-                time.sleep(wait)
-                return True
+        for attempt in range(2):
+            for found, x, y in nodes():
+                # Android's own dialogs spell their buttons differently between
+                # versions ("While using the app", "WHILE USING THE APP").
+                if found.casefold() == label.casefold() or (not exact and label.casefold() in found.casefold()):
+                    sh("shell", "input", "tap", str(x), str(y))
+                    time.sleep(wait)
+                    return True
+            if attempt or label not in TILES or not reach(label):
+                return False
         return False
 
     def reach(label):
@@ -312,7 +319,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(has("Low quality", "High quality") and has("Video: on", "Sound: on") and has("Use this phone as another display"),
          "screen: quality, video, sound and which display are chosen in one place")
     tap("Use this phone as another display", wait=5)
-    step(has("no spare display output"), "screen: says so when the computer has no output to make another display of")
+    step(has("no display to spare"), "screen: says so when the computer has no output to make another display of")
     tap("Picture and sound", wait=1.5)
     tap("Low quality", wait=3)
     for _ in range(10):
@@ -552,6 +559,10 @@ def screens(check, adb, device, control, build_env, sandbox):
     tap("More", wait=2)
     tap("Get from computer", wait=2)
     tap("Send to computer", wait=2)
+    step(reach("How the link is"), "more: how the link is, as the computer sees itself")
+    home()
+    reach("More")
+    tap("More", wait=2)
     step(has("Clipboard"), "more: clipboard both ways")
     tap("Lock", wait=2)
     step(has("turned off on the computer"), "more: a power action is refused when the computer has it turned off")
@@ -707,6 +718,64 @@ def screens(check, adb, device, control, build_env, sandbox):
          "scan: the pages arrive on the computer as one PDF")
     home()
 
+    # ------------------------------ the phone's own screen, on the computer
+    sh("shell", "settings", "put", "secure", "enabled_accessibility_services",
+       "com.karthi.adaptivelink/com.karthi.adaptivelink.PhoneControl")
+    sh("shell", "settings", "put", "secure", "accessibility_enabled", "1")
+    reach("More")
+    tap("More", wait=2)
+    switch("This phone's screen in a window")
+    reach("Show it there now")
+    tap("Show it there now", wait=4)
+    # Android's own question. Newer versions offer one app first; the whole screen is what is wanted.
+    if tap("A single app", wait=1.5):
+        tap("Entire screen", wait=1.5)
+    for label in ("Start", "Start now", "Start recording", "Share screen"):
+        if tap(label, wait=3):
+            break
+    # A screen that is not changing sends nothing new: one picture is the whole of it.
+    step(until(lambda: (control.status().get("phone_screen") or {}).get("frames", 0) >= 1, 30),
+         f"phone screen: this phone's screen is shown on the computer ({control.status().get('phone_screen')})")
+    open_app()
+    seen = control.status()["phone_screen"]["frames"]
+    step(until(lambda: "adaptivelink" in focused(), 8) and control.call("POST", "/cast", {"input": {"t": "key", "k": "home"}})["ok"]
+         and until(lambda: "adaptivelink" not in focused(), 12),
+         "phone screen: what is done in its window on the computer is done on the phone (its home key)")
+    step(until(lambda: control.status()["phone_screen"]["frames"] > seen, 15),
+         "phone screen: and what the phone then shows is sent as it changes")
+    step(control.call("POST", "/cast", {"stop": True})["ok"]
+         and until(lambda: "CastService" not in sh("shell", "dumpsys", "activity", "services", "com.karthi.adaptivelink"), 15),
+         "phone screen: closed on the computer, the phone stops sending")
+    home()
+
+    # --------------------------------------------- asking for it in words
+    def ask(words):
+        tap("Ask the computer", exact=False, wait=1)
+        sh("shell", "input", "text", words.replace(" ", "%s"))
+        time.sleep(4)
+
+    ask("mute")
+    step(has("Mute, or unmute, the sound"), "ask: what is typed is answered with what it would do")
+    hushed = machine_now()["muted"]
+    tap("Mute, or unmute, the sound", wait=4)
+    step(machine_now()["muted"] != hushed and has("Undo"), "ask: something harmless is done at once, and can be undone")
+    tap("Undo", wait=4)
+    step(machine_now()["muted"] == hushed, "ask: Undo puts it back")
+    ask("turn bluetooth off")
+    # The answer, not the field the same words were typed into: told apart by how it is written.
+    for found, x, y in nodes():
+        if found == "Turn Bluetooth off":
+            sh("shell", "input", "tap", str(x), str(y))
+            break
+    time.sleep(2)
+    step(has("Do it", "Cancel") and machine_now()["bluetooth"], "ask: something that changes the computer is shown before it is done")
+    tap("Do it", wait=5)
+    step(not machine_now()["bluetooth"], "ask: and done when the owner says so")
+    ask("flibber the wotsit")
+    step(has("Nothing the computer knows how to do"), "ask: what means nothing says so")
+    sh("shell", "input", "keyevent", "KEYCODE_BACK")
+    home()
+
     # ----------------------------------------------- more than one computer
     tap("Computers", wait=1.5)
     step(has("Pair another computer"), "computers: the ones paired, and pairing another")
@@ -787,7 +856,7 @@ def main():
     import fake_system_tools
     tools = sandbox / "tools"
     env.update(PATH=f"{fake_system_tools.install(tools / 'bin')}:{env['PATH']}", FAKE_TOOLS_DIR=str(tools),
-               ADAPTIVE_LINK_KEEP_S=str(KEEP_S), ADAPTIVE_LINK_ALERT_EVERY_S="2",
+               ADAPTIVE_LINK_KEEP_S=str(KEEP_S), ADAPTIVE_LINK_ALERT_EVERY_S="2", ADAPTIVE_LINK_NEARBY="0",
                # No sound server here, and none is to be started by asking for one.
                PULSE_SERVER="unix:/nonexistent/pulse")
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)

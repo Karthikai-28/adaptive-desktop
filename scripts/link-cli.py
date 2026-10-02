@@ -25,6 +25,9 @@
     link-cli.py allow proximity on|off
                                lock this computer when the phone leaves its network
     link-cli.py ring           make the phone ring, to find it
+    link-cli.py phone-screen [stop]
+                               show the phone's screen in a window here, to
+                               see and use it (the phone asks its owner first)
     link-cli.py sms [NUMBER TEXT...]
                                the phone's recent texts, or send one from it
     link-cli.py allow notifications on|off
@@ -36,6 +39,15 @@
                                a relay of your own (a TURN server) for networks
                                that forbid direct connections; asks for its
                                password
+    link-cli.py ask WORDS...   do something by saying it: "turn off bluetooth",
+                               "what's using the memory". Asks first if it
+                               changes anything (--yes to skip the question)
+    link-cli.py scene save NAME [--auto] | apply NAME | forget NAME | list
+                               keep how things are set now as what you do in
+                               this situation (this network, these displays,
+                               mains or battery); --auto applies it by itself
+    link-cli.py doctor         the link looking at itself, and what to do
+                               about anything that is wrong
     link-cli.py log            what the phone has done
 
 The daemon is services/adaptive-link (systemd unit adaptive-link.service).
@@ -155,6 +167,16 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="action", required=True)
     for name in ("status", "pair", "on", "off", "log", "signin", "signout", "ring"):
         sub.add_parser(name)
+    ask = sub.add_parser("ask")
+    ask.add_argument("words", nargs="+")
+    ask.add_argument("--yes", action="store_true", help="do it without asking, whatever it changes")
+    scene = sub.add_parser("scene")
+    scene.add_argument("verb", choices=["save", "apply", "forget", "list"])
+    scene.add_argument("name", nargs="?")
+    scene.add_argument("--auto", action="store_true")
+    sub.add_parser("doctor")
+    cast = sub.add_parser("phone-screen")
+    cast.add_argument("stop", nargs="?", choices=["stop"])
     sms = sub.add_parser("sms")
     sms.add_argument("to", nargs="?")
     sms.add_argument("text", nargs="*")
@@ -218,6 +240,55 @@ def main(argv=None):
             heard = control.call("POST", "/ring")["ok"]
             print("The phone is ringing." if heard else "No phone is listening (turn on \"Find this phone\" in the app).")
             return 0 if heard else 1
+        elif args.action == "ask":
+            matches = control.call("POST", "/ask", {"text": " ".join(args.words)}, timeout=30)["matches"]
+            if not matches:
+                print("Nothing the computer knows how to do matches that.", file=sys.stderr)
+                return 1
+            first = matches[0]
+            if not first["sure"] and len(matches) > 1:
+                print("That could mean:")
+                for match in matches[:4]:
+                    print(f"  {match['say']}")
+                return 1
+            if first["risk"] != "safe" and not args.yes:
+                if input(f"{first['say']}? [y/N] ").strip().lower() not in ("y", "yes"):
+                    return 1
+            answer = control.call("POST", "/ask", {"id": first["id"], "args": first["args"]}, timeout=120)
+            print(answer["text"] or first["say"])
+            return 0 if answer["ok"] else 1
+        elif args.action == "scene":
+            if args.verb != "list" and not args.name:
+                print("Which scene?", file=sys.stderr)
+                return 1
+            body = {} if args.verb == "list" else {args.verb: args.name, "auto": args.auto}
+            answer = control.call("POST", "/scene", body, timeout=60)
+            if args.verb == "list":
+                now = answer["now"]
+                print(f"Now: {now['wifi'] or 'no Wi-Fi'}, {now['displays']} display(s), on {now['power']}, "
+                      f"the phone {'here' if now['phone'] else 'not here'}")
+                for kept in answer["scenes"]:
+                    when = ", ".join(f"{key} {value}" for key, value in kept["when"].items())
+                    print(f"  {kept['name']}{' (applied by itself)' if kept.get('auto') else ''}: when {when}")
+            elif args.verb == "save" and answer["ok"]:
+                print(f"Saved “{args.name}”: {len(answer['scene']['do'])} things, for when "
+                      + ", ".join(f"{key} is {value}" for key, value in answer["scene"]["when"].items()))
+            else:
+                print(answer.get("text") or ("Done." if answer["ok"] else f"There is no scene called {args.name}."))
+            return 0 if answer["ok"] else 1
+        elif args.action == "doctor":
+            checks = control.call("GET", "/doctor", timeout=30)["checks"]
+            for item in checks:
+                print(f"{'ok ' if item['ok'] else 'FIX'}  {item['name']}: {item['text']}" + (f"\n       -> {item['fix']}" if item["fix"] else ""))
+            return 0 if all(item["ok"] for item in checks) else 1
+        elif args.action == "phone-screen":
+            done = control.call("POST", "/cast", {"stop": bool(args.stop)})["ok"]
+            if args.stop:
+                print("Stopped." if done else "The phone's screen was not being shown.")
+            else:
+                print("Asked the phone: allow it there, and its screen opens in a window here." if done
+                      else "No phone is listening (turn on \"Show this phone on the computer\" in the app).")
+            return 0 if done else 1
         elif args.action == "sms":
             if args.to:
                 answer = control.call("POST", "/sms", {"to": args.to, "text": " ".join(args.text)}, timeout=40)

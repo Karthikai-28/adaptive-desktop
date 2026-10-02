@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The computer at a glance. A tap looks again; the name opens the app. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/status_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:id="@+id/status_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="Adaptive Link"
+        android:textColor="#F5F5F7"
+        android:textStyle="bold"
+        android:textSize="15sp" />
+
+    <TextView
+        android:id="@+id/status_line"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="Tap to look"
+        android:textColor="#0A84FF"
+        android:textSize="13sp" />
+
+    <TextView
+        android:id="@+id/status_detail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:text=""
+        android:textColor="#98989D"
+        android:textSize="12sp" />
+</LinearLayout>

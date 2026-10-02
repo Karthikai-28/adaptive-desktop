@@ -664,6 +664,17 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   tags that press the owner's own buttons, a game pad, a page of the owner's
   own controls, several computers, a two-pane layout on tablets, one display
   or the phone as another. 🔬 Everything an emulator has no hardware for.
+- ✅ **One way in, and what comes after features** (`docs/SUPERPOWERS.md`):
+  asking in ordinary words from the phone, `link-cli.py ask` and the palette;
+  undo; chains; scenes; plug-in actions; `link-cli.py doctor`; state pushed
+  to open screens; pairing by being near; an outbox on the phone.
+- ✅ **Both ways with the screen.** The phone's screen in a window on the
+  computer and used from it (`phone_screen.py`), and the phone as another
+  display through a display made for it (`virtual_display.py`). 🔬 The
+  second needs `scripts/install-link-display.sh` (sudo) and has not run: the
+  laptop's own driver will not light an empty output, which was tried.
+- ✅ **Four home-screen widgets**: quick actions, status, media, the owner's
+  own buttons.
 - ⬜ Not there: a watch app of its own (the notification's buttons reach a
   watch), browsing the phone's files from the desktop's file manager, the
   phone's battery in the panel (it is in `link-cli.py status`), Wayland, iOS,

@@ -72,7 +72,7 @@ internal fun refused(reply: JSONObject?): String? = when {
  * back unless the phone gets through to say it can still reach it. Returns
  * what to tell the owner, or null if there is nothing to tell.
  */
-private suspend fun keep(client: LinkClient, reply: JSONObject?): String? {
+internal suspend fun keep(client: LinkClient, reply: JSONObject?): String? {
     // No answer at all may be the change itself taking the connection away.
     val seconds = reply?.optInt("keep") ?: 45
     if (seconds <= 0) return null

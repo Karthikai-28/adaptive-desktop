@@ -111,12 +111,13 @@ class EventsService : Service() {
     }
 
     private fun kinds(store: Store): List<String> = listOfNotNull(
-        "alert".takeIf { store.computerAlerts },
+        "alert".takeIf { store.computerAlerts }, "offer".takeIf { store.computerAlerts },
         "notification".takeIf { store.computerNotifications },
         "clipboard".takeIf { store.syncClipboard },
         "ring".takeIf { store.findPhone },
         "approve".takeIf { store.approvals }, "approve-done".takeIf { store.approvals },
         "sms-send".takeIf { store.phoneMessages },
+        "cast".takeIf { store.castFromComputer }, "phone-input".takeIf { store.castFromComputer },
     )
 
     private suspend fun listen() {
@@ -134,6 +135,7 @@ class EventsService : Service() {
                         wait = 3_000L
                         scope.launch {
                             client.post("/v1/phone/state", PhoneState.read(this@EventsService))
+                            Outbox.deliver(this@EventsService, client)
                             if (store.copyPhotos && !client.tunnelled) Photos.copy(this@EventsService, client)
                         }
                     }
@@ -169,6 +171,12 @@ class EventsService : Service() {
                 }
             }
             "ring" -> Ringer.start(this)
+            // The computer offers to do something: one tap says yes.
+            "offer" -> Offers.show(this, event)
+            // The computer asks for this phone's screen, or has closed its window on it.
+            "cast" -> if (event.optString("title") == "stop") Cast.stop(this) else if (!Cast.showing) Cast.asked(this)
+            // What was done in that window, done here - only while the screen is being shown there.
+            "phone-input" -> if (Cast.showing) event.optJSONObject("input")?.let { PhoneControl.running?.perform(it) }
             "approve" -> Approval.ask(this, event)
             "approve-done" -> Approval.done(this, event.optString("ask"))
             "sms-send" -> scope.launch {

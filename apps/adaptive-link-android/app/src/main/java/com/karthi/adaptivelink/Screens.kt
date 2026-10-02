@@ -257,6 +257,8 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
     ) {
         Text("Adaptive Link", fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
+        // A computer on this network that is waiting to be paired with: no code to scan.
+        if (stage == "start") NearbyComputers { ask(it) }
         when (stage) {
             "asking" -> {
                 CircularProgressIndicator()
@@ -363,6 +365,7 @@ fun HomeScreen(
     computers: List<Computer> = emptyList(), onAdd: () -> Unit = {}, onSwitch: (Computer) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     var choosing by remember { mutableStateOf(false) }
     var woke by remember { mutableStateOf("") }
 
@@ -372,6 +375,8 @@ fun HomeScreen(
         state.status = status
         state.connecting = false
         state.message = if (status == null) "Cannot reach ${client.computer.name}" else ""
+        // Reached: what was kept for it while it could not be goes now.
+        if (status != null && Outbox.waiting(context) > 0) Outbox.deliver(context, client)
     }
 
     // Keep the status fresh while this screen is showing.
@@ -449,7 +454,11 @@ fun HomeScreen(
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(10.dp))
+        // One way in to everything below, and more: ask for it.
+        AskBox(client, enabled = state.connected)
+        if (state.connected) FrontCard(client)
+        Spacer(Modifier.height(10.dp))
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             horizontalArrangement = Arrangement.spacedBy(12.dp),

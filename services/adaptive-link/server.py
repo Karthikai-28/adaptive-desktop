@@ -35,6 +35,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import WSMsgType, web
 
+import actions
 import alerts
 import camera
 import cloud
@@ -43,6 +44,7 @@ import desktop
 import identity
 import inputs
 import machine
+import scenes
 import screen
 import system
 
@@ -57,7 +59,20 @@ ALERT_EVERY_S = float(os.environ.get("ADAPTIVE_LINK_ALERT_EVERY_S", "30"))
 PROXIMITY_GRACE_S = float(os.environ.get("ADAPTIVE_LINK_PROXIMITY_S", "60"))
 # What a phone may ask to be told (/v1/events), and the owner's switch each needs.
 EVENT_KINDS = {"notification": "send_notifications", "alert": None, "clipboard": "sync_clipboard",
-               "approve": "allow_power", "approve-done": "allow_power", "ring": None, "sms-send": None}
+               "approve": "allow_power", "approve-done": "allow_power", "ring": None, "sms-send": None,
+               # The phone's own screen shown here: what is done in its window, and being asked to start.
+               "phone-input": None, "cast": None,
+               # Something the computer offers to do, for the phone to say yes to with one tap.
+               "offer": None}
+# What a phone may ask to be kept told about (/v1/watch): how to read each, and how often to look.
+WATCHED = {
+    "status": (lambda: desktop.status(), 5), "media": (lambda: {"players": desktop.players(), "volume": desktop.volume()}, 2),
+    "network": (system.network, 2), "devices": (lambda: {"usb": system.usb_devices(), "drives": system.drives()}, 3),
+    "desktop": (system.desktop_state, 5),
+    **{name: (read, 4) for name, read in machine.READ.items()},
+}
+# How often the situation is looked at for a scene come round again.
+SCENE_EVERY_S = float(os.environ.get("ADAPTIVE_LINK_SCENE_EVERY_S", "10"))
 EXEC_OUTPUT_CHUNK = 4096
 PAIR_ASKS_PER_MINUTE = 60
 # How old a request made through the account may be and still be acted on.
@@ -153,6 +168,11 @@ class Link:
         self.phonebook = companion.PhoneBook()
         self._clip_from_phone = ""
         self._texts = {}   # texts the phone has been asked to send: id -> whether it did
+        self._phone_screen = None   # a phone's screen being shown here (phone_screen.py)
+        # One way in to everything (actions.py), and the situations that come round again (scenes.py).
+        self.book = actions.Book(self.link_dir)
+        self.scenes = scenes.Scenes(self.link_dir)
+        self._nearby = None   # this computer saying it is here, while it waits to be paired with
         self._pair_asks = {}
 
     # ------------------------------------------------------------ listeners
@@ -175,7 +195,8 @@ class Link:
                           asyncio.ensure_future(companion.watch_clipboard(
                               self.events, desktop.clipboard_get,
                               lambda: self.config["sync_clipboard"] and self.events.listening("clipboard"),
-                              lambda: self._clip_from_phone))]
+                              lambda: self._clip_from_phone)),
+                          asyncio.ensure_future(self._watch_scenes())]
 
     async def stop(self):
         for watcher in self._watchers:
@@ -213,6 +234,8 @@ class Link:
         """
         if self._media is not None:
             await self._media.close_all()
+        if self._phone_screen is not None:
+            await self._phone_screen.close()
         if self._link_runner is not None:
             for ws in list(self._sockets):
                 try:
@@ -332,6 +355,15 @@ class Link:
         add.add_post("/v1/phone/call", self.h_phone_call)
         add.add_post("/v1/phone/sent", self.h_phone_sent)
         add.add_get("/v1/mic", self.h_mic)
+        add.add_post("/v1/ask", self.h_ask)
+        add.add_post("/v1/do", self.h_do)
+        add.add_get("/v1/actions", self.h_actions)
+        add.add_post("/v1/chains", self.h_chains)
+        add.add_get("/v1/watch", self.h_watch)
+        add.add_get("/v1/doctor", self.h_doctor)
+        add.add_get("/v1/front", self.h_front)
+        add.add_post("/v1/phone/screen", self.h_phone_screen)
+        add.add_post("/v1/phone/screen/close", self.h_phone_screen_close)
         add.add_get("/v1/tasks", self.h_tasks)
         add.add_post("/v1/tasks/signal", self.h_task_signal)
         add.add_get("/v1/devices", self.h_devices)
@@ -956,6 +988,193 @@ class Link:
         self.audit.write("", "sms-sent" if sent else "sms-failed", number)
         return sent, "Sent" if sent else "the phone could not send it"
 
+    async def h_phone_screen(self, request):
+        """The phone offers its own screen, to be shown in a window here."""
+        body = await read_json(request)
+        caller = request["phone"]
+        try:
+            import phone_screen
+            if self._phone_screen is None:
+                self._phone_screen = phone_screen.PhoneScreen(
+                    relay=self.relay,
+                    # What is done in the window goes to the phone it is showing, and to no other.
+                    on_input=lambda event: self.events.add("phone-input", "", keep=False, data={"input": event}),
+                    on_closed=lambda: self.events.add("cast", "stop", keep=False),
+                    show=os.environ.get("ADAPTIVE_LINK_PHONE_WINDOW") != "0")
+            self._phone_screen.relay = self.relay
+            answer = await asyncio.wait_for(self._phone_screen.answer(body.get("offer"), caller["name"]), 30)
+        except ImportError:
+            return json_error(503, "video is not installed on the computer (see docs/ADAPTIVE_LINK.md)")
+        except (ValueError, asyncio.TimeoutError) as error:
+            return json_error(400, str(error) or "the phone's screen could not be shown")
+        self.audit.write(request["peer"], "phone-screen", "shown on the computer")
+        return web.json_response({"ok": True, "answer": answer})
+
+    async def h_phone_screen_close(self, _request):
+        showing = self._phone_screen is not None and self._phone_screen.showing
+        if showing:
+            await self._phone_screen.close()
+        return web.json_response({"ok": showing})
+
+    # ----------------------------------------------- one way in, and scenes
+
+    async def h_ask(self, request):
+        """What was asked, as the few things it could mean."""
+        text = str((await read_json(request)).get("text", ""))[:300]
+        matches = await asyncio.to_thread(self.book.ask, text, self._allowed)
+        # A scene asked for by its name is one of the things it could mean.
+        for scene in self.scenes.scenes:
+            if actions.closeness(text, scene["name"]) >= 0.7:
+                matches.insert(0, {"id": "scene", "args": {"name": scene["name"]}, "risk": "changes", "sure": True,
+                                   "say": f"Set things as for “{scene['name']}”"})
+        return web.json_response({"matches": matches[:actions.MATCHES], "undo": any(e["back"] for e in self.book.journal)})
+
+    async def _do(self, ident, args, who):
+        """Do one action, by whoever asked. Returns (done, what to say, how
+        long the phone has to keep a change that may have cut it off)."""
+        if ident == "scene":
+            scene = self.scenes.find(str((args or {}).get("name")))
+            if scene is None:
+                return False, "no such scene", 0
+            said = []
+            for step in scene["do"]:
+                done, text = await asyncio.to_thread(self.book.run, step["id"], step.get("args", {}), self._allowed)
+                if not done:
+                    said.append(text)
+            self.audit.write(who, "scene", scene["name"])
+            return True, scene["name"] + (f" (but: {'; '.join(said)})" if said else ""), 0
+        action = self.book.actions().get(ident)
+        risky = action is not None and action.risk == "cuts" and ident in ("wifi", "join")
+        if risky:
+            # The same care as the Network screen takes: undone unless the phone comes back.
+            self._hold(None)
+            how = ("wifi", args.get("state", "")) if ident == "wifi" else ("join", args.get("network", ""))
+            done, text, change = await asyncio.to_thread(system.network_action, *how)
+            self.audit.write(who, "do", f"{action.say(args)}" + ("" if done else f" - {text}"))
+            return done, text or action.say(args), self._hold(change)
+        done, text = await asyncio.to_thread(self.book.run, ident, args, self._allowed)
+        said = action.say(args) if action is not None else ident
+        self.audit.write(who, "do", said + ("" if done else f" - {text}"))
+        return done, text, 0
+
+    async def h_do(self, request):
+        body = await read_json(request)
+        args = body.get("args") if isinstance(body.get("args"), dict) else {}
+        done, text, keep = await self._do(str(body.get("id", ""))[:60], args, request["peer"])
+        return web.json_response({"ok": done, "text" if done else "error": text, "keep": keep})
+
+    async def h_actions(self, _request):
+        return web.json_response({"actions": await asyncio.to_thread(self.book.catalogue),
+                                  "chains": sorted(self.book.chains),
+                                  "scenes": [{"name": scene["name"], "auto": scene.get("auto", False)} for scene in self.scenes.scenes],
+                                  "recent": [entry["say"] for entry in self.book.journal[-5:]]})
+
+    async def h_chains(self, request):
+        """Keep the last few things done as one thing with a name, or forget one."""
+        body = await read_json(request)
+        if body.get("forget"):
+            return web.json_response({"ok": self.book.forget(str(body["forget"]))})
+        try:
+            done = self.book.remember(body.get("name"), int(body.get("count", 2)))
+        except (TypeError, ValueError):
+            done = False
+        self.audit.write(request["peer"], "chain", str(body.get("name", ""))[:60])
+        return web.json_response({"ok": done})
+
+    async def h_watch(self, request):
+        """The phone is kept told: it names the parts it is looking at, and
+        each is sent when it changes rather than asked for over and over."""
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=8 * 1024)
+        await ws.prepare(request)
+        self._track(ws)
+        wanted, last, due = set(), {}, {}
+
+        async def listen():
+            async for message in ws:
+                if message.type != WSMsgType.TEXT:
+                    continue
+                try:
+                    named = json.loads(message.data).get("watch", [])
+                except (ValueError, AttributeError):
+                    continue
+                now = {name for name in named if name in WATCHED} if isinstance(named, list) else set()
+                for name in now - wanted:
+                    last.pop(name, None)   # newly looked at: told at once, changed or not
+                    due[name] = 0
+                wanted.clear()
+                wanted.update(now)
+
+        listening = asyncio.ensure_future(listen())
+        try:
+            while not ws.closed and not listening.done():
+                moment = time.monotonic()
+                for name in list(wanted):
+                    read, every = WATCHED[name]
+                    if moment < due.get(name, 0):
+                        continue
+                    due[name] = moment + every
+                    switch = machine.SWITCH.get(name, (None, None))[0]
+                    if switch and not self._allowed(switch):
+                        continue
+                    try:
+                        data = await asyncio.to_thread(read)
+                    except Exception:  # noqa: BLE001 - a part that cannot be read now is read again later
+                        continue
+                    # The same but for the clock is the same: time and traffic counters are not news by themselves.
+                    seen = json.dumps({key: value for key, value in data.items() if key not in ("time", "uptime")}
+                                      if isinstance(data, dict) else data, sort_keys=True)
+                    if seen != last.get(name):
+                        last[name] = seen
+                        await ws.send_json({"part": name, "data": data})
+                await asyncio.sleep(0.5)
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        finally:
+            listening.cancel()
+        return ws
+
+    async def h_doctor(self, _request):
+        return web.json_response({"checks": await asyncio.to_thread(scenes.doctor, self.describe())})
+
+    async def h_front(self, _request):
+        """What is in front on the computer now: for the phone to carry on with."""
+        windows = await asyncio.to_thread(machine.windows) if self._allowed("allow_input") else []
+        front = next((window for window in windows if window["active"]), None)
+        players = await asyncio.to_thread(desktop.players)
+        playing = next((player for player in players if player["status"] == "Playing"), None)
+        project = next((p for p in await asyncio.to_thread(system.projects) if p["active"]), None)
+        return web.json_response({
+            "window": {"title": front["title"], "app": front["app"]} if front else None,
+            "playing": {key: playing[key] for key in ("title", "artist", "url", "position")} if playing else None,
+            "project": {"name": project["name"], "path": project["path"]} if project else None})
+
+    async def _watch_scenes(self):
+        """Look at the situation now and then. A scene come round again is
+        applied if its owner said to, and otherwise offered to the phone."""
+        drives = None
+        while True:
+            await asyncio.sleep(SCENE_EVERY_S)
+            try:
+                now = await asyncio.to_thread(scenes.context, self.presence.anyone)
+                for scene in self.scenes.entered(now):
+                    if scene.get("auto"):
+                        await self._do("scene", {"name": scene["name"]}, "-")
+                    else:
+                        self.events.add("offer", f"{scene['name']}?", "Set things the way you have them there", keep=False,
+                                        data={"do": {"id": "scene", "args": {"name": scene["name"]}}})
+                # A drive just plugged in, and a chain called "backup": the next step is offered.
+                mounted = {drive["mount"]: drive["name"] for drive in await asyncio.to_thread(system.drives)
+                           if drive["removable"] and drive["mount"]}
+                if drives is not None and "backup" in self.book.chains:
+                    for mount in mounted.keys() - drives.keys():
+                        self.events.add("offer", f"Back up to {mounted[mount] or mount}?", "Run your backup", keep=False,
+                                        data={"do": {"id": "chain", "args": {"name": "backup"}}})
+                drives = mounted
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - a look that fails is taken again
+                continue
+
     async def h_mic(self, request):
         """The phone's microphone: 16 kHz, 16-bit, one channel, as it comes."""
         if not self._allowed("allow_input"):
@@ -1063,6 +1282,7 @@ class Link:
 
         self._pairing = {"state": "waiting", "token": token, "attempts": 0, "ui": bool(ui),
                          "expires": time.time() + window}
+        await self._say_nearby(token)
         self._pair_decided = asyncio.Event()
         self._arm_pair_timer(window)
         payload = identity.pairing_payload(socket.gethostname(), hosts, self.port,
@@ -1083,7 +1303,30 @@ class Link:
         if self._pairing.get("state") in ("waiting", "pending"):
             await self._close_pairing("expired")
 
+    async def _say_nearby(self, token=None):
+        """While it waits to be paired with, the computer says on its own
+        network that it is here and how to ask (what the QR code holds), so a
+        phone on that network can offer it without scanning anything. It
+        still pairs only when the owner compares the digits and presses
+        Pair. Called with nothing, it stops saying so."""
+        if self._nearby is not None:
+            try:
+                self._nearby.terminate()
+            except ProcessLookupError:
+                pass
+            self._nearby = None
+        if token is None or os.environ.get("ADAPTIVE_LINK_NEARBY") == "0":
+            return
+        try:
+            self._nearby = await asyncio.create_subprocess_exec(
+                "avahi-publish-service", f"Adaptive Link on {socket.gethostname()}"[:60], "_adaptivelink._tcp",
+                str(self.pairing_port), f"n={socket.gethostname()}", f"f={self.fingerprint}", f"t={token}", f"p={self.port}",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        except OSError:
+            self._nearby = None   # no avahi here: the code is still there to scan
+
     async def _close_pairing(self, state):
+        await self._say_nearby(None)
         if self._pair_timer is not None:
             self._pair_timer.cancel()
             self._pair_timer = None
@@ -1474,6 +1717,8 @@ class Link:
                         "deny": phone["deny"], "state": self.phonebook.state.get(phone["fingerprint"])}
                        for phone in self.phones],
             "present": self.presence.anyone,
+            "phone_screen": {"showing": self._phone_screen.showing, "frames": self._phone_screen.frames,
+                             "size": list(self._phone_screen.size)} if self._phone_screen is not None else None,
             "addresses": [{"address": a, "kind": k} for a, k in addresses],
             "fingerprint": self.fingerprint,
             "viewing": self._sessions + (self._media.viewers if self._media is not None else 0),
@@ -1554,6 +1799,52 @@ class Link:
             self.audit.write("", "approval-asked", f"{what}: {'yes' if answer['ok'] else answer.get('why', 'no')}")
             return web.json_response(answer)
 
+        async def ask(request):
+            data = await read_json(request)
+            allowed = lambda switch: bool(self.config.get(switch))   # noqa: E731 - the owner, at the computer
+            if "id" in data:
+                done, text, _keep = await self._do(str(data["id"]), data.get("args") or {}, "")
+                return web.json_response({"ok": done, "text": text})
+            return web.json_response({"matches": await asyncio.to_thread(self.book.ask, str(data.get("text", "")), allowed)})
+
+        async def scene(request):
+            data = await read_json(request)
+            if data.get("save"):
+                now = await asyncio.to_thread(scenes.context, self.presence.anyone)
+                kept = self.scenes.save(data["save"], now, await asyncio.to_thread(scenes.arrangement), data.get("auto") is True)
+                self.scenes.active.add(kept["name"]) if kept else None
+                return web.json_response({"ok": kept is not None, "scene": kept})
+            if data.get("forget"):
+                return web.json_response({"ok": self.scenes.forget(str(data["forget"]))})
+            if data.get("apply"):
+                done, text, _keep = await self._do("scene", {"name": str(data["apply"])}, "")
+                return web.json_response({"ok": done, "text": text})
+            return web.json_response({"ok": True, "scenes": self.scenes.scenes,
+                                      "now": await asyncio.to_thread(scenes.context, self.presence.anyone)})
+
+        async def doctor(_request):
+            return web.json_response({"checks": await asyncio.to_thread(scenes.doctor, self.describe())})
+
+        async def cast(request):
+            # Ask a listening phone to show its screen here (its owner is asked on the phone), or stop one that is.
+            data = await read_json(request)
+            if data.get("stop"):
+                showing = self._phone_screen is not None and self._phone_screen.showing
+                if showing:
+                    await self._phone_screen.close()
+                return web.json_response({"ok": showing})
+            if "input" in data:
+                # Something to do on the phone, as if done in its window (a script's own tap, or a check's).
+                import phone_screen
+                event = phone_screen.clean_input(data["input"])
+                showing = self._phone_screen is not None and self._phone_screen.showing
+                if event and showing:
+                    self.events.add("phone-input", "", keep=False, data={"input": event})
+                return web.json_response({"ok": bool(event and showing)})
+            heard = self.events.listening("cast")
+            self.events.add("cast", "start", keep=False)
+            return web.json_response({"ok": heard})
+
         async def ring(_request):
             heard = self.events.listening("ring")
             self.events.add("ring", "", keep=False)
@@ -1604,6 +1895,10 @@ class Link:
         app.router.add_post("/relay", relay)
         app.router.add_post("/approve", approve)
         app.router.add_post("/ring", ring)
+        app.router.add_post("/cast", cast)
+        app.router.add_post("/ask", ask)
+        app.router.add_post("/scene", scene)
+        app.router.add_get("/doctor", doctor)
         app.router.add_post("/sms", sms)
         app.router.add_post("/cloud/setup", cloud_setup)
         app.router.add_post("/cloud/signin", cloud_signin)

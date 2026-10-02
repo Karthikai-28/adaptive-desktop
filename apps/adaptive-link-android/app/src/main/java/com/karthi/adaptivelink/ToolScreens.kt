@@ -444,6 +444,7 @@ fun MorePage(
     var messages by remember { mutableStateOf(store.phoneMessages) }
     var photos by remember { mutableStateOf(store.copyPhotos) }
     var remote by remember { mutableStateOf(store.remoteNotification) }
+    var casting by remember { mutableStateOf(store.castFromComputer) }
     // What each of those needs from Android is asked for when it is turned on.
     val askFor = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         if (granted.values.any { !it }) note = "Without that permission the phone cannot do it."
@@ -578,8 +579,24 @@ fun MorePage(
             Together("Lock and play/pause as buttons on a notification (a watch shows them too)", remote) {
                 remote = it; store.remoteNotification = it; listen()
             }
+            Together("This phone's screen in a window on the computer, and used from there", casting) {
+                casting = it; store.castFromComputer = it; listen()
+            }
+            if (casting) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { activity.awayOnPurpose = true; Cast.start(activity) }) { Text("Show it there now") }
+                    if (!PhoneControl.enabled(activity)) OutlinedButton(onClick = {
+                        activity.awayOnPurpose = true
+                        activity.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    }) { Text("Allow it to be used from there") }
+                }
+                Muted(if (PhoneControl.enabled(activity)) "Clicks and typing in the computer's window are done on this phone. \"link-cli.py phone-screen\" on the computer asks for it from there."
+                    else "Until you allow it in Android's accessibility settings, the computer shows this phone's screen but cannot use it.")
+            }
             if (store.listens) Muted("The phone stays connected to the computer for these, and says so in its notification shade.")
         }
+
+        Section("How the link is") { DoctorNotes(client) }
 
         Section("Security") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -631,6 +648,8 @@ fun MorePage(
                     store.syncClipboard = false; store.findPhone = false; store.approvals = false
                     store.presence = false; store.phoneMessages = false; store.copyPhotos = false
                     store.remoteNotification = false
+                    store.castFromComputer = false
+                    Cast.stop(activity)
                     EventsService.sync(activity)
                     Link.forget()
                     onUnpaired()
