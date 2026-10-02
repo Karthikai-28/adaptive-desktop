@@ -823,9 +823,16 @@ class Link:
             "hosts": hosts, "port": self.port, "at": int(time.time())})
 
     async def _republish(self):
+        """Keep what the account says about this computer true: again every
+        ten minutes, and at once when it moves to another network."""
+        known, since = None, time.time()
         while True:
-            await asyncio.sleep(600)
-            await self._publish()
+            await asyncio.sleep(20)
+            hosts = [a for a, _kind in await asyncio.to_thread(identity.local_addresses)]
+            if (known is not None and hosts != known and hosts) or time.time() - since > 600:
+                await self._publish()
+                since = time.time()
+            known = hosts or known
 
     async def _cloud_loop(self):
         wait = 2
@@ -887,7 +894,8 @@ class Link:
                 continue
             if self._tunnel is None:
                 import rtc
-                self._tunnel = rtc.TunnelServer(self.port)
+                self._tunnel = rtc.TunnelServer(
+                    self.port, report=lambda what: self.audit.write("account", "tunnel-state", what))
             try:
                 answer = await asyncio.wait_for(self._tunnel.answer(offer), 30)
             except Exception as error:  # noqa: BLE001 - one bad offer must not stop the listener

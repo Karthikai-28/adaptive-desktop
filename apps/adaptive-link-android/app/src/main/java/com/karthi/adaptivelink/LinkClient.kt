@@ -38,7 +38,11 @@ import javax.net.ssl.X509TrustManager
  *  - this phone presents its own certificate, signed for by the key in its
  *    hardware keystore (PhoneKey). The computer accepts no other.
  */
-class LinkClient(context: Context, val computer: Computer) {
+class LinkClient(
+    context: Context, val computer: Computer,
+    /** False only in the app's own test, to be "away" while sitting next to the computer. */
+    private val nearby: Boolean = true,
+) {
     private val appContext = context.applicationContext
 
     /** The address that answered last: the computer's own on its network, this phone's when tunnelled. */
@@ -97,8 +101,25 @@ class LinkClient(context: Context, val computer: Computer) {
             // the computer's own network again only when it stops.
             askThroughTunnel()?.let { return it }
         }
-        askOnNetwork()?.let { return it }
+        if (nearby) askOnNetwork()?.let { return it }
+        // The computer may have moved to another network, or been given
+        // another address: the account says where it is now. Whatever is
+        // read there is only somewhere to look - the pinned certificate
+        // still decides whether what answers is the computer.
+        if (nearby && relocate()) askOnNetwork()?.let { return it }
         return openTunnel()
+    }
+
+    private suspend fun relocate(): Boolean {
+        if (!cloud.available || !cloud.signedIn) return false
+        val listed = runCatching { cloud.computers() }.getOrNull()
+            ?.firstOrNull { it.second.fingerprint == computer.fingerprint }?.second ?: return false
+        val merged = (listed.hosts + hosts).distinct().take(8)
+        if (listed.hosts.isEmpty() || merged == hosts) return false
+        hosts = merged
+        val store = Store(appContext)
+        if (store.computer?.fingerprint == computer.fingerprint) store.computer = computer.copy(hosts = merged)
+        return true
     }
 
     private val quick by lazy {

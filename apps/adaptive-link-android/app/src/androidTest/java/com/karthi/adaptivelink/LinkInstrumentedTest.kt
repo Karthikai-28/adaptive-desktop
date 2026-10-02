@@ -166,9 +166,17 @@ class LinkInstrumentedTest {
         assertNotNull("the account does not list the computer", listed)
         assertEquals(Cloud.deviceId(paired.fingerprint), listed!!.first)
 
-        // An address nothing answers on, as when the phone is somewhere else.
+        // The computer has moved since the phone last saw it: the address
+        // the phone remembers answers nothing, and the account says where
+        // it is now.
         val elsewhere = listed.second.copy(hosts = listOf("192.0.2.1"))
-        val away = LinkClient(context, elsewhere)
+        val moved = LinkClient(context, elsewhere)
+        assertNotNull("the computer's new address was not found through the account", moved.connect())
+        assertTrue(!moved.tunnelled)
+        moved.close()
+
+        // Away from its network altogether.
+        val away = LinkClient(context, elsewhere, nearby = false)
         val status = away.connect()
         assertNotNull("no direct connection: ${away.awayProblem}", status)
         assertTrue(away.tunnelled)
@@ -196,7 +204,7 @@ class LinkInstrumentedTest {
         cloud.signOut()
         assertEquals("someone-else@example.com", cloud.signInWith("google:someone-else@example.com"))
         assertTrue(cloud.computers().isEmpty())
-        val stranger = LinkClient(context, elsewhere)
+        val stranger = LinkClient(context, elsewhere, nearby = false)
         assertNull("another account must not reach the computer", stranger.connect())
         stranger.close()
 

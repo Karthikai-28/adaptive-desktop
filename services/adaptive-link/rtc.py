@@ -47,6 +47,42 @@ def configuration(stun=STUN):
     return RTCConfiguration(iceServers=servers)
 
 
+def _kinds(sdp):
+    """Which kinds of address a description carries, without the addresses:
+    'host' is on its own network, 'srflx' is as the internet sees it."""
+    found = {}
+    for line in sdp.splitlines():
+        if line.startswith("a=candidate:") and " typ " in line:
+            parts = line.split()
+            kind = parts[parts.index("typ") + 1] + ("6" if ":" in parts[4] else "")
+            found[kind] = found.get(kind, 0) + 1
+    return ", ".join(f"{count} {kind}" for kind, count in sorted(found.items())) or "no addresses"
+
+
+def _addresses(sdp, kind):
+    found = []
+    for line in sdp.splitlines():
+        parts = line.split()
+        if line.startswith("a=candidate:") and "typ" in parts and parts[parts.index("typ") + 1] == kind:
+            found.append(parts[4])
+    return found
+
+
+def _relation(offer, answer):
+    """Where the two devices are in relation to each other, in words: it is
+    what decides whether a direct connection can be made at all."""
+    public = set(_addresses(offer, "srflx")) & set(_addresses(answer, "srflx"))
+    mine = {a.rsplit(".", 1)[0] for a in _addresses(answer, "host") if "." in a}
+    near = any(a.rsplit(".", 1)[0] in mine for a in _addresses(offer, "host") if "." in a)
+    if near:
+        return "the phone is on this computer's own network"
+    if public:
+        return "both are behind the same router, on different networks of it"
+    # Which networks it is on, by the start of each address only.
+    where = sorted({".".join(a.split(".")[:2]) + ".x" for a in _addresses(offer, "host") if "." in a})
+    return "the phone is on another network" + (f" ({', '.join(where)})" if where else "")
+
+
 async def _send_all(channel, data):
     """Send bytes on a data channel in pieces, waiting while it is backed up."""
     for start in range(0, len(data), CHUNK):
@@ -92,10 +128,13 @@ class TunnelServer:
     """The computer's end: answers a phone's offer, and joins each channel
     the phone opens to the link's port."""
 
-    def __init__(self, port, stun=STUN):
+    def __init__(self, port, stun=STUN, report=None):
         self.port = port
         self.stun = stun
         self._peers = set()
+        # Told how each connection went, for the owner's log: a direct
+        # connection that cannot be made is otherwise silent on this side.
+        self._report = report or (lambda _what: None)
 
     async def answer(self, offer_sdp):
         """The answer to send back for a phone's offer."""
@@ -121,11 +160,15 @@ class TunnelServer:
 
         @peer.on("connectionstatechange")
         async def changed():
+            if peer.connectionState in ("connected", "failed"):
+                self._report(peer.connectionState)
             if peer.connectionState in ("failed", "closed", "disconnected"):
                 await self._drop(peer)
 
         await peer.setRemoteDescription(RTCSessionDescription(sdp=offer_sdp, type="offer"))
         await peer.setLocalDescription(await peer.createAnswer())
+        self._report(f"phone offers {_kinds(offer_sdp)}; this computer {_kinds(peer.localDescription.sdp)}; "
+                     f"{_relation(offer_sdp, peer.localDescription.sdp)}")
         return peer.localDescription.sdp
 
     async def _serve(self, channel, early):
