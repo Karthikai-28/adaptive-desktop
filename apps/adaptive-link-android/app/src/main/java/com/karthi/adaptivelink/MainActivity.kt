@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 
-enum class Page { Home, Screen, Trackpad, Media, Presenter, Run, Files, Camera, More }
+enum class Page { Home, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop, More }
 
 /** Apple dark appearance with one accent, as on the desktop. */
 private val Colors = darkColorScheme(
@@ -180,6 +180,8 @@ private fun App(activity: MainActivity) {
     var computer by remember { mutableStateOf(store.computer) }
     var page by remember { mutableStateOf(Page.Home) }
     val state = remember { LinkState() }
+    // Where the Files screen opens: home, or a drive chosen under Devices.
+    var folder by remember { mutableStateOf("~") }
 
     val paired = computer
     if (paired == null) {
@@ -198,7 +200,11 @@ private fun App(activity: MainActivity) {
             Page.Media -> MediaPage(client) { page = Page.Home }
             Page.Presenter -> PresenterPage(activity, client) { page = Page.Home }
             Page.Run -> RunPage(client, store) { page = Page.Home }
-            Page.Files -> FilesPage(activity, client) { page = Page.Home }
+            Page.Files -> FilesPage(activity, client, folder) { folder = "~"; page = Page.Home }
+            Page.Tasks -> TasksPage(client) { page = Page.Home }
+            Page.Devices -> DevicesPage(client, onBack = { page = Page.Home }, onBrowse = { folder = it; page = Page.Files })
+            Page.Network -> NetworkPage(client) { page = Page.Home }
+            Page.Desktop -> DesktopPage(client) { page = Page.Home }
             Page.Camera -> CameraPage(activity, client) { page = Page.Home }
             Page.More -> MorePage(activity, client, store, state, onBack = { page = Page.Home }, onUnpaired = {
                 computer = null

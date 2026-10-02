@@ -186,7 +186,7 @@ private fun displayName(context: Context, uri: Uri): String {
 }
 
 @Composable
-fun FilesPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
+fun FilesPage(activity: MainActivity, client: LinkClient, start: String = "~", onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var path by remember { mutableStateOf("~") }
     var parent by remember { mutableStateOf("") }
@@ -212,7 +212,7 @@ fun FilesPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
         }
         note = ""
     }
-    LaunchedEffect(Unit) { load("~") }
+    LaunchedEffect(start) { load(start) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {

@@ -406,6 +406,55 @@ async def daemon_checks(sandbox, check):
             async with phone.get(f"{link_url}/v1/apps") as reply:
                 check(isinstance((await reply.json())["apps"], list), "apps: the app list is served")
 
+            # ------------------------------------ tasks, devices, the desktop
+            victim = subprocess.Popen(["sleep", "300"])
+            async with phone.get(f"{link_url}/v1/tasks?q=sleep%20300") as reply:
+                tasks = await reply.json()
+            mine = [p for p in tasks["processes"] if p["pid"] == victim.pid]
+            check(tasks["summary"]["cpus"] >= 1 and tasks["summary"]["memory"]["total"] > 0,
+                  "tasks: how busy the machine is")
+            check(len(mine) == 1 and mine[0]["mine"] and mine[0]["name"] == "sleep", "tasks: a process is found by name")
+            async with phone.post(f"{link_url}/v1/tasks/signal", json={"pid": victim.pid, "action": "stop"}) as reply:
+                stopped = await reply.json()
+            check(stopped["ok"] and victim.wait(timeout=5) == -15, "tasks: the owner's process can be ended from the phone")
+            async with phone.post(f"{link_url}/v1/tasks/signal", json={"pid": 1, "action": "kill"}) as reply:
+                check(not (await reply.json())["ok"], "tasks: the system's own processes cannot")
+            async with phone.post(f"{link_url}/v1/tasks/signal", json={"pid": daemon.pid, "action": "kill"}) as reply:
+                check(not (await reply.json())["ok"] and daemon.poll() is None, "tasks: nor can the link itself")
+            control.call("POST", "/configure", {"allow_exec": False})
+            async with phone.get(f"{link_url}/v1/tasks") as reply:
+                check(reply.status == 403, "tasks: not shown when commands are turned off")
+            control.call("POST", "/configure", {"allow_exec": True})
+
+            async with phone.get(f"{link_url}/v1/devices") as reply:
+                devices = await reply.json()
+            check(isinstance(devices["usb"], list) and any(d["mount"] == "/" for d in devices["drives"]),
+                  "devices: USB devices and the drives are listed")
+
+            async with phone.get(f"{link_url}/v1/network") as reply:
+                net = await reply.json()
+            check(isinstance(net["dns"], list) and net["time"] > 0
+                  and all(i["name"] != "lo" and i["received"] >= 0 and isinstance(i["addresses"], list)
+                          for i in net["interfaces"]),
+                  "network: the interfaces, their addresses and their traffic are listed")
+
+            async with phone.get(f"{link_url}/v1/desktop") as reply:
+                check(isinstance((await reply.json())["projects"], list), "desktop: the projects are listed (none here)")
+            async with phone.post(f"{link_url}/v1/desktop", json={"action": "note", "value": "from the\nphone"}) as reply:
+                noted = await reply.json()
+            inbox = home / ".local/share/adaptive-desktop/notes/General/Inbox.md"
+            check(noted["ok"] and inbox.exists() and inbox.read_text().rstrip().endswith("from the phone"),
+                  "desktop: a quick note lands in the inbox, on one line")
+            for body in ({"action": "rm -rf", "value": "~"}, {"action": "project", "value": "../../etc"},
+                         {"action": "tile", "value": "left; reboot"}, {"action": "open", "value": "../../bin/sh"}):
+                async with phone.post(f"{link_url}/v1/desktop", json=body) as reply:
+                    refused = await reply.json()
+                check(not refused["ok"], f"desktop: only what is offered can be asked for ({body['action']})")
+            control.call("POST", "/configure", {"allow_input": False})
+            async with phone.post(f"{link_url}/v1/desktop", json={"action": "note", "value": "x"}) as reply:
+                check(reply.status == 403, "desktop: refused in view-only")
+            control.call("POST", "/configure", {"allow_input": True})
+
             # -------------------------------------------------------------- power
             # Only the refusals: a real action would act on this machine.
             async with phone.post(f"{link_url}/v1/power", json={"action": "explode"}) as reply:
@@ -414,7 +463,11 @@ async def daemon_checks(sandbox, check):
             async with phone.post(f"{link_url}/v1/power", json={"action": "lock"}) as reply:
                 check(reply.status == 403, "power: refused when the owner turns it off")
             async with phone.get(f"{link_url}/v1/camera") as reply:
-                check(reply.status == 503, "camera: says so when the virtual camera is not installed")
+                # Which of the two depends on the machine running this.
+                if Path("/dev/video10").exists():
+                    check(reply.status != 503, "camera: offered when the virtual camera is installed")
+                else:
+                    check(reply.status == 503, "camera: says so when the virtual camera is not installed")
 
             # -------------------------------------------------------------- audit
             async with phone.get(f"{link_url}/v1/log") as reply:

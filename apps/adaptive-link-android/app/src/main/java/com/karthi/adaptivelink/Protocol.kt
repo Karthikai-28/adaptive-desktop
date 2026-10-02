@@ -103,6 +103,10 @@ object Protocol {
         else -> "$bytes B"
     }
 
+    /** A speed from two readings of a byte count taken `seconds` apart. */
+    fun formatRate(before: Long, after: Long, seconds: Double): String =
+        if (seconds <= 0 || after < before) "0 B/s" else formatSize(((after - before) / seconds).toLong()) + "/s"
+
     fun formatDuration(seconds: Int): String =
         if (seconds >= 3600) "%d:%02d:%02d".format(seconds / 3600, seconds % 3600 / 60, seconds % 60)
         else "%d:%02d".format(seconds / 60, seconds % 60)

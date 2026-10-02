@@ -5,6 +5,14 @@ import android.graphics.BitmapFactory
 import android.view.WindowManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -134,6 +142,10 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
     var keyboard by remember { mutableStateOf(false) }
     var box by remember { mutableStateOf(IntSize.Zero) }
     var socket by remember { mutableStateOf<WebSocket?>(null) }
+    // Two fingers zoom and move the picture; one finger is still the pointer
+    // on the computer, wherever the picture has been moved to.
+    var zoom by remember { mutableStateOf(1f) }
+    var shift by remember { mutableStateOf(Offset.Zero) }
 
     DisposableEffect(quality) {
         val opened = client.socket("/v1/screen?preset=$quality", object : WebSocketListener() {
@@ -154,7 +166,7 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
 
     fun send(event: String) { socket?.send(event) }
     fun at(offset: Offset): Pair<Float, Float>? =
-        frame?.let { touchToScreen(offset, box, IntSize(it.width, it.height)) }
+        frame?.let { touchToScreen(unzoomed(offset, box, zoom, shift), box, IntSize(it.width, it.height)) }
 
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar("Screen", onBack) {
@@ -174,7 +186,7 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
             }
         }
         Box(
-            Modifier.weight(1f).fillMaxWidth().background(Color.Black).onSizeChanged { box = it }
+            Modifier.weight(1f).fillMaxWidth().background(Color.Black).clipToBounds().onSizeChanged { box = it }
                 .pointerInput(scrolling) {
                     detectTapGestures(
                         onTap = { at(it)?.let { (x, y) -> send(Protocol.move(x, y)); send(Protocol.click(1)) } },
@@ -207,17 +219,66 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                             at(change.position)?.let { (x, y) -> send(Protocol.move(x, y)) }
                         }
                     }
+                }
+                // Last, so it sees two fingers before the gestures above do
+                // and takes them: a pinch is never a click or a drag.
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        do {
+                            val event = awaitPointerEvent()
+                            if (event.changes.count { it.pressed } >= 2) {
+                                val (newZoom, newShift) = zoomed(
+                                    zoom, shift, box, event.calculateZoom(),
+                                    event.calculateCentroid(useCurrent = false), event.calculatePan(),
+                                )
+                                zoom = newZoom
+                                shift = newShift
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) {
             frame?.let {
-                Image(it.asImageBitmap(), "The computer's screen", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                Image(
+                    it.asImageBitmap(), "The computer's screen",
+                    Modifier.fillMaxSize().graphicsLayer {
+                        scaleX = zoom; scaleY = zoom
+                        translationX = shift.x; translationY = shift.y
+                    },
+                    contentScale = ContentScale.Fit,
+                )
             }
             if (note.isNotEmpty()) Text(note, color = Color.White)
         }
         if (scrolling) Muted("Scroll mode: drag up and down to scroll", Modifier.padding(8.dp))
         if (keyboard) KeyboardBar(::send)
     }
+}
+
+/** Where a touch on the zoomed picture lies on the picture as first drawn. */
+internal fun unzoomed(touch: Offset, box: IntSize, zoom: Float, shift: Offset): Offset {
+    val centre = Offset(box.width / 2f, box.height / 2f)
+    return centre + (touch - centre - shift) / zoom
+}
+
+/**
+ * The picture's zoom and position after a pinch: it grows about the point
+ * between the fingers and follows them, never smaller than the whole screen
+ * and never moved off it.
+ */
+internal fun zoomed(zoom: Float, shift: Offset, box: IntSize, by: Float, between: Offset, moved: Offset): Pair<Float, Offset> {
+    if (!between.isSpecified) return zoom to shift
+    val next = (zoom * by).coerceIn(1f, 8f)
+    if (next < 1.03f) return 1f to Offset.Zero
+    val centre = Offset(box.width / 2f, box.height / 2f)
+    val held = between - centre
+    val wanted = held + moved - (held - shift) * (next / zoom)
+    val reachX = box.width * (next - 1f) / 2f
+    val reachY = box.height * (next - 1f) / 2f
+    return next to Offset(wanted.x.coerceIn(-reachX, reachX), wanted.y.coerceIn(-reachY, reachY))
 }
 
 // ---------------------------------------------------------------- trackpad

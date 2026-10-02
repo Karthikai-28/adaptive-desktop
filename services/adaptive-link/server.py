@@ -40,6 +40,7 @@ import desktop
 import identity
 import inputs
 import screen
+import system
 
 VERSION = 1
 CONNECT_NOTICE_EVERY_S = 600
@@ -246,6 +247,13 @@ class Link:
         add.add_post("/v1/upload", self.h_upload)
         add.add_post("/v1/open", self.h_open)
         add.add_get("/v1/log", self.h_log)
+        add.add_get("/v1/tasks", self.h_tasks)
+        add.add_post("/v1/tasks/signal", self.h_task_signal)
+        add.add_get("/v1/devices", self.h_devices)
+        add.add_get("/v1/network", self.h_network)
+        add.add_get("/v1/desktop", self.h_desktop)
+        add.add_get("/v1/desktop/report", self.h_desktop_report)
+        add.add_post("/v1/desktop", self.h_desktop_action)
 
     async def h_status(self, request):
         info = await asyncio.to_thread(desktop.status)
@@ -472,6 +480,49 @@ class Link:
             return json_error(400, "unknown action")
         self.audit.write(request["peer"], "power", action)
         return web.json_response({"ok": await asyncio.to_thread(desktop.power, action)})
+
+    # ------------------------------------- the machine, and the desktop's own
+
+    async def h_tasks(self, request):
+        # Command lines can carry anything; seeing them goes with running them.
+        if not self._allowed("allow_exec"):
+            return json_error(403, "commands are turned off on the computer")
+        sort = "memory" if request.query.get("sort") == "memory" else "cpu"
+        found = await asyncio.to_thread(system.processes, sort, request.query.get("q", "")[:80])
+        return web.json_response({"summary": await asyncio.to_thread(system.summary), "processes": found})
+
+    async def h_task_signal(self, request):
+        if not self._allowed("allow_exec"):
+            return json_error(403, "commands are turned off on the computer")
+        body = await read_json(request)
+        pid, action = body.get("pid"), body.get("action")
+        done, why = await asyncio.to_thread(system.signal_process, pid, action)
+        self.audit.write(request["peer"], "task", f"{action} {pid}" + ("" if done else f" - {why}"))
+        return web.json_response({"ok": done, "error": why})
+
+    async def h_devices(self, _request):
+        return web.json_response({"usb": await asyncio.to_thread(system.usb_devices),
+                                  "drives": await asyncio.to_thread(system.drives)})
+
+    async def h_network(self, _request):
+        return web.json_response(await asyncio.to_thread(system.network))
+
+    async def h_desktop(self, _request):
+        return web.json_response(await asyncio.to_thread(system.desktop_state))
+
+    async def h_desktop_report(self, request):
+        done, text = await asyncio.to_thread(system.desktop_report, request.query.get("name", ""))
+        return web.json_response({"ok": done, "text": text})
+
+    async def h_desktop_action(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "pointer and keyboard are turned off on the computer")
+        body = await read_json(request)
+        action, value = str(body.get("action", ""))[:40], body.get("value", "")
+        done, text = await asyncio.to_thread(system.desktop_action, action, value)
+        shown = "" if action == "note" else str(value)[:60]   # what was noted is the owner's, not the log's
+        self.audit.write(request["peer"], "desktop", f"{action} {shown}".strip())
+        return web.json_response({"ok": done, "text": text})
 
     async def h_apps(self, _request):
         return web.json_response({"apps": await asyncio.to_thread(desktop.applications)})

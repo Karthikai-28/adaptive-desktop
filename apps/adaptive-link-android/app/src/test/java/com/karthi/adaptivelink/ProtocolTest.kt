@@ -83,4 +83,32 @@ class ProtocolTest {
         assertEquals("1:05", Protocol.formatDuration(65))
         assertEquals("1:01:01", Protocol.formatDuration(3661))
     }
+
+    @Test fun aSpeedIsWorkedOutFromTwoReadings() {
+        assertEquals("1.0 MB/s", Protocol.formatRate(1000, 1000 + (2L shl 20), 2.0))
+        assertEquals("512 B/s", Protocol.formatRate(0, 1024, 2.0))
+        // A counter that went back (the interface was reset) is not a speed.
+        assertEquals("0 B/s", Protocol.formatRate(5000, 100, 2.0))
+        assertEquals("0 B/s", Protocol.formatRate(0, 100, 0.0))
+    }
+
+    @Test fun aTouchOnTheZoomedPictureLandsWhereItLooks() {
+        val box = androidx.compose.ui.unit.IntSize(1000, 2000)
+        fun point(x: Float, y: Float) = androidx.compose.ui.geometry.Offset(x, y)
+        // Pinched to twice the size about a point: that point stays under the fingers.
+        val held = point(250f, 600f)
+        val (zoom, shift) = zoomed(1f, point(0f, 0f), box, 2f, held, point(0f, 0f))
+        assertEquals(2f, zoom, 1e-4f)
+        val back = unzoomed(held, box, zoom, shift)
+        assertEquals(250f, back.x, 0.5f)
+        assertEquals(600f, back.y, 0.5f)
+        // Pinched back out, the picture is whole and in place again.
+        val (out, home) = zoomed(zoom, shift, box, 0.4f, held, point(0f, 0f))
+        assertEquals(1f, out, 1e-4f)
+        assertEquals(0f, home.x, 1e-4f)
+        // And it cannot be dragged off the screen.
+        val (_, far) = zoomed(2f, point(0f, 0f), box, 1f, point(500f, 1000f), point(9000f, -9000f))
+        assertEquals(500f, far.x, 0.5f)
+        assertEquals(-1000f, far.y, 0.5f)
+    }
 }

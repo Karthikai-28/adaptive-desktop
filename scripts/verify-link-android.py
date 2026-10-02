@@ -342,12 +342,59 @@ def screens(check, adb, device, control, build_env, sandbox):
     back(2)
     step(home(), "files: back in the app after the picker")
 
+    # ---------------------------------- tasks, devices, network, desktop
+    tap("Tasks", wait=4)
+    step(has("Memory", "Processor") and has("Load"), "tasks: the machine's load and its processes")
+    tap("Memory", wait=2)
+    if tap("Find a process", wait=1):
+        sh("shell", "input", "text", "xvfb")
+        sh("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(5)
+    step(has("xvfb-run"), "tasks: a process is found by name")
+    tap("xvfb-run", wait=1.5)
+    step(has("End", "Kill", "Pause"), "tasks: a process can be paused, ended or killed")
+    tap("Close", wait=1)
+    home()
+
+    tap("Devices", wait=4)
+    step(has("USB", "Drives"), "devices: USB devices and drives")
+    for _ in range(4):   # the mounted drive is further down the list
+        if has("Browse"):
+            break
+        sh("shell", "input", "swipe", "540", "1700", "540", "700", "300")
+        time.sleep(1)
+    tap("Browse", wait=3)
+    step(has("Send a file to the computer"), "devices: a drive opens in Files")
+    home()
+
+    tap("Network", wait=5)
+    step(has("Received", "Sent") and has("DNS"), "network: the connections and what they carry")
+    home()
+
+    tap("Desktop", wait=4)
+    step(has("Quick note", "Focus") and has("Project"), "desktop: projects, notes, focus and windows")
+    if tap("A line for the project's inbox", wait=1):
+        sh("shell", "input", "text", "phone-note-check")
+        sh("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1)
+    tap("Add note", wait=3)
+    inbox = sandbox / "home/.local/share/adaptive-desktop/notes/General/Inbox.md"
+    step(has("Noted in General") and inbox.exists() and "phone-note-check" in inbox.read_text(),
+         "desktop: a note typed on the phone lands in the inbox on the computer")
+    tap("Git", wait=3)
+    step(has("Close"), "desktop: a report opens")
+    tap("Close", wait=1)
+    home()
+
     # ------------------------------------------------------------ webcam
     tap("Webcam", wait=3)
     allow_permission()
     time.sleep(4)
-    step(has("Webcam") and has("virtual camera is not installed"),
-         "webcam: the camera opens, and says the computer has no virtual camera here")
+    # Whether the machine running this has the virtual camera decides which
+    # of the two the app should say.
+    installed = Path("/dev/video10").exists()
+    step(has("Webcam") and has("virtual camera is not installed") != installed,
+         "webcam: the camera opens, and says so if the computer has no virtual camera")
     tap("Switch camera", wait=3)
     step(has("Webcam"), "webcam: switching cameras")
     home()

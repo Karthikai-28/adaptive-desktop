@@ -23,7 +23,11 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Mouse
@@ -331,6 +335,10 @@ private val TILES = listOf(
     Tile(Page.Run, "Run", "Commands and apps", Icons.Filled.Terminal),
     Tile(Page.Files, "Files", "Browse, open, send", Icons.Filled.Folder),
     Tile(Page.Camera, "Webcam", "This phone's camera", Icons.Filled.Videocam),
+    Tile(Page.Tasks, "Tasks", "Processes and load", Icons.Filled.Memory),
+    Tile(Page.Devices, "Devices", "USB and drives", Icons.Filled.Usb),
+    Tile(Page.Network, "Network", "Connections and traffic", Icons.Filled.Wifi),
+    Tile(Page.Desktop, "Desktop", "Projects, focus, windows", Icons.Filled.Dashboard),
     Tile(Page.More, "More", "Clipboard, power, settings", Icons.Filled.MoreHoriz),
 )
 
@@ -395,7 +403,7 @@ fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
         }
         Spacer(Modifier.height(14.dp))
         LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+            columns = GridCells.Fixed(3),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 16.dp),
@@ -404,7 +412,7 @@ fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
                 // More is always reachable: unpairing must work offline.
                 val enabled = state.connected || tile.page == Page.More
                 Column(
-                    Modifier.aspectRatio(1.35f).clip(RoundedCornerShape(16.dp))
+                    Modifier.aspectRatio(0.95f).clip(RoundedCornerShape(16.dp))
                         .background(MaterialTheme.colorScheme.surface)
                         .clickable(enabled = enabled) { onOpen(tile.page) }
                         .padding(14.dp),
@@ -417,7 +425,7 @@ fun HomeScreen(client: LinkClient, state: LinkState, onOpen: (Page) -> Unit) {
                     Column {
                         Text(tile.label, fontWeight = FontWeight.SemiBold,
                             color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                        Muted(tile.detail)
+                        Text(tile.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, lineHeight = 13.sp, maxLines = 2)
                     }
                 }
             }
