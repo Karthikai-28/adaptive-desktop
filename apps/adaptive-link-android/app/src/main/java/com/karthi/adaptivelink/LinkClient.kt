@@ -57,8 +57,12 @@ class LinkClient(
     private var tunnel: Tunnel? = null
     private val tunnelLock = Mutex()
 
+    /** Whether the link is going over a USB cable just now (the computer's adb carries this phone's 127.0.0.1 to it). */
+    @Volatile var viaCable = false
+        private set
+
     /** Whether the link is going through the direct connection just now. */
-    val tunnelled get() = host == LOCAL
+    val tunnelled get() = host == LOCAL && !viaCable
 
     @Volatile private var tunnelProblem = ""
 
@@ -102,6 +106,7 @@ class LinkClient(
             // the computer's own network again only when it stops.
             askThroughTunnel()?.let { return it }
         }
+        if (nearby) askOverCable()?.let { return it }
         if (nearby) askOnNetwork()?.let { return it }
         // The computer may have moved to another network, or been given
         // another address: the account says where it is now. Whatever is
@@ -127,6 +132,35 @@ class LinkClient(
         http.newBuilder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).build()
     }
 
+    /**
+     * Over a USB cable, when there is one: the computer has adb carry this
+     * phone's own address on the link's port to itself. It is tried first,
+     * and is either there at once or not at all.
+     */
+    private suspend fun askOverCable(): JSONObject? = withContext(Dispatchers.IO) {
+        val found = runCatching {
+            cable.newCall(Request.Builder().url("${base(LOCAL, computer.port)}/v1/status").build()).execute().use {
+                if (it.isSuccessful) JSONObject(it.body!!.string()) else null
+            }
+        }.getOrNull()
+        if (found != null) {
+            host = LOCAL
+            port = computer.port
+            viaCable = true
+            tunnel?.close()
+            tunnel = null
+            learn(found)
+        } else if (viaCable) {
+            viaCable = false
+            host = null
+        }
+        found
+    }
+
+    private val cable by lazy {
+        http.newBuilder().connectTimeout(700, TimeUnit.MILLISECONDS).readTimeout(4, TimeUnit.SECONDS).build()
+    }
+
     private suspend fun askThroughTunnel(): JSONObject? = withContext(Dispatchers.IO) {
         val through = tunnel?.takeIf { it.alive } ?: return@withContext null
         runCatching {
@@ -149,6 +183,7 @@ class LinkClient(
                     it.open()
                 }
             host = LOCAL
+            viaCable = false
             port = through.port
             awayProblem = ""
             askThroughTunnel() ?: run {
@@ -193,6 +228,7 @@ class LinkClient(
         attempts.forEach { it.cancel() }
         if (found != null) {
             host = found.first
+            viaCable = false
             port = computer.port
             // On the computer's own network again: the tunnel is not needed.
             tunnel?.close()

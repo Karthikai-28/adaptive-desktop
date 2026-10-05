@@ -1,6 +1,12 @@
 package com.karthi.adaptivelink
 
 import android.app.Activity
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
@@ -184,6 +190,71 @@ private fun wholeScreen(activity: Activity): Pair<Int, Int> {
     return maxOf(w, h) to minOf(w, h)
 }
 
+/** After a stylus was last seen, how long a touch is taken for the hand holding it rather than a finger. */
+private const val PALM_MS = 500L
+
+/** How large things are on this phone as a display: the longest side of the desktop it shows, in its pixels. */
+internal val DISPLAY_SIZES = linkedMapOf("larger" to 1280, "standard" to 1600, "more" to 1920)
+
+/**
+ * The size of display to ask the computer for: this phone's whole screen in
+ * shape, with as many pixels as the chosen size gives (fewer pixels, larger
+ * text), never more than the phone has, upright or sideways.
+ */
+internal fun displaySize(wide: Int, high: Int, choice: String, upright: Boolean): String {
+    val long = minOf(wide, DISPLAY_SIZES[choice] ?: 1600) / 8 * 8
+    val short = (high * long / wide) / 8 * 8
+    return if (upright) "${short}x$long" else "${long}x$short"
+}
+
+private fun displaySize(activity: Activity, choice: String, upright: Boolean): String =
+    wholeScreen(activity).let { (wide, high) -> displaySize(wide, high, choice, upright) }
+
+/** Where this phone's display goes and how it looks: chosen once, kept, and applied to the display there is. */
+@Composable
+private fun DisplaySettings(store: Store, onDone: (changed: Boolean) -> Unit) {
+    var size by remember { mutableStateOf(store.displaySize) }
+    var side by remember { mutableStateOf(store.displaySide) }
+    var turns by remember { mutableStateOf(store.displayTurns) }
+    AlertDialog(
+        onDismissRequest = { onDone(false) },
+        title = { Text("This phone as a display") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Size of things on it", fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("larger" to "Larger", "standard" to "Standard", "more" to "More space").forEach { (name, label) ->
+                        FilterChip(selected = size == name, onClick = { size = name }, label = { Text(label) })
+                    }
+                }
+                Text("Beside the computer's screen", fontWeight = FontWeight.SemiBold)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("left" to "Left", "right" to "Right", "above" to "Above", "below" to "Below").forEach { (name, label) ->
+                        FilterChip(selected = side == name, onClick = { side = name }, label = { Text(label) })
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Turn with the phone", fontWeight = FontWeight.SemiBold)
+                        Muted("Upright, the display is tall; sideways, wide.")
+                    }
+                    Switch(checked = turns, onCheckedChange = { turns = it })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val changed = size != store.displaySize || side != store.displaySide || turns != store.displayTurns
+                store.displaySize = size
+                store.displaySide = side
+                store.displayTurns = turns
+                onDone(changed)
+            }) { Text("Done") }
+        },
+        dismissButton = { TextButton(onClick = { onDone(false) }) { Text("Cancel") } },
+    )
+}
+
 @Composable
 fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () -> Unit) {
     var frame by remember { mutableStateOf<Bitmap?>(null) }
@@ -210,24 +281,65 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
     // this phone, beside the computer's own.
     var display by remember { mutableStateOf("") }
     var displays by remember { mutableStateOf(listOf<String>()) }
+    var primary by remember { mutableStateOf("") }
     var extended by remember { mutableStateOf("") }
+    // Counts the times this phone's display was made: made again (another
+    // size, turned), the picture and the touches start again on the new one.
+    var generation by remember { mutableIntStateOf(0) }
+    var settings by remember { mutableStateOf(false) }
+    // Over a USB cable the link carries pictures at 30 a second; video's own
+    // connection cannot go over the cable.
+    var cable by remember { mutableStateOf(client.viaCable) }
+    LaunchedEffect(Unit) { client.connect(); cable = client.viaCable }
+    val showVideo = video && !cable
+    val preset = if (cable) "cable" else quality
     val showing = if (display.isEmpty()) "" else "&display=" + java.net.URLEncoder.encode(display, "UTF-8")
-    val input = remember(display) { InputSocket(client, "/v1/input?x=1$showing") }
+    val input = remember(display, generation) { InputSocket(client, "/v1/input?x=1$showing") }
     val surface = remember { VideoView(context) }
     DisposableEffect(Unit) { onDispose { surface.release() } }
     DisposableEffect(input) { onDispose { input.close() } }
     LaunchedEffect(options) {
         if (options) client.get("/v1/machine/display")?.optJSONArray("outputs")?.let { outputs ->
-            displays = List(outputs.length()) { outputs.optJSONObject(it) }.filterNotNull()
-                .filter { it.optBoolean("on") }.map { it.optString("name") }
+            val on = List(outputs.length()) { outputs.optJSONObject(it) }.filterNotNull().filter { it.optBoolean("on") }
+            displays = on.map { it.optString("name") }
+            primary = on.firstOrNull { it.optBoolean("primary") }?.optString("name") ?: displays.firstOrNull() ?: ""
         }
     }
+    val sideways = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    /** Make this phone a display - or have its display made again - as it is held and as its owner chose. */
+    suspend fun makeDisplay(upright: Boolean = store.displayTurns && !sideways): Boolean {
+        val reply = client.post("/v1/machine/display", JSONObject().put("action", "extend")
+            .put("value", displaySize(activity, store.displaySize, upright)).put("target", store.displaySide))
+        if (reply?.optBoolean("ok") != true) {
+            note = reply?.optString("error")?.ifBlank { null } ?: "The computer could not make another display"
+            return false
+        }
+        extended = reply.optString("text")
+        display = extended
+        generation += 1
+        return true
+    }
+
+    // A display this phone let go of a moment ago (the app closed, the phone
+    // locked) is still there: it is taken back, windows and all.
+    LaunchedEffect(Unit) {
+        val mine = client.get("/v1/machine/display")?.optJSONArray("made").objects().any { it.optBoolean("mine") }
+        if (mine) makeDisplay()
+    }
+    // Turned, the display turns with it: made again the other way up.
+    LaunchedEffect(sideways) {
+        if (extended.isNotEmpty() && store.displayTurns) {
+            delay(700)   // a phone being turned passes through in-between angles
+            makeDisplay()
+        }
+    }
+
     // Full screen: chosen from the bar, or by itself while this phone is a
-    // display of the computer and held sideways, as a monitor would be.
+    // display of the computer and held as it shows it.
     var full by remember { mutableStateOf(false) }
     var hint by remember { mutableStateOf(false) }
-    val sideways = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    LaunchedEffect(sideways, extended) { if (extended.isNotEmpty()) full = sideways }
+    LaunchedEffect(sideways, extended) { if (extended.isNotEmpty()) full = sideways || store.displayTurns }
     BackHandler(enabled = full) { full = false }
     DisposableEffect(full) {
         val on = full
@@ -236,18 +348,19 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
     }
     LaunchedEffect(full) { hint = full; if (full) { delay(3000); hint = false } }
 
-    // The display made for this phone is taken away again on leaving.
+    // Leaving, this phone lets go of its display rather than taking it away:
+    // the computer keeps it a while, in case the phone comes back.
     DisposableEffect(extended) {
         val made = extended
         onDispose {
             if (made.isNotEmpty()) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                client.post("/v1/machine/display", JSONObject().put("action", "unextend").put("target", made))
+                client.post("/v1/machine/display", JSONObject().put("action", "release"))
             }
         }
     }
 
-    if (video) {
-        DisposableEffect(quality, sound, display) {
+    if (showVideo) {
+        DisposableEffect(quality, sound, display, generation) {
             note = "Connecting…"
             picture = IntSize.Zero
             val watching = ScreenVideo(context, client) { said -> if (picture != IntSize.Zero || said.isNotEmpty()) note = said }
@@ -273,8 +386,8 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
             }
         }
     } else {
-        DisposableEffect(quality, display) {
-            val opened = client.socket("/v1/screen?preset=$quality$showing", object : WebSocketListener() {
+        DisposableEffect(preset, display, generation) {
+            val opened = client.socket("/v1/screen?preset=$preset$showing", object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size)?.let {
                         frame = it
@@ -294,7 +407,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
 
     // With video the pictures come on their own connection; the pointer and
     // the keys go on the socket the trackpad uses.
-    fun send(event: String) { if (video) input.send(event) else socket?.send(event) }
+    fun send(event: String) { if (showVideo) input.send(event) else socket?.send(event) }
     fun at(offset: Offset): Pair<Float, Float>? =
         picture.takeIf { it != IntSize.Zero }?.let { touchToScreen(unzoomed(offset, box, zoom, shift), box, it) }
 
@@ -310,10 +423,14 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text(if (video) "Video: on (less data)" else "Video: off (a picture at a time)") },
+                        text = {
+                            Text(if (cable) "Over the USB cable: 30 pictures a second"
+                                 else if (video) "Video: on (less data)" else "Video: off (a picture at a time)")
+                        },
+                        enabled = !cable,
                         onClick = { video = !video; store.screenVideo = video; options = false },
                     )
-                    if (video) DropdownMenuItem(
+                    if (showVideo) DropdownMenuItem(
                         text = { Text(if (!sound) "Sound: off" else if (hearing || picture == IntSize.Zero) "Sound: on" else "Sound: on (the computer has none to send)") },
                         onClick = { sound = !sound; store.screenSound = sound; options = false },
                     )
@@ -326,28 +443,41 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
                             onClick = { display = name; options = false },
                         )
                     }
-                    if (extended.isEmpty()) DropdownMenuItem(
-                        text = { Text("Use this phone as another display") },
-                        onClick = {
-                            options = false
-                            scope.launch {
-                                // The shape of this phone's whole screen held sideways, so that
-                                // full screen it fills it exactly; no larger than a display
-                                // output can be asked for.
-                                val (wide, high) = wholeScreen(activity)
-                                val long = wide.coerceAtMost(1920) / 8 * 8
-                                val short = (high * long / wide) / 8 * 8
-                                val reply = client.post("/v1/machine/display", JSONObject().put("action", "extend").put("value", "${long}x$short"))
-                                if (reply?.optBoolean("ok") == true) {
-                                    extended = reply.optString("text")
-                                    display = extended
-                                } else note = reply?.optString("error")?.ifBlank { null } ?: "The computer could not make another display"
-                            }
-                        },
-                    ) else DropdownMenuItem(
-                        text = { Text("Stop using this phone as a display") },
-                        onClick = { options = false; display = ""; extended = "" },
-                    )
+                    if (extended.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("Use this phone as another display") },
+                            onClick = { options = false; scope.launch { makeDisplay() } },
+                        )
+                        // The computer's own screen, as it is, filling this one.
+                        if (primary.isNotEmpty()) DropdownMenuItem(
+                            text = { Text("Mirror the computer's screen") },
+                            onClick = { options = false; display = primary; full = true },
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Bring the window in front here") },
+                            onClick = {
+                                options = false
+                                scope.launch {
+                                    val reply = client.post("/v1/machine/display", JSONObject().put("action", "bring"))
+                                    if (reply?.optBoolean("ok") != true) note = reply?.optString("error") ?: "It could not be moved"
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Stop using this phone as a display") },
+                            onClick = {
+                                options = false
+                                val made = extended
+                                display = ""
+                                extended = ""
+                                scope.launch {
+                                    client.post("/v1/machine/display", JSONObject().put("action", "unextend").put("target", made))
+                                }
+                            },
+                        )
+                    }
+                    DropdownMenuItem(text = { Text("Display settings…") }, onClick = { options = false; settings = true })
                 }
             }
             IconButton(onClick = { full = true }) { Icon(Icons.Filled.Fullscreen, "Full screen") }
@@ -362,6 +492,36 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
         }
         Box(
             Modifier.weight(1f).fillMaxWidth().background(Color.Black).clipToBounds().onSizeChanged { box = it }
+                // A stylus draws: pressure, the eraser end and its button go to
+                // the computer as a tablet's (pen.py). While it is near, a hand
+                // resting on the glass is not a touch. Seen before the gestures
+                // below, which then leave what it took alone.
+                .pointerInput(picture, box, zoom, shift) {
+                    awaitPointerEventScope {
+                        var penSeen = 0L
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val stylus = event.changes.firstOrNull { it.type == PointerType.Stylus || it.type == PointerType.Eraser }
+                            if (stylus == null) {
+                                if ((event.changes.firstOrNull()?.uptimeMillis ?: 0L) - penSeen < PALM_MS) event.changes.forEach { it.consume() }
+                                continue
+                            }
+                            penSeen = stylus.uptimeMillis
+                            val stage = when (event.type) {
+                                PointerEventType.Press -> "down"
+                                PointerEventType.Release -> "up"
+                                PointerEventType.Exit -> "away"
+                                PointerEventType.Enter -> "near"
+                                else -> if (stylus.pressed) "move" else "near"
+                            }
+                            at(stylus.position)?.let { (x, y) ->
+                                send(Protocol.pen(x, y, stylus.pressure, stage, eraser = stylus.type == PointerType.Eraser,
+                                    button = event.buttons.isSecondaryPressed))
+                            }
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                }
                 .pointerInput(scrolling) {
                     detectTapGestures(
                         onTap = { at(it)?.let { (x, y) -> send(Protocol.move(x, y)); send(Protocol.click(1)) } },
@@ -416,7 +576,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
                 },
             contentAlignment = Alignment.Center,
         ) {
-            if (video) {
+            if (showVideo) {
                 // The view is given the shape of the pictures, so that what
                 // is drawn fills it exactly and a touch lands where it looks.
                 val shape = if (picture == IntSize.Zero) 16f / 10f else picture.width / picture.height.toFloat()
@@ -447,6 +607,11 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
         }
         if (scrolling && !full) Muted("Scroll mode: drag up and down to scroll", Modifier.padding(8.dp))
         if (keyboard && !full) KeyboardBar(::send)
+    }
+    if (settings) DisplaySettings(store) { changed ->
+        settings = false
+        // Applied to the display there is, which is made again to suit.
+        if (changed && extended.isNotEmpty()) scope.launch { makeDisplay() }
     }
 }
 

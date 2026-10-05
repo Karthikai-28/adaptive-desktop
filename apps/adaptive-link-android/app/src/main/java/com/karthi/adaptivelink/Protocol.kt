@@ -181,6 +181,11 @@ object Protocol {
 
     // Input events, as the computer's inputs.py reads them.
     fun move(x: Float, y: Float) = JSONObject().put("t", "move").put("x", x.toDouble()).put("y", y.toDouble()).toString()
+
+    /** A stylus on the picture: where, how hard (0..1), and what it is doing - near, down, move, up or away. */
+    fun pen(x: Float, y: Float, pressure: Float, stage: String, eraser: Boolean = false, button: Boolean = false) =
+        JSONObject().put("t", "pen").put("x", x.toDouble()).put("y", y.toDouble())
+            .put("p", pressure.coerceIn(0f, 1f).toDouble()).put("s", stage).put("e", eraser).put("b", button).toString()
     fun relative(dx: Float, dy: Float) = JSONObject().put("t", "rel").put("dx", dx.toDouble()).put("dy", dy.toDouble()).toString()
     fun click(button: Int = 1) = JSONObject().put("t", "click").put("b", button).toString()
     fun button(down: Boolean, button: Int = 1) = JSONObject().put("t", if (down) "down" else "up").put("b", button).toString()

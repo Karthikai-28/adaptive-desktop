@@ -132,6 +132,19 @@ class Store(context: Context) {
         get() = prefs.getString("screen_quality", "medium") ?: "medium"
         set(value) = prefs.edit().putString("screen_quality", value).apply()
 
+    /** This phone as a display: how large things are on it (larger, standard, more), which side of the computer's screen it is on, and whether it turns with the phone. */
+    var displaySize: String
+        get() = prefs.getString("display_size", "standard") ?: "standard"
+        set(value) = prefs.edit().putString("display_size", value).apply()
+
+    var displaySide: String
+        get() = prefs.getString("display_side", "right") ?: "right"
+        set(value) = prefs.edit().putString("display_side", value).apply()
+
+    var displayTurns: Boolean
+        get() = prefs.getBoolean("display_turns", true)
+        set(value) = prefs.edit().putBoolean("display_turns", value).apply()
+
     /** Commands kept to be run with one tap (the Run screen). */
     var savedCommands: List<SavedCommand>
         get() = SavedCommand.listFromJson(prefs.getString("saved_commands", "[]") ?: "[]")

@@ -272,6 +272,7 @@ scripts/build-link-app.sh --install   # ...and onto the phone over USB
 scripts/install-link-camera.sh    # once, sudo: the virtual webcam
 scripts/install-link-usb.sh       # once, sudo: switching USB devices off and on
 scripts/install-link-display.sh   # once, sudo: the phone as another display
+scripts/install-link-pen.sh       # optional, sudo: the phone's stylus as a drawing tablet
 scripts/install-link-sudo.sh      # optional, sudo: sudo approved by the phone
 scripts/link-cli.py setup         # once, with a Google project: its five values
 scripts/link-cli.py signin        # ...and sign in; or, with no account:
@@ -474,11 +475,54 @@ frames the desktop draws on it: while it is connected, evdi holds back the
 desktop's next frame until the last one has been taken, and with nobody
 taking them X stops at the first.
 
-The display is made the shape of the phone's whole screen held sideways.
-Turned sideways, the phone goes full screen by itself - no bars, past the
-camera's cutout, kept awake - so the picture fills it edge to edge; upright
-it comes back. The button beside the menu does the same for any screen, and
-back leaves it.
+The display is made the shape of the phone's whole screen, and while the
+phone is a display it is full screen - no bars, past the camera's cutout,
+kept awake - so the picture fills it edge to edge. Turned, the display turns
+with it: made again tall when the phone is upright, wide when it is
+sideways (*Display settings* can turn that off, and then upright is the
+ordinary screen again). The button beside the menu makes any screen full
+screen, and back leaves it.
+
+*Display settings* also say how large things are on it - *Larger* (1280
+pixels along its long side), *Standard* (1600) or *More space* (1920), never
+more than the phone has - and which side of the computer's screen it is on.
+Changed while the phone is a display, it is made again to suit.
+
+The display outlives the screen. Leaving the Screen page, closing the app or
+locking the phone lets go of it, and the computer keeps it for two minutes
+in case the phone comes back - opening the Screen page again takes it back
+as it was. After that, or when it is stopped from the menu, it is taken away
+and the windows on it move to the computer's own screen; they are
+remembered, and the next time that phone is a display they are put back,
+in proportion if it is now another size or the other way up
+(`phone_display.py`). *Bring the window in front here*, *To this phone* on
+the Windows screen, or asking for it ("send this window to the phone") puts
+a window on it, filling it.
+
+What the phone is sent of its display is what the display itself was given
+to show - the frames the link takes from evdi anyway - only when something
+on it changed, rather than a second capture of the screen.
+
+Each phone has a display of its own. `install-link-display.sh` makes room
+for two (a phone and a tablet, say); two on the same side go one beyond the
+other. *Mirror the computer's screen* is the other way round: the
+computer's own screen, filling the phone's, with nothing made.
+
+With a stylus, the phone draws: its pressure, its eraser end and its button
+reach the computer as a graphics tablet's (`pen.py`, a uinput tablet), so a
+drawing program takes pressure for line width. While the pen is near, a
+hand resting on the glass is not taken for a touch. It needs
+`scripts/install-link-pen.sh` once (sudo, /dev/uinput); until then the pen
+is the pointer.
+
+### Over a USB cable
+
+With *USB debugging* on and the phone plugged in, the link goes over the
+cable: the computer has adb carry the phone's own 127.0.0.1 on the link's
+port to itself (`usb_link.py`), and the app tries that before Wi-Fi. It is
+steadier than Wi-Fi and charges the phone while it is a display. The same
+mutual TLS goes through it. Video's own connection cannot go over the cable,
+so there the screen is pictures, at 30 a second.
 
 If the two cannot make that connection the app says so and falls back to
 JPEG frames by itself; *Video: off* in the screen's menu chooses that

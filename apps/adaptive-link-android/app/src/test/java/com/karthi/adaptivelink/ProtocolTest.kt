@@ -254,4 +254,26 @@ class ProtocolTest {
         assertEquals(0, Protocol.outboxFromJson("""[{"path":"https://elsewhere.example/steal"},{"x":1}]""").size)
         assertEquals(0, Protocol.outboxFromJson("not json").size)
     }
+
+    @Test
+    fun aPhoneAsADisplayIsItsOwnShapeAtTheChosenSize() {
+        // A 2400x1080 phone: the whole screen's shape, fewer pixels for larger text.
+        assertEquals("1600x720", displaySize(2400, 1080, "standard", upright = false))
+        assertEquals("720x1600", displaySize(2400, 1080, "standard", upright = true))
+        assertEquals("1280x576", displaySize(2400, 1080, "larger", upright = false))
+        assertEquals("1920x864", displaySize(2400, 1080, "more", upright = false))
+        // Never more pixels than the phone has, and always in eights, as a display output needs.
+        assertEquals("1280x720", displaySize(1280, 720, "more", upright = false))
+        assertEquals("1600x720", displaySize(2400, 1080, "unknown", upright = false))
+    }
+
+    @Test
+    fun aStylusSaysWhereHowHardAndWhatItIsDoing() {
+        val pen = JSONObject(Protocol.pen(0.25f, 0.75f, 1.4f, "down", eraser = true))
+        assertEquals("pen", pen.getString("t"))
+        assertEquals("down", pen.getString("s"))
+        assertEquals(1.0, pen.getDouble("p"), 0.0)   // pressure is never more than full
+        assertTrue(pen.getBoolean("e"))
+        assertFalse(pen.getBoolean("b"))
+    }
 }

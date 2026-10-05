@@ -357,6 +357,12 @@ fun ServicesPage(client: LinkClient, onBack: () -> Unit) {
 fun WindowsPage(client: LinkClient, onBack: () -> Unit) {
     val part = rememberPart(client, "windows", 3000)
     val windows = part.now?.optJSONArray("windows").objects()
+    // While this phone is a display of the computer, a window can be sent to it.
+    var mine by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        mine = client.get("/v1/machine/display")?.optJSONArray("made").objects().any { it.optBoolean("mine") }
+    }
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Windows", onBack)
@@ -373,6 +379,13 @@ fun WindowsPage(client: LinkClient, onBack: () -> Unit) {
                             if (window.optBoolean("minimized")) "Minimised" else "").filter { it.isNotBlank() }.joinToString(" · "))
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(enabled = !part.busy, onClick = { part.act("show", id) }) { Text("Show") }
+                            if (mine) OutlinedButton(enabled = !part.busy, onClick = {
+                                scope.launch {
+                                    val reply = client.post("/v1/machine/display", JSONObject().put("action", "bring").put("target", id))
+                                    part.said = refused(reply) ?: "On this phone's display"
+                                    part.load()
+                                }
+                            }) { Text("To this phone") }
                             OutlinedButton(enabled = !part.busy, onClick = { part.act("minimize", id) }) { Text("Minimise") }
                             OutlinedButton(enabled = !part.busy, onClick = { part.act("move", id, "left") }) { Text("◀ display") }
                             OutlinedButton(enabled = !part.busy, onClick = { part.act("move", id, "right") }) { Text("display ▶") }
