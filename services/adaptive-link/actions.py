@@ -245,6 +245,11 @@ def _window_choices():
     return [(str(window["id"]), f"{window['app']} {window['title']}") for window in machine.windows()]
 
 
+def _phone_display():
+    import phone_display
+    return phone_display
+
+
 def _percent(asked, _chosen):
     value = number_in(asked)
     return {"to": max(0, min(100, value))} if value is not None else None
@@ -313,6 +318,10 @@ def built_in():
                lambda a: machine.window_action("show", a["window"]), lambda a: f"Bring {a['name'][:60]} to the front",
                "safe", "allow_input", choices=_window_choices,
                args=lambda asked, chosen: {"window": chosen[0], "name": chosen[1]}),
+        Action("to-phone", ["send to phone", "window to phone", "put on phone", "move to phone", "on the phone",
+                            "phone display", "to phone screen"],
+               lambda a: _phone_display().bring("", ""), "Put the window in front on the phone's display",
+               "safe", "allow_input"),
         Action("tile-left", ["window left", "tile left", "left half"], _desktop("tile", "left"), "Put the window in front on the left", "safe", "allow_input"),
         Action("tile-right", ["window right", "tile right", "right half"], _desktop("tile", "right"), "Put the window in front on the right", "safe", "allow_input"),
         Action("maximise", ["maximise", "maximize", "full size"], _desktop("tile", "maximize"), "Maximise the window in front", "safe", "allow_input"),

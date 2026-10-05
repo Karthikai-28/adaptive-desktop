@@ -17,7 +17,6 @@ import os
 import re
 import shutil
 import subprocess
-import time
 from pathlib import Path
 
 
@@ -125,82 +124,23 @@ def region(name):
     return None
 
 
-_made = None   # the display made for the phone, while there is one (virtual_display.py)
-
-
 def _outputs_now():
     ok, out = _run("xrandr", "--query")
     return [line.split()[0] for line in out.splitlines() if ok and " connected" in line]
 
 
-def extend(size):
-    """Make the phone another display, to the right of the main one.
-    Returns (done, the new display's name or why not).
-
-    The display is one made for the purpose (the evdi module, where it is
-    installed): the desktop is told a monitor of the phone's size has been
-    plugged in, and extends onto it as it would onto any other.
-    """
-    global _made
-    match = re.fullmatch(r"(\d{3,4})x(\d{3,4})", str(size))
-    if not match:
-        return False, "a size like 1280x800"
-    width, height = int(match.group(1)), int(match.group(2))
-    import virtual_display
-    if not virtual_display.available():
-        return False, ("this computer has no display to spare: run scripts/install-link-display.sh on it once, "
-                       "then restart the link")
-    if _made is not None:
-        unextend("")
-    before = set(_outputs_now())
-    lit = [output for output in display()["outputs"] if output["on"]]
-    made = virtual_display.VirtualDisplay()
-    if not made.plug_in(width, height):
-        return False, "the display could not be made"
-    _made = made
-    # The new card's output is the driver's to draw on once it is told so;
-    # then it appears as one more connected display.
-    name = ""
-    for _ in range(20):
-        providers = _run("xrandr", "--listproviders")[1]
-        for line in providers.splitlines():
-            found = re.match(r"Provider (\d+):.*name:(\S+)", line)
-            if found and "evdi" in found.group(2).lower() or (found and found.group(1) != "0" and "Sink Output" in line):
-                _run("xrandr", "--setprovideroutputsource", found.group(1), "0")
-        new = [output for output in _outputs_now() if output not in before]
-        if new:
-            name = new[0]
-            break
-        time.sleep(0.25)
-    if not name:
-        unextend("")
-        return False, "the display was made, but the desktop did not see it"
-    main = next((output["name"] for output in lit if output["primary"]), lit[0]["name"] if lit else "")
-    done, text = _run("xrandr", "--output", name, "--auto", *(("--right-of", main) if main else ()))
-    if not done:
-        unextend(name)
-        return False, _last_line(text)
-    # A display coming and going can make the desktop light a port that says
-    # something is plugged in when nothing is (no EDID, only fallback modes);
-    # windows sent there would be lost. Only the phone's display is new.
-    was_on = {output["name"] for output in lit}
-    for output in display()["outputs"]:
-        if output["on"] and output["name"] not in was_on and output["name"] != name:
-            _run("xrandr", "--output", output["name"], "--off")
-    return True, name
+def extend(size, owner="", position="right"):
+    """Make the phone another display (phone_display.py). Returns (done, the
+    new display's name or why not)."""
+    import phone_display
+    return phone_display.extend(owner, size, position)
 
 
-def unextend(name):
+def unextend(name, owner=""):
     """Take the phone's display away again: the monitor is unplugged, and
     the desktop closes up as it does when any display goes."""
-    global _made
-    if _made is None:
-        return False, "the phone is not a display just now"
-    if name and re.fullmatch(r"[A-Za-z0-9-]{1,30}", name):
-        _run("xrandr", "--output", name, "--off")
-    _made.unplug()
-    _made = None
-    return True, ""
+    import phone_display
+    return phone_display.unextend(owner, name)
 
 
 def _brightness():
@@ -216,7 +156,8 @@ def display():
     return {"outputs": parse_xrandr(out) if ok else [], "brightness": _brightness()}
 
 
-def display_action(action, target="", value=""):
+def display_action(action, target="", value="", owner=""):
+    """`owner` is the phone asking, for what concerns the display made for it."""
     if action == "brightness":
         if not value.isdigit() or not 1 <= int(value) <= 100:
             return False, "a number from 1 to 100"
@@ -225,9 +166,12 @@ def display_action(action, target="", value=""):
                           f"<int32 {int(value)}>", timeout=3)
         return done, "" if done else "this screen's brightness cannot be set"
     if action == "extend":
-        return extend(value)
+        return extend(value, owner, target)
     if action == "unextend":
-        return unextend(target)
+        return unextend(target, owner)
+    if action in ("release", "bring"):
+        import phone_display
+        return phone_display.release(owner) if action == "release" else phone_display.bring(owner, target)
     outputs = display()["outputs"]
     output = next((o for o in outputs if o["name"] == target), None)
     if output is None:

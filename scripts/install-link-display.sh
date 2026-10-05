@@ -7,6 +7,8 @@
 # a program - the link, which says a monitor of the phone's size has been
 # plugged in. Loading a kernel module needs root, so this needs sudo, once.
 #
+# Two devices: a phone and a tablet can each be a display at once.
+#
 #   install-link-display.sh            install
 #   install-link-display.sh --remove   take it out again
 set -Eeuo pipefail
@@ -27,10 +29,19 @@ if ! modinfo evdi >/dev/null 2>&1 || ! ldconfig -p | grep -q libevdi; then
 fi
 
 echo "evdi" | sudo tee "$CONF_LOAD" >/dev/null
-# One device, there from boot: the display the phone becomes.
-echo "options evdi initial_device_count=1" | sudo tee "$CONF_OPTS" >/dev/null
-sudo modprobe -r evdi 2>/dev/null || true
-sudo modprobe evdi initial_device_count=1
+# Two devices, there from boot: the displays phones become.
+echo "options evdi initial_device_count=2" | sudo tee "$CONF_OPTS" >/dev/null
+if [ -d /sys/devices/evdi ]; then
+    # Loaded already, and held by the desktop, so it cannot be loaded again
+    # until the next boot: devices are added to it as it is instead.
+    have="$(cat /sys/devices/evdi/count 2>/dev/null || echo 0)"
+    while [ "$have" -lt 2 ]; do
+        echo 1 | sudo tee /sys/devices/evdi/add >/dev/null
+        have=$((have + 1))
+    done
+else
+    sudo modprobe evdi initial_device_count=2
+fi
 if [ -d /sys/devices/evdi ]; then
     echo "Done. In the app: Screen → the menu → \"Use this phone as another display\"."
     echo "The link needs restarting once to see it: systemctl --user restart adaptive-link"

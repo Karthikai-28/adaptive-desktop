@@ -122,22 +122,36 @@ def _library():
     return None
 
 
-def _device():
-    """The number of an evdi graphics card that is free to use, or -1."""
+_in_use = set()   # the cards a display made here holds; evdi says only whether a card is evdi's
+
+
+def _cards():
+    """Every evdi graphics card there is."""
     library = _library()
     if library is None:
-        return -1
+        return []
+    found = []
     for card in sorted(Path("/dev/dri").glob("card*")):
         number = int(card.name[4:])
         if library.evdi_check_device(number) == AVAILABLE:
-            return number
-    return -1
+            found.append(number)
+    return found
+
+
+def _device():
+    """The number of an evdi graphics card that is free to use, or -1."""
+    return next((number for number in _cards() if number not in _in_use), -1)
 
 
 def available():
     """Whether a display can be made here: the module is loaded with a device
     to spare, and its library is installed."""
     return SYS.exists() and _device() >= 0
+
+
+def capacity():
+    """How many displays can be made here at once (one for each evdi card)."""
+    return len(_cards()) if SYS.exists() else 0
 
 
 class _Rect(ctypes.Structure):
@@ -177,8 +191,11 @@ class VirtualDisplay:
     one, so with nobody taking them the desktop stops at its first frame
     (setting the display's mode hangs X). So a thread here does what a
     DisplayLink dock's own program does: it gives the device a buffer the
-    size of the mode the desktop chose and keeps taking frames into it. The
-    picture itself goes to the phone the way the rest of the screen does.
+    size of the mode the desktop chose and keeps taking frames into it.
+
+    Those frames are the picture the phone is sent (`frame()`): what the
+    desktop drew, the pointer drawn in by the device, taken only when
+    something on the display changed - not a second capture of the screen.
     """
 
     def __init__(self):
@@ -191,6 +208,11 @@ class VirtualDisplay:
         self._waiting = False   # asked for a frame, and told it will come with an event
         self._rects = (_Rect * MAX_DIRTS)()
         self._events = _Events(mode_changed=_ON_MODE(self._on_mode), update_ready=_ON_UPDATE(self._on_update))
+        self._card = -1
+        self._lock = threading.Lock()
+        self._fresh = threading.Condition(self._lock)
+        self._mode = None     # (width, height, stride) of the frames being taken
+        self._changed = 0     # counts the grabs that found something changed
 
     def plug_in(self, width, height):
         """Tell the desktop a monitor of this size has been connected.
@@ -216,6 +238,8 @@ class VirtualDisplay:
         handle = library.evdi_open(device)
         if not handle:
             return False
+        self._card = device
+        _in_use.add(device)
         # Kept, because the device reads it for as long as the monitor is there.
         self._edid = ctypes.create_string_buffer(edid(width, height, timings), 128)
         library.evdi_connect(handle, self._edid, 128, width * height, 0)
@@ -233,9 +257,14 @@ class VirtualDisplay:
         if self._handle:
             self._library.evdi_disconnect(self._handle)
             self._library.evdi_close(self._handle)
+        _in_use.discard(self._card)
+        self._card = -1
         self._handle = None
         self._edid = None
-        self._buffer = None
+        with self._lock:
+            self._buffer = None
+            self._mode = None
+            self._fresh.notify_all()
 
     def _serve(self):
         """Take each frame the desktop draws on this display, so it draws the next."""
@@ -259,23 +288,43 @@ class VirtualDisplay:
     def _on_mode(self, mode, _user):
         """The desktop chose a mode: a buffer the size of it to take frames into."""
         library, handle = self._library, self._handle
-        if self._buffer is not None:
-            library.evdi_unregister_buffer(handle, self._buffer[1])
-        stride = mode.width * max(4, mode.bits_per_pixel // 8)
-        memory = ctypes.create_string_buffer(stride * mode.height)
-        number = 1 if self._buffer is None else self._buffer[1] + 1
-        library.evdi_register_buffer(handle, _Buffer(number, ctypes.cast(memory, ctypes.c_void_p), mode.width,
-                                                     mode.height, stride, self._rects, MAX_DIRTS))
-        self._buffer = (memory, number)
-        self._waiting = False
+        with self._lock:
+            if self._buffer is not None:
+                library.evdi_unregister_buffer(handle, self._buffer[1])
+            stride = mode.width * 4
+            memory = ctypes.create_string_buffer(stride * mode.height)
+            number = 1 if self._buffer is None else self._buffer[1] + 1
+            library.evdi_register_buffer(handle, _Buffer(number, ctypes.cast(memory, ctypes.c_void_p), mode.width,
+                                                         mode.height, stride, self._rects, MAX_DIRTS))
+            self._buffer = (memory, number)
+            self._mode = (mode.width, mode.height, stride)
+            self._changed += 1
+            self._waiting = False
 
     def _on_update(self, _buffer, _user):
         self._grab()
 
     def _grab(self):
         count = ctypes.c_int(MAX_DIRTS)
-        self._library.evdi_grab_pixels(self._handle, self._rects, ctypes.byref(count))
-        self._waiting = False
+        with self._lock:
+            self._library.evdi_grab_pixels(self._handle, self._rects, ctypes.byref(count))
+            self._waiting = False
+            if count.value > 0:
+                self._changed += 1
+                self._fresh.notify_all()
+
+    def frame(self, after=-1, timeout=1.0):
+        """(number, pixels, width, height) of the display's picture once it is
+        newer than frame `after`, or None if nothing changed within `timeout`.
+        The pixels are 4 bytes each, blue green red and one unused, row after
+        row with nothing between."""
+        with self._fresh:
+            if self._changed == after or self._mode is None:
+                self._fresh.wait(timeout)
+            if self._mode is None or self._buffer is None or self._changed == after:
+                return None
+            width, height, stride = self._mode
+            return self._changed, ctypes.string_at(self._buffer[0], stride * height), width, height
 
     @property
     def plugged(self):

@@ -14,6 +14,10 @@ names. It has no side effects and is checked directly by verify-link.py.
     {"t": "key", "k": "Right", "m": ["ctrl"]}
     {"t": "keydown" | "keyup", "k": "w"}   a key held (a game pad's buttons)
     {"t": "text", "s": "hello"}            typed as it is
+    {"t": "pen", "x": .5, "y": .5, "p": .7, "s": "down", "e": false, "b": false}
+                                           a stylus: pressure, its state (near, down,
+                                           move, up, away), eraser end, side button -
+                                           drawn through pen.py, not xdotool
 
 X11 only (xdotool). docs/GNOME_PORT.md covers what Wayland would need.
 """
@@ -115,12 +119,24 @@ def release(held):
 def in_region(event, region, screen):
     """A pointer position given as a fraction of one display, as the same
     place on the whole screen. Anything else is passed on as it is."""
-    if not region or not isinstance(event, dict) or event.get("t") != "move":
+    if not region or not isinstance(event, dict) or event.get("t") not in ("move", "pen"):
         return event
     x, y, width, height = region
     whole_w, whole_h = max(screen[0], 1), max(screen[1], 1)
     return dict(event, x=(x + _number(event.get("x"), 0, 1) * width) / whole_w,
                 y=(y + _number(event.get("y"), 0, 1) * height) / whole_h)
+
+
+def pen_as_pointer(event):
+    """A pen event as the pointer would take it, where no tablet can be made
+    (pen.py): touching is the left button held, lifting lets it go."""
+    if not isinstance(event, dict) or event.get("t") != "pen":
+        return []
+    stage = event.get("s")
+    if stage not in ("near", "down", "move", "up"):
+        return []
+    move = {"t": "move", "x": event.get("x"), "y": event.get("y")}
+    return [move] + ([{"t": "down", "b": 1}] if stage == "down" else [{"t": "up", "b": 1}] if stage == "up" else [])
 
 
 def text_of(event):

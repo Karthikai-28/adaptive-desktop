@@ -168,6 +168,55 @@ class ScreenTrack(_Source):
         return frame
 
 
+class MadeTrack(MediaStreamTrack):
+    """The picture of a display made for a phone, from the frames the display
+    itself was given (virtual_display.py) - not captured a second time from
+    the screen. A frame is sent when the display changed, and the last one
+    again each second when it did not, so a phone that joins late or lost a
+    packet is not left waiting for a change to see anything."""
+
+    kind = "video"
+    AGAIN_S = 1.0
+
+    def __init__(self, display, preset):
+        super().__init__()
+        self.display = display
+        _longest, self.rate = PRESETS.get(preset, PRESETS["medium"])
+        self.preset = preset
+        found = display.frame(-1, 2.0)
+        source = found[2:] if found else (1280, 720)
+        self.width, self.height, _ = frame_size(*source, preset)
+        self._seen = -1
+        self._last = None
+        self._sent = 0.0
+        self._started = time.monotonic()
+
+    def start(self):
+        return True
+
+    async def recv(self):
+        while True:
+            if self.readyState != "live":
+                raise MediaStreamError
+            # At the preset's rate at most.
+            await asyncio.sleep(max(0.0, self._sent + 1 / self.rate - time.monotonic()))
+            found = await asyncio.to_thread(self.display.frame, self._seen, self.AGAIN_S)
+            if found is not None:
+                self._seen, pixels, width, height = found
+                import numpy
+
+                whole = av.VideoFrame.from_ndarray(numpy.frombuffer(pixels, numpy.uint8).reshape(height, width, 4),
+                                                   format="bgra")
+                self._last = whole.reformat(width=self.width, height=self.height, format="yuv420p")
+            if self._last is not None:
+                break
+        self._sent = time.monotonic()
+        frame = self._last
+        frame.pts = int((self._sent - self._started) * VIDEO_CLOCK)
+        frame.time_base = fractions.Fraction(1, VIDEO_CLOCK)
+        return frame
+
+
 class SoundTrack(_Source):
     kind = "audio"
     description = AUDIO_PIPELINE
@@ -208,7 +257,7 @@ class MediaServer:
     def viewers(self):
         return len(self._watching)
 
-    async def answer(self, offer_sdp, screen_size, preset="medium", sound=True, region=None):
+    async def answer(self, offer_sdp, screen_size, preset="medium", sound=True, region=None, made=None):
         """Start sending the screen to the phone that made this offer.
         Returns {"id", "answer", "sound", "size"}; raises ValueError for an
         offer that is not one."""
@@ -220,7 +269,10 @@ class MediaServer:
         peer = RTCPeerConnection(rtc.configuration(relay=self.relay))
         session = self._next
         self._next += 1
-        picture = ScreenTrack(screen_size, preset, region)
+        # A display made for a phone sends what it was given; any other, what
+        # is captured from the screen.
+        picture = (await asyncio.to_thread(MadeTrack, made, preset)) if made is not None \
+            else ScreenTrack(screen_size, preset, region)
         voice = SoundTrack() if sound and "m=audio" in offer_sdp else None
         if not await asyncio.to_thread(picture.start):
             await peer.close()

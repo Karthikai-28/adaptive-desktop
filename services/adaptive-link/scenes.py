@@ -165,8 +165,14 @@ def doctor(status):
     check("Phone as webcam", camera.find_device() is not None, camera.find_device() or "the virtual camera is not installed",
           "scripts/install-link-camera.sh")
     import virtual_display
-    check("Phone as another display", virtual_display.available(), "ready" if virtual_display.available() else "no display to spare",
-          "scripts/install-link-display.sh")
+    room = virtual_display.capacity()
+    check("Phone as another display", room > 0, (f"ready, for {room} device{'s' if room != 1 else ''} at once" if room
+                                                 else "no display to spare"), "scripts/install-link-display.sh")
+    import pen
+    check("Phone's pen as a tablet", True, "ready" if pen.available() else
+          "not installed (optional, the pen is a pointer until then: scripts/install-link-pen.sh)")
+    import usb_link
+    check("Over a USB cable", True, "ready" if usb_link.adb() else "adb is not installed (optional: sudo apt install adb)")
     usb = system.usb_devices()
     check("USB switching", not usb or any(device["switchable"] for device in usb),
           "ready" if any(device["switchable"] for device in usb) else "the switches are still the system's",

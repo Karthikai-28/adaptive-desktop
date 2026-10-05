@@ -44,9 +44,13 @@ import desktop
 import identity
 import inputs
 import machine
+import pen
+import phone_display
 import scenes
 import screen
 import system
+import usb_link
+import virtual_display
 
 VERSION = 1
 CONNECT_NOTICE_EVERY_S = 600
@@ -126,6 +130,7 @@ class Link:
         self.audit = Audit(self.state_dir / "link.log", lambda: len(self.phones) > 1)
         self.notifications = desktop.Notifications()
         self.input = inputs.Input()
+        self.pen = pen.Pen()
 
         self._link_runner = None
         self._pair_runner = None
@@ -187,6 +192,10 @@ class Link:
 
     async def start(self):
         await self.input.start()
+        loop = asyncio.get_running_loop()
+        # A display made or taken away changes the size of the whole screen,
+        # which is what a touch is placed on.
+        phone_display.on_change(lambda: loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self.input.start())))
         await self._start_control()
         await self.restart_link()
         await self.restart_cloud()
@@ -196,11 +205,14 @@ class Link:
                               self.events, desktop.clipboard_get,
                               lambda: self.config["sync_clipboard"] and self.events.listening("clipboard"),
                               lambda: self._clip_from_phone)),
-                          asyncio.ensure_future(self._watch_scenes())]
+                          asyncio.ensure_future(self._watch_scenes()),
+                          asyncio.ensure_future(usb_link.watch(self.port, lambda what: self.audit.write("-", "usb", what)))]
 
     async def stop(self):
         for watcher in self._watchers:
             watcher.cancel()
+        await asyncio.to_thread(phone_display.unextend_all)
+        self.pen.close()
         if self._media is not None:
             await self._media.close_all()
         if self._cloud_task is not None:
@@ -420,7 +432,13 @@ class Link:
                     event = json.loads(message.data)
                 except ValueError:
                     continue
-                if await self.input.send(inputs.in_region(event, region, self.input.screen)):
+                placed = inputs.in_region(event, region, self.input.screen)
+                if isinstance(placed, dict) and placed.get("t") == "pen":
+                    if not await asyncio.to_thread(self.pen.send, placed, self.input.screen):
+                        for instead in inputs.pen_as_pointer(placed):
+                            if await self.input.send(instead):
+                                held = inputs.held_after(held, instead)
+                elif await self.input.send(placed):
                     held = inputs.held_after(held, event)
         finally:
             for event in inputs.release(held):
@@ -444,7 +462,9 @@ class Link:
         await ws.prepare(request)
         self._track(ws)
         region = await self._region(request)
-        capture = screen.Capture(self.input.screen, request.query.get("preset", "medium"), region)
+        made = phone_display.display_named(request.query.get("display", ""))
+        capture = (screen.MadeCapture(made, request.query.get("preset", "medium")) if made is not None
+                   else screen.Capture(self.input.screen, request.query.get("preset", "medium"), region))
         self.audit.write(request["peer"], "screen", capture.preset)
         self._sessions += 1
         try:
@@ -476,9 +496,10 @@ class Link:
                     relay=self.relay, report=lambda what: self.audit.write("-", "screen-video", what))
             self._media.relay = self.relay
             region = await asyncio.to_thread(machine.region, str(body["display"])) if body.get("display") else None
+            made = phone_display.display_named(str(body.get("display", "")))
             started = await asyncio.wait_for(self._media.answer(
                 body.get("offer"), self.input.screen, str(body.get("preset", "medium")), body.get("sound") is not False,
-                region), 30)
+                region, made), 30)
         except ImportError:
             return json_error(503, "video is not installed on the computer (see docs/ADAPTIVE_LINK.md)")
         except (ValueError, asyncio.TimeoutError) as error:
@@ -746,7 +767,12 @@ class Link:
         switch = machine.SWITCH.get(what, (None, "allow_input"))[0]
         if switch and not self._allowed(switch):
             return json_error(403, "that is turned off on the computer")
-        return web.json_response(await asyncio.to_thread(machine.READ[what]))
+        found = await asyncio.to_thread(machine.READ[what])
+        if what == "display":
+            # The displays made for phones, and which is the asker's own.
+            found["made"] = phone_display.made(request["phone"]["fingerprint"])
+            found["can_make"] = virtual_display.capacity()
+        return web.json_response(found)
 
     async def h_machine_action(self, request):
         what = request.match_info["what"]
@@ -756,7 +782,11 @@ class Link:
             return json_error(403, "that is turned off on the computer")
         body = await read_json(request)
         action, target, value = (str(body.get(key, ""))[:200] for key in ("action", "target", "value"))
-        done, text = await asyncio.to_thread(machine.ACT[what], action, target, value)
+        if what == "display":
+            done, text = await asyncio.to_thread(machine.display_action, action, target, value,
+                                                 request["phone"]["fingerprint"])
+        else:
+            done, text = await asyncio.to_thread(machine.ACT[what], action, target, value)
         self.audit.write(request["peer"], what, f"{action} {target} {value}".strip() + ("" if done else f" - {text}"))
         return web.json_response({"ok": done, "text" if done else "error": text})
 

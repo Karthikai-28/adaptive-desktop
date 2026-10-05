@@ -24,6 +24,8 @@ PRESETS = {
     "low": (960, 45, 8),
     "medium": (1280, 60, 12),
     "high": (1920, 75, 15),
+    # Over a USB cable, where there is room for it.
+    "cable": (1920, 80, 30),
 }
 
 
@@ -103,3 +105,44 @@ class Capture:
             self._pipeline.set_state(Gst.State.NULL)
             self._pipeline = None
             self._sink = None
+
+
+class MadeCapture:
+    """The same frames as Capture, from a display made for a phone: taken
+    from what the display itself was given to show (virtual_display.py), and
+    only when it changed, rather than captured again from the screen."""
+
+    def __init__(self, display, preset="medium"):
+        self.display = display
+        self.preset = preset if preset in PRESETS else "medium"
+        self._seen = -1
+        self._sent = 0.0
+
+    def start(self):
+        pass
+
+    def next_frame(self, timeout_s=1.0):
+        """The next frame as JPEG bytes, or None if nothing changed. Blocking."""
+        import time
+
+        from PIL import Image
+
+        # No more often than the preset's rate, however often it changes.
+        time.sleep(max(0.0, self._sent + 1 / PRESETS[self.preset][2] - time.monotonic()))
+        found = self.display.frame(self._seen, timeout_s)
+        if found is None:
+            return None
+        self._seen, pixels, width, height = found
+        longest, quality, _rate = PRESETS[self.preset]
+        picture = Image.frombuffer("RGB", (width, height), pixels, "raw", "BGRX", 0, 1)
+        out_w, out_h = fit(width, height, longest)
+        if (out_w, out_h) != (width, height):
+            picture = picture.resize((out_w, out_h), Image.BILINEAR)
+        import io
+        kept = io.BytesIO()
+        picture.save(kept, "JPEG", quality=quality)
+        self._sent = time.monotonic()
+        return kept.getvalue()
+
+    def stop(self):
+        pass

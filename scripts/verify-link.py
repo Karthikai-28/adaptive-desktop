@@ -371,6 +371,45 @@ def pure_checks(check):
         virtual_display.available = available
     check(not refused[0] and "install-link-display.sh" in refused[1] and not machine.extend("huge")[0],
           "display: without the means to make a display, the phone is told what to install")
+    import phone_display
+    check(phone_display._size("1280x576") == (1280, 576) and phone_display._size("576x1280") == (576, 1280)
+          and phone_display._size("99999x1") is None and phone_display._size("1280x576; rm") is None
+          and not phone_display.extend("phone", "1280x576", "behind")[0]
+          and not phone_display.release("nobody")[0] and not phone_display.bring("nobody")[0],
+          "display: a phone's display is a size it can be, upright or sideways, on a side there is")
+    check(phone_display._inside((100, 100, 200, 100), (0, 0, 400, 300))
+          and not phone_display._inside((350, 100, 200, 100), (0, 0, 400, 300)),
+          "display: a window is on the display its middle is on")
+
+    import pen
+    pen_state = {}
+    stroke = []
+    for stage, pressure in (("near", 0), ("down", 0.5), ("move", 1.0), ("up", 0), ("away", 0)):
+        sent, pen_state = pen.reports({"t": "pen", "x": 0.5, "y": 0.25, "p": pressure, "s": stage}, (100, 100), pen_state)
+        stroke.append(sent)
+    keys = [(code, value) for sent in stroke for kind, code, value in sent if kind == pen.EV_KEY]
+    pressures = [value for sent in stroke for kind, code, value in sent if kind == pen.EV_ABS and code == pen.ABS_PRESSURE]
+    check(keys == [(pen.BTN_TOOL_PEN, 1), (pen.BTN_TOUCH, 1), (pen.BTN_TOUCH, 0), (pen.BTN_TOOL_PEN, 0)]
+          and pressures[:3] == [0, round(0.5 * pen.PRESSURE), pen.PRESSURE]
+          and all(sent[-1] == (pen.EV_SYN, pen.SYN_REPORT, 0) for sent in stroke)
+          and (pen.EV_ABS, pen.ABS_X, round(0.5 * pen.RANGE)) in stroke[0]
+          and pen.reports({"t": "pen", "s": "fly"}, (1, 1), {})[0] == []
+          and pen.reports({"t": "move"}, (1, 1), {})[0] == [],
+          "pen: a stroke is near, touching with its pressure, lifted and away, as a tablet says it")
+    turned, _ = pen.reports({"t": "pen", "x": 0, "y": 0, "s": "near", "e": True}, (1, 1),
+                            {"near": True, "rubber": False})
+    check((pen.EV_KEY, pen.BTN_TOOL_PEN, 0) in turned and (pen.EV_KEY, pen.BTN_TOOL_RUBBER, 1) in turned,
+          "pen: turned over, the pen leaves and the eraser arrives")
+    check(inputs.pen_as_pointer({"t": "pen", "x": 0.1, "y": 0.2, "s": "down"}) == [
+              {"t": "move", "x": 0.1, "y": 0.2}, {"t": "down", "b": 1}]
+          and inputs.pen_as_pointer({"t": "pen", "s": "away"}) == []
+          and inputs.in_region({"t": "pen", "x": 0.5, "y": 0.5}, (100, 0, 200, 100), (400, 100))["x"] == 0.5,
+          "pen: with no tablet it is the pointer, and it lands on the display the phone shows")
+
+    import usb_link
+    check(usb_link.phones("List of devices attached\nR58N123ABC\tdevice\nemulator-5554\tdevice\n"
+                          "ZY22\tunauthorized\n\n") == ["R58N123ABC"],
+          "usb: only a plugged-in phone that allowed this computer is used, not the emulator")
 
     import alerts
     import companion
