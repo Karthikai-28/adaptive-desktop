@@ -249,9 +249,12 @@ private fun App(activity: MainActivity) {
     }
 
     // On a tablet, or a phone unfolded: the list on one side, what was
-    // chosen from it on the other.
+    // chosen from it on the other. Not for the computer's screen, which has
+    // the whole of this one - and a phone turned sideways is often this wide,
+    // so turning it would otherwise start the screen again, and take away a
+    // display made for it.
     BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding()) {
-        if (maxWidth >= 840.dp) {
+        if (maxWidth >= 840.dp && page != Page.Screen) {
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(0.38f).fillMaxHeight()) { home() }
                 Column(Modifier.weight(0.62f).fillMaxHeight()) {
@@ -283,7 +286,7 @@ private fun Pages(
     Column(Modifier.fillMaxSize()) {
         when (page) {
             Page.Home -> Unit
-            Page.Screen -> ScreenPage(client, store) { go(Page.Home) }
+            Page.Screen -> ScreenPage(activity, client, store) { go(Page.Home) }
             Page.Trackpad -> TrackpadPage(client) { go(Page.Home) }
             Page.Media -> MediaPage(client) { go(Page.Home) }
             Page.Presenter -> PresenterPage(activity, client) { go(Page.Home) }

@@ -362,8 +362,14 @@ def pure_checks(check):
           and virtual_display.read_edid(virtual_display.edid(1280, 720, virtual_display.modeline(1280, 720))) == (1280, 720)
           and virtual_display.read_edid(described[:-1] + bytes([(described[-1] + 1) % 256])) is None,
           "display: the monitor the phone is described as is one of exactly its size, in the form every monitor uses")
-    check(machine.extend("2400x1080")[0] == virtual_display.available() and not machine.extend("huge")[0]
-          and (virtual_display.available() or "install-link-display.sh" in machine.extend("2400x1080")[1]),
+    # As on a computer without evdi, whether or not this one has it: these
+    # checks run on a display of their own, where a made one could not appear.
+    available, virtual_display.available = virtual_display.available, lambda: False
+    try:
+        refused = machine.extend("2400x1080")
+    finally:
+        virtual_display.available = available
+    check(not refused[0] and "install-link-display.sh" in refused[1] and not machine.extend("huge")[0],
           "display: without the means to make a display, the phone is told what to install")
 
     import alerts

@@ -1,6 +1,16 @@
 package com.karthi.adaptivelink
 
+import android.app.Activity
+import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.os.Build
+import android.util.DisplayMetrics
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
@@ -144,8 +154,38 @@ fun touchToScreen(touch: Offset, box: IntSize, picture: IntSize): Pair<Float, Fl
     return x.coerceIn(0f, 1f) to y.coerceIn(0f, 1f)
 }
 
+/**
+ * The whole of this phone's screen, edge to edge: Android's bars hidden (a
+ * swipe in from an edge brings them back for a moment), the picture drawn
+ * past the camera's cutout, and the screen kept on - it is a display.
+ */
+private fun fullScreen(activity: Activity, on: Boolean) {
+    val window = activity.window
+    val bars = WindowCompat.getInsetsController(window, window.decorView)
+    if (on) {
+        bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        bars.hide(WindowInsetsCompat.Type.systemBars())
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    } else {
+        bars.show(WindowInsetsCompat.Type.systemBars())
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+    window.attributes = window.attributes.apply {
+        layoutInDisplayCutoutMode = if (on) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+    }
+}
+
+/** This phone's whole screen in pixels, bars and cutout included, long side first. */
+private fun wholeScreen(activity: Activity): Pair<Int, Int> {
+    val (w, h) = if (Build.VERSION.SDK_INT >= 30) activity.windowManager.maximumWindowMetrics.bounds.let { it.width() to it.height() }
+    else DisplayMetrics().also { @Suppress("DEPRECATION") activity.windowManager.defaultDisplay.getRealMetrics(it) }
+        .let { it.widthPixels to it.heightPixels }
+    return maxOf(w, h) to minOf(w, h)
+}
+
 @Composable
-fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
+fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () -> Unit) {
     var frame by remember { mutableStateOf<Bitmap?>(null) }
     var note by remember { mutableStateOf("Connecting…") }
     var quality by remember { mutableStateOf(store.screenQuality) }
@@ -182,6 +222,20 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                 .filter { it.optBoolean("on") }.map { it.optString("name") }
         }
     }
+    // Full screen: chosen from the bar, or by itself while this phone is a
+    // display of the computer and held sideways, as a monitor would be.
+    var full by remember { mutableStateOf(false) }
+    var hint by remember { mutableStateOf(false) }
+    val sideways = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    LaunchedEffect(sideways, extended) { if (extended.isNotEmpty()) full = sideways }
+    BackHandler(enabled = full) { full = false }
+    DisposableEffect(full) {
+        val on = full
+        if (on) fullScreen(activity, true)
+        onDispose { if (on) fullScreen(activity, false) }
+    }
+    LaunchedEffect(full) { hint = full; if (full) { delay(3000); hint = false } }
+
     // The display made for this phone is taken away again on leaving.
     DisposableEffect(extended) {
         val made = extended
@@ -245,7 +299,7 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
         picture.takeIf { it != IntSize.Zero }?.let { touchToScreen(unzoomed(offset, box, zoom, shift), box, it) }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        TopBar("Screen", onBack) {
+        if (!full) TopBar("Screen", onBack) {
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Filled.Tune, "Picture and sound") }
                 DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
@@ -277,11 +331,12 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                         onClick = {
                             options = false
                             scope.launch {
-                                // As wide as this phone held sideways, within what a display output can be asked for.
-                                val metrics = context.resources.displayMetrics
-                                val long = maxOf(metrics.widthPixels, metrics.heightPixels).coerceAtMost(1920) / 8 * 8
-                                val short = (minOf(metrics.widthPixels, metrics.heightPixels) * long /
-                                    maxOf(metrics.widthPixels, metrics.heightPixels)) / 8 * 8
+                                // The shape of this phone's whole screen held sideways, so that
+                                // full screen it fills it exactly; no larger than a display
+                                // output can be asked for.
+                                val (wide, high) = wholeScreen(activity)
+                                val long = wide.coerceAtMost(1920) / 8 * 8
+                                val short = (high * long / wide) / 8 * 8
                                 val reply = client.post("/v1/machine/display", JSONObject().put("action", "extend").put("value", "${long}x$short"))
                                 if (reply?.optBoolean("ok") == true) {
                                     extended = reply.optString("text")
@@ -295,6 +350,7 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                     )
                 }
             }
+            IconButton(onClick = { full = true }) { Icon(Icons.Filled.Fullscreen, "Full screen") }
             IconButton(onClick = { scrolling = !scrolling }) {
                 Icon(Icons.Filled.SwapVert, "Scroll mode",
                     tint = if (scrolling) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
@@ -383,9 +439,14 @@ fun ScreenPage(client: LinkClient, store: Store, onBack: () -> Unit) {
                 )
             }
             if (note.isNotEmpty()) Text(note, color = Color.White)
+            if (hint) Text(
+                "Swipe in from an edge and go back to leave full screen", color = Color.White,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
-        if (scrolling) Muted("Scroll mode: drag up and down to scroll", Modifier.padding(8.dp))
-        if (keyboard) KeyboardBar(::send)
+        if (scrolling && !full) Muted("Scroll mode: drag up and down to scroll", Modifier.padding(8.dp))
+        if (keyboard && !full) KeyboardBar(::send)
     }
 }
 

@@ -469,7 +469,16 @@ it is, and the link tells it a monitor of the phone's size has been plugged
 in (`virtual_display.py`). The desktop then treats it as any other display,
 windows can be dragged onto it, and that part of the screen is what the
 phone shows. It needs `scripts/install-link-display.sh` once (sudo, a kernel
-module); until then the app says so.
+module); until then the app says so. The link also has to keep taking the
+frames the desktop draws on it: while it is connected, evdi holds back the
+desktop's next frame until the last one has been taken, and with nobody
+taking them X stops at the first.
+
+The display is made the shape of the phone's whole screen held sideways.
+Turned sideways, the phone goes full screen by itself - no bars, past the
+camera's cutout, kept awake - so the picture fills it edge to edge; upright
+it comes back. The button beside the menu does the same for any screen, and
+back leaves it.
 
 If the two cannot make that connection the app says so and falls back to
 JPEG frames by itself; *Video: off* in the screen's menu chooses that

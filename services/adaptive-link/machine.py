@@ -178,8 +178,15 @@ def extend(size):
     main = next((output["name"] for output in lit if output["primary"]), lit[0]["name"] if lit else "")
     done, text = _run("xrandr", "--output", name, "--auto", *(("--right-of", main) if main else ()))
     if not done:
-        unextend("")
+        unextend(name)
         return False, _last_line(text)
+    # A display coming and going can make the desktop light a port that says
+    # something is plugged in when nothing is (no EDID, only fallback modes);
+    # windows sent there would be lost. Only the phone's display is new.
+    was_on = {output["name"] for output in lit}
+    for output in display()["outputs"]:
+        if output["on"] and output["name"] not in was_on and output["name"] != name:
+            _run("xrandr", "--output", output["name"], "--off")
     return True, name
 
 

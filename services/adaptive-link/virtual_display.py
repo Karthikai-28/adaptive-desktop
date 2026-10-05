@@ -21,7 +21,10 @@ verify-link.py with no device at all.
 import ctypes
 import ctypes.util
 import re
+import select
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 LIBRARIES = ("libevdi.so.1", "libevdi.so.0", "libevdi.so")
@@ -137,13 +140,57 @@ def available():
     return SYS.exists() and _device() >= 0
 
 
+class _Rect(ctypes.Structure):
+    _fields_ = [("x1", ctypes.c_int), ("y1", ctypes.c_int), ("x2", ctypes.c_int), ("y2", ctypes.c_int)]
+
+
+class _Mode(ctypes.Structure):
+    _fields_ = [("width", ctypes.c_int), ("height", ctypes.c_int), ("refresh_rate", ctypes.c_int),
+                ("bits_per_pixel", ctypes.c_int), ("pixel_format", ctypes.c_uint)]
+
+
+class _Buffer(ctypes.Structure):
+    _fields_ = [("id", ctypes.c_int), ("buffer", ctypes.c_void_p), ("width", ctypes.c_int), ("height", ctypes.c_int),
+                ("stride", ctypes.c_int), ("rects", ctypes.POINTER(_Rect)), ("rect_count", ctypes.c_int)]
+
+
+_ON_MODE = ctypes.CFUNCTYPE(None, _Mode, ctypes.c_void_p)
+_ON_UPDATE = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_void_p)
+
+
+class _Events(ctypes.Structure):
+    # Only the two handlers this needs; libevdi skips the ones left empty.
+    _fields_ = [("dpms", ctypes.c_void_p), ("mode_changed", _ON_MODE), ("update_ready", _ON_UPDATE),
+                ("crtc_state", ctypes.c_void_p), ("cursor_set", ctypes.c_void_p), ("cursor_move", ctypes.c_void_p),
+                ("ddcci_data", ctypes.c_void_p), ("user_data", ctypes.c_void_p)]
+
+
+MAX_DIRTS = 16     # the most changed areas libevdi reports in one grab
+FRAME = 1 / 60     # how often the display is asked for what changed
+
+
 class VirtualDisplay:
-    """One display made for the phone, there for as long as this is held."""
+    """One display made for the phone, there for as long as this is held.
+
+    Plugging the monitor in is not enough. While it is connected the device
+    holds back the desktop's next frame until someone has taken the last
+    one, so with nobody taking them the desktop stops at its first frame
+    (setting the display's mode hangs X). So a thread here does what a
+    DisplayLink dock's own program does: it gives the device a buffer the
+    size of the mode the desktop chose and keeps taking frames into it. The
+    picture itself goes to the phone the way the rest of the screen does.
+    """
 
     def __init__(self):
         self._library = None
         self._handle = None
         self._edid = None
+        self._thread = None
+        self._stop = threading.Event()
+        self._buffer = None     # (the memory, its id) once the desktop has chosen a mode
+        self._waiting = False   # asked for a frame, and told it will come with an event
+        self._rects = (_Rect * MAX_DIRTS)()
+        self._events = _Events(mode_changed=_ON_MODE(self._on_mode), update_ready=_ON_UPDATE(self._on_update))
 
     def plug_in(self, width, height):
         """Tell the desktop a monitor of this size has been connected.
@@ -153,24 +200,82 @@ class VirtualDisplay:
         if timings is None or library is None or device < 0:
             return False
         library.evdi_open.restype = ctypes.c_void_p
-        library.evdi_connect.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint32]
+        # 1.10 and later take a fifth limit (pixels a second, 0 for none); an
+        # earlier library ignores the extra argument.
+        library.evdi_connect.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint32, ctypes.c_uint32]
         library.evdi_disconnect.argtypes = [ctypes.c_void_p]
         library.evdi_close.argtypes = [ctypes.c_void_p]
+        library.evdi_get_event_ready.argtypes = [ctypes.c_void_p]
+        library.evdi_get_event_ready.restype = ctypes.c_int
+        library.evdi_handle_events.argtypes = [ctypes.c_void_p, ctypes.POINTER(_Events)]
+        library.evdi_register_buffer.argtypes = [ctypes.c_void_p, _Buffer]
+        library.evdi_unregister_buffer.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        library.evdi_request_update.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        library.evdi_request_update.restype = ctypes.c_bool
+        library.evdi_grab_pixels.argtypes = [ctypes.c_void_p, ctypes.POINTER(_Rect), ctypes.POINTER(ctypes.c_int)]
         handle = library.evdi_open(device)
         if not handle:
             return False
         # Kept, because the device reads it for as long as the monitor is there.
         self._edid = ctypes.create_string_buffer(edid(width, height, timings), 128)
-        library.evdi_connect(handle, self._edid, 128, ctypes.c_uint32(width * height))
+        library.evdi_connect(handle, self._edid, 128, width * height, 0)
         self._library, self._handle = library, handle
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._serve, name="phone-display", daemon=True)
+        self._thread.start()
         return True
 
     def unplug(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+        self._thread = None
         if self._handle:
             self._library.evdi_disconnect(self._handle)
             self._library.evdi_close(self._handle)
         self._handle = None
         self._edid = None
+        self._buffer = None
+
+    def _serve(self):
+        """Take each frame the desktop draws on this display, so it draws the next."""
+        library, handle = self._library, self._handle
+        ready = library.evdi_get_event_ready(handle)
+        asked = 0.0
+        while not self._stop.is_set():
+            if self._buffer is not None and not self._waiting and time.monotonic() - asked >= FRAME:
+                asked = time.monotonic()
+                if library.evdi_request_update(handle, self._buffer[1]):
+                    self._grab()
+                else:
+                    self._waiting = True
+            try:
+                events, _, _ = select.select([ready], [], [], FRAME)
+            except (OSError, ValueError):
+                break
+            if events:
+                library.evdi_handle_events(handle, ctypes.byref(self._events))
+
+    def _on_mode(self, mode, _user):
+        """The desktop chose a mode: a buffer the size of it to take frames into."""
+        library, handle = self._library, self._handle
+        if self._buffer is not None:
+            library.evdi_unregister_buffer(handle, self._buffer[1])
+        stride = mode.width * max(4, mode.bits_per_pixel // 8)
+        memory = ctypes.create_string_buffer(stride * mode.height)
+        number = 1 if self._buffer is None else self._buffer[1] + 1
+        library.evdi_register_buffer(handle, _Buffer(number, ctypes.cast(memory, ctypes.c_void_p), mode.width,
+                                                     mode.height, stride, self._rects, MAX_DIRTS))
+        self._buffer = (memory, number)
+        self._waiting = False
+
+    def _on_update(self, _buffer, _user):
+        self._grab()
+
+    def _grab(self):
+        count = ctypes.c_int(MAX_DIRTS)
+        self._library.evdi_grab_pixels(self._handle, self._rects, ctypes.byref(count))
+        self._waiting = False
 
     @property
     def plugged(self):
