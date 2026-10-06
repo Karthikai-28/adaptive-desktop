@@ -13,7 +13,7 @@ it the pen is was worked out from the display the phone shows
 (inputs.in_region), so the pen lands where it is on the phone's picture.
 
 /dev/uinput belongs to root until scripts/install-link-pen.sh hands it to
-the input group, once. Until then `available()` is false and pen strokes
+whoever is at the computer's seat, once. Until then `available()` is false and pen strokes
 fall back to the pointer: touched is a click held, lifted is let go.
 """
 

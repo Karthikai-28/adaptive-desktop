@@ -77,7 +77,10 @@ fun AskBox(client: LinkClient, enabled: Boolean) {
     fun perform(match: JSONObject) {
         scope.launch {
             said = "…"
-            val reply = client.post("/v1/do", JSONObject().put("id", match.optString("id")).put("args", match.optJSONObject("args") ?: JSONObject()))
+            // Anything but a safe one was put to the owner first (choose), and the computer
+            // will not do what cannot be undone without hearing that it was.
+            val reply = client.post("/v1/do", JSONObject().put("id", match.optString("id")).put("args", match.optJSONObject("args") ?: JSONObject())
+                .put("confirm", match.optString("risk") != "safe"))
             // A change that could cut the phone off: say it can still be reached, or the computer puts it back.
             val kept = if (reply == null || reply.optInt("keep") > 0) keep(client, reply) else null
             said = kept ?: when {

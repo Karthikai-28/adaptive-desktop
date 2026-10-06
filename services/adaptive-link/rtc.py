@@ -35,6 +35,7 @@ _PYDEPS = os.environ.get("ADAPTIVE_LINK_PYDEPS") or str(
 if _PYDEPS not in sys.path:
     sys.path.append(_PYDEPS)
 
+from identity import TUNNEL_SOURCE  # noqa: E402
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription  # noqa: E402
 
 # Tells each device its own public address; it carries none of the traffic.
@@ -184,7 +185,10 @@ class TunnelServer:
 
     async def _serve(self, channel, early):
         try:
-            reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+            # From an address of its own, so the link can tell the tunnel
+            # from the USB cable, which also arrives from this machine.
+            reader, writer = await asyncio.open_connection("127.0.0.1", self.port,
+                                                           local_addr=(TUNNEL_SOURCE, 0))
         except OSError:
             channel.close()
             return

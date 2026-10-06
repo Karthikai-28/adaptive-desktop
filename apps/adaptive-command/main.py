@@ -115,6 +115,9 @@ class Result:
     # open (pinning a clipboard entry), and the footer hint that says so.
     alt: Optional[Callable] = None
     alt_hint: str = ""
+    # Said in place of the subtitle on the first Enter; only a second Enter
+    # on the same row runs it. For what cannot be taken back.
+    confirm: str = ""
 
 
 @dataclass
@@ -171,6 +174,7 @@ class Palette(Gtk.ApplicationWindow):
         self.selected = 0
         self._debounce = 0
         self._search_serial = 0
+        self._armed = None   # the row waiting for its second Enter
         self._file_results = []
         self._mode_results = []
         self._apps = []
@@ -603,21 +607,27 @@ class Palette(Gtk.ApplicationWindow):
 
     def _ask_rows(self, asked):
         """What the words typed could mean for the computer to do, each as a
-        row that says exactly what Enter will do."""
+        row that says exactly what Enter will do.
+
+        One that could cut the computer off or lose work (sleep, restart,
+        shut down, Wi-Fi off) is never put first - "restart firefox" and
+        "sleep tracker" are not asking for that - and Enter on it only asks
+        for a second Enter."""
         rows = []
         for match in asked[:3]:
             careful = {"cuts": "May disconnect the phone", "destroys": "Cannot be undone"}.get(match.get("risk"), "")
             rows.append(Result(
                 title=match["say"], subtitle=careful or "Enter does it", group="Computer",
                 icon="system-run-symbolic", badge="Careful" if careful else "Do",
-                action=lambda m=match: self._do_asked(m),
-                # Clearly meant: above everything. Only possibly meant: among the rest.
-                score=WEIGHT_ANSWER - 10 if match.get("sure") else 30))
+                action=lambda m=match, sure=bool(careful): self._do_asked(m, confirmed=sure),
+                confirm=f"{careful} - press Enter again to do it" if careful else "",
+                # Clearly meant: above everything. Only possibly meant, or careful: among the rest.
+                score=WEIGHT_ANSWER - 10 if match.get("sure") and not careful else 30))
         return rows
 
-    def _do_asked(self, match):
+    def _do_asked(self, match, confirmed=False):
         def work():
-            done, said = P.do_link(match["id"], match.get("args") or {})
+            done, said = P.do_link(match["id"], match.get("args") or {}, confirmed=confirmed)
             GLib.idle_add(self._notify, said or (match["say"] if done else "It did not work"))
         threading.Thread(target=work, daemon=True).start()
 
@@ -1306,6 +1316,15 @@ class Palette(Gtk.ApplicationWindow):
             self._activate(self.results[self.selected])
 
     def _activate(self, result):
+        if result.confirm and self._armed is not result:
+            self._armed = result
+            result.subtitle, result.badge = result.confirm, "Enter again"
+            keep = self.selected
+            self._render()
+            self.selected = min(keep, max(0, len(self.results) - 1))
+            self._paint_selection()
+            return
+
         if result.fill:
             self.entry.set_text(result.fill)
             self.entry.set_position(-1)

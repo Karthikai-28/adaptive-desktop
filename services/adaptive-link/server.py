@@ -61,8 +61,9 @@ KEEP_S = int(os.environ.get("ADAPTIVE_LINK_KEEP_S", "45"))
 ALERT_EVERY_S = float(os.environ.get("ADAPTIVE_LINK_ALERT_EVERY_S", "30"))
 # How long the phone may be gone from the network before the computer locks.
 PROXIMITY_GRACE_S = float(os.environ.get("ADAPTIVE_LINK_PROXIMITY_S", "60"))
-# What a phone may ask to be told (/v1/events), and the owner's switch each needs.
-EVENT_KINDS = {"notification": "send_notifications", "alert": None, "clipboard": "sync_clipboard",
+# What a phone may ask to be told (/v1/events), and the owner's switch (or
+# switches) each needs.
+EVENT_KINDS = {"notification": "send_notifications", "alert": None, "clipboard": ("sync_clipboard", "allow_input"),
                "approve": "allow_power", "approve-done": "allow_power", "ring": None, "sms-send": None,
                # The phone's own screen shown here: what is done in its window, and being asked to start.
                "phone-input": None, "cast": None,
@@ -82,6 +83,9 @@ PAIR_ASKS_PER_MINUTE = 60
 # How old a request made through the account may be and still be acted on.
 SIGNAL_FRESH_S = 120
 REQUEST_FRESH_S = 600
+# What /v1/do and the palette are told when something that cannot be undone
+# was asked for without {"confirm": true}.
+NEEDS_CONFIRMING = "this cannot be undone: confirm it first"
 
 
 # The device whose request is being handled: what it may do can be less than
@@ -316,8 +320,8 @@ class Link:
     def _notice(self, address, caller):
         now = time.monotonic()
         if now - self._last_notice.get(caller["fingerprint"], -CONNECT_NOTICE_EVERY_S - 1) > CONNECT_NOTICE_EVERY_S:
-            self.audit.write(address, "connected",
-                             "direct tunnel" if identity.is_loopback(address) else "local network")
+            self.audit.write(address, "connected", "direct tunnel" if identity.is_tunnel(address)
+                             else "USB cable" if identity.is_loopback(address) else "local network")
             if self.config["notify_on_connect"]:
                 desktop.notify(f"{caller['name']} connected",
                                "Your phone is connected to this computer.")
@@ -394,8 +398,9 @@ class Link:
         info = await asyncio.to_thread(desktop.status)
         info.update({
             "version": VERSION,
-            # From this machine itself means through the direct tunnel.
-            "via": "direct" if identity.is_loopback(request["peer"]) else "lan",
+            # From this machine itself: the direct tunnel, or the USB cable.
+            "via": "direct" if identity.is_tunnel(request["peer"])
+                   else "usb" if identity.is_loopback(request["peer"]) else "lan",
             # Where this computer can be reached now. The phone keeps these,
             # so a changed address at home does not mean pairing again.
             "hosts": [address for address, _kind in await asyncio.to_thread(identity.local_addresses)],
@@ -615,6 +620,8 @@ class Link:
     # --------------------------------------------------------------- camera
 
     async def h_camera(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
         device = camera.find_device()
         if device is None:
             return json_error(503, "the virtual camera is not installed (scripts/install-link-camera.sh)")
@@ -639,21 +646,32 @@ class Link:
                                   "volume": await asyncio.to_thread(desktop.volume)})
 
     async def h_media_post(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
         data = await read_json(request)
         ok = await asyncio.to_thread(desktop.media, data.get("action"), str(data.get("player") or ""),
                                      data.get("seconds", 0))
         return web.json_response({"ok": bool(ok)})
 
     async def h_volume(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
         data = await read_json(request)
         ok = await asyncio.to_thread(desktop.set_volume, data.get("action"))
         return web.json_response({"ok": bool(ok), "volume": await asyncio.to_thread(desktop.volume)})
 
+    # The clipboard goes with pointer and keyboard: what a phone that may not
+    # type could otherwise read (a password just copied) or paste.
+
     async def h_clipboard_get(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the clipboard is turned off on the computer")
         self.audit.write(request["peer"], "clipboard-read")
         return web.json_response({"text": await asyncio.to_thread(desktop.clipboard_get)})
 
     async def h_clipboard_set(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the clipboard is turned off on the computer")
         data = await read_json(request)
         if isinstance(data.get("text"), str):
             self._clip_from_phone = data["text"]   # not to be told back to the phone as news
@@ -848,15 +866,37 @@ class Link:
         project = ""
         if kind == "scans":
             project = next((p["path"] for p in await asyncio.to_thread(system.projects) if p["active"]), "")
-        target = desktop.upload_target(request.query.get("name"), desktop.upload_folder(kind, project))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        size = 0
+        folder = desktop.upload_folder(kind, project)
+        folder.mkdir(parents=True, exist_ok=True)
+        # Made only if it is not there yet: two files of one name sent at
+        # once each get a name of their own instead of writing over each other.
+        for _ in range(20):
+            target = desktop.upload_target(request.query.get("name"), folder)
+            try:
+                handle = target.open("xb")
+                break
+            except FileExistsError:
+                continue
+        else:
+            return json_error(409, "could not find a free name for that file")
+        size, looked = 0, None
         try:
-            with target.open("wb") as handle:
+            with handle:
                 async for chunk in request.content.iter_chunked(256 * 1024):
+                    # Never fill the disk: what is sent has no size limit of its own.
+                    if looked is None or size - looked >= 32 * 1024 * 1024:
+                        looked = size
+                        if not desktop.room_for_upload(folder):
+                            raise OSError(28, "the computer's disk is nearly full")
                     handle.write(chunk)
                     size += len(chunk)
-        except (OSError, asyncio.CancelledError):
+        except OSError as error:
+            target.unlink(missing_ok=True)
+            if error.errno == 28:
+                self.audit.write(request["peer"], "upload", f"{target}: stopped, the disk is nearly full")
+                return json_error(507, "the computer's disk is nearly full")
+            raise
+        except asyncio.CancelledError:
             target.unlink(missing_ok=True)
             raise
         self.audit.write(request["peer"], "upload", f"{target} ({size} bytes)")
@@ -866,6 +906,12 @@ class Link:
         if not self._allowed("allow_files"):
             return json_error(403, "file access is turned off on the computer")
         path = (await read_json(request)).get("path")
+        # A file whose default application runs it (a .exe and mono, a
+        # .desktop, a script set to run) is running a program, whatever the
+        # path says: that goes with allow_exec, not allow_files.
+        if await asyncio.to_thread(desktop.opens_as_program, path) and not self._allowed("allow_exec"):
+            self.audit.write(request["peer"], "refused", f"open {path}: it would run a program")
+            return json_error(403, "that file would run as a program, and running commands is turned off")
         self.audit.write(request["peer"], "open", path)
         return web.json_response({"ok": await asyncio.to_thread(desktop.open_path, path)})
 
@@ -892,7 +938,10 @@ class Link:
         def may(kind):
             # Looked at each time, so a switch turned off takes effect on
             # what is already being listened to.
-            return kind in EVENT_KINDS and (EVENT_KINDS[kind] is None or self._allowed(EVENT_KINDS[kind]))
+            if kind not in EVENT_KINDS:
+                return False
+            needs = EVENT_KINDS[kind]
+            return all(self._allowed(switch) for switch in ((needs,) if isinstance(needs, str) else needs or ()))
 
         wanted = {kind for kind in request.query.get("kinds", "notification,alert").split(",") if may(kind)}
         try:
@@ -907,9 +956,9 @@ class Link:
         self._track(ws)
         queue = self.events.listen(wanted)
         # A phone that says it is here, and is on the computer's own network
-        # (not reaching in from elsewhere), counts as present.
+        # or its USB cable (not reaching in from elsewhere), counts as present.
         caller = request["phone"]
-        present = request.query.get("present") == "1" and not identity.is_loopback(request["peer"])
+        present = request.query.get("present") == "1" and not identity.is_tunnel(request["peer"])
         if present:
             self.presence.arrive(caller["fingerprint"], request["peer"])
             if self.presence.locked_here:
@@ -1059,39 +1108,92 @@ class Link:
                                    "say": f"Set things as for “{scene['name']}”"})
         return web.json_response({"matches": matches[:actions.MATCHES], "undo": any(e["back"] for e in self.book.journal)})
 
-    async def _do(self, ident, args, who):
-        """Do one action, by whoever asked. Returns (done, what to say, how
-        long the phone has to keep a change that may have cut it off)."""
+    def _risk(self, ident, args):
+        """What doing this risks, the worst of its steps for a scene or a chain."""
+        known = self.book.actions()
         if ident == "scene":
-            scene = self.scenes.find(str((args or {}).get("name")))
+            scene = self.scenes.find(str(args.get("name")))
+            steps = scene["do"] if scene else []
+        elif ident == "chain":
+            steps = self.book.chains.get(str(args.get("name")), [])
+        else:
+            return known[ident].risk if ident in known else "safe"
+        return max((known[step["id"]].risk for step in steps if step.get("id") in known),
+                   key=actions.RISKS.index, default="safe")
+
+    async def _do(self, ident, args, who, confirmed=False):
+        """Do one action, by whoever asked. Returns (done, what to say, how
+        long the phone has to keep a change that may have cut it off).
+
+        What cannot be undone (restarting, shutting down) is done only when
+        the asker says the owner confirmed it: words that happen to match it
+        ("restart firefox") are never enough to lose unsaved work.
+        """
+        args = args if isinstance(args, dict) else {}
+        if self._risk(ident, args) == "destroys" and not confirmed:
+            return False, NEEDS_CONFIRMING, 0
+        if ident == "scene":
+            scene = self.scenes.find(str(args.get("name")))
             if scene is None:
                 return False, "no such scene", 0
-            said = []
+            said, keep = [], 0
             for step in scene["do"]:
-                done, text = await asyncio.to_thread(self.book.run, step["id"], step.get("args", {}), self._allowed)
+                done, text, held = await self._do_one(step["id"], step.get("args", {}), who)
+                keep = held or keep
                 if not done:
                     said.append(text)
             self.audit.write(who, "scene", scene["name"])
-            return True, scene["name"] + (f" (but: {'; '.join(said)})" if said else ""), 0
+            return True, scene["name"] + (f" (but: {'; '.join(said)})" if said else ""), keep
+        if ident == "chain":
+            # Step by step here rather than in the book, so that a step that
+            # may cut the phone off gets the same care as when done alone.
+            steps = self.book.chains.get(str(args.get("name")), [])
+            if not steps:
+                return False, "no such chain", 0
+            said, keep = [], 0
+            for step in steps:
+                done, text, held = await self._do_one(step["id"], step.get("args", {}), who)
+                keep = held or keep
+                said.append(text or ("done" if done else "it did not work"))
+                if not done:
+                    return False, "; ".join(said), keep
+            return True, "; ".join(said), keep
+        return await self._do_one(ident, args, who)
+
+    async def _do_one(self, ident, args, who):
         action = self.book.actions().get(ident)
-        risky = action is not None and action.risk == "cuts" and ident in ("wifi", "join")
-        if risky:
-            # The same care as the Network screen takes: undone unless the phone comes back.
-            self._hold(None)
+        args = args if isinstance(args, dict) else {}
+
+        def say():
+            try:
+                return action.say(args) if action is not None else ident
+            except (KeyError, TypeError, ValueError):
+                return ident
+
+        if action is not None and ident in ("wifi", "join"):
+            if action.switch and not self._allowed(action.switch):
+                return False, "that is turned off on the computer", 0
+            # Asked by a phone, the same care as the Network screen takes:
+            # undone unless the phone comes back. Asked at the computer
+            # (the palette, link-cli), it is the owner's, and it stays.
+            from_phone = CALLER.get() is not None
+            if from_phone:
+                self._hold(None)
             how = ("wifi", args.get("state", "")) if ident == "wifi" else ("join", args.get("network", ""))
             done, text, change = await asyncio.to_thread(system.network_action, *how)
-            self.audit.write(who, "do", f"{action.say(args)}" + ("" if done else f" - {text}"))
-            return done, text or action.say(args), self._hold(change)
+            self.audit.write(who, "do", say() + ("" if done else f" - {text}"))
+            return done, text or say(), self._hold(change) if from_phone else 0
         done, text = await asyncio.to_thread(self.book.run, ident, args, self._allowed)
-        said = action.say(args) if action is not None else ident
-        self.audit.write(who, "do", said + ("" if done else f" - {text}"))
+        self.audit.write(who, "do", say() + ("" if done else f" - {text}"))
         return done, text, 0
 
     async def h_do(self, request):
         body = await read_json(request)
         args = body.get("args") if isinstance(body.get("args"), dict) else {}
-        done, text, keep = await self._do(str(body.get("id", ""))[:60], args, request["peer"])
-        return web.json_response({"ok": done, "text" if done else "error": text, "keep": keep})
+        done, text, keep = await self._do(str(body.get("id", ""))[:60], args, request["peer"],
+                                          confirmed=body.get("confirm") is True)
+        return web.json_response({"ok": done, "text" if done else "error": text, "keep": keep,
+                                  "confirm": text == NEEDS_CONFIRMING})
 
     async def h_actions(self, _request):
         return web.json_response({"actions": await asyncio.to_thread(self.book.catalogue),
@@ -1474,8 +1576,9 @@ class Link:
                 await self.restart_link()
         else:
             self.audit.write(pending.get("from", ""), "pairing-rejected", pending["name"])
-        if pending.get("cloud_id"):
+        if pending.get("cloud_id") and self.account is not None and self.account.signed_in:
             # Tell the phone, through the account, what the owner decided.
+            # (Signed out since it asked: there is nowhere to tell it.)
             self._decided[pending["cloud_id"]] = pending.get("cloud_at")
             await self._cloud_try(self.account.put(f"computers/{self.cloud_id}/accepted/{pending['cloud_id']}",
                                                    bool(accept)))
@@ -1833,8 +1936,9 @@ class Link:
             data = await read_json(request)
             allowed = lambda switch: bool(self.config.get(switch))   # noqa: E731 - the owner, at the computer
             if "id" in data:
-                done, text, _keep = await self._do(str(data["id"]), data.get("args") or {}, "")
-                return web.json_response({"ok": done, "text": text})
+                done, text, _keep = await self._do(str(data["id"]), data.get("args") or {}, "",
+                                                   confirmed=data.get("confirm") is True)
+                return web.json_response({"ok": done, "text": text, "confirm": text == NEEDS_CONFIRMING})
             return web.json_response({"matches": await asyncio.to_thread(self.book.ask, str(data.get("text", "")), allowed)})
 
         async def scene(request):

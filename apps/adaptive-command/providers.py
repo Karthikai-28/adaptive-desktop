@@ -309,10 +309,11 @@ def ask_link(text, timeout=2):
     return [match for match in matches if isinstance(match, dict) and "say" in match] if isinstance(matches, list) else []
 
 
-def do_link(ident, args, timeout=120):
-    """Do one of those. (done, what it said)."""
+def do_link(ident, args, timeout=120, confirmed=False):
+    """Do one of those. (done, what it said). `confirmed`: the owner has
+    said yes to it, which what cannot be undone needs."""
     try:
-        answer = _link().call("POST", "/ask", {"id": ident, "args": args}, timeout)
+        answer = _link().call("POST", "/ask", {"id": ident, "args": args, "confirm": bool(confirmed)}, timeout)
     except Exception as error:  # noqa: BLE001
         return False, str(error) or "Adaptive Link is not running"
     return bool(answer.get("ok")), str(answer.get("text") or "")

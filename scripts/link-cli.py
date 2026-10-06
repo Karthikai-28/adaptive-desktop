@@ -254,7 +254,9 @@ def main(argv=None):
             if first["risk"] != "safe" and not args.yes:
                 if input(f"{first['say']}? [y/N] ").strip().lower() not in ("y", "yes"):
                     return 1
-            answer = control.call("POST", "/ask", {"id": first["id"], "args": first["args"]}, timeout=120)
+            # Said yes to above (or --yes): what cannot be undone needs it said.
+            answer = control.call("POST", "/ask", {"id": first["id"], "args": first["args"], "confirm": True},
+                                  timeout=120)
             print(answer["text"] or first["say"])
             return 0 if answer["ok"] else 1
         elif args.action == "scene":

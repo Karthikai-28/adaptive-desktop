@@ -30,6 +30,22 @@ const CC = Me.imports.ccUtil;
 
 const REFRESH_MS = 2000;
 const TERM_GRACE_MS = 3000;
+
+// When a process started (field 22 of /proc/PID/stat), or null if it has
+// gone. A pid is reused once its process ends; the start time is not, so it
+// says whether a pid is still the process that was asked to quit.
+function startTime(pid) {
+    try {
+        const [ok, bytes] = GLib.file_get_contents(`/proc/${pid}/stat`);
+        if (!ok)
+            return null;
+        const text = new TextDecoder().decode(bytes);
+        // The name (field 2) may hold spaces and parentheses: count from the last ')'.
+        return text.slice(text.lastIndexOf(')') + 2).split(' ')[19] ?? null;
+    } catch (e) {
+        return null;
+    }
+}
 const LIST_MAX_HEIGHT = 620;
 const PROCESS_ROWS = 12;
 const PAGE_SIZE = 4096;
@@ -572,6 +588,7 @@ var TaskPanel = class TaskPanel {
             return;
 
         const pids = entry.pids.filter(pid => pid !== this._selfPid);
+        const started = new Map(pids.map(pid => [pid, startTime(pid)]));
         const pending = { pids, status: 'Ending…', timer: 0 };
         this._ending.set(key, pending);
         this._fill(entry);
@@ -584,7 +601,9 @@ var TaskPanel = class TaskPanel {
         // Anything that ignored the polite request is stopped outright.
         pending.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, TERM_GRACE_MS, () => {
             pending.timer = 0;
-            const alive = pids.filter(pid => GLib.file_test(`/proc/${pid}`, GLib.FileTest.EXISTS));
+            // Only the same processes: one that ended and whose pid was
+            // given to something new in the meantime is left alone.
+            const alive = pids.filter(pid => started.get(pid) !== null && startTime(pid) === started.get(pid));
             if (alive.length) {
                 pending.status = 'Not responding - forcing…';
                 this._signal('KILL', alive, () => {});

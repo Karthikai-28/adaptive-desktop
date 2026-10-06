@@ -363,6 +363,54 @@ def upload_target(name, directory=None):
     return target
 
 
+# Kinds of file that are programs whatever opens them, and the programs that
+# run what they are given. A file is a program to open if it is one of these
+# kinds, or if its default application is one of these runners.
+PROGRAM_TYPES = ("application/x-executable", "application/x-sharedlib", "application/x-ms-dos-executable",
+                 "application/x-msdownload", "application/x-msi", "application/x-ms-shortcut",
+                 "application/x-desktop", "application/x-java-archive", "application/x-java-jnlp-file",
+                 "application/vnd.appimage", "application/x-shellscript", "application/x-executable-script")
+RUNNERS = {"mono", "wine", "wine64", "java", "javaws", "sh", "bash", "dash", "zsh", "fish", "env",
+           "python", "python3", "perl", "ruby", "node", "nodejs", "php", "lua", "tclsh", "wish",
+           "gnome-terminal", "terminator", "xterm", "x-terminal-emulator", "kitty", "alacritty", "konsole"}
+UPLOAD_MIN_FREE = 1024 ** 3
+
+
+def opens_as_program(path):
+    """Whether opening this with its default application runs it as a
+    program. A folder never does; a file that cannot be looked at is taken
+    to, so that not knowing is never a way in."""
+    target = resolve(path)
+    if target.is_dir():
+        return False
+    if not target.is_file():
+        return False   # nothing to open: open_path says so
+    try:
+        import gi
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio
+        info = Gio.File.new_for_path(str(target)).query_info("standard::content-type", Gio.FileQueryInfoFlags.NONE, None)
+        kind = info.get_content_type() or ""
+        if any(Gio.content_type_is_a(kind, program) for program in PROGRAM_TYPES):
+            return True
+        app = Gio.AppInfo.get_default_for_type(kind, False)
+    except Exception:  # noqa: BLE001 - see above
+        return True
+    if app is None:
+        return False   # nothing would open it
+    runner = os.path.basename(str(app.get_executable() or ""))
+    return runner in RUNNERS or runner.startswith(("python", "wine"))
+
+
+def room_for_upload(folder):
+    """Whether a file from the phone may keep growing here: it stops before
+    the disk is down to its last gigabyte."""
+    try:
+        return shutil.disk_usage(folder).free > UPLOAD_MIN_FREE
+    except OSError:
+        return False
+
+
 def open_path(path):
     """Open a file or folder on the laptop with its default application."""
     target = resolve(path)

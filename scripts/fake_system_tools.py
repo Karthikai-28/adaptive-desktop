@@ -52,6 +52,7 @@ def nmcli(args, state):
         state.setdefault("wake", {})[args[3]] = args[5]
         STATE.write_text(json.dumps(state))
         return
+    fields = args[args.index("-f") + 1] if "-f" in args else ""
     for option in ("--wait", "-f"):
         if option in args:
             del args[args.index(option):args.index(option) + 2]
@@ -73,12 +74,16 @@ def nmcli(args, state):
         pass
     elif args[:3] == ["dev", "wifi", "connect"]:
         name = args[3]
-        if IN_RANGE[name][2] and sys.stdin.readline().rstrip("\n") != IN_RANGE[name][2]:
+        if name in state["saved"]:
+            # As the real one: a network it has a profile for is joined with that.
+            state["active"] = name
+        elif IN_RANGE[name][2] and sys.stdin.readline().rstrip("\n") != IN_RANGE[name][2]:
             state["saved"].append(name)   # as the real one leaves a half-made one behind
             STATE.write_text(json.dumps(state))
             sys.exit("Error: Connection activation failed: Secrets were required, but not provided.")
-        state["saved"].append(name)
-        state["active"] = name
+        else:
+            state["saved"].append(name)
+            state["active"] = name
     elif args[:3] == ["con", "up", "id"]:
         if args[3] == "Work VPN":
             state["vpn"] = True
@@ -96,6 +101,9 @@ def nmcli(args, state):
     elif args[:2] in (["dev", "disconnect"], ["dev", "connect"]):
         state["device"] = args[1] == "connect"
         state["active"] = "Home" if state["device"] and state["radio"] else ""
+    elif args == ["dev"] and fields == "DEVICE,TYPE":
+        print(terse(DEVICE, "wifi"))
+        print(terse("lo", "loopback"))
     elif args == ["dev"]:
         print(terse(DEVICE, "connected" if state["active"] else "disconnected", state["active"]))
         print(terse("lo", "unmanaged", ""))

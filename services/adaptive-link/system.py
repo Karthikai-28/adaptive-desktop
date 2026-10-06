@@ -405,13 +405,19 @@ def wifi_networks(saved=None):
     """The Wi-Fi networks in range, strongest first, one line per name."""
     known = {name for name, kind, _active in (_saved() if saved is None else saved) if kind == "802-11-wireless"}
     best = {}
+
+    def remembered(ssid):
+        # NetworkManager names a profile after its network, and a second one
+        # for the same network "NAME 1".
+        return ssid in known or any(re.fullmatch(re.escape(ssid) + r" \d+", name) for name in known)
+
     for used, name, strength, frequency, rate, security in _rows(
             "-f", "IN-USE,SSID,SIGNAL,FREQ,RATE,SECURITY", "dev", "wifi", "list", "--rescan", "no", width=6):
         if not name:
             continue   # a hidden one has no name to join it by
         entry = {"name": name, "signal": int(strength) if strength.isdigit() else 0, "frequency": frequency,
                  "rate": rate, "security": "" if security in ("", "--") else security,
-                 "active": used.strip() == "*", "known": name in known}
+                 "active": used.strip() == "*", "known": remembered(name)}
         kept = best.get(name)
         if kept is None or (entry["active"], entry["signal"]) > (kept["active"], kept["signal"]):
             best[name] = entry
@@ -452,9 +458,9 @@ def network_action(action, value="", secret=""):
         if seen is None:
             return False, "that network is not in range", None
         before = next((n["name"] for n in wifi_networks() if n["active"]), "")
-        if seen["known"]:
-            done, text = _nmcli("con", "up", "id", value, wait=20)
-        elif not seen["security"]:
+        if seen["known"] or not seen["security"]:
+            # By the network's name: NetworkManager finds its own profile for
+            # it, whatever that profile is called.
             done, text = _nmcli("dev", "wifi", "connect", value, wait=20)
         elif not isinstance(secret, str) or not 8 <= len(secret) <= 63:
             return False, "it needs its password (8 to 63 characters)", None
@@ -496,10 +502,12 @@ def undo(change):
         _nmcli("radio", "wifi", value)
         return "Wi-Fi turned back on"
     if kind == "join":
-        _nmcli("con", "up", "id", value, wait=20)
+        _nmcli("dev", "wifi", "connect", value, wait=20)
         return f"back on {value}"
     if kind == "wifi-leave":
-        _nmcli("con", "down", "id", value, wait=20)
+        for device, kind_of in _rows("-f", "DEVICE,TYPE", "dev", width=2):
+            if kind_of == "wifi":
+                _nmcli("dev", "disconnect", device, wait=20)
         return f"left {value}"
     if kind == "connect":
         _nmcli("dev", "connect", value, wait=20)

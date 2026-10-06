@@ -9,7 +9,9 @@
 # What this trusts, it copies to where only root can change it:
 #   /usr/local/lib/adaptive-link/link-approve   the program sudo runs
 #   /etc/adaptive-link/approvers/USER/*.pem     the public keys of the phones paired now
-# A phone paired later is not trusted for sudo until this is run again.
+# A phone paired later is not trusted for sudo until this is run again; one
+# unpaired later is trusted no longer at once (link-approve also checks that
+# a key is one of the phones paired now).
 #
 #   install-link-sudo.sh            install
 #   install-link-sudo.sh --remove   take it out again

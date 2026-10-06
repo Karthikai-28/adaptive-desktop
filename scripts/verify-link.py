@@ -856,6 +856,20 @@ async def daemon_checks(sandbox, check):
             async with phone.get(f"{link_url}/v1/files") as reply:
                 check(reply.status == 403, "files: refused when the owner turns it off")
             control.call("POST", "/configure", {"allow_files": True})
+            async with phone.post(f"{link_url}/v1/upload", params={"name": "authorized_keys"}, data=b"two") as reply:
+                again = await reply.json()
+            check(again["path"] == str(home / "Downloads/Phone/authorized_keys (2)")
+                  and (home / "Downloads/Phone/authorized_keys").read_bytes() == b"photo",
+                  "files: a second file of the same name gets a name of its own")
+            (home / "Downloads/Phone/setup.exe").write_bytes(b"MZ\x90\x00")
+            control.call("POST", "/configure", {"allow_exec": False})
+            async with phone.post(f"{link_url}/v1/open", json={"path": "~/Downloads/Phone/setup.exe"}) as reply:
+                ran = reply.status
+            async with phone.post(f"{link_url}/v1/open", json={"path": "~/movie.mkv"}) as reply:
+                opened = await reply.json()
+            control.call("POST", "/configure", {"allow_exec": True})
+            check(ran == 403 and opened["ok"],
+                  "files: opening what would run as a program needs commands turned on; a film still opens")
 
             # ----------------------------------------- clipboard, notifications
             async with phone.post(f"{link_url}/v1/clipboard", json={"text": "from the phone"}) as reply:
@@ -1029,6 +1043,15 @@ async def daemon_checks(sandbox, check):
             async with phone.post(f"{link_url}/v1/devices", json={"action": "unmount", "target": "/dev/sda1"}) as reply:
                 check(reply.status == 403 and refused_network == 403 and network_now()["radio"],
                       "network and devices: nothing is changed in view-only")
+            on_before = network_now()["active"]
+            asked_wifi = await change("/v1/do", id="wifi", args={"state": "off"})
+            asked_join = await change("/v1/do", id="join", args={"network": "Cafe: Open"})
+            check(not asked_wifi["ok"] and not asked_join["ok"] and network_now()["radio"] and network_now()["active"] == on_before,
+                  "network: nor by asking for it in words (/v1/do) in view-only")
+            async with phone.get(f"{link_url}/v1/clipboard") as reply:
+                read_clip = reply.status
+            async with phone.post(f"{link_url}/v1/clipboard", json={"text": "x"}) as reply:
+                check(read_clip == 403 and reply.status == 403, "clipboard: neither read nor set in view-only")
             control.call("POST", "/configure", {"allow_input": True})
 
             # ------------- bluetooth, displays, sound, services, power, windows
@@ -1350,6 +1373,15 @@ async def daemon_checks(sandbox, check):
             offered = await change("/v1/ask", text="lock the computer")
             check(not refused["ok"] and offered["matches"] == [], "ask: what the owner has turned off is not offered, and not done")
             control.call("POST", "/configure", {"allow_power": True})
+            restart = await change("/v1/do", id="restart")
+            from_computer = control.call("POST", "/ask", {"id": "shut-down", "args": {}})
+            check(not restart["ok"] and restart["confirm"] and not from_computer["ok"] and from_computer["confirm"],
+                  "do: what cannot be undone is not done without being confirmed, from the phone or the computer")
+            owner = control.call("POST", "/ask", {"id": "wifi", "args": {"state": "off"}})
+            await asyncio.sleep(4.5)
+            check(owner["ok"] and not network_now()["radio"],
+                  "ask: Wi-Fi turned off at the computer stays off - no phone has to keep it")
+            control.call("POST", "/ask", {"id": "wifi", "args": {"state": "on"}})
             check(not (await change("/v1/do", id="nothing-like-it"))["ok"] and not (await change("/v1/do", id="volume", args={"to": "loud"}))["ok"],
                   "do: only an action there is, with what it needs")
 

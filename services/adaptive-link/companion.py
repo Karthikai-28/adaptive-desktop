@@ -19,6 +19,7 @@ by verify-link.py.
 
 import asyncio
 import base64
+import ipaddress
 import re
 import secrets
 import shutil
@@ -137,6 +138,13 @@ def reachable(address):
         return False
 
 
+def _loopback(address):
+    try:
+        return ipaddress.ip_address(str(address).split("%")[0]).is_loopback
+    except ValueError:
+        return False
+
+
 class Presence:
     """Which paired phones are on the computer's own network now."""
 
@@ -173,7 +181,8 @@ class Presence:
                 await asyncio.sleep(self.grace / PRESENCE_PROBES)
                 if self.anyone:
                     return
-            for address in set(self._address.values()):
+            # Not a phone that was on the cable: this machine always answers there.
+            for address in {a for a in self._address.values() if not _loopback(a)}:
                 if await asyncio.to_thread(self._probe, address):
                     return   # asleep, not gone
             await self._on_gone()

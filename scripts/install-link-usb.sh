@@ -7,6 +7,10 @@
 # rule, so it needs sudo once. Without it the phone still lists the devices
 # and safely removes drives; it only cannot switch a device off.
 #
+# Only a device the system let in when it was plugged in is handed over. One
+# it kept out (USBGuard, or authorized_default=0) stays the system's, so this
+# can never be used to let in a device that was blocked.
+#
 #   install-link-usb.sh            install
 #   install-link-usb.sh --remove   take it out again
 set -Eeuo pipefail
@@ -27,7 +31,7 @@ fi
 
 sudo tee "$RULE" >/dev/null <<'RULE'
 # Adaptive Link: the person at the computer may switch a USB device off and on.
-ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{bDeviceClass}!="09", \
+ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{bDeviceClass}!="09", ATTR{authorized}=="1", \
   RUN+="/bin/sh -c 'chgrp plugdev /sys%p/authorized && chmod 664 /sys%p/authorized'"
 RULE
 sudo udevadm control --reload

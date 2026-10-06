@@ -3,8 +3,12 @@
 # eraser end, the side button (services/adaptive-link/pen.py).
 #
 # The tablet is made through /dev/uinput, which only root may write to. This
-# gives it to the input group - which the owner is in - and loads the uinput
-# module at boot. It needs sudo, once.
+# gives it to whoever is at the computer's own seat (udev's uaccess, as for
+# game controllers) and loads the uinput module at boot. It needs sudo, once.
+#
+# Not the input group: that would also let every program of the owner's read
+# every keyboard - the lock screen's password included - which a pen does not
+# need. (The touchpad gestures, scripts/adaptive-gestures.py, do need it.)
 #
 #   install-link-pen.sh            install
 #   install-link-pen.sh --remove   take it out again
@@ -21,11 +25,8 @@ if [ "${1:-}" = "--remove" ]; then
     exit 0
 fi
 
-if ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
-    echo "Adding $USER to the input group (log out and in again for it to count)..."
-    sudo usermod -aG input "$USER"
-fi
-echo 'KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee "$RULE" >/dev/null
+# Before 73-seat-late.rules, which turns the uaccess tag into the seat's access.
+echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' | sudo tee "$RULE" >/dev/null
 echo "uinput" | sudo tee "$LOAD" >/dev/null
 sudo modprobe uinput
 sudo udevadm control --reload-rules
@@ -34,5 +35,5 @@ sleep 1
 if [ -w /dev/uinput ]; then
     echo "Done. The link needs restarting once: systemctl --user restart adaptive-link"
 else
-    echo "/dev/uinput is $(stat -c '%G %a' /dev/uinput); log out and in again, then restart the link." >&2
+    echo "/dev/uinput is not open to $USER yet; log out and in again, then restart the link." >&2
 fi

@@ -451,6 +451,16 @@ def peer_allowed(address, allow_public=False):
     return any(ip in network for network in _ALLOWED_NETWORKS)
 
 
+# Where the direct tunnel (rtc.py) connects to the link from. The rest of
+# loopback is the USB cable (usb_link.py: adb reverse), which is the phone
+# plugged in here, not reaching in from elsewhere.
+TUNNEL_SOURCE = "127.0.0.2"
+
+
+def is_tunnel(address):
+    return str(address).split("%")[0] == TUNNEL_SOURCE
+
+
 def is_loopback(address):
     try:
         return ipaddress.ip_address(str(address).split("%")[0]).is_loopback
