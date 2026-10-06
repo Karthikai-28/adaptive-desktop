@@ -4,7 +4,9 @@
     ssh_connect.py saved <host>          {"user": ..., "has_password": bool}
     ssh_connect.py connect <host> [user] try the login, then open a terminal
     ssh_connect.py forget <host>         drop the remembered user and password
-    ssh_connect.py askpass               (internal) the ssh password prompt
+    ssh_connect.py askpass <prompt>      (internal) the ssh password prompt; ssh
+                                         itself calls it with the prompt alone,
+                                         flagged by ADAPTIVE_SSH_ASKPASS in the env
 
 `connect` reads {"user": ..., "password": ...} as JSON on stdin (both optional:
 the remembered ones fill in). It logs in once in the background first, so a
@@ -82,6 +84,7 @@ def ssh_env(host, user, password=None):
     env = dict(os.environ)
     env["SSH_ASKPASS"] = os.path.abspath(__file__)
     env["SSH_ASKPASS_REQUIRE"] = "force"
+    env["ADAPTIVE_SSH_ASKPASS"] = "1"  # ssh passes only the prompt, so main() can't tell otherwise
     env["ADAPTIVE_SSH_HOST"] = host
     env["ADAPTIVE_SSH_USER"] = user
     if password is not None:
@@ -169,9 +172,9 @@ def connect(host, user_arg):
 
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else ""
-    if command == "askpass":
+    if os.environ.get("ADAPTIVE_SSH_ASKPASS") or command == "askpass":
         # ssh calls this with the prompt as argv[1]; stdout is the answer.
-        prompt = sys.argv[2] if len(sys.argv) > 2 else ""
+        prompt = sys.argv[-1] if len(sys.argv) > 1 else ""
         if "password" not in prompt.lower():
             sys.exit(1)  # host-key or passphrase questions: not ours to answer
         host, user = os.environ.get("ADAPTIVE_SSH_HOST", ""), os.environ.get("ADAPTIVE_SSH_USER", "")
