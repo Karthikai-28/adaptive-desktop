@@ -150,7 +150,7 @@ internal fun AppsPage(activity: MainActivity, client: LinkClient, store: Store, 
 }
 
 @Composable
-private fun AppIcon(client: LinkClient, app: JSONObject) {
+internal fun AppIcon(client: LinkClient, app: JSONObject) {
     var picture by remember(app.optString("id")) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(app.optString("id")) {
         val text = client.get("/v1/apps/icon?id=" + URLEncoder.encode(app.optString("id"), "UTF-8"))?.optString("png").orEmpty()

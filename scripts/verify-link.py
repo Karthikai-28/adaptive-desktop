@@ -1813,6 +1813,8 @@ def inner(sandbox, check):
     pure_checks(check)
     import verify_link_workspace
     verify_link_workspace.checks(check)
+    import verify_link_mobile
+    verify_link_mobile.checks(check)
     asyncio.run(daemon_checks(sandbox, check))
 
 

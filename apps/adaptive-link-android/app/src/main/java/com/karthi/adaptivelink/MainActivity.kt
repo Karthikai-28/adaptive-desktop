@@ -248,33 +248,14 @@ private fun App(activity: MainActivity) {
         })
     }
 
-    // On a tablet, or a phone unfolded: the list on one side, what was
-    // chosen from it on the other. Not for the computer's screen, which has
-    // the whole of this one - and a phone turned sideways is often this wide,
-    // so turning it would otherwise start the screen again, and take away a
-    // display made for it.
-    BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding()) {
-        if (maxWidth >= 840.dp && page != Page.Screen) {
-            Row(Modifier.fillMaxSize()) {
-                Column(Modifier.weight(0.38f).fillMaxHeight()) { home() }
-                Column(Modifier.weight(0.62f).fillMaxHeight()) {
-                    if (page == Page.Home) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Choose something on the left", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else Pages(activity, client, store, state, page, folder, { page = it }, { folder = it }) {
-                        computer = store.computer
-                        page = Page.Home
-                    }
-                }
-            }
-        } else Column(Modifier.fillMaxSize()) {
-            if (page == Page.Home) home()
-            else Pages(activity, client, store, state, page, folder, { page = it }, { folder = it }) {
-                computer = store.computer
-                page = Page.Home
-            }
+    MobileDesktop(activity, client, store, state, externalPage = page, consumed = { page = Page.Home }, connections = home) { chosen, back ->
+        Pages(activity, client, store, state, chosen, folder, { if (it == Page.Home) back() else page = it }, { folder = it }) {
+            computer = store.computer
+            page = Page.Home
+            back()
         }
     }
+
 }
 
 /** The screen that was chosen from the home screen. */

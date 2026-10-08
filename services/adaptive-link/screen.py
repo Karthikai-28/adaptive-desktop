@@ -11,6 +11,7 @@ The cost is bandwidth, which scale, quality and rate keep in hand.
 """
 
 import hashlib
+import re
 
 import gi
 
@@ -37,23 +38,28 @@ def fit(width, height, longest):
     return max(2, int(width * scale) // 2 * 2), max(2, int(height * scale) // 2 * 2)
 
 
-def source(region=None):
+def source(region=None, display=None):
     """The part of the screen to capture: all of it, or one display
     (x, y, width, height)."""
+    explicit = ""
+    if display is not None:
+        if not re.fullmatch(r":\d+", display):
+            raise ValueError("invalid private display")
+        explicit = f'display-name="{display}" '
     if not region:
-        return "ximagesrc use-damage=false show-pointer=true "
+        return "ximagesrc use-damage=false show-pointer=true " + explicit
     x, y, width, height = (int(value) for value in region)
     return (f"ximagesrc use-damage=false show-pointer=true startx={x} starty={y} "
-            f"endx={x + width - 1} endy={y + height - 1} ")
+            f"endx={x + width - 1} endy={y + height - 1} " + explicit)
 
 
-def pipeline_description(width, height, preset, region=None):
+def pipeline_description(width, height, preset, region=None, display=None):
     longest, quality, rate = PRESETS.get(preset, PRESETS["medium"])
     if region:
         width, height = region[2], region[3]
     out_w, out_h = fit(width, height, longest)
     return (
-        source(region)
+        source(region, display)
         + f"! video/x-raw,framerate={rate}/1 "
         "! videoscale method=bilinear "
         f"! video/x-raw,width={out_w},height={out_h} "
@@ -64,7 +70,10 @@ def pipeline_description(width, height, preset, region=None):
 
 
 class Capture:
-    def __init__(self, screen, preset="medium", region=None):
+    def __init__(self, screen, preset="medium", region=None, display=None, env=None):
+        self.env = env
+        self.pipe = None
+        self.display = display
         self.screen = screen
         self.region = region
         self.preset = preset if preset in PRESETS else "medium"
@@ -73,7 +82,11 @@ class Capture:
         self._last = b""
 
     def start(self):
-        self._pipeline = Gst.parse_launch(pipeline_description(*self.screen, self.preset, self.region))
+        if self.env is not None:
+            self.pipe = PipedSource(pipeline_description(*self.screen, self.preset, self.region, self.display), self.env)
+            self.pipe.start()
+            return
+        self._pipeline = Gst.parse_launch(pipeline_description(*self.screen, self.preset, self.region, self.display))
         self._sink = self._pipeline.get_by_name("sink")
         self._pipeline.set_state(Gst.State.PLAYING)
 
@@ -82,6 +95,8 @@ class Capture:
 
         Blocking: call it from a worker thread.
         """
+        if self.pipe is not None:
+            return self.pipe.pull(timeout_s)
         # The action signal, so the GstApp typelib is not needed.
         sample = self._sink.emit("try-pull-sample", int(timeout_s * Gst.SECOND))
         if sample is None:
@@ -101,6 +116,9 @@ class Capture:
         return data
 
     def stop(self):
+        if self.pipe is not None:
+            self.pipe.stop()
+            self.pipe = None
         if self._pipeline is not None:
             self._pipeline.set_state(Gst.State.NULL)
             self._pipeline = None
@@ -146,3 +164,66 @@ class MadeCapture:
 
     def stop(self):
         pass
+
+
+class PipedSource:
+    """Capture with explicit process environment; never change daemon X auth."""
+    def __init__(self, description, env, capacity=1):
+        import queue
+        self.description, self.env = description, env
+        self.queue = queue.Queue(capacity)
+        self.proc = None
+        self.thread = None
+
+    def start(self):
+        import subprocess
+        import sys
+        import threading
+        from pathlib import Path
+        self.proc = subprocess.Popen([sys.executable, str(Path(__file__).with_name("capture_worker.py")), self.description],
+                                     env=self.env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.thread = threading.Thread(target=self._read, daemon=True)
+        self.thread.start()
+        return True
+
+    def _read(self):
+        import struct
+        import queue
+        while True:
+            header = self.proc.stdout.read(4)
+            if len(header) != 4:
+                break
+            length = struct.unpack("!I", header)[0]
+            if not 0 < length <= 64 * 1024 * 1024:
+                break
+            data = self.proc.stdout.read(length)
+            if len(data) != length:
+                break
+            try:
+                self.queue.put_nowait(data)
+            except queue.Full:
+                try:
+                    self.queue.get_nowait()
+                except queue.Empty:
+                    pass
+                self.queue.put_nowait(data)
+
+    def pull(self, timeout_s):
+        import queue
+        try:
+            return self.queue.get(timeout=timeout_s)
+        except queue.Empty:
+            return None
+
+    def stop(self):
+        import subprocess
+        if self.proc is not None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+            if self.thread:
+                self.thread.join(timeout=3)
+            self.proc.stdout.close()

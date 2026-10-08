@@ -37,6 +37,7 @@ from aiohttp import WSMsgType, web
 
 import actions
 import app_workspace
+import mobile_session
 import alerts
 import camera
 import cloud
@@ -185,6 +186,7 @@ class Link:
         self._nearby = None   # this computer saying it is here, while it waits to be paired with
         self._pair_asks = {}
         self.workspace = app_workspace.Workspace(self)
+        self.mobile = mobile_session.MobileDesktop(self)
 
     # ------------------------------------------------------------ listeners
 
@@ -205,7 +207,7 @@ class Link:
         await self._start_control()
         await self.restart_link()
         await self.restart_cloud()
-        self._watchers = [asyncio.create_task(self.workspace.expire()),
+        self._watchers = [asyncio.create_task(self.mobile.watch()), asyncio.create_task(self.workspace.expire()),
                           asyncio.ensure_future(alerts.watch_notifications(self.events)),
                           asyncio.ensure_future(alerts.watch_machine(self.events, ALERT_EVERY_S)),
                           asyncio.ensure_future(companion.watch_clipboard(
@@ -216,6 +218,7 @@ class Link:
                           asyncio.ensure_future(usb_link.watch(self.port, lambda what: self.audit.write("-", "usb", what)))]
 
     async def stop(self):
+        await self.mobile.close()
         await self.workspace.close()
         for watcher in self._watchers:
             watcher.cancel()
@@ -354,6 +357,7 @@ class Link:
     def _routes(self, app):
         add = app.router
         self.workspace.routes(add)
+        self.mobile.routes(add)
         add.add_get("/v1/status", self.h_status)
         add.add_get("/v1/screen", self.h_screen)
         add.add_get("/v1/input", self.h_input)
@@ -411,7 +415,7 @@ class Link:
         info = await asyncio.to_thread(desktop.status)
         info.update({
             "version": VERSION,
-            "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1},
+            "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1, "mobile_desktop": self.mobile.capabilities()},
             # From this machine itself: the direct tunnel, or the USB cable.
             "via": "direct" if identity.is_tunnel(request["peer"])
                    else "usb" if identity.is_loopback(request["peer"]) else "lan",
@@ -1273,6 +1277,7 @@ class Link:
         watched = dict(WATCHED)
         owner = self.workspace.owner(request)
         watched.update({
+            "mobile-sessions": (lambda: {"sessions": [s.public() for s in list(self.mobile.sessions.values()) if s.owner == owner]}, 1),
             "control-profiles": (lambda: {"revision": self.workspace.profiles.data["revision"]}, 1),
             "app-sessions": (lambda: {"sessions": [self.workspace.public(s) for s in list(self.workspace.sessions.values()) if s["owner"] == owner]}, 1),
             "control-runs": (lambda: {"runs": [self.workspace.run_public(r) for r in list(self.workspace.runs.values()) if r["owner"] == owner]}, 0.5),

@@ -58,12 +58,12 @@ def frame_size(width, height, preset):
     return max(16, out_w // 16 * 16), out_h, rate
 
 
-def video_pipeline(width, height, preset, region=None):
+def video_pipeline(width, height, preset, region=None, display=None):
     if region:
         width, height = region[2], region[3]
     out_w, out_h, rate = frame_size(width, height, preset)
     return (
-        screen.source(region)
+        screen.source(region, display)
         + f"! video/x-raw,framerate={rate}/1 "
         "! videoscale method=bilinear "
         f"! video/x-raw,width={out_w},height={out_h} "
@@ -83,6 +83,8 @@ AUDIO_PIPELINE = (
 
 def _pull(sink, timeout_s):
     """The next buffer from a pipeline's end as bytes, or None. Blocking."""
+    if isinstance(sink, screen.PipedSource):
+        return sink.pull(timeout_s)
     sample = sink.emit("try-pull-sample", int(timeout_s * Gst.SECOND))
     if sample is None:
         return None
@@ -117,9 +119,16 @@ class _Source(MediaStreamTrack):
         super().__init__()
         self._pipeline = None
         self._sink = None
+        self.env = None
+        self.pipe = None
 
     def start(self):
         """Start the pipeline. Returns whether it is running."""
+        if self.env is not None:
+            self.pipe = screen.PipedSource(self.description, self.env)
+            self.pipe.start()
+            self._sink = self.pipe
+            return True
         try:
             self._pipeline = Gst.parse_launch(self.description)
         except Exception:  # noqa: BLE001 - GLib raises its own error for a pipeline it cannot build
@@ -136,6 +145,9 @@ class _Source(MediaStreamTrack):
 
     def stop(self):
         super().stop()
+        if self.pipe:
+            self.pipe.stop()
+            self._sink = None
         if self._pipeline is not None:
             self._pipeline.set_state(Gst.State.NULL)
             self._pipeline = None
@@ -145,10 +157,10 @@ class _Source(MediaStreamTrack):
 class ScreenTrack(_Source):
     kind = "video"
 
-    def __init__(self, screen_size, preset, region=None):
+    def __init__(self, screen_size, preset, region=None, display=None):
         super().__init__()
         self.width, self.height, self.rate = frame_size(*(region[2:] if region else screen_size), preset)
-        self.description = video_pipeline(*screen_size, preset, region)
+        self.description = video_pipeline(*screen_size, preset, region, display)
         self._started = time.monotonic()
 
     async def recv(self):
@@ -221,8 +233,13 @@ class SoundTrack(_Source):
     kind = "audio"
     description = AUDIO_PIPELINE
 
-    def __init__(self):
+    def __init__(self, device=None):
         super().__init__()
+        if device is not None:
+            import re
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", device):
+                raise ValueError("invalid sound source")
+            self.description = AUDIO_PIPELINE.replace("@DEFAULT_MONITOR@", device)
         self._waiting = b""
         self._sent = 0
 
@@ -257,7 +274,7 @@ class MediaServer:
     def viewers(self):
         return len(self._watching)
 
-    async def answer(self, offer_sdp, screen_size, preset="medium", sound=True, region=None, made=None):
+    async def answer(self, offer_sdp, screen_size, preset="medium", sound=True, region=None, made=None, display=None, audio_device=None, env=None):
         """Start sending the screen to the phone that made this offer.
         Returns {"id", "answer", "sound", "size"}; raises ValueError for an
         offer that is not one."""
@@ -272,8 +289,9 @@ class MediaServer:
         # A display made for a phone sends what it was given; any other, what
         # is captured from the screen.
         picture = (await asyncio.to_thread(MadeTrack, made, preset)) if made is not None \
-            else ScreenTrack(screen_size, preset, region)
-        voice = SoundTrack() if sound and "m=audio" in offer_sdp else None
+            else ScreenTrack(screen_size, preset, region, display)
+        picture.env = env
+        voice = SoundTrack(audio_device) if sound and "m=audio" in offer_sdp else None
         if not await asyncio.to_thread(picture.start):
             await peer.close()
             raise ValueError("the screen could not be captured")

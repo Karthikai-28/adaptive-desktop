@@ -168,6 +168,11 @@ def doctor(status):
     room = virtual_display.capacity()
     check("Phone as another display", room > 0, (f"ready, for {room} device{'s' if room != 1 else ''} at once" if room
                                                  else "no display to spare"), "scripts/install-link-display.sh")
+    import mobile_session
+    missing = mobile_session.MobileDesktop.capabilities()["missing"]
+    check("Phone apps in their own session", not missing,
+          "ready" if not missing else "missing " + ", ".join(missing),
+          "sudo apt install " + " ".join(sorted({mobile_session.PACKAGES[tool] for tool in missing})))
     import pen
     check("Phone's pen as a tablet", True, "ready" if pen.available() else
           "not installed (optional, the pen is a pointer until then: scripts/install-link-pen.sh)")

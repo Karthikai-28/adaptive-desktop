@@ -256,7 +256,7 @@ private fun DisplaySettings(store: Store, onDone: (changed: Boolean) -> Unit) {
 }
 
 @Composable
-fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId: String = "", contentStamp: String = "", whole: Boolean = false, onBack: () -> Unit) {
+fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId: String = "", contentStamp: String = "", whole: Boolean = false, mobileSession: String = "", appTitle: String = "Screen", onBack: () -> Unit) {
     var frame by remember { mutableStateOf<Bitmap?>(null) }
     var note by remember { mutableStateOf("Connecting…") }
     var quality by remember { mutableStateOf(store.screenQuality) }
@@ -293,14 +293,38 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
     LaunchedEffect(Unit) { client.connect(); cable = client.viaCable }
     val showVideo = video && !cable
     val preset = if (cable) "cable" else quality
-    val showing = (if (display.isEmpty()) "" else "&display=" + java.net.URLEncoder.encode(display, "UTF-8")) +
+    val base = if (mobileSession.isEmpty()) "/v1" else "/v1/mobile"
+    val showing = (if (mobileSession.isEmpty()) "" else "&session=$mobileSession") + (if (display.isEmpty()) "" else "&display=" + java.net.URLEncoder.encode(display, "UTF-8")) +
         (if (workspaceId.isEmpty()) "" else "&workspace=$workspaceId&whole=${if (whole) 1 else 0}")
-    val input = remember(display, generation, workspaceId, contentStamp, whole) { InputSocket(client, "/v1/input?x=1$showing") }
+    val input = remember(display, generation, workspaceId, contentStamp, whole) { InputSocket(client, "$base/input?x=1$showing") }
+    LaunchedEffect(mobileSession, box) {
+        if (mobileSession.isNotEmpty() && box.width > 0 && box.height > 0) {
+            delay(400)
+            val scale = 1.5f / activity.resources.displayMetrics.density
+            val size = org.json.JSONArray(listOf((box.width * scale).toInt().coerceIn(320, 3840), (box.height * scale).toInt().coerceIn(320, 3840)))
+            val reply = client.post("/v1/mobile/sessions", JSONObject().put("operation", "resize").put("session", mobileSession).put("viewport", size))
+            if (reply?.optBoolean("ok") == true) generation++
+            else note = reply?.optString("error") ?: "Disconnected · phone applications remain open"
+        }
+    }
+    val viewPrefs = remember { context.getSharedPreferences("mobile-view-${client.computer.fingerprint}", android.content.Context.MODE_PRIVATE) }
+    LaunchedEffect(appTitle, mobileSession) {
+        if (mobileSession.isNotEmpty()) {
+            zoom = viewPrefs.getFloat("$appTitle.zoom", 1f)
+            shift = Offset(viewPrefs.getFloat("$appTitle.x", 0f), viewPrefs.getFloat("$appTitle.y", 0f))
+        }
+    }
+    DisposableEffect(appTitle, mobileSession) {
+        onDispose { if (mobileSession.isNotEmpty()) viewPrefs.edit().putFloat("$appTitle.zoom", zoom).putFloat("$appTitle.x", shift.x).putFloat("$appTitle.y", shift.y).apply() }
+    }
+    LaunchedEffect(note) {
+        if (mobileSession.isNotEmpty() && note == "Connection lost") { delay(2000); generation++ }
+    }
     val surface = remember { VideoView(context) }
     DisposableEffect(Unit) { onDispose { surface.release() } }
     DisposableEffect(input) { onDispose { input.close() } }
     LaunchedEffect(options) {
-        if (options) client.get("/v1/machine/display")?.optJSONArray("outputs")?.let { outputs ->
+        if (options && mobileSession.isEmpty()) client.get("/v1/machine/display")?.optJSONArray("outputs")?.let { outputs ->
             val on = List(outputs.length()) { outputs.optJSONObject(it) }.filterNotNull().filter { it.optBoolean("on") }
             displays = on.map { it.optString("name") }
             primary = on.firstOrNull { it.optBoolean("primary") }?.optString("name") ?: displays.firstOrNull() ?: ""
@@ -325,8 +349,8 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
     // A display this phone let go of a moment ago (the app closed, the phone
     // locked) is still there: it is taken back, windows and all.
     LaunchedEffect(Unit) {
-        val mine = client.get("/v1/machine/display")?.optJSONArray("made").objects().any { it.optBoolean("mine") }
-        if (mine && workspaceId.isEmpty()) makeDisplay()
+        val mine = if (mobileSession.isEmpty()) client.get("/v1/machine/display")?.optJSONArray("made").objects().any { it.optBoolean("mine") } else false
+        if (mine && workspaceId.isEmpty() && mobileSession.isEmpty()) makeDisplay()
     }
     // Turned, the display turns with it: made again the other way up.
     LaunchedEffect(sideways) {
@@ -369,7 +393,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
             surface.onSize = { w, h -> picture = IntSize(w, h); note = "" }
             watching.show(surface)
             val starting = scope.launch {
-                val agreed = watching.start(quality, sound, display, workspaceId, whole)
+                val agreed = watching.start(quality, sound, display, workspaceId, whole, mobileSession)
                 hearing = agreed && watching.sound
                 // No picture after a while: the two could not reach each
                 // other this way. The other way still works.
@@ -388,7 +412,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
         }
     } else {
         DisposableEffect(preset, display, generation, workspaceId, contentStamp, whole) {
-            val opened = client.socket("/v1/screen?preset=$preset$showing", object : WebSocketListener() {
+            val opened = client.socket("$base/screen?preset=$preset$showing", object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size)?.let {
                         frame = it
@@ -413,7 +437,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
         picture.takeIf { it != IntSize.Zero }?.let { touchToScreen(unzoomed(offset, box, zoom, shift), box, it) }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        if (!full) TopBar("Screen", onBack) {
+        if (!full) TopBar(appTitle, onBack) {
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Filled.Tune, "Picture and sound") }
                 DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
@@ -435,7 +459,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
                         text = { Text(if (!sound) "Sound: off" else if (hearing || picture == IntSize.Zero) "Sound: on" else "Sound: on (the computer has none to send)") },
                         onClick = { sound = !sound; store.screenSound = sound; options = false },
                     )
-                    if (workspaceId.isEmpty()) {
+                    if (workspaceId.isEmpty() && mobileSession.isEmpty()) {
                     if (displays.size > 1 || display.isNotEmpty()) (listOf("") + displays).distinct().forEach { name ->
                         DropdownMenuItem(
                             text = {

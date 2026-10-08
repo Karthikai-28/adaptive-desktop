@@ -292,9 +292,13 @@ on the local network only and the screen is sent a picture at a time.
 
 ## What the phone can do
 
+The app opens on the laptop's **mobile desktop** (below). Every screen in
+this table is in its drawer, and all of them together are under *Laptop
+tools*, which is pinned to Home to begin with.
+
 | In the app | On the computer |
 | --- | --- |
-| Apps | Every app in the app grid, searched, starred and recent; opened (or the window it already has brought back) into a workspace of its own, with your saved button layouts beside it (see *Every app, with buttons of your own*) |
+| Desktop workspaces | Every app in the app grid, searched, starred and recent; opened (or the window it already has brought back) into a workspace of its own, with your saved button layouts beside it (see *Every app, with buttons of your own*) |
 | Screen | The screen as video with the computer's sound (three qualities), or a picture at a time where video cannot be had; tap to click, drag to drag, long-press for right-click, pinch to zoom, a scroll mode, a keyboard |
 | Trackpad | Relative pointer, a scroll strip, both buttons, a keyboard with the keys a phone lacks; *Air* aims the phone like a pointer; the microphone on the keyboard types what you say |
 | Media | Whatever is playing (MPRIS): play, pause, next, previous, seek, volume; what is playing from the web can be carried on with on the phone |
@@ -355,9 +359,75 @@ and a keyboard can type a command into a terminal or open a file, whatever
 `input` off as well. The clipboard, media controls and the phone's
 notifications are always available to the paired phone.
 
+### The laptop as a mobile desktop
+
+The phone is an accessory of the laptop: apps run on the laptop and are used
+on the phone, at the phone's size, while the laptop stays free for someone
+else. This is the app's landing screen.
+
+- **Home** has the laptop and whether it is connected, your pins and pinned
+  folders, recent apps, *Continue* for what is running, and a dock of up to
+  six. Long-press anything to pin it, move it first, put it in the dock or a
+  drawer folder, see what it is, or edit its custom controls.
+- **Apps** (the drawer) lists every app installed on the laptop by its real
+  name and icon, with search, categories, favourites and your folders, beside
+  the phone's own tools: Control Center, Files, Tasks, Desktop Remote, the
+  camera and microphone, scanner, presenter, trackpad, media, run, laptop
+  windows, game pad, drawing input and your global controls.
+- **Recents** lists the apps open in the phone's session. Tap one to go back
+  to it; with several windows the phone asks which. *Close* asks the app to
+  close as the laptop would (a save dialog appears on the phone); force quit
+  is separate and asks first. On a tablet, two apps can be shown side by
+  side. *End session* closes everything normally, and stops if anything is
+  still asking to be saved.
+- **Control Center** is native: network and Wi-Fi, Bluetooth, sound and
+  displays, power, storage and devices, desktop and projects, tasks, and your
+  services, acting on the laptop directly. The laptop's own *Settings* entry
+  opens it rather than a Settings window on the laptop.
+
+**A session of its own.** Each paired phone gets a private display on the
+laptop (Xvfb with the xfwm4 window manager), its own session bus, input and
+sound output, and app settings of its own under
+`~/.config/adaptive-desktop/link/mobile/`. Apps opened from the phone run
+there, so a tap or a keystroke from the phone never reaches the laptop's
+screen, and nothing on the laptop moves or loses focus. Both use the same
+files: open a document from *Files* on the phone and save it, and the laptop
+has the change. It is a separate graphical session, not a sandbox - phone
+apps run as you, with your permissions.
+
+The app is fitted to the phone's screen, keyboard and turning, without
+restarting it and without changing the laptop's own displays; an app with a
+minimum size larger than the phone keeps it and is panned and zoomed, and the
+zoom is remembered per app. Leaving the app, or losing the connection, stops
+the picture and lets go of held keys, but the apps keep running, and coming
+back finds them as they were. A laptop restart ends the session; pins, folders
+and app settings remain.
+
+Apps that refuse a second copy are given one of their own: Firefox, Chrome
+and Chromium, VS Code and its relatives (Antigravity, Codium, Cursor), and
+LibreOffice each get a fresh profile for the phone, never a copy of yours -
+sign in on the phone if you want to. Snap apps run in a scope of their own,
+as snapd requires, with their phone profile under `~/snap/NAME/common/`.
+
+An app that cannot start this way says so on the phone; it is never opened
+on the laptop instead. To find out beforehand:
+
+```sh
+scripts/link-mobile-compat.py firefox_firefox.desktop libreoffice-writer.desktop
+scripts/link-mobile-compat.py --all    # every installed app; some take a while
+```
+
+Each app is started in a throwaway session nobody sees, and the result -
+*works*, *no-window* or *failed* - is kept for the drawer, which marks the
+last two. Opening an app from the phone updates its result too.
+
+Needs `xvfb`, `xfwm4`, `dbus`, `xauth`, `x11-utils` and `xdotool` on the
+laptop; `scripts/link-cli.py doctor` says which are missing. The laptop's
+own screen, shared as it is, stays available as *Desktop Remote*.
+
 ### Every app, with buttons of your own
 
-*Apps* lists what is in the computer's app grid, by its desktop-entry ID
+*Desktop workspaces* lists what is in the computer's app grid, by its desktop-entry ID
 (`firefox.desktop`), never by a window's title. Tapping one opens it, or
 brings back the window it already has; with several windows the phone asks
 which, and can remember that a window class belongs to that app. An app that
@@ -671,6 +741,14 @@ never as part of a command line that other programs could read.
   when none of its addresses answers, an impostor computer and a replaced
   key; then the app itself - signing in, every screen opened and every
   control pressed, and a command typed on the phone's own screen.
+- `scripts/verify_link_mobile.py` (also run by `verify-link.py`) — two
+  phones' private sessions on real displays: each its own display and bus,
+  the daemon's environment untouched, input reaching only its own session
+  and never moving another's focus, a phone refused another's apps and
+  picture, `input` turned off mid-stream, a dialog staying in the session,
+  an app fitted to the phone and resized without restarting, reconnecting to
+  the same apps, a run cancelled mid-way and not replayed, an app that fails
+  to start reported as such, and ending one phone's session leaving the other.
 - `scripts/verify_link_workspace.py` (also run by `verify-link.py`) — layouts
   and buttons: an interrupted save, two phones' edits to one layout, a stale
   delete, imports with more in them than a layout; windows matched to apps
@@ -708,6 +786,12 @@ PAM.
   what is safe for that (see above).
 - An app workspace without the phone as a display is a crop of the screen,
   not of the window: what overlaps the window shows on the phone too.
+- Phone apps cannot pick up what is open on the laptop: the phone's Firefox
+  is another Firefox, and unsaved work in a laptop window stays there.
+- A desktop app keeps its desktop layout on the phone; it is fitted, panned
+  and zoomed, not redesigned. Only the shell and the system tools are native.
+- Apps that need the GPU run on Xvfb's software rendering in the phone's
+  session, so 3D apps (Blender, games) are slow there.
 - Android only.
 
 ## Building the app from scratch

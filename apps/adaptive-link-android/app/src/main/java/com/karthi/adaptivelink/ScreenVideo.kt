@@ -94,6 +94,7 @@ class ScreenVideo(
 ) {
     private var peer: PeerConnection? = null
     private var session = 0
+    private var mobileSession = ""
     @Volatile private var track: VideoTrack? = null
     @Volatile private var sink: VideoSink? = null
 
@@ -108,7 +109,8 @@ class ScreenVideo(
     }
 
     /** Ask the computer for its screen. Returns whether it agreed. */
-    suspend fun start(preset: String, withSound: Boolean, display: String = "", workspace: String = "", whole: Boolean = false): Boolean {
+    suspend fun start(preset: String, withSound: Boolean, display: String = "", workspace: String = "", whole: Boolean = false, mobile: String = ""): Boolean {
+        mobileSession = mobile
         val stun = Cloud(context).config.stun
         val connection = Rtc.factory(context).createPeerConnection(
             PeerConnection.RTCConfiguration(Rtc.iceServers(context, stun)).apply {
@@ -152,8 +154,8 @@ class ScreenVideo(
         withTimeoutOrNull(4_000) {
             while (connection.iceGatheringState() != PeerConnection.IceGatheringState.COMPLETE) delay(50)
         }
-        val reply = client.post("/v1/rtc", JSONObject().put("offer", connection.localDescription.description)
-            .put("preset", preset).put("sound", withSound).put("display", display).put("workspace", workspace).put("whole", whole))
+        val reply = client.post(if (mobile.isEmpty()) "/v1/rtc" else "/v1/mobile/rtc", JSONObject().put("offer", connection.localDescription.description)
+            .put("session", mobile).put("preset", preset).put("sound", withSound).put("display", display).put("workspace", workspace).put("whole", whole))
         if (reply == null || !reply.optBoolean("ok")) {
             onState(reply?.optString("error").orEmpty())
             return false
@@ -172,7 +174,7 @@ class ScreenVideo(
         runCatching { peer?.close() }
         runCatching { peer?.dispose() }
         peer = null
-        if (ended != 0) client.post("/v1/rtc/close", JSONObject().put("id", ended))
+        if (ended != 0) client.post(if (mobileSession.isEmpty()) "/v1/rtc/close" else "/v1/mobile/rtc/close", JSONObject().put("id", ended).put("session", mobileSession))
     }
 
     private suspend fun PeerConnection.create(start: PeerConnection.(SdpObserver) -> Unit): SessionDescription? =

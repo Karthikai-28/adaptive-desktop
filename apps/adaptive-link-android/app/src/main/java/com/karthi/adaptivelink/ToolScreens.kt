@@ -250,7 +250,7 @@ internal fun displayName(context: Context, uri: Uri): String {
 }
 
 @Composable
-fun FilesPage(activity: MainActivity, client: LinkClient, start: String = "~", onBack: () -> Unit) {
+fun FilesPage(activity: MainActivity, client: LinkClient, start: String = "~", onOpen: ((String) -> Unit)? = null, onPin: ((String) -> Unit)? = null, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var path by remember { mutableStateOf("~") }
     var parent by remember { mutableStateOf("") }
@@ -305,6 +305,7 @@ fun FilesPage(activity: MainActivity, client: LinkClient, start: String = "~", o
     }
 
     TopBar("Files", onBack) {
+        if (onPin != null) TextButton(onClick = { onPin(path) }) { Text("Pin folder") }
         IconButton(onClick = { activity.awayOnPurpose = true; picker.launch("*/*") }) { Icon(Icons.Filled.Upload, "Send a file to the computer") }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
@@ -327,7 +328,17 @@ fun FilesPage(activity: MainActivity, client: LinkClient, start: String = "~", o
         AlertDialog(
             onDismissRequest = { chosen = null },
             title = { Text(entry.name) },
-            text = { Text(Protocol.formatSize(entry.size)) },
+            text = {
+                Column {
+                    Text(Protocol.formatSize(entry.size))
+                    // In the mobile desktop, opening on the phone comes first;
+                    // the computer's own screen (a film on the TV) stays one tap away.
+                    if (onOpen != null) TextButton(onClick = {
+                        chosen = null
+                        onOpen("$path/${entry.name}")
+                    }) { Text("Open in phone session") }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     chosen = null

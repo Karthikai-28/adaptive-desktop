@@ -146,13 +146,13 @@ def text_of(event):
     return ""
 
 
-async def screen_size():
+async def screen_size(env=None):
     """(width, height) of the X screen, or (0, 0) when there is none."""
     if not shutil.which("xdotool"):
         return 0, 0
     proc = await asyncio.create_subprocess_exec(
         "xdotool", "getdisplaygeometry",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env)
     out, _ = await proc.communicate()
     try:
         width, height = out.decode().split()
@@ -165,12 +165,13 @@ class Input:
     """One long-lived xdotool reading commands, so a pointer move costs a
     line on a pipe rather than a new process."""
 
-    def __init__(self):
+    def __init__(self, env=None):
+        self.env = env
         self._proc = None
         self.screen = (0, 0)
 
     async def start(self):
-        self.screen = await screen_size()
+        self.screen = await screen_size(self.env)
         return self.available
 
     @property
@@ -181,7 +182,7 @@ class Input:
         if self._proc is None or self._proc.returncode is not None:
             self._proc = await asyncio.create_subprocess_exec(
                 "xdotool", "-", stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=self.env)
         return self._proc
 
     async def send(self, event):
@@ -192,7 +193,7 @@ class Input:
             proc = await asyncio.create_subprocess_exec(
                 "xdotool", "type", "--clearmodifiers", "--delay", "0", "--file", "-",
                 stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=self.env)
             await proc.communicate(text.encode())
             return True
         commands = translate(event, self.screen)

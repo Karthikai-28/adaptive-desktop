@@ -67,9 +67,11 @@ internal class WorkspaceStore(context: Context, computer: Computer, legacy: Stor
         }
     init {
         if (!data.has("profiles")) data.put("profiles", JSONArray())
-        if (!data.optBoolean("migrated")) {
+        // Done once there are buttons to carry over: the mobile desktop opens
+        // this store at launch, before any may have been made.
+        if (!data.optBoolean("migrated") && legacy.controls.isNotEmpty()) {
             data.put("legacy_backup", Control.listToJson(legacy.controls))
-            if (legacy.controls.isNotEmpty()) {
+            run {
                 val controls = legacy.controls.map { c ->
                     val s = when (c.kind) {
                         "action" -> when (c.value) {

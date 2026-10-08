@@ -367,7 +367,7 @@ def applications(detailed=False):
             item.update({"executable": info.get_executable() or "", "icon": icon.to_string() if icon else "",
                          "wm_class": "", "desktop_actions": []})
             if isinstance(info, Gio.DesktopAppInfo):
-                item.update({"wm_class": info.get_startup_wm_class() or "", "desktop_actions": list(info.list_actions())})
+                item.update({"wm_class": info.get_startup_wm_class() or "", "desktop_actions": list(info.list_actions()), "categories": (info.get_categories() or "").split(";")})
     apps.sort(key=lambda a: a["name"].casefold())
     return apps
 

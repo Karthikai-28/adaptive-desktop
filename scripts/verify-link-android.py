@@ -175,6 +175,13 @@ def screens(check, adb, device, control, build_env, sandbox):
         sh("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(wait)
 
+    def until(done, seconds=20):
+        for _ in range(seconds):
+            if done():
+                return True
+            time.sleep(1)
+        return done()
+
     def focused():
         return sh("shell", "dumpsys", "window", "displays").split("mCurrentFocus=")[-1].split("\n")[0]
 
@@ -195,16 +202,23 @@ def screens(check, adb, device, control, build_env, sandbox):
             sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
             time.sleep(3)
 
-    def home():
-        """Back to the app's home screen, from wherever the last step ended."""
-        for _ in range(5):
+    def shell_home():
+        """Back to the mobile desktop's Home, from wherever the last step ended."""
+        for _ in range(6):
             if "adaptivelink" not in focused():
                 sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
                 unlock_app()
-            if has("Webcam", "Presenter"):
+            if has("Pinned", "Recents"):
                 return True
             back()
         return False
+
+    def home():
+        """To the laptop tools (the screens below are opened from there),
+        through the mobile desktop's Home."""
+        if has("Webcam", "Presenter"):
+            return True
+        return shell_home() and tap("Laptop tools", wait=2) and has("Webcam", "Presenter")
 
     def allow_permission():
         for label in ("While using the app", "Allow", "Only this time"):
@@ -291,12 +305,48 @@ def screens(check, adb, device, control, build_env, sandbox):
             time.sleep(1)
         step(matched and account == "me@example.com",
              "sign-in: with the computer's account the phone asks without a code, and shows the same six digits")
-        step(has("Connected", "Screen", "Trackpad", "Presenter", "Webcam"), "sign-in: approved on the computer, connected")
+        step(has("Connected", "Pinned", "Recents"), "sign-in: approved on the computer, connected, at the mobile desktop")
     else:
         open_app()
         step(has("Use a pairing code instead") or has("Scan pairing code"), "first run: unlocked with the screen lock")
         tap("Use a pairing code instead")
         step(pair_by_code(), "code: a typed pairing code pairs the phone")
+
+    # ------------------------------------------------ the mobile desktop
+    # Opening the app lands on the laptop's mobile desktop, not a dashboard.
+    step(shell_home() and has("Home", "Apps", "Recents") and has("Files", "Control Center", "Laptop tools"),
+         "mobile desktop: the app opens at Home, with its pins and Home, Apps and Recents")
+    tap("Apps", wait=3)
+    step(has("Search laptop apps", "All apps", "Favorites"),
+         "mobile desktop: the drawer lists the laptop's installed apps beside the phone's own tools")
+    # Typed straight in: Back, to hide the keyboard, would leave the drawer.
+    tap("Search laptop apps", wait=1)
+    sh("shell", "input", "text", "Pocket")
+    time.sleep(1.5)
+    step(has("Pocket fixture") and not has("Laptop tools"), "mobile desktop: the drawer is searched by name")
+    tap("Pocket fixture", wait=8)
+    started = sandbox / "home" / "pocket-started.txt"
+    step(until(started.exists, 20) and "ADAPTIVE_MOBILE_ROOT" in started.read_text()
+         and has("Windows", "Controls"),
+         "mobile desktop: an app opens in the phone's own session, filling the screen with its controls on demand")
+    tap("Controls", wait=2)
+    step(has("Edit layouts"), "mobile desktop: an app's saved controls open beside it when asked for")
+    tap("Recents", wait=3)
+    step(has("Pocket fixture", "End session"), "mobile desktop: Recents lists the apps running on the phone")
+    tap("Home", wait=2)
+    step(has("Continue"), "mobile desktop: Home offers to continue the running apps")
+    tap("Control Center", wait=2)
+    step(has("Network & Wi-Fi", "Sound & displays", "Power & accessories"), "control center: the laptop's settings, natively")
+    tap("Sound & displays", wait=5)
+    step(has("Displays", "Sound comes out of"), "control center: a section opens on the laptop's own services")
+    shell_home()
+    tap("Recents", wait=2)
+    tap("End session", wait=1.5)
+    tap("Close normally", wait=6)
+    closed = until((sandbox / "home" / "pocket-closed.txt").exists, 10)
+    tap("Recents", wait=3)
+    step(closed and has("No phone applications are open"), "mobile desktop: ending the session closes its apps normally")
+    home()
 
     # Power buttons are pressed below. With power turned off on the computer
     # they are refused, which is what is checked - a real lock or suspend
@@ -616,13 +666,6 @@ def screens(check, adb, device, control, build_env, sandbox):
     def notified(text):
         return text in sh("shell", "dumpsys", "notification", "--noredact")
 
-    def until(done, seconds=20):
-        for _ in range(seconds):
-            if done():
-                return True
-            time.sleep(1)
-        return done()
-
     switch("Find this phone")
     time.sleep(5)
     rang = control.call("POST", "/ring")["ok"]
@@ -837,11 +880,11 @@ def screens(check, adb, device, control, build_env, sandbox):
     time.sleep(18)
     sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
     time.sleep(3)
-    step(not has("Screen", "Trackpad"), "lock: after being left, the app shows nothing until it is unlocked")
+    step(not has("Pinned", "Recents"), "lock: after being left, the app shows nothing until it is unlocked")
     sh("shell", "input", "text", PIN)
     sh("shell", "input", "keyevent", "KEYCODE_ENTER")
     time.sleep(3)
-    step(has("Screen", "Trackpad"), "lock: the phone's own screen lock opens it")
+    step(has("Pinned", "Recents"), "lock: the phone's own screen lock opens it")
 
     sh("shell", "am", "force-stop", "com.karthi.adaptivelink")
     sh("shell", "locksettings", "clear", "--old", PIN)
@@ -869,6 +912,18 @@ def main():
     (sandbox / "run").mkdir(mode=0o700)
     (sandbox / "home" / "Downloads").mkdir(parents=True)
     (sandbox / "home" / "Downloads" / "movie.mkv").write_bytes(b"x" * 2048)
+    # An app for the phone's own session to open: it notes where it ran, and
+    # that it was closed rather than killed.
+    applications = sandbox / "home" / ".local" / "share" / "applications"
+    applications.mkdir(parents=True)
+    (sandbox / "pocket.py").write_text(
+        "import os, tkinter as tk\nfrom pathlib import Path\nhome = Path.home()\n"
+        "(home / 'pocket-started.txt').write_text(''.join(k + '\\n' for k in os.environ if k.startswith('ADAPTIVE_MOBILE')))\n"
+        "root = tk.Tk(className='PocketFixture')\nroot.title('Pocket fixture')\nroot.mainloop()\n"
+        "(home / 'pocket-closed.txt').write_text('closed')\n")
+    (applications / "pocket-fixture.desktop").write_text(
+        f"[Desktop Entry]\nType=Application\nName=Pocket fixture\nExec={sys.executable} {sandbox / 'pocket.py'}\n"
+        "StartupWMClass=PocketFixture\nCategories=Utility;\n")
     env = dict(os.environ, HOME=str(sandbox / "home"), XDG_RUNTIME_DIR=str(sandbox / "run"),
                ADAPTIVE_LINK_PORT=str(PORT), ADAPTIVE_LINK_PAIRING_PORT=str(PAIRING_PORT),
                PYTHONPATH=site.getusersitepackages())

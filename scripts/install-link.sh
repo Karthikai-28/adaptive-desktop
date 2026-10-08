@@ -23,6 +23,11 @@ PYTHONPATH="$REPO/.local/link-pydeps" python3 -c "import aiortc" 2>/dev/null ||
 for tool in xdotool xclip; do
     command -v "$tool" >/dev/null || echo "note: $tool is not installed (sudo apt install $tool)"
 done
+# Phone apps run in a private display of their own, never on this screen.
+for pair in Xvfb:xvfb xfwm4:xfwm4 dbus-daemon:dbus xauth:xauth xprop:x11-utils; do
+    command -v "${pair%%:*}" >/dev/null ||
+        echo "note: phone apps need ${pair%%:*} (sudo apt install ${pair#*:})"
+done
 
 mkdir -p "$UNIT_DIR"
 install -m 0644 "$REPO/services/adaptive-link.service" "$UNIT_DIR/"

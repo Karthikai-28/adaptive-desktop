@@ -20,10 +20,10 @@ import subprocess
 from pathlib import Path
 
 
-def _run(*command, timeout=8, feed=None):
+def _run(*command, timeout=8, feed=None, env=None):
     """(ok, what it printed). Never raises."""
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout, input=feed, check=False)
+        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout, input=feed, check=False, env=env)
     except (OSError, subprocess.SubprocessError) as error:
         return False, str(error)
     return done.returncode == 0, (done.stdout if done.returncode == 0 else done.stderr or done.stdout).strip()
@@ -396,8 +396,8 @@ WINDOW_ID = re.compile(r"0x[0-9a-fA-F]+")
 MOVES = {"left": "super+shift+Left", "right": "super+shift+Right"}
 
 
-def _xprop(*args):
-    return _run("xprop", *args, timeout=3)[1]
+def _xprop(*args, env=None):
+    return _run("xprop", *args, timeout=3, env=env)[1]
 
 
 def _text(props, name):
@@ -405,21 +405,23 @@ def _text(props, name):
     return match.group(1).replace('\\"', '"') if match else ""
 
 
-def windows():
+def windows(env=None):
     """The windows that are open, the one in front first."""
-    root = _xprop("-root", "_NET_CLIENT_LIST_STACKING", "_NET_ACTIVE_WINDOW")
+    root = _xprop("-root", "_NET_CLIENT_LIST_STACKING", "_NET_CLIENT_LIST", "_NET_ACTIVE_WINDOW", env=env)
     stacking = re.search(r"_NET_CLIENT_LIST_STACKING\(WINDOW\): window id # (.*)$", root, re.MULTILINE)
+    if stacking is None:
+        stacking = re.search(r"_NET_CLIENT_LIST\(WINDOW\): window id # (.*)$", root, re.MULTILINE)
     active = re.search(r"_NET_ACTIVE_WINDOW\(WINDOW\): window id # (0x[0-9a-fA-F]+)", root)
     front = int(active.group(1), 16) if active else 0
     found = []
     for wid in reversed(WINDOW_ID.findall(stacking.group(1)) if stacking else []):
-        props = _xprop("-id", wid, "_NET_WM_NAME", "WM_NAME", "WM_CLASS", "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE", "_NET_WM_PID", "_GTK_APPLICATION_ID", "WM_TRANSIENT_FOR")
+        props = _xprop("-id", wid, "_NET_WM_NAME", "WM_NAME", "WM_CLASS", "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE", "_NET_WM_PID", "_GTK_APPLICATION_ID", "WM_TRANSIENT_FOR", env=env)
         kind = re.search(r"_NET_WM_WINDOW_TYPE\(ATOM\) = (.*)$", props, re.MULTILINE)
         if kind and "_NET_WM_WINDOW_TYPE_NORMAL" not in kind.group(1) and "DIALOG" not in kind.group(1):
             continue   # the desktop itself, docks and panels
         state = re.search(r"_NET_WM_STATE\(ATOM\) = (.*)$", props, re.MULTILINE)
         app = re.search(r'WM_CLASS\(STRING\) = "[^"]*", "([^"]*)"', props)
-        if state and "SKIP_TASKBAR" in state.group(1):
+        if state and "SKIP_TASKBAR" in state.group(1) and env is None:
             continue
         found.append({"id": int(wid, 16), "title": (_text(props, "_NET_WM_NAME") or _text(props, "WM_NAME"))[:200],
                       "app": app.group(1) if app else "", "active": int(wid, 16) == front,
