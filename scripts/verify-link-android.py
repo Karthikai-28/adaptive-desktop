@@ -369,7 +369,12 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(has("Low quality", "High quality") and has("Video: on", "Sound: on") and has("Use this phone as another display"),
          "screen: quality, video, sound and which display are chosen in one place")
     tap("Use this phone as another display", wait=5)
-    step(has("no display to spare"), "screen: says so when the computer has no output to make another display of")
+    import virtual_display
+    if virtual_display.capacity() == 0:
+        step(has("no display to spare"), "screen: says so when the computer has no output to make another display of")
+    else:
+        # This machine has a card to make one with; the test desktop (Xvfb) cannot show it.
+        step(has("the desktop did not see it"), "screen: says so when the display it made is not taken up by the desktop")
     tap("Picture and sound", wait=1.5)
     tap("Low quality", wait=3)
     for _ in range(10):
@@ -683,7 +688,9 @@ def screens(check, adb, device, control, build_env, sandbox):
     (keys / "phone.pem").write_bytes(subprocess.run(["openssl", "x509", "-pubkey", "-noout"],
                                                     input=paired[-1]["cert_pem"].encode(), capture_output=True).stdout)
     helper = subprocess.Popen([sys.executable, str(REPO / "scripts/link-approve.py")],
-                              env=dict(os.environ, LINK_SOCKET=str(sandbox / "run/adaptive-link.sock"), LINK_APPROVERS=str(keys)))
+                              env=dict(os.environ, LINK_SOCKET=str(sandbox / "run/adaptive-link.sock"), LINK_APPROVERS=str(keys),
+                                       # The sandbox's paired phones, not this machine's own.
+                                       HOME=str(sandbox / "home")))
     asked = until(lambda: notified("Allow administrator rights"))
     sh("shell", "cmd", "statusbar", "expand-notifications")
     time.sleep(2)
