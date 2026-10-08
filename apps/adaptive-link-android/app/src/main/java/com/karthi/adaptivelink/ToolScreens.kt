@@ -294,8 +294,9 @@ fun FilesPage(activity: MainActivity, client: LinkClient, start: String = "~", o
             response.use {
                 if (!it.isSuccessful) return@withContext false
                 val values = ContentValues().apply { put(MediaStore.Downloads.DISPLAY_NAME, entry.name) }
-                val target = activity.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: return@withContext false
+                // Android gives up finding a free name after 32 copies of one, and says so by throwing.
+                val target = runCatching { activity.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) }
+                    .getOrNull() ?: return@withContext false
                 activity.contentResolver.openOutputStream(target)!!.use { out -> it.body!!.byteStream().copyTo(out) }
                 true
             }

@@ -286,6 +286,72 @@ def power(action):
 
 # --------------------------------------------------------------------- apps
 
+def _icon_theme():
+    """The icon theme the desktop is set to, or "" (a missing schema would abort, so it is looked up first)."""
+    from gi.repository import Gio
+    source = Gio.SettingsSchemaSource.get_default()
+    if source is None or source.lookup("org.gnome.desktop.interface", True) is None:
+        return ""
+    return Gio.Settings.new("org.gnome.desktop.interface").get_string("icon-theme")
+
+
+def _icon_files(names, size):
+    """Files that could be these icons, nearest to the size wanted first.
+
+    The icon theme's own layout, followed by hand: GTK is never started in the
+    daemon, where it would be started from a worker thread."""
+    data = [Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")] + [
+        Path(d) for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":") if d]
+    bases = [Path.home() / ".icons"] + [d / "icons" for d in data]
+    themes = list(dict.fromkeys(t for t in (_icon_theme(), "Yaru", "Adwaita", "hicolor") if t))
+
+    def distance(path):
+        if "scalable" in path.parts:
+            return 0
+        found = re.search(r"(\d+)(?:x\d+)?(?:@\d+)?$", path.parent.name) or re.search(r"(\d+)", path.parent.parent.name)
+        return abs(int(found.group(1)) - size) if found else 1000
+
+    for name in names:
+        if "/" in name or name.startswith("."):
+            continue
+        for theme in themes:
+            found = []
+            for base in bases:
+                folder = base / theme
+                if folder.is_dir():
+                    found += [f for pattern in (f"*/apps/{name}.*", f"apps/*/{name}.*", f"*/*/{name}.*", f"*/*/*/{name}.*")
+                              for f in folder.glob(pattern) if f.suffix in (".png", ".svg")]
+            if found:
+                yield from sorted(set(found), key=distance)
+        for suffix in (".png", ".svg", ".xpm"):
+            if (Path("/usr/share/pixmaps") / (name + suffix)).is_file():
+                yield Path("/usr/share/pixmaps") / (name + suffix)
+
+
+def app_icon_png(icon, size=48):
+    """An app's icon (as Gio writes it, a name or a path) as PNG bytes, or None."""
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf, Gio, GLib
+    try:
+        made = Gio.Icon.new_for_string(icon)
+    except (GLib.Error, TypeError):
+        return None
+    if isinstance(made, Gio.FileIcon):
+        files = [Path(made.get_file().get_path() or "")]
+    elif isinstance(made, Gio.ThemedIcon):
+        files = _icon_files(made.get_names(), size)
+    else:
+        return None
+    for path in files:
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(str(path), size, size)
+            return pixbuf.save_to_bufferv("png", [], [])[1]
+        except GLib.Error:
+            continue
+    return None
+
+
 def applications(detailed=False):
     """[{id, name}] of the applications in the app grid."""
     import gi

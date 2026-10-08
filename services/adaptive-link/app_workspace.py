@@ -71,6 +71,7 @@ class Workspace:
         self.catalog_lock = asyncio.Lock()
         self.catalog = []
         self.catalog_at = 0
+        self.icons = {}
         self.association_path = link.link_dir / "app-associations.json"
         try:
             self.associations = json.loads(self.association_path.read_text())
@@ -129,20 +130,12 @@ class Workspace:
         app = next((a for a in self.catalog if a["id"] == request.query.get("id")), None)
         if not app:
             raise web.HTTPNotFound()
-        def load():
-            import gi
-            gi.require_version("Gtk", "3.0")
-            from gi.repository import Gio, Gtk
-            icon = Gio.Icon.new_for_string(app["icon"])
-            theme = Gtk.IconTheme.get_default()
-            info = theme.lookup_by_gicon(icon, 48, Gtk.IconLookupFlags.FORCE_SIZE) if theme else None
-            if info is None:
-                return None
-            return info.load_icon().save_to_bufferv("png", [], [])[1]
-        try:
-            data = await asyncio.to_thread(load)
-        except Exception:
-            data = None
+        if app["id"] not in self.icons:
+            try:
+                self.icons[app["id"]] = await asyncio.to_thread(desktop.app_icon_png, app.get("icon", ""))
+            except Exception:  # noqa: BLE001 - an icon that cannot be drawn is drawn by the phone instead
+                self.icons[app["id"]] = None
+        data = self.icons[app["id"]]
         return web.json_response({"png": base64.b64encode(data).decode() if data else ""})
 
     def session(self, ident, owner):

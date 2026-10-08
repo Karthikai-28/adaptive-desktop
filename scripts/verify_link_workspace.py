@@ -51,6 +51,19 @@ def checks(check):
     check(aw.matches({"app": "Browser"}, apps, {"browser": "b.desktop"}) == ["b.desktop"], "apps: explicit remembered association wins")
     check(aw.matches({"application_id": "a", "title": "b.desktop"}, apps, {}) == ["a.desktop"], "apps: stable ID wins over window title")
     check(aw.adapter("code_code.desktop") == "editor" and aw.adapter("new.desktop") == "universal", "apps: unknown apps retain universal controls")
+    import sys
+    import desktop
+    with tempfile.TemporaryDirectory() as folder:
+        import gi
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import GdkPixbuf
+        source = Path(folder) / "app.png"
+        GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 96, 96).savev(str(source), "png", [], [])
+        png = desktop.app_icon_png(str(source))
+        check(png is not None and png.startswith(b"\x89PNG"), "apps: an icon is drawn as PNG")
+        check(desktop.app_icon_png(str(Path(folder) / "missing.png")) is None and desktop.app_icon_png("") is None,
+              "apps: an icon that cannot be found is left to the phone")
+        check("gi.repository.Gtk" not in sys.modules, "apps: icons are drawn without starting GTK in the daemon")
     check(aw.key_event("ctrl+shift+s") == {"t": "key", "k": "s", "m": ["ctrl", "shift"]}, "controls: shortcuts use validated key events")
     asyncio.run(async_checks(check))
 
