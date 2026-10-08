@@ -413,7 +413,7 @@ def windows():
     front = int(active.group(1), 16) if active else 0
     found = []
     for wid in reversed(WINDOW_ID.findall(stacking.group(1)) if stacking else []):
-        props = _xprop("-id", wid, "_NET_WM_NAME", "WM_NAME", "WM_CLASS", "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE")
+        props = _xprop("-id", wid, "_NET_WM_NAME", "WM_NAME", "WM_CLASS", "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE", "_NET_WM_PID", "_GTK_APPLICATION_ID", "WM_TRANSIENT_FOR")
         kind = re.search(r"_NET_WM_WINDOW_TYPE\(ATOM\) = (.*)$", props, re.MULTILINE)
         if kind and "_NET_WM_WINDOW_TYPE_NORMAL" not in kind.group(1) and "DIALOG" not in kind.group(1):
             continue   # the desktop itself, docks and panels
@@ -424,7 +424,12 @@ def windows():
         found.append({"id": int(wid, 16), "title": (_text(props, "_NET_WM_NAME") or _text(props, "WM_NAME"))[:200],
                       "app": app.group(1) if app else "", "active": int(wid, 16) == front,
                       "minimized": bool(state and "_NET_WM_STATE_HIDDEN" in state.group(1)),
-                      "maximized": bool(state and "MAXIMIZED_VERT" in state.group(1))})
+                      "maximized": bool(state and "MAXIMIZED_VERT" in state.group(1)),
+                      "application_id": _text(props, "_GTK_APPLICATION_ID"),
+                      "pid": int(re.search(r"_NET_WM_PID\(CARDINAL\) = (\d+)", props).group(1))
+                          if re.search(r"_NET_WM_PID\(CARDINAL\) = (\d+)", props) else 0,
+                      "parent": int(re.search(r"WM_TRANSIENT_FOR\(WINDOW\): window id # (0x[0-9a-fA-F]+)", props).group(1), 16)
+                          if re.search(r"WM_TRANSIENT_FOR\(WINDOW\): window id # (0x[0-9a-fA-F]+)", props) else 0})
         if len(found) >= WINDOW_LIMIT:
             break
     return found

@@ -675,6 +675,19 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   laptop's own driver will not light an empty output, which was tried.
 - ✅ **Four home-screen widgets**: quick actions, status, media, the owner's
   own buttons.
+- ✅ **Every app from the phone, with buttons of your own**
+  (`app_workspace.py`, `control_profiles.py`, the app's Apps screen). The app
+  grid on the phone; an app opened into a workspace of its own, moved to the
+  phone's display where there is one and a crop that follows its window where
+  there is not; several named layouts per app and a global set, kept on the
+  computer and each phone, edits from two phones never lost; buttons of up to
+  30 steps that stop on the first failure, can be stopped, and are never
+  replayed; starter layouts and extra screens for browsers, Files, terminal,
+  editors, media players and Impress. One phone types at a time. Checked by
+  `verify_link_workspace.py`, the real routes in `verify-link.py`, and the
+  Apps and layout screens on an emulator. 🔬 The three `link_app_workspaces`,
+  `link_layouts_sync` and `link_macro_cancel` checks on a real phone and
+  desktop.
 - ⬜ Not there: a watch app of its own (the notification's buttons reach a
   watch), browsing the phone's files from the desktop's file manager, the
   phone's battery in the panel (it is in `link-cli.py status`), Wayland, iOS,

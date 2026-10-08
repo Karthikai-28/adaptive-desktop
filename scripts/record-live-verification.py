@@ -216,6 +216,21 @@ CHECKS = [
         "prompt": "Do the four widgets work on your home screen, and does a second phone on the Wi-Fi see the computer as nearby while the pairing window is open?",
     },
     {
+        "id": "link_app_workspaces",
+        "backlog": "Adaptive Link: every app from the phone, in a workspace of its own.",
+        "prompt": "From Apps, do Files, a browser, a terminal, an editor, a media player and Impress each open into a workspace - moved to the phone's display where it is installed, a crop that follows the window where it is not - upright, sideways, full screen and with the keyboard up?",
+    },
+    {
+        "id": "link_layouts_sync",
+        "backlog": "Adaptive Link: several saved layouts per app, kept on the computer and each phone.",
+        "prompt": "Save three layouts for one app, restart the phone and the computer: are all three there? Edit one on a second phone: does the first receive it, and do two edits made at once both survive?",
+    },
+    {
+        "id": "link_macro_cancel",
+        "backlog": "Adaptive Link: buttons of several steps, stopped part-way.",
+        "prompt": "Run a button that opens an app, waits for its window, types and presses keys; press Stop part-way. Do the remaining steps not happen, is no key left held down, and does nothing run again on reconnecting over Wi-Fi, USB and mobile data?",
+    },
+    {
         "id": "long_memory",
         "backlog": "Long-running shell memory test.",
         "prompt": "Did scripts/verify-shell-memory.py --seconds 14400 --interval 60 pass in the graphical session?",

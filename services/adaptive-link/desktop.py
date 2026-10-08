@@ -155,6 +155,11 @@ def players():
             "url": web_address(str(meta.get("xesam:url", ""))),
             "length": int(meta.get("mpris:length", 0)) // 1_000_000,
             "position": int(info.get("Position", 0)) // 1_000_000,
+            "can_seek": bool(info.get("CanSeek", False)),
+            "can_control": bool(info.get("CanControl", False)),
+            "can_next": bool(info.get("CanGoNext", False)),
+            "can_previous": bool(info.get("CanGoPrevious", False)),
+            "can_play": bool(info.get("CanPlay", False)), "can_pause": bool(info.get("CanPause", False)),
         })
     # What is playing first: it is what a press of pause is meant for.
     found.sort(key=lambda p: (p["status"] != "Playing", p["name"]))
@@ -281,13 +286,22 @@ def power(action):
 
 # --------------------------------------------------------------------- apps
 
-def applications():
+def applications(detailed=False):
     """[{id, name}] of the applications in the app grid."""
     import gi
     gi.require_version("Gio", "2.0")
     from gi.repository import Gio
-    apps = [{"id": app.get_id(), "name": app.get_display_name() or app.get_name()}
-            for app in Gio.AppInfo.get_all() if app.should_show() and app.get_id()]
+    found = [app for app in Gio.AppInfo.get_all() if app.should_show() and app.get_id()]
+    apps = [{"id": app.get_id(), "name": app.get_display_name() or app.get_name()} for app in found]
+    if detailed:
+        # What get_all() gives is already a DesktopAppInfo; looking it up again
+        # by ID raises (not None) for one that cannot be found.
+        for item, info in zip(apps, found):
+            icon = info.get_icon()
+            item.update({"executable": info.get_executable() or "", "icon": icon.to_string() if icon else "",
+                         "wm_class": "", "desktop_actions": []})
+            if isinstance(info, Gio.DesktopAppInfo):
+                item.update({"wm_class": info.get_startup_wm_class() or "", "desktop_actions": list(info.list_actions())})
     apps.sort(key=lambda a: a["name"].casefold())
     return apps
 

@@ -944,6 +944,26 @@ async def daemon_checks(sandbox, check):
                 async with phone.post(f"{link_url}{path}", json=body) as reply:
                     return await reply.json()
 
+            # Versioned layouts and execution go through the real authenticated routes.
+            import verify_link_workspace
+            layout = verify_link_workspace.sample()
+            saved = await change("/v1/control-profiles", profile=layout, revision=0)
+            check(saved["ok"] and saved["profile"]["revision"] > 0, "layout routes: paired phone saves a layout")
+            conflicting = await change("/v1/control-profiles", profile=dict(layout, name="Offline copy"), revision=0)
+            check(conflicting["conflict"], "layout routes: stale revisions preserve a conflict copy")
+            async with phone.get(f"{link_url}/v1/control-profiles") as reply:
+                layouts = await reply.json()
+            check(len(layouts["profiles"]) == 2, "layout routes: both saved versions can be read")
+            started = await change("/v1/control-runs", request_id="http-regression", steps=[{"kind": "delay", "value": "0", "scope": "global"}])
+            await asyncio.sleep(0.1)
+            async with phone.get(f"{link_url}/v1/control-runs?id=http-regression") as reply:
+                finished_run = (await reply.json())["runs"][0]
+            check(started["ok"] and finished_run["state"] == "completed", "control routes: executions have observable completion")
+            duplicate = await change("/v1/control-runs", request_id="http-regression", steps=[{"kind": "delay", "value": "0"}])
+            check(duplicate["run"]["state"] == "completed", "control routes: retrying a completed request does not rerun it")
+            bad_session = await change("/v1/app-sessions", operation="take-control", id="unknown")
+            check(not bad_session["ok"], "workspace routes: unknown session cannot take control")
+
             def network_now():
                 return json.loads((tools / "network.json").read_text())
 
@@ -1791,6 +1811,8 @@ async def daemon_checks(sandbox, check):
 
 def inner(sandbox, check):
     pure_checks(check)
+    import verify_link_workspace
+    verify_link_workspace.checks(check)
     asyncio.run(daemon_checks(sandbox, check))
 
 

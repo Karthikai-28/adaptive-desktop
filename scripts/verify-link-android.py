@@ -146,7 +146,7 @@ def screens(check, adb, device, control, build_env, sandbox):
         return all(any(w in label for label in labels) for w in wanted)
 
     # The home screen's tiles: more of them than fit, so one may need scrolling to.
-    TILES = {"Screen", "Trackpad", "Media", "Presenter", "Run", "Files", "Webcam", "Tasks", "Devices", "Network", "Desktop",
+    TILES = {"Apps", "Screen", "Trackpad", "Media", "Presenter", "Run", "Files", "Webcam", "Tasks", "Devices", "Network", "Desktop",
              "Controls", "Scan", "Windows", "Display", "Bluetooth", "Services", "More"}
 
     def tap(label, wait=1.5, exact=True):
@@ -702,6 +702,26 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(machine_now()["muted"] == before, "tags: one of the owner's buttons is pressed only by a tag this phone wrote")
     tap("Game pad", wait=2)
     step(has("WASD", "Arrows") and has("A", "B"), "game pad: a stick and buttons that hold keys down")
+    home()
+
+    # ------------------------------------------------------- app layouts
+    tap("Apps", wait=5)
+    step(has("Search apps", "Refresh"), "apps: searchable application library opens")
+    tap("Layouts", wait=3)
+    step(has("Global layouts", "My controls"), "layouts: legacy buttons migrate to a global layout")
+    tap("New", wait=2)
+    step(has("Edit layout", "Layout name", "Add button"), "layouts: new layout opens the editor")
+    tap("Add button", wait=2)
+    step(has("Edit button", "Label", "Step 1"), "layouts: button editor exposes explicit action steps")
+    tap("Done", wait=2)
+    tap("Save", wait=4)
+    step(has("New layout", "1 controls"), "layouts: custom layout is saved and listed")
+    tap("New", wait=2)
+    tap("Save", wait=3)
+    home()
+    tap("Apps", wait=3)
+    tap("Layouts", wait=3)
+    step(has("New layout", "My controls"), "layouts: several layouts survive leaving and reopening Apps")
     home()
 
     # ------------------------------------------------------------- scan

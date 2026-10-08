@@ -294,6 +294,7 @@ on the local network only and the screen is sent a picture at a time.
 
 | In the app | On the computer |
 | --- | --- |
+| Apps | Every app in the app grid, searched, starred and recent; opened (or the window it already has brought back) into a workspace of its own, with your saved button layouts beside it (see *Every app, with buttons of your own*) |
 | Screen | The screen as video with the computer's sound (three qualities), or a picture at a time where video cannot be had; tap to click, drag to drag, long-press for right-click, pinch to zoom, a scroll mode, a keyboard |
 | Trackpad | Relative pointer, a scroll strip, both buttons, a keyboard with the keys a phone lacks; *Air* aims the phone like a pointer; the microphone on the keyboard types what you say |
 | Media | Whatever is playing (MPRIS): play, pause, next, previous, seek, volume; what is playing from the web can be carried on with on the phone |
@@ -353,6 +354,104 @@ and a keyboard can type a command into a terminal or open a file, whatever
 `exec` and `files` say. To stop the phone acting on the computer, turn
 `input` off as well. The clipboard, media controls and the phone's
 notifications are always available to the paired phone.
+
+### Every app, with buttons of your own
+
+*Apps* lists what is in the computer's app grid, by its desktop-entry ID
+(`firefox.desktop`), never by a window's title. Tapping one opens it, or
+brings back the window it already has; with several windows the phone asks
+which, and can remember that a window class belongs to that app. An app that
+offers *New window* gets a button for it. An app that starts but shows no
+window in six seconds says so, and offers its windows to choose from.
+
+The app opens into a workspace: its name and window at the top, the app
+itself in the middle, a drawer of buttons below (beside it, sideways), and
+along the bottom Apps, Trackpad, Controls, Desktop and Full screen. Where the
+phone can be a display (*The screen as video*, below) the window is moved
+onto it and fills it, and *Return window to computer* puts it back where it
+was. Where it cannot, the window stays on the computer, is brought to the
+front, and the phone shows the part of the screen it covers, following it as
+it moves. That is a crop of the screen, not a capture of the window alone:
+whatever lies over it shows too, and *Desktop* shows the whole screen for a
+menu or dialog that reaches outside it. A dialog the app opens is followed
+by its parent, not guessed from its title.
+
+**Layouts.** Each app has as many layouts as you like - Reading, Research and
+Meetings for a browser; Coding, Debugging and Writing for an editor;
+Presenting and Rehearsal for slides - and there is a *Global* set for
+buttons wanted everywhere. Opening an app brings back the layout last used
+with it on that phone; what is in front on the computer does not change it.
+New, Edit, Duplicate, Rename, Save as, Set default, Export, Import and Delete.
+In the editor a tap selects a button rather than pressing it, and *Test
+action* is the one way to run it from there. Buttons can be wide or blue,
+grouped into pages, reordered by holding and dragging, and previewed upright
+or sideways. The first time an app is opened it is given starter layouts:
+
+| App | Starter layouts | Besides the live view |
+| --- | --- | --- |
+| Firefox, Chrome | Reading, Research, Meetings | An address bar that types into the chosen window |
+| Files | Files | *Tasks*: the Files screen |
+| Terminal | Terminal | *Tasks*: the Run screen |
+| VS Code, text editor | Coding, Debugging, Writing | — |
+| VLC, Rhythmbox | Playback | What is playing; seeking only where the player says it can |
+| LibreOffice Impress | Presenting, Rehearsal | A timer |
+| Anything else | Basic | — |
+
+What these do not have is made up from pictures: a browser's tabs, an
+editor's document and a presentation's notes are not read, and would need
+a real connection to that app first.
+
+**What a button does** is a list of up to 30 steps, run in order on the
+computer: keys to press, text to type (or asked for when pressed), an action
+the computer already knows (the same ones *Asking for it* uses), an app, file,
+folder or web address to open, a command with its folder, a wait of up to
+ten seconds, waiting for an app's window, media and volume, and switching
+layout. A button can also be held (one key, down until let go), or be a
+volume slider or mute switch, which show the computer's real volume. The
+run stops at the first step that fails and says which; *Stop* is always
+there, and stopping lets go of any held key without undoing the steps
+already done. Two minutes is the most a run may take. Before every step
+meant for the app (rather than marked global), its window is checked and
+brought to the front again.
+
+Pressing is never queued: a button pressed while the phone is out of reach
+does nothing, and nothing is sent again on reconnecting. A request carries
+its own ID, so the same press arriving twice runs once. A run whose phone
+stops answering for eight seconds is stopped.
+
+**Where they are kept.** The computer keeps the layouts
+(`~/.config/adaptive-desktop/link/control-profiles.json`, written whole or
+not at all), and each phone keeps a copy per computer, so they can be edited
+with no connection and are sent when there is one. Each layout has a
+revision; an edit made to an older revision than the computer's does not
+replace the newer one but is kept beside it as a *conflict copy*, so edits
+from two phones are never lost. Export writes a layout's buttons and steps
+and nothing about the pairing; an import is shown step by step, then opened
+in the editor, before anything in it can run. The buttons from the Controls
+screen were copied once into *Global → My controls*, in order; the Controls
+screen, its widget and its NFC tags go on using the originals.
+
+**The switches still decide.** Each step is checked against them on the
+computer when it runs: keys, text, apps and media need `input`, commands
+need `exec`, files need `files` - and a file that would run as a program
+needs `exec` as well, as on the Files screen. A step that cannot be undone
+(restarting, shutting down) is asked about first. Turning `input` off stops
+a run at its next step, and lets go of a held key at once. The audit log
+records each run's ID, how far it got and how long it took, never the text
+or the command.
+
+**One phone at a time.** The computer has one keyboard focus, so while one
+phone has a workspace open, its input is the one that counts; another phone
+can watch, and has to press *Take control* to type or click. While a button
+runs, nothing else types: touches and keys from the live view are dropped
+until it ends, rather than mixed in with its steps.
+
+A phone with an older app keeps working as before; an app connected to an
+older computer service sees that it lacks these (`/v1/status` lists
+`capabilities`) and says so. The new parts of the link are `/v1/apps`
+(more detail, and `/v1/apps/icon`), `/v1/app-sessions`,
+`/v1/control-profiles` and `/v1/control-runs`, and three more things
+`/v1/watch` can follow.
 
 ### Asking for it
 
@@ -572,8 +671,16 @@ never as part of a command line that other programs could read.
   when none of its addresses answers, an impostor computer and a replaced
   key; then the app itself - signing in, every screen opened and every
   control pressed, and a command typed on the phone's own screen.
+- `scripts/verify_link_workspace.py` (also run by `verify-link.py`) — layouts
+  and buttons: an interrupted save, two phones' edits to one layout, a stale
+  delete, imports with more in them than a layout; windows matched to apps
+  without guessing; a run stopping at its first failure, not running twice,
+  stopped mid-wait, stopped when its phone goes quiet, letting go of a held
+  key when `input` is turned off, and not getting round input ownership or
+  `exec`.
 - The app's unit tests check that the phone computes the same pairing digits
-  and fingerprints as the computer's code.
+  and fingerprints as the computer's code, and that its starter layouts and
+  export carry only what a layout holds.
 
 What that leaves for a real phone is in `record-live-verification.py`: your
 own device, Google's real sign-in (the emulator has no Google account, so the
@@ -599,6 +706,8 @@ PAM.
   cannot reach the computer unless you run a relay of your own.
 - The widget and the tiles act without the app's lock; they are limited to
   what is safe for that (see above).
+- An app workspace without the phone as a display is a crop of the screen,
+  not of the window: what overlaps the window shows on the phone too.
 - Android only.
 
 ## Building the app from scratch

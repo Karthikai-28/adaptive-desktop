@@ -36,6 +36,7 @@ import aiohttp
 from aiohttp import WSMsgType, web
 
 import actions
+import app_workspace
 import alerts
 import camera
 import cloud
@@ -183,6 +184,7 @@ class Link:
         self.scenes = scenes.Scenes(self.link_dir)
         self._nearby = None   # this computer saying it is here, while it waits to be paired with
         self._pair_asks = {}
+        self.workspace = app_workspace.Workspace(self)
 
     # ------------------------------------------------------------ listeners
 
@@ -203,7 +205,8 @@ class Link:
         await self._start_control()
         await self.restart_link()
         await self.restart_cloud()
-        self._watchers = [asyncio.ensure_future(alerts.watch_notifications(self.events)),
+        self._watchers = [asyncio.create_task(self.workspace.expire()),
+                          asyncio.ensure_future(alerts.watch_notifications(self.events)),
                           asyncio.ensure_future(alerts.watch_machine(self.events, ALERT_EVERY_S)),
                           asyncio.ensure_future(companion.watch_clipboard(
                               self.events, desktop.clipboard_get,
@@ -213,6 +216,7 @@ class Link:
                           asyncio.ensure_future(usb_link.watch(self.port, lambda what: self.audit.write("-", "usb", what)))]
 
     async def stop(self):
+        await self.workspace.close()
         for watcher in self._watchers:
             watcher.cancel()
         await asyncio.to_thread(phone_display.unextend_all)
@@ -248,6 +252,7 @@ class Link:
         listener starts, so pairing, unpairing and switching the link on or
         off all come through here.
         """
+        await self.workspace.close()
         if self._media is not None:
             await self._media.close_all()
         if self._phone_screen is not None:
@@ -315,6 +320,13 @@ class Link:
         request["phone"] = caller
         CALLER.set(caller)
         self._notice(address, caller)
+        input_paths = {"/v1/launch", "/v1/open", "/v1/open-url", "/v1/input", "/v1/machine/windows"}
+        if request.path in input_paths and (request.method == "POST" or request.path == "/v1/input"):
+            if self.workspace.control_owner and self.workspace.control_owner != digest:
+                return json_error(409, "another phone owns input; take control first")
+        serialized = input_paths | {"/v1/do", "/v1/exec"}
+        if request.path in serialized and self.workspace.input_lock.locked():
+            return json_error(409, "a control is running; wait or stop it first")
         return await handler(request)
 
     def _notice(self, address, caller):
@@ -341,6 +353,7 @@ class Link:
 
     def _routes(self, app):
         add = app.router
+        self.workspace.routes(add)
         add.add_get("/v1/status", self.h_status)
         add.add_get("/v1/screen", self.h_screen)
         add.add_get("/v1/input", self.h_input)
@@ -398,6 +411,7 @@ class Link:
         info = await asyncio.to_thread(desktop.status)
         info.update({
             "version": VERSION,
+            "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1},
             # From this machine itself: the direct tunnel, or the USB cable.
             "via": "direct" if identity.is_tunnel(request["peer"])
                    else "usb" if identity.is_loopback(request["peer"]) else "lan",
@@ -420,7 +434,7 @@ class Link:
 
     # ----------------------------------------------------- screen and input
 
-    async def _read_input(self, ws, region=None):
+    async def _read_input(self, ws, region=None, workspace_id="", owner=""):
         """Apply the input events arriving on a socket until it closes.
 
         With input turned off the socket is still read (so a close is seen)
@@ -429,29 +443,55 @@ class Link:
         phone going out of reach never leaves one stuck down.
         """
         held = frozenset()
+        async def release():
+            nonlocal held
+            for event in inputs.release(held):
+                await self.input.send(event)
+            held = frozenset()
         try:
-            async for message in ws:
-                if message.type != WSMsgType.TEXT or not self._allowed("allow_input"):
+            while not ws.closed:
+                permitted = self._allowed("allow_input") and (not self.workspace.control_owner or self.workspace.control_owner == owner)
+                if not permitted or self.workspace.input_lock.locked():
+                    await release()
+                try:
+                    message = await ws.receive(timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                if message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                    break
+                if message.type != WSMsgType.TEXT or not permitted or self.workspace.input_lock.locked():
                     continue
                 try:
                     event = json.loads(message.data)
                 except ValueError:
                     continue
-                placed = inputs.in_region(event, region, self.input.screen)
-                if isinstance(placed, dict) and placed.get("t") == "pen":
-                    if not await asyncio.to_thread(self.pen.send, placed, self.input.screen):
-                        for instead in inputs.pen_as_pointer(placed):
-                            if await self.input.send(instead):
-                                held = inputs.held_after(held, instead)
-                elif await self.input.send(placed):
-                    held = inputs.held_after(held, event)
+                async with self.workspace.input_lock:
+                    if workspace_id:
+                        try:
+                            session = await self.workspace.focus(workspace_id, owner, fresh=False)
+                            region = session["region"] if region is not None else None
+                        except (ValueError, PermissionError):
+                            await release()
+                            continue
+                    placed = inputs.in_region(event, region, self.input.screen)
+                    if isinstance(placed, dict) and placed.get("t") == "pen":
+                        if not await asyncio.to_thread(self.pen.send, placed, self.input.screen):
+                            for instead in inputs.pen_as_pointer(placed):
+                                if await self.input.send(instead):
+                                    held = inputs.held_after(held, instead)
+                    elif await self.input.send(placed):
+                        held = inputs.held_after(held, event)
         finally:
-            for event in inputs.release(held):
-                await self.input.send(event)
+            await release()
 
     async def _region(self, request):
         """The one display the phone asked for (?display=NAME), or None for
         the whole screen."""
+        if request.query.get("workspace"):
+            try:
+                return await self.workspace.region(request.query["workspace"], self.workspace.owner(request), request.query.get("whole") == "1")
+            except (ValueError, PermissionError) as error:
+                raise web.HTTPBadRequest(text=str(error))
         name = request.query.get("display", "")
         return await asyncio.to_thread(machine.region, name) if name else None
 
@@ -463,10 +503,10 @@ class Link:
     async def h_screen(self, request):
         if not await self._have_screen():
             return json_error(503, "there is no screen to show")
+        region = await self._region(request)
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
         await ws.prepare(request)
         self._track(ws)
-        region = await self._region(request)
         made = phone_display.display_named(request.query.get("display", ""))
         capture = (screen.MadeCapture(made, request.query.get("preset", "medium")) if made is not None
                    else screen.Capture(self.input.screen, request.query.get("preset", "medium"), region))
@@ -474,7 +514,7 @@ class Link:
         self._sessions += 1
         try:
             await asyncio.to_thread(capture.start)
-            reader = asyncio.ensure_future(self._read_input(ws, region))
+            reader = asyncio.ensure_future(self._read_input(ws, region, request.query.get("workspace", ""), self.workspace.owner(request)))
             while not ws.closed and not reader.done():
                 frame = await asyncio.to_thread(capture.next_frame, 1.0)
                 if frame is not None:
@@ -495,12 +535,15 @@ class Link:
             return json_error(503, "there is no screen to show")
         body = await read_json(request)
         try:
+            if body.get("workspace"):
+                region = await self.workspace.region(body["workspace"], self.workspace.owner(request), body.get("whole", False))
+            else:
+                region = await asyncio.to_thread(machine.region, str(body["display"])) if body.get("display") else None
             if self._media is None:
                 import media
                 self._media = media.MediaServer(
                     relay=self.relay, report=lambda what: self.audit.write("-", "screen-video", what))
             self._media.relay = self.relay
-            region = await asyncio.to_thread(machine.region, str(body["display"])) if body.get("display") else None
             made = phone_display.display_named(str(body.get("display", "")))
             started = await asyncio.wait_for(self._media.answer(
                 body.get("offer"), self.input.screen, str(body.get("preset", "medium")), body.get("sound") is not False,
@@ -526,7 +569,7 @@ class Link:
         await ws.prepare(request)
         self._track(ws)
         self.audit.write(request["peer"], "input")
-        await self._read_input(ws, await self._region(request))
+        await self._read_input(ws, await self._region(request), request.query.get("workspace", ""), self.workspace.owner(request))
         return ws
 
     # ------------------------------------------------------------- commands
@@ -565,7 +608,7 @@ class Link:
         cwd = desktop.resolve(order.get("cwd"))
         if not cwd.is_dir():
             cwd = Path.home()
-        self.audit.write(request["peer"], "exec", command)
+        self.audit.write(request["peer"], "exec", "command started")
 
         if order.get("detach"):
             process = await asyncio.create_subprocess_exec(
@@ -832,12 +875,16 @@ class Link:
         return web.json_response({"ok": done, "text": text})
 
     async def h_apps(self, _request):
-        return web.json_response({"apps": await asyncio.to_thread(desktop.applications)})
+        apps, windows = await self.workspace.apps()
+        return web.json_response({"apps": apps, "windows": windows})
 
     async def h_launch(self, request):
         if not self._allowed("allow_input"):
             return json_error(403, "pointer and keyboard are turned off on the computer")
-        app_id = (await read_json(request)).get("id")
+        body = await read_json(request)
+        if body.get("workspace"):
+            return await self.workspace.guarded(self.workspace.change_session)(request)
+        app_id = body.get("id")
         self.audit.write(request["peer"], "launch", app_id)
         return web.json_response({"ok": await asyncio.to_thread(desktop.launch, app_id)})
 
@@ -1163,6 +1210,9 @@ class Link:
     async def _do_one(self, ident, args, who):
         action = self.book.actions().get(ident)
         args = args if isinstance(args, dict) else {}
+        caller = CALLER.get()
+        if action is not None and action.switch == "allow_input" and caller and self.workspace.control_owner and self.workspace.control_owner != caller["fingerprint"]:
+            return False, "another phone owns input; take control first", 0
 
         def say():
             try:
@@ -1181,10 +1231,10 @@ class Link:
                 self._hold(None)
             how = ("wifi", args.get("state", "")) if ident == "wifi" else ("join", args.get("network", ""))
             done, text, change = await asyncio.to_thread(system.network_action, *how)
-            self.audit.write(who, "do", say() + ("" if done else f" - {text}"))
+            self.audit.write(who, "do", ident + (" completed" if done else " failed"))
             return done, text or say(), self._hold(change) if from_phone else 0
         done, text = await asyncio.to_thread(self.book.run, ident, args, self._allowed)
-        self.audit.write(who, "do", say() + ("" if done else f" - {text}"))
+        self.audit.write(who, "do", ident + (" completed" if done else " failed"))
         return done, text, 0
 
     async def h_do(self, request):
@@ -1220,6 +1270,13 @@ class Link:
         await ws.prepare(request)
         self._track(ws)
         wanted, last, due = set(), {}, {}
+        watched = dict(WATCHED)
+        owner = self.workspace.owner(request)
+        watched.update({
+            "control-profiles": (lambda: {"revision": self.workspace.profiles.data["revision"]}, 1),
+            "app-sessions": (lambda: {"sessions": [self.workspace.public(s) for s in list(self.workspace.sessions.values()) if s["owner"] == owner]}, 1),
+            "control-runs": (lambda: {"runs": [self.workspace.run_public(r) for r in list(self.workspace.runs.values()) if r["owner"] == owner]}, 0.5),
+        })
 
         async def listen():
             async for message in ws:
@@ -1229,7 +1286,7 @@ class Link:
                     named = json.loads(message.data).get("watch", [])
                 except (ValueError, AttributeError):
                     continue
-                now = {name for name in named if name in WATCHED} if isinstance(named, list) else set()
+                now = {name for name in named if name in watched} if isinstance(named, list) else set()
                 for name in now - wanted:
                     last.pop(name, None)   # newly looked at: told at once, changed or not
                     due[name] = 0
@@ -1241,7 +1298,7 @@ class Link:
             while not ws.closed and not listening.done():
                 moment = time.monotonic()
                 for name in list(wanted):
-                    read, every = WATCHED[name]
+                    read, every = watched[name]
                     if moment < due.get(name, 0):
                         continue
                     due[name] = moment + every

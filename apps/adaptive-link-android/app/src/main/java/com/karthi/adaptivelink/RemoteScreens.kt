@@ -256,7 +256,7 @@ private fun DisplaySettings(store: Store, onDone: (changed: Boolean) -> Unit) {
 }
 
 @Composable
-fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () -> Unit) {
+fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId: String = "", contentStamp: String = "", whole: Boolean = false, onBack: () -> Unit) {
     var frame by remember { mutableStateOf<Bitmap?>(null) }
     var note by remember { mutableStateOf("Connecting…") }
     var quality by remember { mutableStateOf(store.screenQuality) }
@@ -293,8 +293,9 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
     LaunchedEffect(Unit) { client.connect(); cable = client.viaCable }
     val showVideo = video && !cable
     val preset = if (cable) "cable" else quality
-    val showing = if (display.isEmpty()) "" else "&display=" + java.net.URLEncoder.encode(display, "UTF-8")
-    val input = remember(display, generation) { InputSocket(client, "/v1/input?x=1$showing") }
+    val showing = (if (display.isEmpty()) "" else "&display=" + java.net.URLEncoder.encode(display, "UTF-8")) +
+        (if (workspaceId.isEmpty()) "" else "&workspace=$workspaceId&whole=${if (whole) 1 else 0}")
+    val input = remember(display, generation, workspaceId, contentStamp, whole) { InputSocket(client, "/v1/input?x=1$showing") }
     val surface = remember { VideoView(context) }
     DisposableEffect(Unit) { onDispose { surface.release() } }
     DisposableEffect(input) { onDispose { input.close() } }
@@ -325,7 +326,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
     // locked) is still there: it is taken back, windows and all.
     LaunchedEffect(Unit) {
         val mine = client.get("/v1/machine/display")?.optJSONArray("made").objects().any { it.optBoolean("mine") }
-        if (mine) makeDisplay()
+        if (mine && workspaceId.isEmpty()) makeDisplay()
     }
     // Turned, the display turns with it: made again the other way up.
     LaunchedEffect(sideways) {
@@ -360,7 +361,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
     }
 
     if (showVideo) {
-        DisposableEffect(quality, sound, display, generation) {
+        DisposableEffect(quality, sound, display, generation, workspaceId, contentStamp, whole) {
             note = "Connecting…"
             picture = IntSize.Zero
             val watching = ScreenVideo(context, client) { said -> if (picture != IntSize.Zero || said.isNotEmpty()) note = said }
@@ -368,7 +369,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
             surface.onSize = { w, h -> picture = IntSize(w, h); note = "" }
             watching.show(surface)
             val starting = scope.launch {
-                val agreed = watching.start(quality, sound, display)
+                val agreed = watching.start(quality, sound, display, workspaceId, whole)
                 hearing = agreed && watching.sound
                 // No picture after a while: the two could not reach each
                 // other this way. The other way still works.
@@ -382,11 +383,11 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
             onDispose {
                 starting.cancel()
                 surface.onSize = null
-                scope.launch { watching.stop() }
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { watching.stop() }
             }
         }
     } else {
-        DisposableEffect(preset, display, generation) {
+        DisposableEffect(preset, display, generation, workspaceId, contentStamp, whole) {
             val opened = client.socket("/v1/screen?preset=$preset$showing", object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size)?.let {
@@ -434,6 +435,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
                         text = { Text(if (!sound) "Sound: off" else if (hearing || picture == IntSize.Zero) "Sound: on" else "Sound: on (the computer has none to send)") },
                         onClick = { sound = !sound; store.screenSound = sound; options = false },
                     )
+                    if (workspaceId.isEmpty()) {
                     if (displays.size > 1 || display.isNotEmpty()) (listOf("") + displays).distinct().forEach { name ->
                         DropdownMenuItem(
                             text = {
@@ -478,6 +480,7 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, onBack: () 
                         )
                     }
                     DropdownMenuItem(text = { Text("Display settings…") }, onClick = { options = false; settings = true })
+                    }
                 }
             }
             IconButton(onClick = { full = true }) { Icon(Icons.Filled.Fullscreen, "Full screen") }
@@ -641,8 +644,8 @@ internal fun zoomed(zoom: Float, shift: Offset, box: IntSize, by: Float, between
 // ---------------------------------------------------------------- trackpad
 
 @Composable
-fun TrackpadPage(client: LinkClient, onBack: () -> Unit) {
-    val input = remember { InputSocket(client) }
+fun TrackpadPage(client: LinkClient, workspaceId: String = "", onBack: () -> Unit) {
+    val input = remember(workspaceId) { InputSocket(client, if (workspaceId.isEmpty()) "/v1/input" else "/v1/input?workspace=$workspaceId") }
     DisposableEffect(Unit) { onDispose { input.close() } }
     var keyboard by remember { mutableStateOf(true) }
     // Aim the phone like a pointer, instead of dragging on it.
@@ -762,14 +765,14 @@ fun MediaPage(client: LinkClient, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(28.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                IconButton(onClick = { act("previous") }) { Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(34.dp)) }
-                IconButton(onClick = { act("seek", -10) }) { Icon(Icons.Filled.FastRewind, "Back 10 seconds", Modifier.size(30.dp)) }
+                IconButton(enabled = current.optBoolean("can_previous"), onClick = { act("previous") }) { Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(34.dp)) }
+                IconButton(enabled = current.optBoolean("can_seek"), onClick = { act("seek", -10) }) { Icon(Icons.Filled.FastRewind, "Back 10 seconds", Modifier.size(30.dp)) }
                 FilledIconButton(onClick = { act("play-pause") }, modifier = Modifier.size(76.dp)) {
                     val playing = current.optString("status") == "Playing"
                     Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play or pause", Modifier.size(44.dp))
                 }
-                IconButton(onClick = { act("seek", 10) }) { Icon(Icons.Filled.FastForward, "Forward 10 seconds", Modifier.size(30.dp)) }
-                IconButton(onClick = { act("next") }) { Icon(Icons.Filled.SkipNext, "Next", Modifier.size(34.dp)) }
+                IconButton(enabled = current.optBoolean("can_seek"), onClick = { act("seek", 10) }) { Icon(Icons.Filled.FastForward, "Forward 10 seconds", Modifier.size(30.dp)) }
+                IconButton(enabled = current.optBoolean("can_next"), onClick = { act("next") }) { Icon(Icons.Filled.SkipNext, "Next", Modifier.size(34.dp)) }
             }
         }
         Spacer(Modifier.height(36.dp))

@@ -40,7 +40,7 @@ import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.launch
 
 enum class Page {
-    Home, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
+    Home, Apps, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
     Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More,
 }
 
@@ -286,6 +286,7 @@ private fun Pages(
     Column(Modifier.fillMaxSize()) {
         when (page) {
             Page.Home -> Unit
+            Page.Apps -> AppsPage(activity, client, store) { go(Page.Home) }
             Page.Screen -> ScreenPage(activity, client, store) { go(Page.Home) }
             Page.Trackpad -> TrackpadPage(client) { go(Page.Home) }
             Page.Media -> MediaPage(client) { go(Page.Home) }

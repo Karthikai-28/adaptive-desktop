@@ -343,6 +343,7 @@ private val TILES = listOf(
     Tile(Page.Trackpad, "Trackpad", "Pointer and keyboard", Icons.Filled.Mouse),
     Tile(Page.Media, "Media", "Play, pause, volume", Icons.Filled.PlayCircle),
     Tile(Page.Presenter, "Presenter", "Slides, with a timer", Icons.Filled.Slideshow),
+    Tile(Page.Apps, "Apps", "Your apps and saved layouts", Icons.Filled.Apps),
     Tile(Page.Run, "Run", "Commands and apps", Icons.Filled.Terminal),
     Tile(Page.Files, "Files", "Browse, open, send", Icons.Filled.Folder),
     Tile(Page.Camera, "Webcam", "This phone's camera", Icons.Filled.Videocam),
