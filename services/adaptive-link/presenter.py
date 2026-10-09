@@ -3,6 +3,7 @@ import asyncio
 import os
 import re
 import time
+import urllib.parse
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -237,13 +238,29 @@ def find_active_presentation():
     except Exception:
         return None
 
-    # Check window titles and process cmdlines for presentations
+    # Check open file descriptors, window titles, and process cmdlines
     for win in wins:
         title = win.get("title", "")
         pid = win.get("pid", 0)
         app = win.get("app", "")
-        # Look for presentation viewers
-        is_pres_app = any(name in app.lower() for name in ["impress", "soffice", "evince", "okular", "pdfpc"])
+        candidates = []
+
+        # 1. Direct FD inspection (most reliable for LibreOffice / Impress / PDF viewers)
+        if pid > 0:
+            fd_dir = Path(f"/proc/{pid}/fd")
+            if fd_dir.is_dir():
+                try:
+                    for fd_entry in fd_dir.iterdir():
+                        try:
+                            target = fd_entry.resolve()
+                            if target.is_file() and target.suffix.lower() in (".pptx", ".odp", ".pdf", ".md", ".notes"):
+                                candidates.append(target)
+                        except (OSError, PermissionError):
+                            pass
+                except (OSError, PermissionError):
+                    pass
+
+        # 2. Process command line
         cmdline = ""
         if pid > 0:
             try:
@@ -253,23 +270,29 @@ def find_active_presentation():
             except Exception:
                 pass
 
-        # Try to find file paths from cmdline or title
-        candidates = []
         if cmdline:
             for part in cmdline.split():
-                if part.lower().endswith((".pptx", ".odp", ".pdf", ".md", ".notes")):
+                if part.startswith("file://"):
+                    part = urllib.parse.unquote(part[7:])
+                if any(part.lower().endswith(ext) for ext in (".pptx", ".odp", ".pdf", ".md", ".notes")):
                     p = Path(part).expanduser().resolve()
                     if p.is_file():
                         candidates.append(p)
-        # Check window title for filename
+
+        # 3. Check window title for filename
         for ext in [".pptx", ".odp", ".pdf", ".md"]:
             if ext in title.lower():
-                # Extract filename word
                 for word in title.split():
                     if ext in word.lower():
                         clean_word = word.strip("— -:\"'[]()")
-                        for base_dir in [Path.home() / "presentation", Path.home() / "Documents",
-                                         Path.home() / "Downloads" / "Presentations", Path.home() / "Downloads"]:
+                        for base_dir in [
+                            Path.home() / "mke",
+                            Path.home() / "mke" / "mkeICC" / "presentations",
+                            Path.home() / "presentation",
+                            Path.home() / "Documents",
+                            Path.home() / "Downloads" / "Presentations",
+                            Path.home() / "Downloads",
+                        ]:
                             match = base_dir / clean_word
                             if match.is_file():
                                 candidates.append(match)
@@ -293,13 +316,13 @@ def list_available_decks():
     decks = []
     seen = set()
     search_dirs = [
+        Path.home() / "mke" / "mkeICC" / "presentations",
+        Path.home() / "mke",
         Path.home() / "presentation",
         Path.home() / "Downloads" / "Presentations",
         Path.home() / "Documents",
         Path.home() / "Downloads" / "Documents",
-        Path.home() / "mke" / "mkert_repository_presentation",
-        Path.home() / "mke" / "slider_control_center_walkthrough",
-        Path.home() / "tmp" / "mkeicc_deck",
+        Path.home() / "Downloads",
     ]
     for d in search_dirs:
         if not d.is_dir():
@@ -319,7 +342,6 @@ def list_available_decks():
                                 "modified": int(item.stat().st_mtime)
                             })
                     elif ext in (".md", ".notes"):
-                        # Only include markdown if it has slide delimiters
                         try:
                             head = item.read_text(encoding="utf-8", errors="ignore")[:2000]
                             if "\n---\n" in head or "\n# Slide" in head or "slides:" in head:
@@ -336,12 +358,12 @@ def list_available_decks():
                             pass
         except Exception:
             pass
-    # Sort with presentation folder first, then latest modified
+
     def sort_key(d):
         is_pres_folder = 1 if "presentation" in d["path"] else 0
         return (is_pres_folder, d["modified"])
     decks.sort(key=sort_key, reverse=True)
-    return decks[:25]
+    return decks[:30]
 
 
 class PresenterEngine:
@@ -375,13 +397,37 @@ class PresenterEngine:
     def auto_detect_or_default(self):
         """Auto-detect active presentation, or load the most recent presentation deck."""
         active = find_active_presentation()
-        if active and self.load_deck(active):
+        if active:
+            if active != self.deck_path:
+                return self.load_deck(active)
             return True
         if not self.slides:
             decks = list_available_decks()
             if decks and self.load_deck(decks[0]["path"]):
                 return True
         return bool(self.slides)
+
+    def activate_presentation_window(self):
+        """Ensure the presentation viewer window is brought to front and focused."""
+        if not machine:
+            return False
+        try:
+            wins = machine.windows()
+            deck_stem = Path(self.deck_path).stem.lower() if self.deck_path else ""
+            for w in wins:
+                app = w.get("app", "").lower()
+                title = w.get("title", "").lower()
+                is_pres = (
+                    any(k in app for k in ("impress", "soffice", "powerpoint", "presentation", "evince", "okular")) or
+                    any(k in title for k in ("impress", "presentation", "slide show", ".pptx", ".odp")) or
+                    (deck_stem and deck_stem in title)
+                )
+                if is_pres:
+                    machine.window_action("show", w["id"])
+                    return True
+        except Exception:
+            pass
+        return False
 
     def current_slide_data(self):
         if not self.slides:
@@ -409,7 +455,7 @@ class PresenterEngine:
             "next_slide": nxt,
             "elapsed": self.elapsed,
             "running": self.running,
-            "available_decks": list_available_decks()[:10]
+            "available_decks": list_available_decks()[:15]
         }
 
     def _update_timer(self):
@@ -431,51 +477,57 @@ class PresenterEngine:
     async def next(self):
         self._update_timer()
         self.running = True
+        self.activate_presentation_window()
         if self.slides and self.current_slide < len(self.slides):
             self.current_slide += 1
         if self.input_sender:
-            await self.input_sender({"t": "key", "key": "Right"})
+            await self.input_sender({"t": "key", "k": "Right"})
         self._notify_change()
         return self.status()
 
     async def prev(self):
         self._update_timer()
+        self.activate_presentation_window()
         if self.slides and self.current_slide > 1:
             self.current_slide -= 1
         if self.input_sender:
-            await self.input_sender({"t": "key", "key": "Left"})
+            await self.input_sender({"t": "key", "k": "Left"})
         self._notify_change()
         return self.status()
 
     async def goto(self, slide_num):
         self._update_timer()
+        self.activate_presentation_window()
         if self.slides and 1 <= slide_num <= len(self.slides):
             diff = slide_num - self.current_slide
             self.current_slide = slide_num
-            # In presentation viewers, simulate jumping
-            if self.input_sender and diff != 0:
-                key = "Right" if diff > 0 else "Left"
-                for _ in range(abs(diff)):
-                    await self.input_sender({"t": "key", "key": key})
-                    await asyncio.sleep(0.02)
+            if self.input_sender:
+                # In Impress & PowerPoint: slide number + Return jumps directly
+                for digit in str(slide_num):
+                    await self.input_sender({"t": "key", "k": digit})
+                    await asyncio.sleep(0.01)
+                await self.input_sender({"t": "key", "k": "Return"})
         self._notify_change()
         return self.status()
 
     async def start(self):
+        self.activate_presentation_window()
         if self.input_sender:
-            await self.input_sender({"t": "key", "key": "F5"})
+            await self.input_sender({"t": "key", "k": "F5"})
         self.running = True
         self._notify_change()
         return self.status()
 
     async def blank(self):
+        self.activate_presentation_window()
         if self.input_sender:
-            await self.input_sender({"t": "key", "key": "b"})
+            await self.input_sender({"t": "key", "k": "b"})
         return self.status()
 
     async def exit(self):
+        self.activate_presentation_window()
         if self.input_sender:
-            await self.input_sender({"t": "key", "key": "Escape"})
+            await self.input_sender({"t": "key", "k": "Escape"})
         self.running = False
         self._notify_change()
         return self.status()
