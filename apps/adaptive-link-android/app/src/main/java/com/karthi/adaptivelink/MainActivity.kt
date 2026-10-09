@@ -11,16 +11,26 @@ import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,8 +43,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.launch
@@ -44,16 +57,16 @@ enum class Page {
     Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More,
 }
 
-/** Apple dark appearance with one accent, as on the desktop. */
+/** Apple dark appearance with true OLED black canvas and curated accents. */
 private val Colors = darkColorScheme(
     primary = Color(0xFF0A84FF),
     onPrimary = Color.White,
-    background = Color(0xFF1C1C1E),
+    background = Color(0xFF000000),
     onBackground = Color(0xFFF5F5F7),
-    surface = Color(0xFF2C2C2E),
+    surface = Color(0xFF1C1C1E),
     onSurface = Color(0xFFF5F5F7),
-    surfaceVariant = Color(0xFF3A3A3C),
-    onSurfaceVariant = Color(0xFF98989D),
+    surfaceVariant = Color(0xFF2C2C2E),
+    onSurfaceVariant = Color(0xFF8E8E93),
     error = Color(0xFFFF453A),
 )
 
@@ -193,14 +206,30 @@ private fun Locked(message: String, onUnlock: () -> Unit) {
         Modifier.fillMaxSize().systemBarsPadding().padding(32.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Adaptive Link", style = MaterialTheme.typography.headlineMedium)
+        Box(
+            Modifier.size(80.dp).clip(CircleShape)
+                .background(Color(0xFF1C1C1E))
+                .border(1.dp, Color(0x330A84FF), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Lock, "Lock", Modifier.size(36.dp), tint = Color(0xFF0A84FF))
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("Adaptive Link", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF5F5F7))
         Spacer(Modifier.height(8.dp))
         Text(
-            message.ifBlank { "Locked" },
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            message.ifBlank { "Touch sensor or screen lock to continue" },
+            color = Color(0xFF8E8E93), fontSize = 13.sp,
         )
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onUnlock) { Text("Unlock") }
+        Spacer(Modifier.height(32.dp))
+        Button(
+            onClick = onUnlock,
+            shape = RoundedCornerShape(22.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0A84FF)),
+            modifier = Modifier.height(48.dp).padding(horizontal = 16.dp),
+        ) {
+            Text("Unlock", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        }
     }
 }
 

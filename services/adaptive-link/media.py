@@ -41,6 +41,8 @@ PRESETS = {
     "low": (960, 10),
     "medium": (1280, 15),
     "high": (1920, 20),
+    # Apple-grade 60 FPS Ultra HD streaming
+    "ultra": (1920, 60),
 }
 VIDEO_CLOCK = 90000
 AUDIO_RATE = 48000

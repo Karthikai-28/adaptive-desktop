@@ -129,7 +129,7 @@ class Store(context: Context) {
         set(value) = prefs.edit().putBoolean("screen_sound", value).apply()
 
     var screenQuality: String
-        get() = prefs.getString("screen_quality", "medium") ?: "medium"
+        get() = prefs.getString("screen_quality", "ultra") ?: "ultra"
         set(value) = prefs.edit().putString("screen_quality", value).apply()
 
     /** This phone as a display: how large things are on it (larger, standard, more), which side of the computer's screen it is on, and whether it turns with the phone. */

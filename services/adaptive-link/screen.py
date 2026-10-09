@@ -27,6 +27,8 @@ PRESETS = {
     "high": (1920, 75, 15),
     # Over a USB cable, where there is room for it.
     "cable": (1920, 80, 30),
+    # High-quality high frame rate
+    "ultra": (1920, 90, 60),
 }
 
 

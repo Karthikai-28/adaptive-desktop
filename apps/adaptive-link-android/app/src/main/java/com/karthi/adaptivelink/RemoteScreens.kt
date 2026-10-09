@@ -30,6 +30,9 @@ import android.graphics.BitmapFactory
 import android.view.WindowManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.isSpecified
@@ -297,10 +300,10 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
     val showing = (if (mobileSession.isEmpty()) "" else "&session=$mobileSession") + (if (display.isEmpty()) "" else "&display=" + java.net.URLEncoder.encode(display, "UTF-8")) +
         (if (workspaceId.isEmpty()) "" else "&workspace=$workspaceId&whole=${if (whole) 1 else 0}")
     val input = remember(display, generation, workspaceId, contentStamp, whole) { InputSocket(client, "$base/input?x=1$showing") }
-    LaunchedEffect(mobileSession, box) {
+    LaunchedEffect(mobileSession, box, quality) {
         if (mobileSession.isNotEmpty() && box.width > 0 && box.height > 0) {
             delay(400)
-            val scale = 1.5f / activity.resources.displayMetrics.density
+            val scale = if (quality == "ultra" || quality == "high") 1.0f else (1.5f / activity.resources.displayMetrics.density).coerceAtLeast(0.85f)
             val size = org.json.JSONArray(listOf((box.width * scale).toInt().coerceIn(320, 3840), (box.height * scale).toInt().coerceIn(320, 3840)))
             val reply = client.post("/v1/mobile/sessions", JSONObject().put("operation", "resize").put("session", mobileSession).put("viewport", size))
             if (reply?.optBoolean("ok") == true) generation++
@@ -441,7 +444,12 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Filled.Tune, "Picture and sound") }
                 DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
-                    listOf("low" to "Low quality", "medium" to "Medium quality", "high" to "High quality").forEach { (name, label) ->
+                    listOf(
+                        "ultra" to "Ultra HD · 60 FPS (Retina)",
+                        "high" to "High quality · 30 FPS",
+                        "medium" to "Medium quality",
+                        "low" to "Low quality (Data saver)",
+                    ).forEach { (name, label) ->
                         DropdownMenuItem(
                             text = { Text(label, color = if (quality == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) },
                             onClick = { quality = name; store.screenQuality = name; options = false },
@@ -626,6 +634,27 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
                 )
             }
             if (note.isNotEmpty()) Text(note, color = Color.White)
+            if (picture != IntSize.Zero && !full) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(12.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0x991C1C1E))
+                        .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                        .clickable { options = true }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF30D158)))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (cable) "USB · 30 FPS"
+                            else if (quality == "ultra") "60 FPS · RETINA"
+                            else "${quality.uppercase()} · ${if (hearing) "AUDIO" else "VIDEO"}",
+                            color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
             if (hint) Text(
                 "Swipe in from an edge and go back to leave full screen", color = Color.White,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)

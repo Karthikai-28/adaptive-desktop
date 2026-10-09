@@ -15,6 +15,14 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -269,21 +277,36 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     val folders = layout.optJSONObject("folders") ?: JSONObject()
     val pinned = layout.optJSONArray("pins").strings()
     @Composable fun grid(entries: List<JSONObject>, modifier: Modifier = Modifier) {
-        LazyVerticalGrid(GridCells.Adaptive(100.dp), modifier, contentPadding = PaddingValues(12.dp),
+        LazyVerticalGrid(GridCells.Adaptive(96.dp), modifier, contentPadding = PaddingValues(12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(entries, key = { it.optString("id") }) { app ->
                 val aid = app.optString("id")
-                Surface(shape = MaterialTheme.shapes.large, tonalElevation = 2.dp,
-                    modifier = Modifier.heightIn(min = 112.dp).combinedClickable(onClick = { open(aid) }, onLongClick = { organizing = app; folderName = folders.optString(aid) })) {
-                    Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (aid.startsWith("native:")) Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Folder,
-                            null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
-                        else AppIcon(client, app)
-                        Spacer(Modifier.height(8.dp))
-                        Text(app.optString("name"), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
-                        if (aid in running) Text("Running", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                        else compatibilityNote(app).takeIf { it.isNotEmpty() }?.let {
-                            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color(0xFF1C1C1E),
+                    border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
+                    modifier = Modifier.heightIn(min = 108.dp).combinedClickable(onClick = { open(aid) }, onLongClick = { organizing = app; folderName = folders.optString(aid) }),
+                ) {
+                    Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF2C2C2E)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (aid.startsWith("native:")) Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Folder,
+                                null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+                            else AppIcon(client, app)
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(app.optString("name"), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        if (aid in running) {
+                            Spacer(Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(5.dp).clip(CircleShape).background(Color(0xFF30D158)))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Running", color = Color(0xFF30D158), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        } else compatibilityNote(app).takeIf { it.isNotEmpty() }?.let {
+                            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                         }
                     }
                 }
@@ -364,13 +387,29 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(if (location == "drawer") "All apps" else "Home", style = MaterialTheme.typography.headlineMedium)
                         Text(client.computer.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    IconButton(onClick = { location = "control" }) { Icon(Icons.Default.Tune, "Control Center") }
+                    IconButton(onClick = { location = "control" }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
+                        Icon(Icons.Default.Tune, "Control Center", modifier = Modifier.size(18.dp), tint = Color(0xFFF5F5F7))
+                    }
                 }
                 if (location == "drawer") {
-                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 12.dp), label = { Text("Search laptop apps") }, singleLine = true)
+                    OutlinedTextField(
+                        value = query, onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        placeholder = { Text("Spotlight Search…", color = Color(0xFF8E8E93)) },
+                        leadingIcon = { Icon(Icons.Default.Search, null, tint = Color(0xFF8E8E93)) },
+                        trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, null, tint = Color(0xFF8E8E93)) } },
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color(0xFF1C1C1E),
+                            unfocusedContainerColor = Color(0xFF1C1C1E),
+                            focusedBorderColor = Color(0xFF0A84FF),
+                            unfocusedBorderColor = Color(0x22FFFFFF),
+                        ),
+                    )
                     val categories = listOf("All", "Favorites") + apps.flatMap { it.optJSONArray("categories").strings() }.filter { it.isNotBlank() }.distinct().sorted() +
                         folders.keys().asSequence().map { folders.optString(it) }.filter { it.isNotBlank() }.distinct().map { "Folder: $it" }.toList()
-                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         categories.forEach { c -> FilterChip(category == c, { category = c }, label = { Text(c) }) }
                     }
                     grid(all.filter { app -> app.optString("name").contains(query, true) && when {
@@ -383,21 +422,89 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     layout.optJSONObject("offline_copy")?.let { copy -> TextButton(onClick = {
                         persist(copy.copyJson().put("revision", layout.optInt("revision")))
                     }) { Text("Restore offline Home organization") } }
-                    if (running.isNotEmpty()) TextButton(onClick = { location = "recents" }) { Text("Continue · ${running.size} running apps") }
+                    if (running.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0x2230D158),
+                            border = BorderStroke(0.5.dp, Color(0x5530D158)),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).combinedClickable(onClick = { location = "recents" }),
+                        ) {
+                            Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF30D158)))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Active Stage · ${running.size} running app${if (running.size > 1) "s" else ""}", color = Color(0xFF30D158), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
                     val recent = layout.optJSONArray("recent").strings().take(6)
-                    Text("Pinned", Modifier.padding(start = 16.dp), style = MaterialTheme.typography.titleSmall)
+                    Text("Pinned", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
                     grid(pinned.mapNotNull { pin -> all.firstOrNull { it.optString("id") == pin } }, Modifier.weight(1f))
                     if (recent.isNotEmpty()) {
-                        Text("Recent", Modifier.padding(start = 16.dp), style = MaterialTheme.typography.titleSmall)
-                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(12.dp)) { recent.forEach { aid ->
-                            TextButton(onClick = { open(aid) }) { Text(all.firstOrNull { it.optString("id") == aid }?.optString("name") ?: aid) }
-                        } }
+                        Text("Recent", Modifier.padding(start = 16.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
+                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            recent.forEach { aid ->
+                                val app = all.firstOrNull { it.optString("id") == aid }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF1C1C1E),
+                                    border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
+                                    modifier = Modifier.combinedClickable(onClick = { open(aid) }),
+                                ) {
+                                    Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                                            if (aid.startsWith("native:")) Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Apps, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                            else AppIcon(client, app ?: JSONObject().put("id", aid))
+                                        }
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(app?.optString("name") ?: aid, fontSize = 12.sp, color = Color(0xFFF5F5F7), fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        layout.optJSONArray("dock").strings().forEach { aid ->
-                            val app = all.firstOrNull { it.optString("id") == aid }
-                            Surface(Modifier.padding(4.dp).combinedClickable(onClick = { open(aid) }, onLongClick = { organizing = app }), shape = MaterialTheme.shapes.large) {
-                                Text(app?.optString("name") ?: aid, Modifier.padding(16.dp))
+                    // Apple iOS Floating Frosted Glass Dock
+                    Box(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = Color(0x77202024),
+                            border = BorderStroke(0.5.dp, Color(0x33FFFFFF)),
+                            tonalElevation = 8.dp,
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                layout.optJSONArray("dock").strings().forEach { aid ->
+                                    val app = all.firstOrNull { it.optString("id") == aid }
+                                    val isRunning = aid in running
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.combinedClickable(onClick = { open(aid) }, onLongClick = { organizing = app }),
+                                    ) {
+                                        Box(
+                                            Modifier.size(48.dp).clip(RoundedCornerShape(13.dp))
+                                                .background(Color(0xFF2C2C2E)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (aid.startsWith("native:")) {
+                                                Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Apps,
+                                                    null, Modifier.size(26.dp), tint = MaterialTheme.colorScheme.primary)
+                                            } else {
+                                                AppIcon(client, app ?: JSONObject().put("id", aid))
+                                            }
+                                        }
+                                        Spacer(Modifier.height(3.dp))
+                                        if (isRunning) {
+                                            Box(Modifier.size(4.dp).clip(CircleShape).background(Color(0xFF30D158)))
+                                        } else {
+                                            Spacer(Modifier.height(4.dp))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -410,10 +517,25 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             Button(onClick = ::stop) { Text("Stop") }
         }
         if (location != "app" || !online || note.startsWith("Step")) Text(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
-        NavigationBar {
-            NavigationBarItem(location == "home", { back() }, icon = { Icon(Icons.Default.Home, "Home") }, label = { Text("Home") })
-            NavigationBarItem(location == "drawer", { location = "drawer"; editLayouts = false }, icon = { Icon(Icons.Default.Apps, "Apps") }, label = { Text("Apps") })
-            NavigationBarItem(location == "recents", { location = "recents"; editLayouts = false }, icon = { Icon(Icons.Default.ViewCarousel, "Recents") }, label = { Text("Recents") })
+        NavigationBar(
+            containerColor = Color(0xFF141416),
+            tonalElevation = 8.dp,
+        ) {
+            NavigationBarItem(
+                selected = location == "home", onClick = { back() },
+                icon = { Icon(Icons.Default.Home, "Home") },
+                label = { Text("Home", fontWeight = FontWeight.Medium) },
+            )
+            NavigationBarItem(
+                selected = location == "drawer", onClick = { location = "drawer"; editLayouts = false },
+                icon = { Icon(Icons.Default.Apps, "Apps") },
+                label = { Text("All Apps", fontWeight = FontWeight.Medium) },
+            )
+            NavigationBarItem(
+                selected = location == "recents", onClick = { location = "recents"; editLayouts = false },
+                icon = { Icon(Icons.Default.ViewCarousel, "Recents") },
+                label = { Text("Stage", fontWeight = FontWeight.Medium) },
+            )
         }
     }
     organizing?.let { app ->

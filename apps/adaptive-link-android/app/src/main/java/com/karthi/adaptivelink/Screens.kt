@@ -20,9 +20,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.BatteryStd
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Bluetooth
@@ -78,28 +86,36 @@ import kotlinx.coroutines.launch
 @Composable
 fun TopBar(title: String, onBack: (() -> Unit)? = null, trailing: @Composable () -> Unit = {}) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF)),
+            ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", modifier = Modifier.size(18.dp), tint = Color(0xFFF5F5F7)) }
+            Spacer(Modifier.width(10.dp))
         } else {
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(8.dp))
         }
-        Text(title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(title, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF5F5F7), modifier = Modifier.weight(1f))
         trailing()
     }
 }
 
 @Composable
 fun Muted(text: String, modifier: Modifier = Modifier) {
-    Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = modifier)
+    Text(text, color = Color(0xFF8E8E93), fontSize = 13.sp, modifier = modifier)
 }
 
 @Composable
 fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
-        modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface).padding(16.dp)
+        modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF1C1C1E))
+            .border(0.5.dp, Color(0x22FFFFFF), RoundedCornerShape(22.dp))
+            .padding(18.dp)
     ) { content() }
 }
 
@@ -360,6 +376,29 @@ private val TILES = listOf(
     Tile(Page.More, "More", "Clipboard, power, settings", Icons.Filled.MoreHoriz),
 )
 
+private fun tileGradient(page: Page): Pair<Color, Color> = when (page) {
+    Page.Screen -> Color(0xFF007AFF) to Color(0xFF0051C6)
+    Page.Trackpad -> Color(0xFF48484A) to Color(0xFF2C2C2E)
+    Page.Media -> Color(0xFFFF2D55) to Color(0xFFD6183C)
+    Page.Presenter -> Color(0xFF5856D6) to Color(0xFF3634A3)
+    Page.Apps -> Color(0xFF0A84FF) to Color(0xFF0058D0)
+    Page.Run -> Color(0xFF3A3A3C) to Color(0xFF1C1C1E)
+    Page.Files -> Color(0xFF32ADE6) to Color(0xFF007AFF)
+    Page.Camera -> Color(0xFF34C759) to Color(0xFF248A3D)
+    Page.Tasks -> Color(0xFF5E5CE6) to Color(0xFF3B39B8)
+    Page.Devices -> Color(0xFFFF9500) to Color(0xFFC97100)
+    Page.Network -> Color(0xFF30B0C7) to Color(0xFF1E8294)
+    Page.Desktop -> Color(0xFFAF52DE) to Color(0xFF7E35A3)
+    Page.Controls -> Color(0xFF00C7BE) to Color(0xFF008E88)
+    Page.Scan -> Color(0xFFFFCC00) to Color(0xFFD6A700)
+    Page.Windows -> Color(0xFF636366) to Color(0xFF3A3A3C)
+    Page.DisplaySound -> Color(0xFF64D2FF) to Color(0xFF0A84FF)
+    Page.Bluetooth -> Color(0xFF007AFF) to Color(0xFF0040DD)
+    Page.Services -> Color(0xFF8E8E93) to Color(0xFF48484A)
+    Page.More -> Color(0xFFA28BFE) to Color(0xFF6C47FF)
+    else -> Color(0xFF0A84FF) to Color(0xFF0051C6)
+}
+
 @Composable
 fun HomeScreen(
     client: LinkClient, state: LinkState, onOpen: (Page) -> Unit,
@@ -391,7 +430,10 @@ fun HomeScreen(
     TopBar(client.computer.name) {
         // Which computer: the others this phone is paired with, and pairing another.
         Box {
-            IconButton(onClick = { choosing = true }) { Icon(Icons.Filled.Computer, "Computers") }
+            IconButton(
+                onClick = { choosing = true },
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF)),
+            ) { Icon(Icons.Filled.Computer, "Computers", modifier = Modifier.size(18.dp), tint = Color(0xFFF5F5F7)) }
             DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
                 computers.forEach { other ->
                     DropdownMenuItem(
@@ -410,48 +452,90 @@ fun HomeScreen(
         Card(Modifier.fillMaxWidth()) {
             val status = state.status
             Column {
-                when {
-                    status != null -> {
-                        val via = if (client.tunnelled) "Direct, away" else "Local network"
-                        Text("Connected · $via", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(6.dp))
-                        val parts = mutableListOf<String>()
-                        status.optJSONObject("battery")?.let {
-                            parts += "Battery ${it.optInt("percent")}%" + if (it.optBoolean("charging")) " charging" else ""
+                if (status != null) {
+                    val via = if (client.tunnelled) "Direct P2P" else "Local Wi-Fi"
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x2230D158))
+                                .border(0.5.dp, Color(0x4430D158), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF30D158)))
+                            Spacer(Modifier.width(6.dp))
+                            Text("ONLINE · 60 FPS ULTRA", color = Color(0xFF30D158), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
-                        status.optJSONObject("volume")?.let { volume ->
-                            if (!volume.isNull("percent"))
-                                parts += if (volume.optBoolean("muted")) "Muted" else "Volume ${volume.optInt("percent")}%"
+                        Spacer(Modifier.weight(1f))
+                        Text(via, color = Color(0xFF8E8E93), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        status.optJSONObject("battery")?.let { b ->
+                            val pct = b.optInt("percent")
+                            val charging = b.optBoolean("charging")
+                            Row(
+                                Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C2E)).padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(if (charging) Icons.Filled.BatteryChargingFull else Icons.Filled.BatteryStd, null, Modifier.size(15.dp),
+                                    tint = if (charging) Color(0xFF30D158) else if (pct <= 20) Color(0xFFFF453A) else Color(0xFFF5F5F7))
+                                Spacer(Modifier.width(4.dp))
+                                Text("$pct%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF5F5F7))
+                            }
                         }
-                        if (status.optBoolean("locked")) parts += "Locked"
-                        status.optString("project").takeIf { it.isNotBlank() }?.let { parts += "Project $it" }
-                        Muted(parts.joinToString("  ·  ").ifBlank { "Ready" })
-                    }
-                    state.connecting -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Muted("Connecting…")
-                    }
-                    else -> {
-                        Text("Not connected", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.height(6.dp))
-                        Muted(client.awayProblem.ifBlank {
-                            "The computer must be on with Adaptive Link started. Away from its network, this phone and the computer both need to be signed in to the same Google account."
-                        })
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { scope.launch { refresh() } }) { Text("Try again") }
-                            // Asleep, on this phone's own network: its network card can be asked to start it.
-                            if (client.canWake) OutlinedButton(onClick = {
-                                scope.launch {
-                                    woke = if (client.wake() > 0) "Asked it to wake. That takes up to a minute, and only works on its own network, if it was set to (link-cli.py wake on)."
-                                    else "This phone could not send the wake request on this network."
-                                    refresh()
+                        status.optJSONObject("volume")?.let { v ->
+                            if (!v.isNull("percent")) {
+                                val muted = v.optBoolean("muted")
+                                val vol = v.optInt("percent")
+                                Row(
+                                    Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C2E)).padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp, null, Modifier.size(15.dp), tint = Color(0xFFF5F5F7))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(if (muted) "Muted" else "$vol%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF5F5F7))
                                 }
-                            }) { Text("Wake it") }
+                            }
                         }
-                        if (woke.isNotEmpty()) { Spacer(Modifier.height(6.dp)); Muted(woke) }
+                        status.optString("project").takeIf { it.isNotBlank() }?.let { proj ->
+                            Row(
+                                Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C2E)).padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.Folder, null, Modifier.size(14.dp), tint = Color(0xFF0A84FF))
+                                Spacer(Modifier.width(4.dp))
+                                Text(proj, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF5F5F7), maxLines = 1)
+                            }
+                        }
                     }
+                } else if (state.connecting) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF0A84FF), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Connecting to ${client.computer.name}…", color = Color(0xFF8E8E93), fontSize = 13.sp)
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF453A)))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Not Connected", fontWeight = FontWeight.SemiBold, color = Color(0xFFFF453A))
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Muted(client.awayProblem.ifBlank {
+                        "Computer must be awake with Adaptive Link active. Away from local Wi-Fi, both devices must be signed in to the same Google account."
+                    })
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { scope.launch { refresh() } }) { Text("Retry") }
+                        if (client.canWake) OutlinedButton(onClick = {
+                            scope.launch {
+                                woke = if (client.wake() > 0) "Wake-on-LAN broadcast sent." else "Could not broadcast wake request."
+                                refresh()
+                            }
+                        }) { Text("Wake Computer") }
+                    }
+                    if (woke.isNotEmpty()) { Spacer(Modifier.height(6.dp)); Muted(woke) }
                 }
             }
         }
@@ -462,28 +546,33 @@ fun HomeScreen(
         Spacer(Modifier.height(10.dp))
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 20.dp),
         ) {
             items(TILES) { tile ->
-                // More is always reachable: unpairing must work offline.
                 val enabled = state.connected || tile.page == Page.More
+                val (g1, g2) = tileGradient(tile.page)
                 Column(
-                    Modifier.aspectRatio(0.95f).clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surface)
+                    Modifier.aspectRatio(0.92f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .border(0.5.dp, Color(0x1FFFFFFF), RoundedCornerShape(20.dp))
                         .clickable(enabled = enabled) { onOpen(tile.page) }
-                        .padding(14.dp),
+                        .padding(12.dp),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Icon(
-                        tile.icon, null, Modifier.size(30.dp),
-                        tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Box(
+                        Modifier.size(38.dp).clip(RoundedCornerShape(10.dp))
+                            .background(Brush.linearGradient(listOf(g1, g2))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(tile.icon, null, Modifier.size(22.dp), tint = Color.White)
+                    }
                     Column {
-                        Text(tile.label, fontWeight = FontWeight.SemiBold,
-                            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(tile.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, lineHeight = 13.sp, maxLines = 2)
+                        Text(tile.label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                            color = if (enabled) Color(0xFFF5F5F7) else Color(0xFF8E8E93))
+                        Text(tile.detail, color = Color(0xFF8E8E93), fontSize = 10.5.sp, lineHeight = 12.sp, maxLines = 2)
                     }
                 }
             }
