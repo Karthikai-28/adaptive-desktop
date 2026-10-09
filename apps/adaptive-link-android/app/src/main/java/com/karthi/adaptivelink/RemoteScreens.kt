@@ -112,6 +112,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -913,21 +914,29 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
     }
 
     fun act(action: String, slideNum: Int? = null) {
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             val body = JSONObject().put("action", action)
             if (slideNum != null) body.put("slide", slideNum)
             val res = client.post("/v1/presenter/action", body)
-            applyState(res)
+            withContext(Dispatchers.Main) {
+                applyState(res)
+            }
         }
     }
 
     fun onNext() {
         running = true
+        if (totalSlides > 0 && currentSlide < totalSlides) {
+            currentSlide += 1
+        }
         input.send(Protocol.key("Right"))
         act("next")
     }
 
     fun onPrev() {
+        if (currentSlide > 1) {
+            currentSlide -= 1
+        }
         input.send(Protocol.key("Left"))
         act("prev")
     }

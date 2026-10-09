@@ -311,51 +311,56 @@ def find_active_presentation():
     return None
 
 
-def list_available_decks():
-    """Discover presentation files in user's home directories."""
+_DECKS_CACHE = []
+_DECKS_LAST_SCAN = 0.0
+
+
+def list_available_decks(force=False):
+    """Discover presentation files with fast targeted globbing and in-memory cache."""
+    global _DECKS_CACHE, _DECKS_LAST_SCAN
+    now = time.time()
+    if not force and _DECKS_CACHE and (now - _DECKS_LAST_SCAN < 120.0):
+        return _DECKS_CACHE
+
     decks = []
     seen = set()
     search_dirs = [
         Path.home() / "mke" / "mkeICC" / "presentations",
-        Path.home() / "mke",
         Path.home() / "presentation",
+        Path.home() / "Documents" / "Codex",
         Path.home() / "Downloads" / "Presentations",
         Path.home() / "Documents",
-        Path.home() / "Downloads" / "Documents",
         Path.home() / "Downloads",
     ]
     for d in search_dirs:
         if not d.is_dir():
             continue
         try:
-            for item in d.rglob("*"):
-                if item.is_file() and not item.name.startswith("."):
-                    ext = item.suffix.lower()
-                    if ext in (".pptx", ".odp"):
+            for ext in ("*.pptx", "*.odp", "*.md"):
+                # Top level of dir
+                for item in d.glob(ext):
+                    if item.is_file() and not item.name.startswith("."):
                         resolved = str(item.resolve())
                         if resolved not in seen:
                             seen.add(resolved)
                             decks.append({
                                 "name": item.name,
                                 "path": resolved,
-                                "type": ext[1:].upper(),
+                                "type": item.suffix[1:].upper(),
                                 "modified": int(item.stat().st_mtime)
                             })
-                    elif ext in (".md", ".notes"):
-                        try:
-                            head = item.read_text(encoding="utf-8", errors="ignore")[:2000]
-                            if "\n---\n" in head or "\n# Slide" in head or "slides:" in head:
-                                resolved = str(item.resolve())
-                                if resolved not in seen:
-                                    seen.add(resolved)
-                                    decks.append({
-                                        "name": item.name,
-                                        "path": resolved,
-                                        "type": "MD",
-                                        "modified": int(item.stat().st_mtime)
-                                    })
-                        except Exception:
-                            pass
+                # Subdirectories (up to 3 levels)
+                for item in d.glob(f"*/*/{ext}"):
+                    if item.is_file() and not item.name.startswith("."):
+                        resolved = str(item.resolve())
+                        if resolved not in seen:
+                            seen.add(resolved)
+                            decks.append({
+                                "name": item.name,
+                                "path": resolved,
+                                "type": item.suffix[1:].upper(),
+                                "modified": int(item.stat().st_mtime)
+                            })
         except Exception:
             pass
 
@@ -363,7 +368,9 @@ def list_available_decks():
         is_pres_folder = 1 if "presentation" in d["path"] else 0
         return (is_pres_folder, d["modified"])
     decks.sort(key=sort_key, reverse=True)
-    return decks[:30]
+    _DECKS_CACHE = decks[:30]
+    _DECKS_LAST_SCAN = now
+    return _DECKS_CACHE
 
 
 class PresenterEngine:
@@ -477,7 +484,6 @@ class PresenterEngine:
     async def next(self):
         self._update_timer()
         self.running = True
-        self.activate_presentation_window()
         if self.slides and self.current_slide < len(self.slides):
             self.current_slide += 1
         if self.input_sender:
@@ -487,7 +493,6 @@ class PresenterEngine:
 
     async def prev(self):
         self._update_timer()
-        self.activate_presentation_window()
         if self.slides and self.current_slide > 1:
             self.current_slide -= 1
         if self.input_sender:
