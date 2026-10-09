@@ -20,7 +20,7 @@ if [ ! -d "$SDK/platforms" ] || [ -z "$GRADLE" ]; then
 fi
 
 printf 'sdk.dir=%s\n' "$SDK" >"$APP/local.properties"
-(cd "$APP" && ANDROID_HOME="$SDK" "$GRADLE" --no-daemon -q clean assembleDebug testDebugUnitTest)
+(cd "$APP" && ANDROID_HOME="$SDK" "$GRADLE" --no-daemon -q clean assembleDebug testDebugUnitTest -Pabi=arm64-v8a,x86_64)
 mkdir -p "$REPO/dist"
 cp "$APP/app/build/outputs/apk/debug/app-debug.apk" "$REPO/dist/adaptive-link.apk"
 echo "Built $REPO/dist/adaptive-link.apk ($(du -h "$REPO/dist/adaptive-link.apk" | cut -f1))"

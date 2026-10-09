@@ -58,15 +58,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SwapVert
@@ -844,41 +848,542 @@ fun MediaPage(client: LinkClient, onBack: () -> Unit) {
 
 @Composable
 fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
     val input = remember { InputSocket(client) }
     var elapsed by remember { mutableIntStateOf(0) }
     var running by remember { mutableStateOf(false) }
 
+    // Live presentation state
+    var deckTitle by remember { mutableStateOf("Presentation") }
+    var currentSlide by remember { mutableIntStateOf(1) }
+    var totalSlides by remember { mutableIntStateOf(0) }
+    var slideTitle by remember { mutableStateOf("") }
+    var keypoints by remember { mutableStateOf(listOf<String>()) }
+    var notesText by remember { mutableStateOf("") }
+    var nextTitle by remember { mutableStateOf("") }
+    var availableDecks by remember { mutableStateOf(listOf<JSONObject>()) }
+
+    var showDeckDialog by remember { mutableStateOf(false) }
+    var showJumpDialog by remember { mutableStateOf(false) }
+    var showEditNotesDialog by remember { mutableStateOf(false) }
+    var editedNotes by remember { mutableStateOf("") }
+    val scrollState = rememberScrollState()
+
+    fun applyState(json: JSONObject?) {
+        if (json == null) return
+        val titleStr = json.optString("title")
+        if (titleStr.isNotBlank()) deckTitle = titleStr
+        val cur = json.optInt("current_slide", 0)
+        if (cur > 0) currentSlide = cur
+        totalSlides = json.optInt("total_slides", 0)
+
+        val slide = json.optJSONObject("slide")
+        if (slide != null) {
+            slideTitle = slide.optString("title")
+            notesText = slide.optString("notes")
+            val kpArray = slide.optJSONArray("keypoints")
+            val kps = mutableListOf<String>()
+            if (kpArray != null) {
+                for (i in 0 until kpArray.length()) {
+                    val s = kpArray.optString(i)
+                    if (s.isNotBlank()) kps.add(s)
+                }
+            }
+            keypoints = kps
+        } else {
+            slideTitle = ""
+            notesText = ""
+            keypoints = emptyList()
+        }
+
+        val nextSlide = json.optJSONObject("next_slide")
+        nextTitle = nextSlide?.optString("title") ?: ""
+
+        val decksArray = json.optJSONArray("available_decks")
+        if (decksArray != null) {
+            val decks = mutableListOf<JSONObject>()
+            for (i in 0 until decksArray.length()) {
+                decksArray.optJSONObject(i)?.let { decks.add(it) }
+            }
+            availableDecks = decks
+        }
+    }
+
+    fun act(action: String, slideNum: Int? = null) {
+        scope.launch {
+            val body = JSONObject().put("action", action)
+            if (slideNum != null) body.put("slide", slideNum)
+            val res = client.post("/v1/presenter/action", body)
+            applyState(res)
+        }
+    }
+
+    fun onNext() {
+        running = true
+        input.send(Protocol.key("Right"))
+        act("next")
+    }
+
+    fun onPrev() {
+        input.send(Protocol.key("Left"))
+        act("prev")
+    }
+
     DisposableEffect(Unit) {
-        // The screen stays on while presenting, and the volume buttons turn
-        // the pages, so the phone can be held without looking at it.
+        // Keep screen on while presenting, and volume keys advance/rewind slides
         activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        activity.volumeKeys = { up -> input.send(Protocol.key(if (up) "Left" else "Right")) }
+        activity.volumeKeys = { up -> if (up) onPrev() else onNext() }
+        val stop = client.watch.subscribe("presenter") { told ->
+            applyState(told)
+        }
         onDispose {
             activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             activity.volumeKeys = null
+            stop()
             input.close()
         }
     }
-    LaunchedEffect(running) { while (running) { delay(1000); elapsed += 1 } }
 
-    TopBar("Presenter", onBack)
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(Protocol.formatDuration(elapsed), fontSize = 44.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            AssistChip(onClick = { running = !running }, label = { Text(if (running) "Pause" else "Start timer") })
-            Spacer(Modifier.width(8.dp))
-            AssistChip(onClick = { elapsed = 0; running = false }, label = { Text("Reset") })
+    LaunchedEffect(Unit) {
+        val res = client.get("/v1/presenter")
+        applyState(res)
+    }
+
+    LaunchedEffect(running) {
+        while (running) {
+            delay(1000)
+            elapsed += 1
         }
-        BigButton("Next", Modifier.fillMaxWidth().weight(2f), height = 240) {
-            running = true
-            input.send(Protocol.key("Right"))
+    }
+
+    TopBar("Presenter", onBack) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { act("detect") }) {
+                Icon(Icons.Filled.Refresh, "Detect active presentation", tint = Color(0xFFF5F5F7))
+            }
+            IconButton(onClick = { showDeckDialog = true }) {
+                Icon(Icons.Filled.Layers, "Choose presentation deck", tint = Color(0xFF0A84FF))
+            }
         }
-        BigButton("Previous", Modifier.fillMaxWidth().weight(1f), height = 120) { input.send(Protocol.key("Left")) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            BigButton("Start (F5)", Modifier.weight(1f)) { input.send(Protocol.key("F5")) }
-            BigButton("Blank", Modifier.weight(1f)) { input.send(Protocol.key("b")) }
-            BigButton("End (Esc)", Modifier.weight(1f)) { input.send(Protocol.key("Escape")) }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // --- Header Pacing & Timing Bar ---
+        Card(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            deckTitle,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF8E8E93),
+                            maxLines = 1
+                        )
+                        Text(
+                            Protocol.formatDuration(elapsed),
+                            fontSize = 38.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFF5F5F7)
+                        )
+                    }
+                    AssistChip(
+                        onClick = {
+                            running = !running
+                            act("timer")
+                        },
+                        label = { Text(if (running) "Pause" else "Start timer", color = Color(0xFFF5F5F7)) },
+                        leadingIcon = {
+                            Icon(
+                                if (running) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Color(0xFF0A84FF)
+                            )
+                        }
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    AssistChip(
+                        onClick = {
+                            elapsed = 0
+                            running = false
+                            scope.launch {
+                                client.post("/v1/presenter/action", JSONObject().put("action", "timer").put("reset", true))
+                            }
+                        },
+                        label = { Text("Reset", color = Color(0xFF8E8E93)) }
+                    )
+                }
+
+                // Slide count & jump button
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0A84FF).copy(alpha = 0.18f))
+                            .clickable { if (totalSlides > 1) showJumpDialog = true }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            if (totalSlides > 0) "Slide $currentSlide of $totalSlides  ▾" else "Slide $currentSlide",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0A84FF)
+                        )
+                    }
+
+                    Text(
+                        if (running) "● Presenting live" else "○ Paused",
+                        fontSize = 12.sp,
+                        color = if (running) Color(0xFF30D158) else Color(0xFF8E8E93),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
-        Muted("The volume buttons also go to the next and previous slide.")
+
+        // --- Active Slide & Speaker Notes (Hero Section) ---
+        Card(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "SLIDE $currentSlide NOTES",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = Color(0xFF0A84FF),
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            editedNotes = notesText
+                            showEditNotesDialog = true
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Filled.Edit, "Edit slide notes", tint = Color(0xFF8E8E93), modifier = Modifier.size(16.dp))
+                    }
+                }
+
+                if (slideTitle.isNotBlank()) {
+                    Text(
+                        slideTitle,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF5F5F7)
+                    )
+                }
+
+                // Key Talking Points
+                if (keypoints.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        keypoints.forEach { point ->
+                            Row(verticalAlignment = Alignment.Top) {
+                                Box(
+                                    Modifier
+                                        .padding(top = 7.dp, end = 8.dp)
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF0A84FF))
+                                )
+                                Text(
+                                    point,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFFF5F5F7),
+                                    lineHeight = 22.sp
+                                )
+                            }
+                        }
+                    }
+                } else if (notesText.isNotBlank()) {
+                    Text(
+                        notesText,
+                        fontSize = 15.sp,
+                        color = Color(0xFFF5F5F7),
+                        lineHeight = 22.sp
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No speaker notes for this slide.\nTap edit icon above to add keypoints.",
+                            color = Color(0xFF8E8E93),
+                            fontSize = 14.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+
+                // Expanded Verbatim Notes (if different from keypoints)
+                if (notesText.isNotBlank() && keypoints.isNotEmpty() && notesText.length > 80) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0x18FFFFFF))
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Text(
+                                "FULL NOTES",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF8E8E93)
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                notesText,
+                                fontSize = 13.sp,
+                                color = Color(0xFFD1D1D6),
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Up Next Preview ---
+        if (nextTitle.isNotBlank()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x12FFFFFF))
+                    .border(0.5.dp, Color(0x22FFFFFF), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "NEXT  ▸",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0A84FF),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Text(
+                        nextTitle,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFFE5E5EA),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
+        // --- Presenter Primary Controls (Thumb Optimized) ---
+        BigButton(
+            "Next Slide",
+            Modifier.fillMaxWidth(),
+            height = 96
+        ) {
+            onNext()
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            BigButton("Previous", Modifier.weight(1f), height = 58) {
+                onPrev()
+            }
+            BigButton("Jump", Modifier.weight(0.7f), height = 58) {
+                showJumpDialog = true
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BigButton("Start (F5)", Modifier.weight(1f), height = 48) {
+                running = true
+                act("start")
+            }
+            BigButton("Blank (B)", Modifier.weight(1f), height = 48) {
+                act("blank")
+            }
+            BigButton("End (Esc)", Modifier.weight(1f), height = 48) {
+                act("exit")
+            }
+        }
+
+        Muted("Tip: Volume buttons also change slides without looking at your screen.")
+    }
+
+    // --- Modal: Deck Picker Dialog ---
+    if (showDeckDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeckDialog = false },
+            title = { Text("Select Presentation Deck", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Decks detected on computer:",
+                        fontSize = 13.sp,
+                        color = Color(0xFF8E8E93)
+                    )
+                    if (availableDecks.isEmpty()) {
+                        Text("No presentations found in ~/presentation or Documents.", color = Color(0xFF8E8E93))
+                    } else {
+                        availableDecks.forEach { deck ->
+                            val path = deck.optString("path")
+                            val name = deck.optString("name")
+                            val type = deck.optString("type", "PPT")
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0x18FFFFFF))
+                                    .clickable {
+                                        scope.launch {
+                                            client.post("/v1/presenter/deck", JSONObject().put("path", path))?.let {
+                                                applyState(it)
+                                            }
+                                        }
+                                        showDeckDialog = false
+                                    }
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFF0A84FF))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(type, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    name,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFFF5F5F7),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    act("detect")
+                    showDeckDialog = false
+                }) { Text("Re-scan Active Window") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeckDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    // --- Modal: Jump to Slide Dialog ---
+    if (showJumpDialog) {
+        AlertDialog(
+            onDismissRequest = { showJumpDialog = false },
+            title = { Text("Jump to Slide", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Select a slide to jump directly:", fontSize = 13.sp, color = Color(0xFF8E8E93))
+                    val maxJump = if (totalSlides > 0) totalSlides else 30
+                    val items = (1..maxJump).toList()
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items.take(8).forEach { num ->
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (num == currentSlide) Color(0xFF0A84FF) else Color(0x22FFFFFF))
+                                    .clickable {
+                                        act("goto", num)
+                                        showJumpDialog = false
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("$num", fontWeight = FontWeight.Bold, color = Color(0xFFF5F5F7), fontSize = 14.sp)
+                            }
+                        }
+                    }
+                    if (items.size > 8) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items.drop(8).take(8).forEach { num ->
+                                Box(
+                                    Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(if (num == currentSlide) Color(0xFF0A84FF) else Color(0x22FFFFFF))
+                                    .clickable {
+                                        act("goto", num)
+                                        showJumpDialog = false
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("$num", fontWeight = FontWeight.Bold, color = Color(0xFFF5F5F7), fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+                TextButton(onClick = { showJumpDialog = false }) { Text("Close") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showJumpDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // --- Modal: Edit Slide Notes Dialog ---
+    if (showEditNotesDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditNotesDialog = false },
+            title = { Text("Edit Slide $currentSlide Notes", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Keypoints & speaking notes for this slide:", fontSize = 13.sp, color = Color(0xFF8E8E93))
+                    OutlinedTextField(
+                        value = editedNotes,
+                        onValueChange = { editedNotes = it },
+                        modifier = Modifier.fillMaxWidth().height(160.dp),
+                        placeholder = { Text("Enter talking points...") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        client.post(
+                            "/v1/presenter/notes",
+                            JSONObject().put("slide", currentSlide).put("notes", editedNotes)
+                        )?.let { applyState(it) }
+                    }
+                    showEditNotesDialog = false
+                }) { Text("Save Notes") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditNotesDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }

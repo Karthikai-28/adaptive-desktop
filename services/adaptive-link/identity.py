@@ -300,7 +300,12 @@ def save_phone(name, cert_pem, link_dir=None, now=None):
     phones = load_phones(link_dir)
     known = next((phone for phone in phones if phone["fingerprint"] == digest), None)
     if known is None and len(phones) >= MAX_PHONES:
-        raise TooManyPhones(f"{MAX_PHONES} devices are paired already; unpair one first")
+        same_name = [p for p in phones if p["name"] == clean_name(name)]
+        if same_name:
+            oldest = min(same_name, key=lambda p: p.get("paired_at", 0))
+            phones = [p for p in phones if p["fingerprint"] != oldest["fingerprint"]]
+        else:
+            raise TooManyPhones(f"{MAX_PHONES} devices are paired already; unpair one first")
     record = {"name": clean_name(name), "cert_pem": pem.decode(), "fingerprint": digest,
               "paired_at": int(now if now is not None else time.time()),
               "deny": known["deny"] if known else []}

@@ -48,6 +48,7 @@ import inputs
 import machine
 import pen
 import phone_display
+import presenter
 import scenes
 import screen
 import system
@@ -165,6 +166,7 @@ class Link:
         self._undo = None   # a change waiting for the phone to keep it
         # What the computer tells the phone without being asked (alerts.py).
         self.events = alerts.Events()
+        self.presenter = presenter.PresenterEngine(input_sender=self.input.send, events_notifier=self.events.add)
         self._watchers = []
         # The owner's relay, if they run one, and the screen as video (media.py).
         self.relay = identity.load_relay(self.link_dir)
@@ -367,6 +369,11 @@ class Link:
         add.add_get("/v1/camera", self.h_camera)
         add.add_get("/v1/media", self.h_media_get)
         add.add_post("/v1/media", self.h_media_post)
+        add.add_get("/v1/presenter", self.h_presenter_get)
+        add.add_post("/v1/presenter", self.h_presenter_post)
+        add.add_post("/v1/presenter/action", self.h_presenter_action)
+        add.add_post("/v1/presenter/deck", self.h_presenter_deck)
+        add.add_post("/v1/presenter/notes", self.h_presenter_notes)
         add.add_post("/v1/volume", self.h_volume)
         add.add_get("/v1/clipboard", self.h_clipboard_get)
         add.add_post("/v1/clipboard", self.h_clipboard_set)
@@ -706,6 +713,59 @@ class Link:
         data = await read_json(request)
         ok = await asyncio.to_thread(desktop.set_volume, data.get("action"))
         return web.json_response({"ok": bool(ok), "volume": await asyncio.to_thread(desktop.volume)})
+
+    async def h_presenter_get(self, _request):
+        if not self.presenter.slides:
+            await asyncio.to_thread(self.presenter.auto_detect_or_default)
+        return web.json_response(self.presenter.status())
+
+    async def h_presenter_post(self, request):
+        return await self.h_presenter_action(request)
+
+    async def h_presenter_action(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the computer is view-only")
+        data = await read_json(request)
+        act = data.get("action", "")
+        if act == "next":
+            status = await self.presenter.next()
+        elif act == "prev":
+            status = await self.presenter.prev()
+        elif act == "goto":
+            slide = int(data.get("slide", 1))
+            status = await self.presenter.goto(slide)
+        elif act == "start":
+            status = await self.presenter.start()
+        elif act == "blank":
+            status = await self.presenter.blank()
+        elif act == "exit":
+            status = await self.presenter.exit()
+        elif act == "timer":
+            self.presenter.set_timer(running=data.get("running"), reset=bool(data.get("reset")))
+            status = self.presenter.status()
+        elif act == "detect":
+            await asyncio.to_thread(self.presenter.auto_detect_or_default)
+            status = self.presenter.status()
+        else:
+            status = self.presenter.status()
+        return web.json_response({"ok": True, **status})
+
+    async def h_presenter_deck(self, request):
+        data = await read_json(request)
+        path = data.get("path") or data.get("file")
+        if not path:
+            return json_error(400, "no deck path provided")
+        ok = await asyncio.to_thread(self.presenter.load_deck, path)
+        if not ok:
+            return json_error(404, "could not load presentation deck")
+        return web.json_response({"ok": True, **self.presenter.status()})
+
+    async def h_presenter_notes(self, request):
+        data = await read_json(request)
+        slide = int(data.get("slide", 1))
+        notes = str(data.get("notes", ""))
+        ok = self.presenter.update_notes(slide, notes)
+        return web.json_response({"ok": ok, **self.presenter.status()})
 
     # The clipboard goes with pointer and keyboard: what a phone that may not
     # type could otherwise read (a password just copied) or paste.
@@ -1281,6 +1341,7 @@ class Link:
             "control-profiles": (lambda: {"revision": self.workspace.profiles.data["revision"]}, 1),
             "app-sessions": (lambda: {"sessions": [self.workspace.public(s) for s in list(self.workspace.sessions.values()) if s["owner"] == owner]}, 1),
             "control-runs": (lambda: {"runs": [self.workspace.run_public(r) for r in list(self.workspace.runs.values()) if r["owner"] == owner]}, 0.5),
+            "presenter": (lambda: self.presenter.status(), 1),
         })
 
         async def listen():
