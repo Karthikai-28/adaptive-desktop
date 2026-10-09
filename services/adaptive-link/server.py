@@ -727,21 +727,25 @@ class Link:
             return json_error(403, "the computer is view-only")
         data = await read_json(request)
         act = data.get("action", "")
+        send_key = bool(data.get("send_key", True))
         if act == "next":
-            status = await self.presenter.next()
+            status = await self.presenter.next(send_key=send_key)
         elif act == "prev":
-            status = await self.presenter.prev()
+            status = await self.presenter.prev(send_key=send_key)
         elif act == "goto":
             slide = int(data.get("slide", 1))
-            status = await self.presenter.goto(slide)
+            status = await self.presenter.goto(slide, send_key=send_key)
         elif act == "start":
-            status = await self.presenter.start()
+            status = await self.presenter.start(send_key=send_key)
         elif act == "blank":
-            status = await self.presenter.blank()
+            status = await self.presenter.blank(send_key=send_key)
         elif act == "exit":
-            status = await self.presenter.exit()
+            status = await self.presenter.exit(send_key=send_key)
         elif act == "timer":
-            self.presenter.set_timer(running=data.get("running"), reset=bool(data.get("reset")))
+            running_val = data.get("running")
+            if running_val is not None:
+                running_val = bool(running_val)
+            self.presenter.set_timer(running=running_val, reset=bool(data.get("reset")))
             status = self.presenter.status()
         elif act == "detect":
             await asyncio.to_thread(self.presenter.auto_detect_or_default)
@@ -1376,7 +1380,7 @@ class Link:
                     except Exception:  # noqa: BLE001 - a part that cannot be read now is read again later
                         continue
                     # The same but for the clock is the same: time and traffic counters are not news by themselves.
-                    seen = json.dumps({key: value for key, value in data.items() if key not in ("time", "uptime")}
+                    seen = json.dumps({key: value for key, value in data.items() if key not in ("time", "uptime", "elapsed")}
                                       if isinstance(data, dict) else data, sort_keys=True)
                     if seen != last.get(name):
                         last[name] = seen

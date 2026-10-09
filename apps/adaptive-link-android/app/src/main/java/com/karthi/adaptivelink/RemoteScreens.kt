@@ -57,7 +57,9 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -870,7 +872,7 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
     var showJumpDialog by remember { mutableStateOf(false) }
     var showEditNotesDialog by remember { mutableStateOf(false) }
     var editedNotes by remember { mutableStateOf("") }
-    val notesScrollState = rememberScrollState()
+    val notesScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
     fun applyState(json: JSONObject?) {
         if (json == null) return
@@ -880,6 +882,17 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
         if (cur > 0) currentSlide = cur
         val total = json.optInt("total_slides", 0)
         if (total > 0) totalSlides = total
+
+        // Sync timer state between phone and computer
+        if (json.has("running")) {
+            running = json.optBoolean("running")
+        }
+        if (json.has("elapsed")) {
+            val srvElapsed = json.optInt("elapsed", 0)
+            if (srvElapsed > 0 || !running) {
+                elapsed = srvElapsed
+            }
+        }
 
         val slide = json.optJSONObject("slide")
         if (slide != null) {
@@ -913,10 +926,11 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
         }
     }
 
-    fun act(action: String, slideNum: Int? = null) {
+    fun act(action: String, slideNum: Int? = null, sendKey: Boolean = false, timerRunning: Boolean? = null) {
         scope.launch(Dispatchers.IO) {
-            val body = JSONObject().put("action", action)
+            val body = JSONObject().put("action", action).put("send_key", sendKey)
             if (slideNum != null) body.put("slide", slideNum)
+            if (timerRunning != null) body.put("running", timerRunning)
             val res = client.post("/v1/presenter/action", body)
             withContext(Dispatchers.Main) {
                 applyState(res)
@@ -926,11 +940,11 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
 
     fun onNext() {
         running = true
-        if (totalSlides > 0 && currentSlide < totalSlides) {
+        if (totalSlides == 0 || currentSlide < totalSlides) {
             currentSlide += 1
         }
         input.send(Protocol.key("Right"))
-        act("next")
+        act("next", sendKey = false)
     }
 
     fun onPrev() {
@@ -938,24 +952,24 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
             currentSlide -= 1
         }
         input.send(Protocol.key("Left"))
-        act("prev")
+        act("prev", sendKey = false)
     }
 
     fun onStart() {
         running = true
         input.send(Protocol.key("F5"))
-        act("start")
+        act("start", sendKey = false)
     }
 
     fun onBlank() {
         input.send(Protocol.key("b"))
-        act("blank")
+        act("blank", sendKey = false)
     }
 
     fun onExit() {
         running = false
         input.send(Protocol.key("Escape"))
-        act("exit")
+        act("exit", sendKey = false)
     }
 
     DisposableEffect(Unit) {
@@ -1071,8 +1085,9 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
                     // Timer Play/Pause
                     IconButton(
                         onClick = {
-                            running = !running
-                            act("timer")
+                            val nextRunning = !running
+                            running = nextRunning
+                            act("timer", timerRunning = nextRunning)
                         },
                         modifier = Modifier.size(34.dp)
                     ) {
@@ -1453,7 +1468,8 @@ fun PresenterPage(activity: MainActivity, client: LinkClient, onBack: () -> Unit
                                     val isCurrent = num == currentSlide
                                     Surface(
                                         onClick = {
-                                            act("goto", num)
+                                            currentSlide = num
+                                            act("goto", slideNum = num, sendKey = true)
                                             showJumpDialog = false
                                         },
                                         modifier = Modifier.size(46.dp),

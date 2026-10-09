@@ -28,10 +28,14 @@ def _extract_keypoints(notes_text, slide_title=""):
     keypoints = []
     lines = [line.strip() for line in notes_text.split("\n") if line.strip()]
     for line in lines:
-        # Check if line looks like a source citation, slide number, or metadata
-        if line.lower().startswith("[source") or line.lower().startswith("source:"):
+        clean_lower = line.lower().strip()
+        # Filter metadata, sources, notes headers and citations
+        if any(clean_lower.startswith(p) for p in (
+            "[source", "source:", "sources:", "[note", "note:", "notes:", "reference:", "ref:", "citation:"
+        )):
             continue
-        if re.match(r"^(slide\s*\d+|page\s*\d+)$", line, re.IGNORECASE):
+        line = re.sub(r"<number>", "", line, flags=re.IGNORECASE).strip()
+        if not line or re.match(r"^(slide\s*\d+|page\s*\d+|\d+)$", line, re.IGNORECASE):
             continue
         # Split bullets if present
         clean_line = re.sub(r"^[-*•–—\d\.\)]+\s*", "", line).strip()
@@ -41,13 +45,53 @@ def _extract_keypoints(notes_text, slide_title=""):
                 sentences = re.split(r"(?<=[.!?])\s+", clean_line)
                 for s in sentences:
                     s = s.strip()
-                    if s and len(s) > 4:
+                    if s and len(s) > 4 and not any(s.lower().startswith(p) for p in ("source:", "sources:", "[source")):
                         keypoints.append(s)
             else:
                 keypoints.append(clean_line)
     if not keypoints and slide_title:
         keypoints.append(slide_title)
     return keypoints[:8]
+
+
+def _get_pptx_slide_title(s_tree, idx):
+    """Detect actual slide title using placeholders, font size, and semantic filtering."""
+    # 1. Standard PowerPoint title placeholder
+    for sp in s_tree.iter():
+        if sp.tag.endswith("sp"):
+            for ph in sp.iter():
+                if ph.tag.endswith("ph") and ph.attrib.get("type") in ("title", "ctrTitle"):
+                    txt = "".join(sp.itertext()).strip()
+                    if txt:
+                        return txt
+
+    # 2. Heuristic scoring: shape with highest font size, excluding metadata and footers
+    candidates = []
+    for sp in s_tree.iter():
+        if not sp.tag.endswith("sp"):
+            continue
+        txt = "".join(sp.itertext()).strip()
+        if not txt:
+            continue
+        clean = re.sub(r"\s+", " ", txt)
+        lower = clean.lower()
+        if any(ign in lower for ign in ("©", "copyright", "for internal use", "confidential", "presented", "presenter")):
+            continue
+        if re.match(r"^\d+$", clean):
+            continue
+        max_sz = 0
+        for rpr in sp.iter():
+            if rpr.tag.endswith("rPr") and "sz" in rpr.attrib:
+                try:
+                    max_sz = max(max_sz, int(rpr.attrib["sz"]))
+                except ValueError:
+                    pass
+        candidates.append((max_sz, len(clean), clean))
+
+    if candidates:
+        candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+        return candidates[0][2]
+    return f"Slide {idx}"
 
 
 def extract_pptx(path):
@@ -59,30 +103,45 @@ def extract_pptx(path):
     try:
         with zipfile.ZipFile(path) as z:
             namelist = z.namelist()
-            slide_files = sorted(
-                [n for n in namelist if re.match(r"^ppt/slides/slide\d+\.xml$", n)],
-                key=lambda x: int(re.search(r"\d+", x).group())
-            )
+
+            # 1. Authoritative slide order via ppt/presentation.xml relationships
+            slide_files = []
+            if "ppt/presentation.xml" in namelist and "ppt/_rels/presentation.xml.rels" in namelist:
+                try:
+                    pres_tree = ET.fromstring(z.read("ppt/presentation.xml"))
+                    rels_tree = ET.fromstring(z.read("ppt/_rels/presentation.xml.rels"))
+                    rel_map = {}
+                    for rel in rels_tree.iter():
+                        r_id = rel.attrib.get("Id")
+                        target = rel.attrib.get("Target", "")
+                        if r_id and target:
+                            clean_target = target.replace("../", "")
+                            if not clean_target.startswith("ppt/"):
+                                clean_target = "ppt/" + clean_target.lstrip("/")
+                            rel_map[r_id] = clean_target
+                    for sld in pres_tree.iter():
+                        if sld.tag.endswith("sldId"):
+                            r_id = (
+                                sld.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                                or sld.attrib.get("id")
+                            )
+                            target = rel_map.get(r_id)
+                            if target and target in namelist:
+                                slide_files.append(target)
+                except Exception:
+                    pass
+
+            if not slide_files:
+                slide_files = sorted(
+                    [n for n in namelist if re.match(r"^ppt/slides/slide\d+\.xml$", n)],
+                    key=lambda x: int(re.search(r"\d+", x).group())
+                )
+
             for idx, sfile in enumerate(slide_files, start=1):
                 s_tree = ET.fromstring(z.read(sfile))
-                title = ""
-                # Try finding title shape
-                for sp in s_tree.iter():
-                    if sp.tag.endswith("sp"):
-                        is_title = False
-                        for nv in sp.iter():
-                            if nv.tag.endswith("nvSpPr"):
-                                for ph in nv.iter():
-                                    if ph.tag.endswith("ph") and ph.attrib.get("type") in ("title", "ctrTitle"):
-                                        is_title = True
-                        if is_title:
-                            title = "".join(sp.itertext()).strip()
-                            break
-                if not title:
-                    non_empty = [t.strip() for t in s_tree.itertext() if t.strip()]
-                    title = non_empty[0] if non_empty else f"Slide {idx}"
+                title = _get_pptx_slide_title(s_tree, idx)
 
-                # Find speaker notes
+                # 2. Speaker notes exclusively linked from slide relationship
                 s_basename = Path(sfile).name
                 rel_file = f"ppt/slides/_rels/{s_basename}.rels"
                 notes_file = None
@@ -98,19 +157,25 @@ def extract_pptx(path):
                                     break
                     except Exception:
                         pass
-                if not notes_file and f"ppt/notesSlides/notesSlide{idx}.xml" in namelist:
-                    notes_file = f"ppt/notesSlides/notesSlide{idx}.xml"
 
                 notes_paragraphs = []
                 if notes_file:
                     try:
                         n_tree = ET.fromstring(z.read(notes_file))
                         for sp in n_tree.iter():
-                            if sp.tag.endswith("sp"):
-                                p_text = "".join(sp.itertext()).strip()
-                                # Ignore pure slide number placeholders
-                                if p_text and not p_text.isdigit():
-                                    notes_paragraphs.append(p_text)
+                            if not sp.tag.endswith("sp"):
+                                continue
+                            is_num_placeholder = False
+                            for ph in sp.iter():
+                                if ph.tag.endswith("ph") and ph.attrib.get("type") in ("sldNum", "dt", "hdr", "ftr"):
+                                    is_num_placeholder = True
+                            if is_num_placeholder:
+                                continue
+                            p_text = "".join(sp.itertext()).strip()
+                            if not p_text or p_text.isdigit() or "<number>" in p_text:
+                                p_text = p_text.replace("<number>", "").strip()
+                            if p_text:
+                                notes_paragraphs.append(p_text)
                     except Exception:
                         pass
 
@@ -123,7 +188,7 @@ def extract_pptx(path):
                     "notes": notes_text,
                     "keypoints": keypoints
                 })
-    except Exception as e:
+    except Exception:
         return []
     return slides
 
@@ -332,6 +397,7 @@ def list_available_decks(force=False):
         Path.home() / "Documents",
         Path.home() / "Downloads",
     ]
+    IGNORED_MD = {"README.MD", "AGENTS.MD", "CONTRIBUTING.MD", "LICENSE.MD", "TODO.MD", "CHANGELOG.MD"}
     for d in search_dirs:
         if not d.is_dir():
             continue
@@ -340,6 +406,16 @@ def list_available_decks(force=False):
                 # Top level of dir
                 for item in d.glob(ext):
                     if item.is_file() and not item.name.startswith("."):
+                        if item.suffix.lower() == ".md":
+                            if item.name.upper() in IGNORED_MD:
+                                continue
+                            if "presentation" not in str(item).lower():
+                                try:
+                                    prefix = item.read_text(encoding="utf-8", errors="ignore")[:1000]
+                                    if not any(sep in prefix for sep in ("\n---\n", "\n===\n", "# Slide", "## Slide")):
+                                        continue
+                                except Exception:
+                                    continue
                         resolved = str(item.resolve())
                         if resolved not in seen:
                             seen.add(resolved)
@@ -352,6 +428,16 @@ def list_available_decks(force=False):
                 # Subdirectories (up to 3 levels)
                 for item in d.glob(f"*/*/{ext}"):
                     if item.is_file() and not item.name.startswith("."):
+                        if item.suffix.lower() == ".md":
+                            if item.name.upper() in IGNORED_MD:
+                                continue
+                            if "presentation" not in str(item).lower():
+                                try:
+                                    prefix = item.read_text(encoding="utf-8", errors="ignore")[:1000]
+                                    if not any(sep in prefix for sep in ("\n---\n", "\n===\n", "# Slide", "## Slide")):
+                                        continue
+                                except Exception:
+                                    continue
                         resolved = str(item.resolve())
                         if resolved not in seen:
                             seen.add(resolved)
@@ -381,13 +467,19 @@ class PresenterEngine:
         self.title = ""
         self.slides = []
         self.current_slide = 1
-        self.elapsed = 0
         self.running = False
-        self._last_tick = 0
+        self._elapsed_base = 0.0
+        self._running_since = 0.0
 
     @property
     def total_slides(self):
         return len(self.slides)
+
+    @property
+    def elapsed(self):
+        if self.running and self._running_since > 0:
+            return int(self._elapsed_base + (time.time() - self._running_since))
+        return int(self._elapsed_base)
 
     def load_deck(self, path):
         path = str(Path(path).expanduser().resolve())
@@ -449,7 +541,6 @@ class PresenterEngine:
         return self.slides[idx]
 
     def status(self):
-        self._update_timer()
         curr = self.current_slide_data()
         nxt = self.next_slide_data()
         return {
@@ -465,48 +556,50 @@ class PresenterEngine:
             "available_decks": list_available_decks()[:15]
         }
 
-    def _update_timer(self):
-        now = time.time()
-        if self.running and self._last_tick > 0:
-            self.elapsed += int(now - self._last_tick)
-        self._last_tick = now
-
     def set_timer(self, running=None, reset=False):
-        self._update_timer()
+        now = time.time()
         if reset:
-            self.elapsed = 0
-            self.running = False
+            self._elapsed_base = 0.0
+            self._running_since = now if self.running else 0.0
         elif running is not None:
-            self.running = bool(running)
-            self._last_tick = time.time()
+            new_running = bool(running)
+            if new_running and not self.running:
+                self.running = True
+                self._running_since = now
+            elif not new_running and self.running:
+                self.running = False
+                if self._running_since > 0:
+                    self._elapsed_base += (now - self._running_since)
+                self._running_since = 0.0
         self._notify_change()
 
-    async def next(self):
-        self._update_timer()
-        self.running = True
+    async def next(self, send_key=True):
+        if not self.running:
+            self.running = True
+            self._running_since = time.time()
         if self.slides and self.current_slide < len(self.slides):
             self.current_slide += 1
-        if self.input_sender:
+        if send_key and self.input_sender:
             await self.input_sender({"t": "key", "k": "Right"})
         self._notify_change()
         return self.status()
 
-    async def prev(self):
-        self._update_timer()
+    async def prev(self, send_key=True):
         if self.slides and self.current_slide > 1:
             self.current_slide -= 1
-        if self.input_sender:
+        if send_key and self.input_sender:
             await self.input_sender({"t": "key", "k": "Left"})
         self._notify_change()
         return self.status()
 
-    async def goto(self, slide_num):
-        self._update_timer()
-        self.activate_presentation_window()
+    async def goto(self, slide_num, send_key=True):
+        if not self.running:
+            self.running = True
+            self._running_since = time.time()
+        await asyncio.to_thread(self.activate_presentation_window)
         if self.slides and 1 <= slide_num <= len(self.slides):
-            diff = slide_num - self.current_slide
             self.current_slide = slide_num
-            if self.input_sender:
+            if send_key and self.input_sender:
                 # In Impress & PowerPoint: slide number + Return jumps directly
                 for digit in str(slide_num):
                     await self.input_sender({"t": "key", "k": digit})
@@ -515,25 +608,32 @@ class PresenterEngine:
         self._notify_change()
         return self.status()
 
-    async def start(self):
-        self.activate_presentation_window()
-        if self.input_sender:
+    async def start(self, send_key=True):
+        await asyncio.to_thread(self.activate_presentation_window)
+        if send_key and self.input_sender:
             await self.input_sender({"t": "key", "k": "F5"})
-        self.running = True
+        if not self.running:
+            self.running = True
+            self._running_since = time.time()
         self._notify_change()
         return self.status()
 
-    async def blank(self):
-        self.activate_presentation_window()
-        if self.input_sender:
+    async def blank(self, send_key=True):
+        await asyncio.to_thread(self.activate_presentation_window)
+        if send_key and self.input_sender:
             await self.input_sender({"t": "key", "k": "b"})
         return self.status()
 
-    async def exit(self):
-        self.activate_presentation_window()
-        if self.input_sender:
+    async def exit(self, send_key=True):
+        await asyncio.to_thread(self.activate_presentation_window)
+        if send_key and self.input_sender:
             await self.input_sender({"t": "key", "k": "Escape"})
-        self.running = False
+        if self.running:
+            now = time.time()
+            if self._running_since > 0:
+                self._elapsed_base += (now - self._running_since)
+            self._running_since = 0.0
+            self.running = False
         self._notify_change()
         return self.status()
 
