@@ -28,7 +28,7 @@ def find_device(sys_root="/sys/devices/virtual/video4linux"):
         entries = sorted(Path(sys_root).iterdir())
     except OSError:
         return None
-    labelled = None
+    fallback = None
     for entry in entries:
         try:
             name = (entry / "name").read_text().strip()
@@ -37,8 +37,9 @@ def find_device(sys_root="/sys/devices/virtual/video4linux"):
         device = f"/dev/{entry.name}"
         if name == CARD_LABEL:
             return device
-        labelled = labelled or device
-    return labelled
+        if "Dummy video device" in name:
+            fallback = fallback or device
+    return fallback
 
 
 def pipeline_description(device):

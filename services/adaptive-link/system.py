@@ -60,12 +60,15 @@ def summary():
     except (OSError, ValueError, IndexError):
         pass
     disks = []
+    seen_devs = set()
     for mount in dict.fromkeys(("/", str(Path.home()))):
         try:
+            st = os.stat(mount)
             usage = shutil.disk_usage(mount)
         except OSError:
             continue
-        if not any(d["total"] == usage.total and d["free"] == usage.free for d in disks):
+        if st.st_dev not in seen_devs:
+            seen_devs.add(st.st_dev)
             disks.append({"mount": mount, "total": usage.total, "free": usage.free})
     try:
         uptime = float(Path("/proc/uptime").read_text().split()[0])

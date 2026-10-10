@@ -174,7 +174,7 @@ class TunnelServer:
         async def changed():
             if peer.connectionState in ("connected", "failed"):
                 self._report(peer.connectionState)
-            if peer.connectionState in ("failed", "closed", "disconnected"):
+            if peer.connectionState in ("failed", "closed"):
                 await self._drop(peer)
 
         await peer.setRemoteDescription(RTCSessionDescription(sdp=offer_sdp, type="offer"))
@@ -211,7 +211,7 @@ class TunnelServer:
 
     @property
     def connected(self):
-        return sum(1 for peer in self._peers if peer.connectionState == "connected")
+        return sum(1 for peer in self._peers if peer.connectionState == "connected" or peer.iceConnectionState in ("connected", "completed"))
 
 
 class TunnelClient:

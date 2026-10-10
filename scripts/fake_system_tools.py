@@ -229,12 +229,25 @@ def main():
     tool = Path(sys.argv[0]).name
     with (DIR / "calls.log").open("a") as log:
         log.write(json.dumps([tool, *sys.argv[1:]]) + "\n")
+    import fcntl
     if tool == "nmcli":
-        nmcli(sys.argv[1:], load())
+        lock_file = (DIR / ".network.lock").open("w")
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            nmcli(sys.argv[1:], load())
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
     elif TOOLS.get(tool):
-        state = machine()
-        TOOLS[tool](sys.argv[1:], state)
-        MACHINE.write_text(json.dumps(state))
+        lock_file = (DIR / ".machine.lock").open("w")
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            state = machine()
+            TOOLS[tool](sys.argv[1:], state)
+            MACHINE.write_text(json.dumps(state))
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
     else:
         sys.exit(f"fake {tool}: nothing here for it to do")
 

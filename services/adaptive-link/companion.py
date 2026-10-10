@@ -272,12 +272,14 @@ class Microphone:
         self._modules = []
         self._pipeline = None
         self._src = None
+        self._gst = None
 
     def start(self):
         import gi
         gi.require_version("Gst", "1.0")
         from gi.repository import Gst
         Gst.init(None)
+        self._gst = Gst
         ok, sink = _pactl("load-module", "module-null-sink", f"sink_name={MIC_SINK}",
                           "sink_properties=device.description=Phone_Microphone_Feed")
         if not ok:
@@ -297,16 +299,15 @@ class Microphone:
             return False
         self._src = self._pipeline.get_by_name("src")
         self._pipeline.set_state(Gst.State.PLAYING)
-        self._gst = Gst
         return ok
 
     def push(self, pcm):
-        if self._src is None or not pcm or len(pcm) % 2:
+        if self._src is None or self._gst is None or not pcm or len(pcm) % 2:
             return False
         return self._src.emit("push-buffer", self._gst.Buffer.new_wrapped(pcm)) == self._gst.FlowReturn.OK
 
     def stop(self):
-        if self._pipeline is not None:
+        if self._pipeline is not None and self._gst is not None:
             self._pipeline.set_state(self._gst.State.NULL)
             self._pipeline = None
             self._src = None
