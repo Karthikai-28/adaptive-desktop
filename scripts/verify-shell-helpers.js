@@ -19,7 +19,7 @@ vm.runInNewContext(`${fs.readFileSync(file, 'utf8')}
   clipboardPushImage, clipboardPin, clipboardClear, pngSize, formatBytes,
   CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_PINS, CLIPBOARD_MAX_IMAGES,
   CLIPBOARD_MAX_IMAGE_BYTES, DROPDOWN_ROLE, dropdownTerminalKind, dropdownArgv, dropdownRect,
-  isDropdownWindow });`, { exportsTo: U });
+  isDropdownWindow, resolveAdaptiveDir });`, { exportsTo: U });
 
 let failures = 0;
 function check(ok, message) {
@@ -169,3 +169,8 @@ if (failures) {
     process.exit(1);
 }
 console.log('Shell helper checks passed');
+
+// resolveAdaptiveDir
+check(U.resolveAdaptiveDir("/home/u", "/custom/path", null) === "/custom/path", "adaptive dir: respects env override");
+check(U.resolveAdaptiveDir("/home/u", null, "/custom/adaptive-desktop/shell/adaptive-shell@local") === "/custom/adaptive-desktop", "adaptive dir: resolves from extension dir in repo");
+check(U.resolveAdaptiveDir("/home/u", null, "/home/u/.local/share/gnome-shell/extensions/adaptive-shell@local") === "/home/u/adaptive-desktop", "adaptive dir: falls back to ~/adaptive-desktop");

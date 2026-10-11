@@ -31,8 +31,11 @@ const Notifications = Me.imports.notifications;
 const AdaptiveUtil = Me.imports.adaptiveUtil;
 
 // Written by scripts/record-live-verification.py (and Adaptive Settings).
-const VERIFICATION_PATH = GLib.build_filenamev(
-    [GLib.get_home_dir(), 'adaptive-desktop', 'verification', 'live-verification-latest.json']);
+const VERIFICATION_PATH = GLib.build_filenamev([
+    AdaptiveUtil.resolveAdaptiveDir(GLib.get_home_dir(), GLib.getenv('ADAPTIVE_DESKTOP_DIR'), Me.dir ? Me.dir.get_path() : null),
+    'verification',
+    'live-verification-latest.json',
+]);
 
 // Layout bounds for _fitToMonitor().
 const NOTIFICATION_MIN_HEIGHT = 220;

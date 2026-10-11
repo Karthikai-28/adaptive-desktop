@@ -13,7 +13,7 @@
    formatBytes, isSecretClipboard, CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS,
    CLIPBOARD_MAX_PINS, CLIPBOARD_MAX_IMAGES, CLIPBOARD_MAX_IMAGE_BYTES,
    DROPDOWN_ROLE, dropdownTerminalKind, dropdownArgv, dropdownRect,
-   isDropdownWindow */
+   isDropdownWindow, resolveAdaptiveDir */
 
 // ----------------------------------------------------------------- git
 
@@ -364,4 +364,21 @@ function dropdownRect(area, fraction) {
         width: area.width,
         height: Math.max(120, Math.round(area.height * share)),
     };
+}
+
+// Resolves the adaptive-desktop root directory:
+// 1. ADAPTIVE_DESKTOP_DIR environment variable if provided
+// 2. Extension directory parent structure if running inside repo (<root>/shell/adaptive-shell@local)
+// 3. Fallback to ~/adaptive-desktop
+function resolveAdaptiveDir(homeDir, envDir = null, extDir = null) {
+    if (envDir && typeof envDir === "string" && envDir.trim())
+        return envDir.trim();
+    if (extDir && typeof extDir === "string") {
+        const marker = "/shell/adaptive-shell@local";
+        const idx = extDir.indexOf(marker);
+        if (idx !== -1)
+            return extDir.slice(0, idx);
+    }
+    const home = homeDir || "";
+    return home ? (home + "/adaptive-desktop") : "adaptive-desktop";
 }

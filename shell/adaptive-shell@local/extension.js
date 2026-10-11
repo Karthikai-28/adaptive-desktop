@@ -27,6 +27,7 @@ const Shade = Me.imports.shade;
 const DockExtras = Me.imports.dockExtras;
 const ControlCenter = Me.imports.controlCenter;
 const UsbDevices = Me.imports.usbDevices;
+const AdaptiveUtil = Me.imports.adaptiveUtil;
 const ShellActions = Me.imports.shellActions;
 const TaskManager = Me.imports.taskManager;
 const NetworkPanel = Me.imports.networkPanel;
@@ -139,21 +140,23 @@ class AdaptiveShellV16 {
         this._aodTime = null;
         this._aodDate = null;
 
-        this._commandLauncher = GLib.build_filenamev([
+        const baseDir = AdaptiveUtil.resolveAdaptiveDir(
             GLib.get_home_dir(),
-            'adaptive-desktop',
+            GLib.getenv('ADAPTIVE_DESKTOP_DIR'),
+            Me.dir ? Me.dir.get_path() : null
+        );
+        this._commandLauncher = GLib.build_filenamev([
+            baseDir,
             'scripts',
             'adaptive-command-launch.sh',
         ]);
         this._focusCli = GLib.build_filenamev([
-            GLib.get_home_dir(),
-            'adaptive-desktop',
+            baseDir,
             'scripts',
             'focus-cli.py',
         ]);
         this._displayGuard = GLib.build_filenamev([
-            GLib.get_home_dir(),
-            'adaptive-desktop',
+            baseDir,
             'scripts',
             'adaptive-display-guard.py',
         ]);
@@ -161,14 +164,12 @@ class AdaptiveShellV16 {
         this._standDownId = 0;
         this._displayGuardRunAt = 0;
         this._windowCli = GLib.build_filenamev([
-            GLib.get_home_dir(),
-            'adaptive-desktop',
+            baseDir,
             'scripts',
             'window-cli.py',
         ]);
         this._appearanceCli = GLib.build_filenamev([
-            GLib.get_home_dir(),
-            'adaptive-desktop',
+            baseDir,
             'scripts',
             'appearance-cli.py',
         ]);

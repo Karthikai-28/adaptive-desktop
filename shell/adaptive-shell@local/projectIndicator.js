@@ -24,7 +24,10 @@ const Util = Me.imports.adaptiveUtil;
 const BUS_NAME = 'org.adaptive.ProjectContext';
 const OBJECT_PATH = '/org/adaptive/ProjectContext';
 const GIT_REFRESH_S = 60;
-const SCRIPTS = GLib.build_filenamev([GLib.get_home_dir(), 'adaptive-desktop', 'scripts']);
+const SCRIPTS = GLib.build_filenamev([
+    Util.resolveAdaptiveDir(GLib.get_home_dir(), GLib.getenv('ADAPTIVE_DESKTOP_DIR'), Me.dir ? Me.dir.get_path() : null),
+    'scripts',
+]);
 
 function script(name) {
     return GLib.build_filenamev([SCRIPTS, name]);
