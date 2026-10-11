@@ -5,6 +5,8 @@ point of contact. The staff are **Gemini 3.8 Flash (High)** agents running throu
 CLI (`agy`) on your Google AI Pro subscription, so there is no API billing.
 
 Open **http://127.0.0.1:8790** (Chrome is recommended because voice input uses Chrome's speech recognition).
+On the phone, the **Adaptive Link** app has all of it under **Office**, at home and away
+([ADAPTIVE_LINK.md](ADAPTIVE_LINK.md#the-agent-office)).
 
 ## Set it up
 

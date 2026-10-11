@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.PlayCircle
@@ -355,6 +356,7 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
 private data class Tile(val page: Page, val label: String, val detail: String, val icon: ImageVector)
 
 private val TILES = listOf(
+    Tile(Page.Office, "Office", "Your AI team", Icons.Filled.Groups),
     Tile(Page.Screen, "Screen", "See and control", Icons.Filled.DesktopWindows),
     Tile(Page.Trackpad, "Trackpad", "Pointer and keyboard", Icons.Filled.Mouse),
     Tile(Page.Media, "Media", "Play, pause, volume", Icons.Filled.PlayCircle),
@@ -377,6 +379,7 @@ private val TILES = listOf(
 )
 
 private fun tileGradient(page: Page): Pair<Color, Color> = when (page) {
+    Page.Office -> Color(0xFFD97757) to Color(0xFFA9533A)
     Page.Screen -> Color(0xFF007AFF) to Color(0xFF0051C6)
     Page.Trackpad -> Color(0xFF48484A) to Color(0xFF2C2C2E)
     Page.Media -> Color(0xFFFF2D55) to Color(0xFFD6183C)

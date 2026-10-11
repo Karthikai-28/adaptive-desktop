@@ -47,9 +47,16 @@ internal class ShellStore(activity: MainActivity, fingerprint: String) {
         }
         private set
     fun defaults() = JSONObject().put("schema", 1).put("revision", 0)
-        .put("pins", JSONArray(listOf("native:files", "native:control", "native:connections")))
+        .put("pins", JSONArray(listOf("native:office", "native:files", "native:control", "native:connections")))
         .put("dock", JSONArray(listOf("native:drawer", "native:files", "native:control")))
-        .put("folders", JSONObject()).put("recent", JSONArray())
+        .put("folders", JSONObject()).put("recent", JSONArray()).put("office_pinned", true)
+    init {
+        // Home screens saved before the Office existed get it pinned once; unpinning it later sticks.
+        if (!data.optBoolean("office_pinned")) {
+            val pins = data.optJSONArray("pins").strings()
+            runCatching { save(data.copyJson().put("pins", JSONArray(listOf("native:office") + pins.filterNot { it == "native:office" })).put("office_pinned", true)) }
+        }
+    }
     @Synchronized fun save(value: JSONObject) {
         val out = disk.startWrite()
         try { out.write(value.toString().toByteArray()); disk.finishWrite(out); data = value.copyJson() }
@@ -59,6 +66,7 @@ internal class ShellStore(activity: MainActivity, fingerprint: String) {
 
 private data class ShellApp(val id: String, val name: String, val page: Page? = null, val icon: ImageVector = Icons.Default.Apps)
 private val NativeApps = listOf(
+    ShellApp("native:office", "Office", Page.Office, Icons.Default.Groups),
     ShellApp("native:control", "Control Center", icon = Icons.Default.Tune), ShellApp("native:files", "Files", Page.Files, Icons.Default.Folder),
     ShellApp("native:tasks", "Tasks", Page.Tasks, Icons.Default.Memory), ShellApp("native:remote", "Desktop Remote", Page.Screen, Icons.Default.DesktopWindows),
     ShellApp("native:workspaces", "Desktop workspaces", Page.Apps, Icons.Default.Dashboard), ShellApp("native:camera", "Camera & microphone", Page.Camera, Icons.Default.Videocam),
@@ -516,8 +524,10 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             Text("Step ${run?.optInt("step")}/${run?.optInt("total")}", Modifier.weight(1f).padding(12.dp))
             Button(onClick = ::stop) { Text("Stop") }
         }
-        if (location != "app" || !online || note.startsWith("Step")) Text(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
-        NavigationBar(
+        // The Office has its own tabs and connection line: it fills the screen without the shell's.
+        val ownChrome = location == "native" && nativePage == Page.Office
+        if (!ownChrome && (location != "app" || !online || note.startsWith("Step"))) Text(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
+        if (!ownChrome) NavigationBar(
             containerColor = Color(0xFF141416),
             tonalElevation = 8.dp,
         ) {

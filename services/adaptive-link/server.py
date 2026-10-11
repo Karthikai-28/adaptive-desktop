@@ -38,6 +38,7 @@ from aiohttp import WSMsgType, web
 import actions
 import app_workspace
 import mobile_session
+import office_gateway
 import alerts
 import camera
 import cloud
@@ -189,6 +190,7 @@ class Link:
         self._pair_asks = {}
         self.workspace = app_workspace.Workspace(self)
         self.mobile = mobile_session.MobileDesktop(self)
+        self.office = office_gateway.OfficeGateway(self)
 
     # ------------------------------------------------------------ listeners
 
@@ -221,6 +223,7 @@ class Link:
 
     async def stop(self):
         await self.mobile.close()
+        await self.office.close()
         await self.workspace.close()
         for watcher in self._watchers:
             watcher.cancel()
@@ -360,6 +363,7 @@ class Link:
         add = app.router
         self.workspace.routes(add)
         self.mobile.routes(add)
+        self.office.routes(add)
         add.add_get("/v1/status", self.h_status)
         add.add_get("/v1/screen", self.h_screen)
         add.add_get("/v1/input", self.h_input)
@@ -422,7 +426,7 @@ class Link:
         info = await asyncio.to_thread(desktop.status)
         info.update({
             "version": VERSION,
-            "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1, "mobile_desktop": self.mobile.capabilities()},
+            "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1, "mobile_desktop": self.mobile.capabilities(), "office": 1},
             # From this machine itself: the direct tunnel, or the USB cable.
             "via": "direct" if identity.is_tunnel(request["peer"])
                    else "usb" if identity.is_loopback(request["peer"]) else "lan",

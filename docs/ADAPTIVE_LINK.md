@@ -359,6 +359,28 @@ and a keyboard can type a command into a terminal or open a file, whatever
 `input` off as well. The clipboard, media controls and the phone's
 notifications are always available to the paired phone.
 
+### The Agent Office
+
+**Office** (pinned on Home, and a tile under Laptop tools) is the [Agent Office](AGENT_OFFICE.md)
+from the phone, with everything the desktop page has, laid out for a phone:
+
+- **Team**: Claude and every agent, with what each is doing now. Tap one for their conversation,
+  their work and activity, and a menu to assign a task, call them, stop them or reset their memory.
+- **Claude**: talk to the manager. **Tasks**: the board, each task's report, brief and activity,
+  cancel, run again, and new tasks (with project and "start after"). **Meeting**: call one, talk in
+  it, invite people, end it (Claude writes the minutes).
+- **More**: the Gemini quota, autopilot, pausing all work, how many agents work at once, study
+  programs (Max's Learning view: mastery, Teach me, Ask, his questions for you) and the workspace's
+  files.
+- **Voice**: the microphone button speaks a message (Android's own speech recognition); replies are
+  read aloud in each agent's own voice (the speaker button turns that off). In a meeting,
+  **Hands-free** listens whenever nobody is talking.
+
+The office listens on the computer's 127.0.0.1 only. The daemon carries it to paired phones as
+`/v1/office/api/...` and `/v1/office/ws`, inside the same mutual TLS as everything else, so it works
+at home and away and nothing new is opened. Directing the office means having agents run commands,
+so it takes the commands switch: `link-cli.py phone NAME deny exec` keeps a device out of it.
+
 ### The laptop as a mobile desktop
 
 The phone is an accessory of the laptop: apps run on the laptop and are used

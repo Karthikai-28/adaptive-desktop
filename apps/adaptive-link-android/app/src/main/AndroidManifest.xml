@@ -33,6 +33,13 @@
 
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
+    <!-- Speech to text in the Office (Android 11+ only shows apps the queries name). -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/no_backup"

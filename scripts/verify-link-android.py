@@ -282,7 +282,9 @@ def screens(check, adb, device, control, build_env, sandbox):
         unlock_app()
 
     sh("logcat", "-c")
-    if on_emulator:
+    # LINK_ANDROID_ONLY=office: pair by code and go straight to the office.
+    office_only = os.environ.get("LINK_ANDROID_ONLY") == "office"
+    if on_emulator and not office_only:
         # ------------------------------------------ by account, no code
         signed_in_as("someone-else@example.com")
         open_app()
@@ -312,41 +314,107 @@ def screens(check, adb, device, control, build_env, sandbox):
         tap("Use a pairing code instead")
         step(pair_by_code(), "code: a typed pairing code pairs the phone")
 
-    # ------------------------------------------------ the mobile desktop
-    # Opening the app lands on the laptop's mobile desktop, not a dashboard.
-    step(shell_home() and has("Home", "Apps", "Recents") and has("Files", "Control Center", "Laptop tools"),
-         "mobile desktop: the app opens at Home, with its pins and Home, Apps and Recents")
-    tap("Apps", wait=3)
-    step(has("Search laptop apps", "All apps", "Favorites"),
-         "mobile desktop: the drawer lists the laptop's installed apps beside the phone's own tools")
-    # Typed straight in: Back, to hide the keyboard, would leave the drawer.
-    tap("Search laptop apps", wait=1)
-    sh("shell", "input", "text", "Pocket")
-    time.sleep(1.5)
-    step(has("Pocket fixture") and not has("Laptop tools"), "mobile desktop: the drawer is searched by name")
-    tap("Pocket fixture", wait=8)
-    started = sandbox / "home" / "pocket-started.txt"
-    step(until(started.exists, 20) and "ADAPTIVE_MOBILE_ROOT" in started.read_text()
-         and has("Windows", "Controls"),
-         "mobile desktop: an app opens in the phone's own session, filling the screen with its controls on demand")
-    tap("Controls", wait=2)
-    step(has("Edit layouts"), "mobile desktop: an app's saved controls open beside it when asked for")
-    tap("Recents", wait=3)
-    step(has("Pocket fixture", "End session"), "mobile desktop: Recents lists the apps running on the phone")
-    tap("Home", wait=2)
-    step(has("Continue"), "mobile desktop: Home offers to continue the running apps")
-    tap("Control Center", wait=2)
-    step(has("Network & Wi-Fi", "Sound & displays", "Power & accessories"), "control center: the laptop's settings, natively")
-    tap("Sound & displays", wait=5)
-    step(has("Displays", "Sound comes out of"), "control center: a section opens on the laptop's own services")
+    if not office_only:
+        # ------------------------------------------------ the mobile desktop
+        # Opening the app lands on the laptop's mobile desktop, not a dashboard.
+        step(shell_home() and has("Home", "Apps", "Recents") and has("Files", "Control Center", "Laptop tools"),
+             "mobile desktop: the app opens at Home, with its pins and Home, Apps and Recents")
+        tap("Apps", wait=3)
+        step(has("Search laptop apps", "All apps", "Favorites"),
+             "mobile desktop: the drawer lists the laptop's installed apps beside the phone's own tools")
+        # Typed straight in: Back, to hide the keyboard, would leave the drawer.
+        tap("Search laptop apps", wait=1)
+        sh("shell", "input", "text", "Pocket")
+        time.sleep(1.5)
+        step(has("Pocket fixture") and not has("Laptop tools"), "mobile desktop: the drawer is searched by name")
+        tap("Pocket fixture", wait=8)
+        started = sandbox / "home" / "pocket-started.txt"
+        step(until(started.exists, 20) and "ADAPTIVE_MOBILE_ROOT" in started.read_text()
+             and has("Windows", "Controls"),
+             "mobile desktop: an app opens in the phone's own session, filling the screen with its controls on demand")
+        tap("Controls", wait=2)
+        step(has("Edit layouts"), "mobile desktop: an app's saved controls open beside it when asked for")
+        tap("Recents", wait=3)
+        step(has("Pocket fixture", "End session"), "mobile desktop: Recents lists the apps running on the phone")
+        tap("Home", wait=2)
+        step(has("Continue"), "mobile desktop: Home offers to continue the running apps")
+        tap("Control Center", wait=2)
+        step(has("Network & Wi-Fi", "Sound & displays", "Power & accessories"), "control center: the laptop's settings, natively")
+        tap("Sound & displays", wait=5)
+        step(has("Displays", "Sound comes out of"), "control center: a section opens on the laptop's own services")
+        shell_home()
+        tap("Recents", wait=2)
+        tap("End session", wait=1.5)
+        tap("Close normally", wait=6)
+        closed = until((sandbox / "home" / "pocket-closed.txt").exists, 10)
+        tap("Recents", wait=3)
+        step(closed and has("No phone applications are open"), "mobile desktop: ending the session closes its apps normally")
+        home()
+
+    # ------------------------------------------------------------ the agent office
+    # A throwaway office (main() starts it) that cannot reach Gemini or Claude: every request is real,
+    # and an agent's turn fails at once instead of spending quota.
+    shots = os.environ.get("LINK_ANDROID_SHOTS")
+    hold = os.environ.get("LINK_ANDROID_HOLD")
+    if office_only and hold:
+        # Leave everything up for driving by hand until the file named is deleted.
+        Path(hold).write_text(str(os.getpid()))
+        while Path(hold).exists():
+            time.sleep(2)
+        sh("shell", "locksettings", "clear", "--old", PIN)
+        return
+
+    def shot(name):
+        if shots:
+            Path(shots).mkdir(parents=True, exist_ok=True)
+            png = subprocess.run([str(adb), "-s", device, "exec-out", "screencap", "-p"], capture_output=True, timeout=30).stdout
+            (Path(shots) / f"{name}.png").write_bytes(png)
+
     shell_home()
-    tap("Recents", wait=2)
-    tap("End session", wait=1.5)
-    tap("Close normally", wait=6)
-    closed = until((sandbox / "home" / "pocket-closed.txt").exists, 10)
-    tap("Recents", wait=3)
-    step(closed and has("No phone applications are open"), "mobile desktop: ending the session closes its apps normally")
-    home()
+    step(has("Office"), "office: pinned on the mobile desktop's Home")
+    tap("Office", wait=5)
+    step(until(lambda: has("Manager", "Team", "Maya", "Claude"), 20), "office: the team, live from the computer, with their states")
+    shot("office-team")
+    tap("Maya", wait=3)
+    step(has("Chat", "Work", "Message"), "office: an agent's page opens on the conversation")
+    type_into("Message", "Hello from the phone")
+    tap("Send", wait=3)
+    step(until(lambda: has("Hello from the phone"), 15), "office: a message to an agent is sent and shown")
+    step(until(lambda: has("couldn't") or has("Maya ·") or has("problem"), 40), "office: the agent's answer comes back live")
+    shot("office-chat")
+    tap("Work", wait=3)
+    step(has("Assign a task"), "office: the agent's work and activity")
+    back()
+    tap("Tasks", wait=2)
+    tap("+ New", wait=2)
+    step(has("New task", "Who", "Title"), "office: a task is written on the phone")
+    type_into("Title", "Phone test task")
+    tap("Assign to Maya", wait=4)
+    tap("All", wait=2)
+    step(until(lambda: has("Phone test task"), 15), "office: it is assigned and appears on the board")
+    shot("office-tasks")
+    tap("Phone test task", exact=False, wait=3)
+    step(has("Task #", "Brief") or has("Task #", "Problem") or has("Task #", "Activity"), "office: a task opens with its report and activity")
+    back()
+    tap("Meeting", wait=2)
+    step(has("Call a meeting", "Start meeting"), "office: a meeting is called from the phone")
+    tap("Zoe", wait=1)
+    tap("Start meeting", wait=4)
+    step(until(lambda: has("Meeting started", "End"), 15), "office: it starts, with the room's transcript and hands-free")
+    shot("office-meeting")
+    tap("End", wait=6)
+    step(until(lambda: has("Call a meeting"), 30), "office: and ends, with notes written")
+    tap("More", wait=2)
+    step(has("Autopilot", "Pause all work", "Agents working at once"), "office: the office's settings")
+    shot("office-more")
+    tap("Workspace", wait=3)
+    step(has("projects") or has("meetings"), "office: the workspace's files are browsed")
+    back()
+    back()
+    step(not has("Autopilot"), "office: Back leaves the office")
+    if office_only:
+        sh("shell", "locksettings", "clear", "--old", PIN)   # as the full run leaves it
+        return
 
     # Power buttons are pressed below. With power turned off on the computer
     # they are refused, which is what is checked - a real lock or suspend
@@ -941,6 +1009,18 @@ def main():
                ADAPTIVE_LINK_KEEP_S=str(KEEP_S), ADAPTIVE_LINK_ALERT_EVERY_S="2", ADAPTIVE_LINK_NEARBY="0",
                # No sound server here, and none is to be started by asking for one.
                PULSE_SERVER="unix:/nonexistent/pulse")
+    # The agent office, as a throwaway: its own state and port, no study sessions, and a home of its own
+    # without agy or claude (the office builds its agents' PATH from the home folder), so nothing
+    # reaches Gemini or Claude: an agent's turn fails at once. The daemon carries it to the phone.
+    office_port = 47960
+    env["OFFICE_PORT"] = str(office_port)
+    office = subprocess.Popen(
+        [sys.executable, str(REPO / "services/agent-office/server.py")],
+        env=dict(os.environ, HOME=str(sandbox / "office-home"), OFFICE_STATE=str(sandbox / "office"),
+                 OFFICE_PORT=str(office_port), OFFICE_NO_STUDY="1",
+                 PATH="/usr/bin:/bin", PYTHONPATH=str(REPO / ".local/office-pydeps")),
+        stdout=open(sandbox / "office.log", "w"), stderr=subprocess.STDOUT)
+
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     daemon = subprocess.Popen(
         ["xvfb-run", "-a", "-s", "-screen 0 1280x800x24", "dbus-run-session", "--",
@@ -986,45 +1066,48 @@ def main():
         offer["h"] = [EMULATOR_HOST] if devices[0].startswith("emulator-") else offer["h"]
         encoded = base64.urlsafe_b64encode(json.dumps(offer).encode()).decode()
 
-        # The owner's part: when the phone asks, compare and press Pair.
-        seen = {}
-
-        def owner():
-            for _ in range(600):
-                state = control.call("GET", "/pair/state")
-                if state.get("state") == "pending":
-                    seen.update(state)
-                    control.call("POST", "/pair/decide", {"accept": True})
-                    return
-                time.sleep(0.5)
-
-        threading.Thread(target=owner, daemon=True).start()
-
         build_env = dict(os.environ, ANDROID_HOME=str(SDK), ANDROID_SERIAL=devices[0])
         build_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-        done = subprocess.run(
-            [gradle(), "--no-daemon", "-q", "connectedDebugAndroidTest", ABIS,
-             "-Pandroid.testInstrumentationRunnerArguments.class="
-             "com.karthi.adaptivelink.LinkInstrumentedTest#pairThenUseTheLink",
-             f"-Pandroid.testInstrumentationRunnerArguments.offer={encoded}"]
-            + ([f"-Pandroid.testInstrumentationRunnerArguments.cloud={stand_in()}"] if on_emulator else []),
-            cwd=APP, env=build_env, capture_output=True, text=True, timeout=1500)
+        # LINK_ANDROID_ONLY=office: the screens below pair through the app itself; the full
+        # instrumented run is left out.
+        if os.environ.get("LINK_ANDROID_ONLY") != "office":
+            # The owner's part: when the phone asks, compare and press Pair.
+            seen = {}
 
-        check(seen.get("name") == "Test Phone", f"the phone asked to pair, by name ({seen.get('name')})")
-        check(done.returncode == 0, "the app paired with its keystore key, connected over mutual TLS, "
-              "received the screen, ran a command, reached the computer through a direct connection "
-              "set up by the account, and refused an impostor - on Android")
-        if done.returncode != 0:
-            print((done.stdout + done.stderr)[-3000:])
-            print((sandbox / "daemon.log").read_text()[-3000:])
-        state = control.status()
-        check(state["phone"] is not None and state["phone"]["name"] == "Test Phone", "the computer holds the phone's certificate")
-        log = control.call("GET", "/log")["entries"]
-        actions = [entry["action"] for entry in log]
-        check("exec" in actions and "screen" in actions, "the computer's audit log shows what the phone did")
-        if on_emulator:
-            check("tunnel" in actions, "the computer's audit log shows the direct connection being set up")
-        check(daemon.poll() is None, "the daemon stayed up throughout")
+            def owner():
+                for _ in range(600):
+                    state = control.call("GET", "/pair/state")
+                    if state.get("state") == "pending":
+                        seen.update(state)
+                        control.call("POST", "/pair/decide", {"accept": True})
+                        return
+                    time.sleep(0.5)
+
+            threading.Thread(target=owner, daemon=True).start()
+
+            done = subprocess.run(
+                [gradle(), "--no-daemon", "-q", "connectedDebugAndroidTest", ABIS,
+                 "-Pandroid.testInstrumentationRunnerArguments.class="
+                 "com.karthi.adaptivelink.LinkInstrumentedTest#pairThenUseTheLink",
+                 f"-Pandroid.testInstrumentationRunnerArguments.offer={encoded}"]
+                + ([f"-Pandroid.testInstrumentationRunnerArguments.cloud={stand_in()}"] if on_emulator else []),
+                cwd=APP, env=build_env, capture_output=True, text=True, timeout=1500)
+
+            check(seen.get("name") == "Test Phone", f"the phone asked to pair, by name ({seen.get('name')})")
+            check(done.returncode == 0, "the app paired with its keystore key, connected over mutual TLS, "
+                  "received the screen, ran a command, reached the computer through a direct connection "
+                  "set up by the account, and refused an impostor - on Android")
+            if done.returncode != 0:
+                print((done.stdout + done.stderr)[-3000:])
+                print((sandbox / "daemon.log").read_text()[-3000:])
+            state = control.status()
+            check(state["phone"] is not None and state["phone"]["name"] == "Test Phone", "the computer holds the phone's certificate")
+            log = control.call("GET", "/log")["entries"]
+            actions = [entry["action"] for entry in log]
+            check("exec" in actions and "screen" in actions, "the computer's audit log shows what the phone did")
+            if on_emulator:
+                check("tunnel" in actions, "the computer's audit log shows the direct connection being set up")
+            check(daemon.poll() is None, "the daemon stayed up throughout")
 
         screens(check, adb, devices[0], control, build_env, sandbox)
         text = (sandbox / "daemon.log").read_text()
@@ -1032,6 +1115,7 @@ def main():
         if "Traceback" in text:
             print(text[-2500:])
     finally:
+        office.terminate()
         stop_sandbox(daemon, sandbox)
         shutil.rmtree(sandbox, ignore_errors=True)
 

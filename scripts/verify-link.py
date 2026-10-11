@@ -30,7 +30,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(LINK))
 import sandbox_display  # noqa: E402
 
-PORT, PAIRING_PORT, CLOUD_PORT = 47923, 47924, 47950
+PORT, PAIRING_PORT, CLOUD_PORT, OFFICE_PORT = 47923, 47924, 47950, 47951
 
 
 def pure_checks(check):
@@ -620,6 +620,50 @@ def pure_checks(check):
           "power: a fixed list of actions")
 
 
+async def fake_office():
+    """The Agent Office's rules, as far as the link meets them: its own host only, and POSTs and the
+    socket only with its header and origin."""
+    from aiohttp import web
+    host = f"127.0.0.1:{OFFICE_PORT}"
+
+    @web.middleware
+    async def guard(request, handler):
+        if request.headers.get("Host") != host:
+            return web.json_response({"error": "forbidden host"}, status=403)
+        if request.method == "POST" and request.headers.get("X-Office") != "1":
+            return web.json_response({"error": "forbidden"}, status=403)
+        return await handler(request)
+
+    async def state(_request):
+        return web.json_response({"type": "state", "agents": []})
+
+    async def chat(request):
+        return web.json_response({**await request.json(), "x_office": request.headers.get("X-Office") == "1"})
+
+    async def tts(_request):
+        return web.Response(body=b"ID3fake", content_type="audio/mpeg")
+
+    async def ws(request):
+        if request.headers.get("Origin") != f"http://{host}":
+            return web.Response(status=403)
+        sock = web.WebSocketResponse()
+        await sock.prepare(request)
+        await sock.send_json({"type": "state", "agents": []})
+        async for message in sock:
+            await sock.send_json({"type": "echo", "data": message.data})
+        return sock
+
+    app = web.Application(middlewares=[guard])
+    app.router.add_get("/api/state", state)
+    app.router.add_post("/api/chat", chat)
+    app.router.add_get("/api/tts", tts)
+    app.router.add_get("/ws", ws)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", OFFICE_PORT).start()
+    return runner
+
+
 async def daemon_checks(sandbox, check):
     import aiohttp
     import identity as I
@@ -636,7 +680,10 @@ async def daemon_checks(sandbox, check):
                # The checks' pairing is not to be offered to every phone on this network.
                ADAPTIVE_LINK_NEARBY="0",
                # No sound server here, and none is to be started by asking for one.
-               PULSE_SERVER="unix:/nonexistent/pulse")
+               PULSE_SERVER="unix:/nonexistent/pulse",
+               # A stand-in for the Agent Office, with the real one's host, origin and header rules.
+               OFFICE_PORT=str(OFFICE_PORT))
+    office_runner = await fake_office()
     # Google, as far as these checks go (scripts/fake_cloud.py).
     google = subprocess.Popen([sys.executable, str(REPO / "scripts/fake_cloud.py"), str(CLOUD_PORT)],
                               stdout=subprocess.DEVNULL, stderr=open(sandbox / "cloud.log", "w"))
@@ -820,6 +867,32 @@ async def daemon_checks(sandbox, check):
             control.call("POST", "/configure", {"allow_exec": True})
 
             # ------------------------------------------------- watch, not act
+            # ------------------------------------------------------------ the agent office
+            async with phone.get(f"{link_url}/v1/office/api/state") as reply:
+                state_now = await reply.json()
+            check(reply.status == 200 and state_now["type"] == "state", "office: the phone reads the office's state")
+            async with phone.post(f"{link_url}/v1/office/api/chat", json={"to": "maya", "text": "hi"}) as reply:
+                sent = await reply.json()
+            check(reply.status == 200 and sent == {"to": "maya", "text": "hi", "x_office": True},
+                  "office: the phone's POSTs reach the office with its own host and header")
+            async with phone.get(f"{link_url}/v1/office/api/tts?who=maya&text=hi") as reply:
+                audio = await reply.read()
+            check(reply.status == 200 and reply.content_type == "audio/mpeg" and audio == b"ID3fake",
+                  "office: speech comes through as audio")
+            async with phone.ws_connect(f"{link_url}/v1/office/ws") as live:
+                first = await live.receive_json(timeout=5)
+                await live.send_str("ping")
+                echoed = await live.receive_json(timeout=5)
+            check(first["type"] == "state" and echoed == {"type": "echo", "data": "ping"},
+                  "office: live updates are relayed both ways")
+            control.call("POST", "/configure", {"allow_exec": False})
+            async with phone.get(f"{link_url}/v1/office/api/state") as reply:
+                check(reply.status == 403, "office: a device without the commands switch is kept out")
+            control.call("POST", "/configure", {"allow_exec": True})
+            await office_runner.cleanup()
+            async with phone.get(f"{link_url}/v1/office/api/state") as reply:
+                check(reply.status == 503, "office: when it is not running the phone is told so")
+
             control.call("POST", "/configure", {"allow_input": False})
             subprocess.run(["xdotool", "mousemove", "5", "5"], check=False)
             async with phone.ws_connect(f"{link_url}/v1/screen?preset=low") as ws:

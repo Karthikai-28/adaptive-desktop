@@ -54,7 +54,7 @@ import kotlinx.coroutines.launch
 
 enum class Page {
     Home, Apps, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
-    Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More,
+    Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More, Office,
 }
 
 /** Apple dark appearance with true OLED black canvas and curated accents. */
@@ -315,6 +315,7 @@ private fun Pages(
             Page.Gamepad -> GamepadPage(client) { go(Page.Controls) }
             Page.Scan -> ScanPage(activity, client) { go(Page.Home) }
             Page.Camera -> CameraPage(activity, client) { go(Page.Home) }
+            Page.Office -> OfficePage(activity, client) { go(Page.Home) }
             Page.More -> MorePage(activity, client, store, state, onBack = { go(Page.Home) }, onUnpaired = onUnpaired)
         }
     }
