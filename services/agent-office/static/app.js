@@ -299,7 +299,10 @@ function renderTop() {
 }
 function renderQuota() {
   const q = $('#quota'); q.replaceChildren();
-  if (S.quotaUntil > Date.now() / 1000) q.append(h('span', { class: 'q out', title: 'Gemini usage limit hit: tasks resume automatically' }, `Quota pause · ${Math.ceil((S.quotaUntil - Date.now() / 1000) / 60)}m`));
+  if (S.quotaUntil > Date.now() / 1000) {
+    const at = new Date(S.quotaUntil * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    q.append(h('span', { class: 'q out', title: 'Gemini quota is used up. Work resumes by itself at the reset (or earlier if it comes back).' }, `Quota out · resumes ${at}`));
+  }
   if (S.settings?.paused) q.append(h('span', { class: 'q out' }, 'Work paused'));
   for (const r of S.usage?.rows || []) {
     const pct = parseInt(r.remaining, 10);
@@ -971,7 +974,7 @@ function openSettings() {
   const body = h('div', null,
     h('div', { class: 'section' }, 'Company'),
     sw('Autopilot', 'Claude reviews finished work by itself, assigns follow-ups and reports back.', S.settings.autopilot, v => api('POST', '/api/settings', { autopilot: v }).then(s => { S.settings = s; })),
-    sw('Pause all work', 'Queued tasks wait; running tasks finish. Chats and meetings still work.', S.settings.paused, v => api('POST', '/api/settings', { paused: v }).then(s => { S.settings = s; renderQuota(); })),
+    sw('Pause all work', 'Queued tasks and study sessions wait; running tasks finish. Chats and meetings still work.', S.settings.paused, v => api('POST', '/api/settings', { paused: v }).then(s => { S.settings = s; renderQuota(); })),
     h('label', { class: 'switch' }, h('div', null, 'Agents working at the same time', h('small', null, 'More is faster but spends Gemini quota quicker.')), par),
     S.quotaUntil > Date.now() / 1000 ? h('label', { class: 'switch' }, h('div', null, 'Quota pause active', h('small', null, 'Resume now if the Gemini limit has reset.')),
       h('button', { class: 'act', style: 'flex:none;padding:0 12px', onclick: () => api('POST', '/api/settings', { clear_quota: true }).then(() => toast('Resumed', 'ok')) }, 'Resume')) : null,

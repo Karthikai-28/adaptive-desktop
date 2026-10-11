@@ -118,8 +118,23 @@ office autopilot on|off · office pause · office resume · office open
 - The **server** listens on 127.0.0.1 only and rejects cross-site requests and foreign Host
   headers. Agent-written pages are served in a sandboxed origin, so they can't call the office API.
 - **Quota.** Autopilot reviews are capped at 20 per hour and Claude may queue at most 40 tasks per
-  hour. When Gemini returns a quota error, work pauses for 15 minutes and resumes by itself. The
-  top bar shows the remaining 5-hour and weekly Gemini limits. A typical task uses 50-100k tokens.
+  hour. A typical task uses 50-100k tokens. The top bar shows the remaining 5-hour and weekly Gemini limits.
+
+## When the quota runs out (`office/quota.py`)
+
+Work never needs restarting by hand. When an agent hits the Gemini limit, its task goes back to the
+queue untouched and the office asks agy (`/usage`) when the exhausted window resets. All agent work
+(tasks and study sessions) then pauses until that time, which the top bar shows ("Quota out ·
+resumes 22:12"). A watchdog runs every 30 seconds:
+
+- at the reset time, or earlier if `/usage` shows quota again (checked every 5 minutes), it resumes
+  everything and tells you;
+- direct messages that hit the limit are answered automatically once it is back;
+- queued work with free slots is always started, so nothing can stay stuck after a missed wake-up.
+
+When `/usage` shows no window at 0% (a short rate limit), the pause is 5 minutes. Claude has the same
+behaviour for its own usage limit: the manager keeps the message or review and retries every 10 minutes
+(up to six hours). Settings → "Resume now" ends a pause by hand.
 
 ## Checks
 

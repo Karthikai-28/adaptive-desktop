@@ -12,7 +12,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from office import config, voice
-from office.agy import _env as agy_env
 from office.config import AGY_HOME, COMPANY, DATA, STATIC
 from office.core import Office
 from office.store import Store
@@ -24,15 +23,12 @@ ALLOWED_ORIGINS = {f"http://{h}" for h in ALLOWED_HOSTS}
 
 store = Store(DATA / "office.db")
 office = Office(CFG, store)
-usage_cache = {"ts": 0, "rows": [], "error": ""}
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app):
     await office.start()
-    task = asyncio.create_task(_usage_loop())
     yield
-    task.cancel()
     await office.shutdown()
 
 
@@ -65,7 +61,7 @@ async def ws(sock: WebSocket):
     office.clients.add(sock)
     try:
         await sock.send_json(office.snapshot())
-        await sock.send_json({"type": "usage", **usage_cache})
+        await sock.send_json({"type": "usage", **office.quota.usage})
         while True:
             await sock.receive_text()       # keep-alive pings from the page
     except (WebSocketDisconnect, RuntimeError):
@@ -259,31 +255,7 @@ async def settings(s: SettingsIn):
 
 @app.get("/api/usage")
 async def usage():
-    return usage_cache
-
-
-async def _usage_loop():
-    while True:
-        await _refresh_usage()
-        await asyncio.sleep(180)
-
-
-async def _refresh_usage():
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "agy", "-p", "/usage", cwd=str(COMPANY), env=agy_env("usage"),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
-        rows = []
-        for line in out.decode(errors="replace").splitlines():
-            parts = line.split("\t")
-            if len(parts) >= 3 and parts[0].startswith("Gemini"):
-                rows.append({"window": "week" if "Weekly" in parts[1] else "5h",
-                             "remaining": parts[2], "resets": parts[3] if len(parts) > 3 else ""})
-        usage_cache.update(ts=time.time(), rows=rows, error="" if rows else "no usage data")
-    except Exception as e:  # usage is informational only
-        usage_cache.update(ts=time.time(), error=str(e)[:200])
-    await office.broadcast({"type": "usage", **usage_cache})
+    return office.quota.usage
 
 
 # ---------------------------------------------------------------- voice

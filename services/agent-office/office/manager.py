@@ -7,6 +7,7 @@ Claude may only run `office` and read files: everything else is denied (--permis
 import asyncio
 import json
 import os
+import re
 import signal
 import time
 
@@ -15,6 +16,12 @@ from .config import COMPANY, ROOT
 ALLOWED = ["Bash(office:*)", "Bash(office *)", "Read", "Glob", "Grep", "LS"]
 DROP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
 NOTHING = "NOTHING_TO_REPORT"
+LIMIT_RETRY_S = 10 * 60
+_LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|resets? (at|in)|overloaded|429", re.I)
+
+
+def _usage_limited(err):
+    return bool(err and _LIMIT_RE.search(err))
 
 
 class Manager:
@@ -28,6 +35,7 @@ class Manager:
         self.finished = []          # tasks waiting for an autopilot review
         self._flush_handle = None
         self._cancelled = False
+        self._limit_tries = {}      # prompt -> attempts while Claude's usage limit is hit
 
     @property
     def pending(self):
@@ -107,6 +115,18 @@ class Manager:
             except Exception as e:
                 text, err = "", f"office error: {e}"
             self.busy = False
+            if not text and _usage_limited(err) and kind in ("chat", "autopilot", "minutes"):
+                # Claude's own usage limit: keep the job and try again later, by itself
+                tries = self._limit_tries.get(prompt, 0) + 1
+                self._limit_tries[prompt] = tries
+                if tries <= 36:   # up to six hours
+                    if tries == 1 and kind == "chat":
+                        await self.o.post("manager", self.id, "(I've hit my Claude usage limit. I'll answer this "
+                                                              "automatically once it resets.)", {"kind": "failure"})
+                    await self.o.activity(self.id, "error", "Claude usage limit - retrying in 10 minutes")
+                    asyncio.get_running_loop().call_later(LIMIT_RETRY_S, self.q.put_nowait, (prompt, kind, fut))
+                    continue
+            self._limit_tries.pop(prompt, None)
             if fut and not fut.done():
                 fut.set_result(text)
             if kind == "chat":

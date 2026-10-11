@@ -14,9 +14,9 @@ import time
 from . import agy
 from .config import COMPANY
 from .manager import Manager
+from .quota import QuotaGuard
 from .study import Study
 
-QUOTA_PAUSE_S = 15 * 60
 NAME_RE_CACHE = {}
 
 
@@ -50,6 +50,7 @@ class Office:
         self.quota_until = store.get("quota_until", 0)
         self.manager = Manager(self)
         self.study = Study(self)
+        self.quota = QuotaGuard(self)
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 
@@ -68,6 +69,7 @@ class Office:
             self._spawn(self._chat_worker(aid))
         self.manager.start()
         self.study.start()
+        self.quota.start()
         self.kick()
 
     def _spawn(self, coro):
@@ -91,9 +93,8 @@ class Office:
                 if k == "max_parallel":
                     v = max(1, min(8, int(v)))
                 self.store.set(k, v)
-        if kw.get("clear_quota"):
-            self.quota_until = 0
-            self.store.set("quota_until", 0)
+        if kw.get("clear_quota") and self.quota_until:
+            await self.quota.resume()
         await self.broadcast({"type": "settings", "settings": self.settings(), "quota_until": self.quota_until})
         self.kick()
         return self.settings()
@@ -353,13 +354,10 @@ class Office:
             t = self.store.update_task(tid, status="cancelled", finished_at=now, steps=r.steps, tokens=r.tokens)
             await self.activity(aid, "info", f"Task #{tid} cancelled", tid)
         elif r.quota:
+            # back in the queue untouched; the quota guard resumes it when Gemini resets
             t = self.store.update_task(tid, status="queued", attempts=max(0, t["attempts"] - 1), error=r.error)
-            self.quota_until = now + QUOTA_PAUSE_S
-            self.store.set("quota_until", self.quota_until)
-            await self.activity(aid, "error", "Gemini quota reached — work paused", tid)
-            await self.toast("Gemini quota reached. Tasks are paused for 15 minutes and will resume by themselves.",
-                             "warn")
-            asyncio.get_running_loop().call_later(QUOTA_PAUSE_S + 5, self.kick)
+            await self.activity(aid, "error", "Gemini quota reached — waiting for it to reset", tid)
+            self._spawn(self.quota.hit(aid))
         elif "conversation" in r.error.lower() and self.store.get(f"conv:{aid}") and t["attempts"] < 3:
             self.store.delete(f"conv:{aid}")   # a stale work thread: start a fresh one
             t = self.store.update_task(tid, status="queued", error=r.error)
@@ -439,8 +437,10 @@ class Office:
             if r.ok:
                 await self.post(f"dm:{aid}", aid, r.text.strip(), {"reply_to": batch[-1][0]["id"]})
             elif r.quota:
-                await self.post(f"dm:{aid}", aid, "(I've hit the Gemini usage limit for now — I'll be able to "
-                                                  "reply again once it resets.)", {"kind": "failure"})
+                self.quota.defer_chat(aid, batch)       # answered automatically when the quota is back
+                await self.post(f"dm:{aid}", aid, "(I've hit the Gemini usage limit. I'll answer this automatically "
+                                                  "as soon as it resets.)", {"kind": "failure"})
+                self._spawn(self.quota.hit(aid))
             elif not r.cancelled:
                 await self.post(f"dm:{aid}", aid, f"(Sorry, I couldn't reply: {r.error[:300]})", {"kind": "failure"})
             await self.push_agent(aid)
@@ -565,6 +565,7 @@ class Office:
                     await self.post(f"meeting:{m['id']}", aid, say)
             elif r.quota:
                 await self.post(f"meeting:{m['id']}", "system", f"{a['name']} is out of Gemini quota for now.")
+                self._spawn(self.quota.hit(aid))
             elif not r.cancelled:
                 await self.post(f"meeting:{m['id']}", "system", f"{a['name']} couldn't answer ({r.error[:120]}).")
             await self.push_agent(aid)
