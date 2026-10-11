@@ -102,6 +102,13 @@ office autopilot on|off · office pause · office resume · office open
   chat while it works.
 - **Manager.** One long-lived Claude Code session (`claude -p --resume`) with a brief describing
   the team. It works only through the `office` command.
+- **Manager models** (`config.json` → `manager`). Every turn runs on **Sonnet 5.5** (`model`). A turn
+  goes to **Opus 5** (`complex_model`, never higher) only when it is complex: you ask for it (start a
+  message with `opus:` or say "think hard" / "deep dive"), or Sonnet replies `ESCALATE_TO_OPUS` for a
+  multi-project plan, a design decision with real trade-offs or a problem it cannot settle. Opus then
+  takes over that turn on the same session. Meetings and minutes always stay on Sonnet. At most
+  `opus_max_per_hour` (6) Opus turns an hour; past that Sonnet handles it. `verify-agent-office.sh`
+  rejects any other model.
 - **Scheduler.** One task at a time per agent, up to three agents at once (Settings). `--after`
   chains work. Interrupted tasks resume after a restart, and transient failures retry once.
 

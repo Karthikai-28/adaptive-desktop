@@ -3,6 +3,10 @@
 Claude talks to the owner, splits work into tasks and hands them to the Gemini agents with the
 `office` CLI, reviews what comes back (autopilot) and chairs meetings. Turns run one at a time.
 Claude may only run `office` and read files: everything else is denied (--permission-mode dontAsk).
+
+Models (config.json "manager"): every turn runs on "model" (Sonnet). A turn goes to "complex_model"
+(Opus, capped at Opus 5) only when it needs it: the owner asks for it ("opus:", "think hard"), or
+Sonnet answers ESCALATE because the request is genuinely complex. Opus turns are capped per hour.
 """
 import asyncio
 import json
@@ -17,6 +21,10 @@ ALLOWED = ["Bash(office:*)", "Bash(office *)", "Read", "Glob", "Grep", "LS"]
 DROP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
 NOTHING = "NOTHING_TO_REPORT"
 LIMIT_RETRY_S = 10 * 60
+DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_COMPLEX_MODEL = "claude-opus-5"
+ESCALATE = "ESCALATE_TO_OPUS"
+_OPUS_ASK_RE = re.compile(r"(^|\]:)\s*(opus\s*[:,]|/opus\b)|\b(think hard|think deeply|use opus|deep dive)\b", re.I)
 _LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|resets? (at|in)|overloaded|429", re.I)
 
 
@@ -111,7 +119,7 @@ class Manager:
                                                      "meeting": "Listening in the meeting",
                                                      "minutes": "Writing meeting minutes"}.get(kind, "Thinking"))
             try:
-                text, err = await self._run(prompt)
+                text, err = await self._turn(prompt, kind)
             except Exception as e:
                 text, err = "", f"office error: {e}"
             self.busy = False
@@ -163,7 +171,8 @@ How to manage well:
 - Coordinate; don't do the team's work yourself. Review their output by reading the files. Send work back with specific fixes when it falls short. Have Omar test or review engineering work before you call it done.
 - Every task spends the owner's Gemini quota: no busywork, no duplicate tasks. Check `office status` before assigning.
 - Never touch credentials, never publish, push, buy or send anything outside this machine unless the owner explicitly asks.
-Your replies appear in the office chat and may be read aloud: plain conversational text, short, most important thing first, no tables."""
+Your replies appear in the office chat and may be read aloud: plain conversational text, short, most important thing first, no tables.
+You run on {self.model} to keep token use low. Handle routine work yourself: status, questions, assigning and chaining tasks, reviews, meetings. Only when a request from the owner or a review is genuinely complex (a multi-project plan, an architecture or design decision with real trade-offs, a hard technical judgement, a subtle bug or quality problem you cannot settle), reply with exactly {ESCALATE} and nothing else, before doing any work, and {self.complex_model} will take that turn. Never escalate meetings or simple requests."""
 
     def _studies(self):
         progs = self.o.study.programs.values()
@@ -174,22 +183,58 @@ Your replies appear in the office chat and may be read aloud: plain conversation
                  f"ask him questions about those codebases with `office ask {p['agent']}`." for p in progs]
         return "Study programs:\n" + "\n".join(lines)
 
-    async def _run(self, prompt):
+    # ------------------------------------------------------------------ model routing
+    @property
+    def model(self):
+        return self.cfg.get("model") or DEFAULT_MODEL
+
+    @property
+    def complex_model(self):
+        return self.cfg.get("complex_model") or DEFAULT_COMPLEX_MODEL
+
+    def _opus_allowed(self):
+        hour_ago = time.time() - 3600
+        log = [t for t in self.o.store.get("opus_log", []) if t > hour_ago]
+        return len(log) < self.cfg.get("opus_max_per_hour", 6), log
+
+    def _use_opus(self):
+        ok, log = self._opus_allowed()
+        if ok:
+            self.o.store.set("opus_log", log + [time.time()])
+        return ok
+
+    async def _turn(self, prompt, kind):
+        """Sonnet by default; Opus when the owner asks for it or Sonnet escalates (within the hourly cap)."""
+        escalatable = kind in ("chat", "autopilot") and self.complex_model != self.model
+        if escalatable and kind == "chat" and _OPUS_ASK_RE.search(prompt) and self._use_opus():
+            await self.o.activity(self.id, "think", "Thinking it through (Opus)")
+            return await self._run(prompt, self.complex_model)
+        text, err = await self._run(prompt, self.model)
+        if not (text and text.strip().startswith(ESCALATE)) or self._cancelled:
+            return text, err
+        if escalatable and self._use_opus():
+            await self.o.activity(self.id, "think", "This one needs more thought (Opus)")
+            return await self._run(f"[office] You escalated the previous message to {self.complex_model}. "
+                                   "Handle it fully now.", self.complex_model)
+        why = "the hourly Opus cap is reached" if escalatable else "this kind of turn stays on Sonnet"
+        return await self._run(f"[office] Opus is not available ({why}). Handle the previous message yourself "
+                               f"as well as you can; do not reply {ESCALATE}.", self.model)
+        return text, err
+
+    async def _run(self, prompt, model):
         sid = self.o.store.get("mgr:session")
-        text, err, new_sid = await self._claude(prompt, sid)
+        text, err, new_sid = await self._claude(prompt, sid, model)
         if not text and sid and ("session" in err.lower() or "conversation" in err.lower()) and not self._cancelled:
             self.o.store.delete("mgr:session")
-            text, err, new_sid = await self._claude(prompt, None)
+            text, err, new_sid = await self._claude(prompt, None, model)
         if new_sid:
             self.o.store.set("mgr:session", new_sid)
         return text, err
 
-    async def _claude(self, prompt, sid):
+    async def _claude(self, prompt, sid, model):
         cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
                "--permission-mode", "dontAsk", "--allowedTools", *ALLOWED,
-               "--append-system-prompt", self._brief()]
-        if self.cfg.get("model"):
-            cmd += ["--model", self.cfg["model"]]
+               "--model", model, "--append-system-prompt", self._brief()]
         if sid:
             cmd += ["--resume", sid]
         env = {k: v for k, v in os.environ.items() if k not in DROP_ENV}

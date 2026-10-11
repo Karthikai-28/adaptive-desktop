@@ -36,6 +36,11 @@ for a in cfg["agents"]:
 for st in cfg.get("studies", []):
     assert st["agent"] in ids, f"study {st['id']}: unknown agent {st['agent']}"
     assert st["repos"] and all(r.get("path") for r in st["repos"]), f"study {st['id']}: needs repos"
+m = cfg["manager"]
+allowed = {"claude-sonnet-5", "claude-sonnet-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"}
+for k in ("model", "complex_model"):
+    assert m.get(k, "") in allowed | {""}, f"manager {k} {m.get(k)!r}: use Sonnet 5/5.5, or Opus 5 or below"
+assert "sonnet" in (m.get("model") or "claude-sonnet-5-5"), "manager model must be Sonnet; Opus is only the complex_model"
 used = [a["desk"] for a in cfg["agents"]]
 assert len(used) == len(set(used)), "two agents share a desk"
 print(f"roster ok: {len(ids)} agents + {cfg['manager']['name']}")
