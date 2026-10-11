@@ -18,6 +18,8 @@ from .config import COMPANY
 TICK_S = 30
 
 KB_LAYOUT = """\
+  STATE.md             START HERE. At most 600 words: where you are in the curriculum, the current focus, the
+                       10 most important open questions, what you will do next. Rewrite it at the end of every session.
   progress.json        machine-readable state (schema below) - keep it valid JSON, update it every session
   CURRICULUM.md        the map: every repo -> its topics, why each matters, learning order, mastery 0-5
   QUESTIONS.md         numbered questions (Q1, Q2, ...). Open: the question and why you ask it.
@@ -141,7 +143,8 @@ class Study:
         if n == 1:
             method = """THIS IS SESSION 1 - THE SURVEY. Do not go deep yet. For every repository: what it is for, language(s) and
 build system, top-level layout, entry points, main components, how it depends on or talks to the other repos,
-size, how active it is (git log), and anything surprising. Then write the first CURRICULUM.md (topics per repo,
+size, how active it is (git log), and anything surprising. Use your graph tools (god_nodes, graph_stats, query_graph)
+to find each repo's core quickly. Then write STATE.md, the first CURRICULUM.md (topics per repo,
 ordered from foundations upward, with why each matters), a seed glossary.md, progress.json, and the first 25-40
 sharp questions in QUESTIONS.md - the questions an expert would want answered to truly understand this system."""
         elif n % 5 == 0:
@@ -151,15 +154,17 @@ different topics. 2) Answer each from memory first, written down, before looking
 you were wrong. 5) Turn the weakest area into new questions. 6) Write or refresh lessons for topics at mastery 3+.
 Then spend the rest of the session learning, as in a normal session."""
         else:
-            method = """1) Read progress.json, CURRICULUM.md, the open questions in QUESTIONS.md and the last JOURNAL.md entry.
+            method = """1) Read STATE.md and progress.json. Open other knowledge-base files only where you need them (grep
+   QUESTIONS.md for the questions you will work on; read just the notes for your focus topic) - not whole files.
 2) Choose a focus: the most foundational topic with the lowest mastery (finish phase 1 before going deep into
    phase 2, and phase 2 before phase 3), plus 4-8 open questions about it.
-3) Investigate in the code: read the files, grep, follow the call paths end to end, read the build and config,
+3) Investigate in the code: get oriented with your graph tools (query_graph, god_nodes, get_neighbors,
+   shortest_path) when an area is new; grep when you know the name; then read the exact files and line ranges, follow the call paths end to end, read the build and config, and
    look at git log / git blame to learn why things are the way they are. Primary evidence, never guesses.
 4) Answer the questions in QUESTIONS.md with evidence (repo/path:line, function, commit) and a confidence.
    Each answer should raise better questions: add 4-8 new, specific ones (what / how / why / what if / where).
 5) Write or deepen notes/<topic>.md. When a topic reaches mastery 3 or more, write or refresh its lesson.
-6) Update glossary.md, progress.json (honest mastery), CURRICULUM.md and JOURNAL.md."""
+6) Update glossary.md, progress.json (honest mastery), CURRICULUM.md and JOURNAL.md, and rewrite STATE.md."""
         return f"""{self.o._persona(self.o.agents[p['agent']])}
 === STUDY SESSION {n} - {p['title']} ===
 Your goal: become the master of these codebases - able to explain any part from first principles, answer hard

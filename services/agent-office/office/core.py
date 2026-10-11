@@ -15,9 +15,14 @@ from . import agy
 from .config import COMPANY
 from .manager import Manager
 from .quota import QuotaGuard
+from .graphs import Graphs
 from .study import Study
 
 NAME_RE_CACHE = {}
+
+
+CONV_ROTATE_TOKENS = 400_000     # a work thread that cost more than this is not resumed again
+CHAT_ROTATE_TOKENS = 250_000
 
 
 def _clean_speech(text):
@@ -51,6 +56,7 @@ class Office:
         self.manager = Manager(self)
         self.study = Study(self)
         self.quota = QuotaGuard(self)
+        self.graphs = Graphs(self)
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 
@@ -62,6 +68,7 @@ class Office:
     # ------------------------------------------------------------------ lifecycle
     async def start(self):
         agy.write_agy_settings()
+        await asyncio.get_running_loop().run_in_executor(None, Graphs.configure_agy)
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             self.store.update_task(t["id"], status="queued")
             self.store.add_event(t["agent"], "info", "Resuming after an office restart", t["id"])
@@ -70,6 +77,7 @@ class Office:
         self.manager.start()
         self.study.start()
         self.quota.start()
+        self.graphs.start()
         self.kick()
 
     def _spawn(self, coro):
@@ -184,12 +192,34 @@ class Office:
             f"Workspace: your current directory {COMPANY} is the company's shared workspace; teammates' files "
             f"are here too. Work only inside it. Projects live in projects/<project-name>/, meeting notes in meetings/.\n"
             + self.study.persona_line(a["id"])
+            + self._efficiency(a["id"])
         )
+
+    def _conv_key(self, t):
+        """Tasks of the same project continue one agy conversation; anything else starts fresh.
+        Study sessions always start fresh (their memory is the knowledge base)."""
+        if self.study.program_of(t) or not t.get("project"):
+            return None
+        return f"conv:{t['agent']}:{t['project']}"
+
+    def _efficiency(self, aid):
+        graph = self.graphs.path_for(aid)
+        # measured 2026-10-11 on mkert: the graph saved 27% on an architecture question but cost 70% more on a
+        # named-symbol lookup, where grep is the shortest path - so agents get both, each for its job
+        nav = ("For orientation - an unfamiliar area, the architecture, how two parts connect, what the core pieces "
+               "are - ask your `graph` tools (query_graph, god_nodes, get_community, get_neighbors, shortest_path). "
+               "When you already know a name, grep for it instead. " if graph else "")
+        return ("Work economically - every step re-sends your whole context, so keep it small without cutting "
+                "corners on quality. " + nav +
+                "Search with grep -n (narrow patterns, -m limits) instead of opening whole files; view large files in "
+                "line ranges; never cat big files, dump directory trees or print long command output (pipe through "
+                "head, tail or wc). Don't re-read what you already read in this session; write short notes instead.\n")
 
     def _run_opts(self, aid):
         """Sandbox options for every agy run of this agent: the repos it studies (read-only), and the
         guarded profile for agents that must learn code only from local copies."""
-        return {"ro_dirs": self.study.repo_paths(aid), "offline": bool(self.agents[aid].get("code_local_only"))}
+        return {"ro_dirs": self.study.repo_paths(aid), "offline": bool(self.agents[aid].get("code_local_only")),
+                "graph": self.graphs.path_for(aid)}
 
     def _task_prompt(self, t):
         a = self.agents[t["agent"]]
@@ -315,7 +345,7 @@ class Office:
         study = self.study.program_of(t)
         run = agy.AgyRun(self.study.prompt(t) if study else self._task_prompt(t),
                          agent_name=self.agents[aid]["name"], model=self.model,
-                         conv_id=None if study else self.store.get(f"conv:{aid}"),   # study sessions start fresh
+                         conv_id=self.store.get(self._conv_key(t)) if self._conv_key(t) else None,
                          timeout_min=self.cfg.get("task_timeout_min", 45), on_event=on_event, **self._run_opts(aid))
         self.task_runs[t["id"]] = run
         self._spawn(self._run_task(t, run))
@@ -334,8 +364,13 @@ class Office:
             self.task_runs.pop(tid, None)
             self.rt[aid]["task"] = None
         study = self.study.program_of(t)
-        if r.conv_id and not study:
-            self.store.set(f"conv:{aid}", r.conv_id)
+        key = self._conv_key(t)
+        if key:
+            # keep a project's thread for its next task, but start over once it has grown expensive
+            if r.conv_id and r.tokens < CONV_ROTATE_TOKENS:
+                self.store.set(key, r.conv_id)
+            else:
+                self.store.delete(key)
         now = time.time()
         if r.ok and study:
             t = self.store.update_task(tid, status="done", result=r.text.strip(), finished_at=now,
@@ -358,8 +393,8 @@ class Office:
             t = self.store.update_task(tid, status="queued", attempts=max(0, t["attempts"] - 1), error=r.error)
             await self.activity(aid, "error", "Gemini quota reached — waiting for it to reset", tid)
             self._spawn(self.quota.hit(aid))
-        elif "conversation" in r.error.lower() and self.store.get(f"conv:{aid}") and t["attempts"] < 3:
-            self.store.delete(f"conv:{aid}")   # a stale work thread: start a fresh one
+        elif "conversation" in r.error.lower() and key and self.store.get(key) and t["attempts"] < 3:
+            self.store.delete(key)   # a stale work thread: start a fresh one
             t = self.store.update_task(tid, status="queued", error=r.error)
         elif t["attempts"] < 2 and "time" not in r.error.lower():
             t = self.store.update_task(tid, status="queued", error=r.error)
@@ -432,8 +467,10 @@ class Office:
             finally:
                 self.chat_runs.pop(aid, None)
                 self.rt[aid]["chatting"] = False
-            if r.conv_id:
+            if r.conv_id and r.tokens < CHAT_ROTATE_TOKENS:
                 self.store.set(f"chatconv:{aid}", r.conv_id)
+            elif r.conv_id:
+                self.store.delete(f"chatconv:{aid}")     # long thread: the next message starts a fresh one
             if r.ok:
                 await self.post(f"dm:{aid}", aid, r.text.strip(), {"reply_to": batch[-1][0]["id"]})
             elif r.quota:
@@ -630,6 +667,7 @@ class Office:
         if aid == self.mgr["id"]:
             self.store.delete("mgr:session")
         else:
+            self.store.delete_prefix(f"conv:{aid}:")
             self.store.delete(f"conv:{aid}")
             self.store.delete(f"chatconv:{aid}")
         await self.activity(aid, "info", "Memory reset — starting fresh conversations")

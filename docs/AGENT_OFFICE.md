@@ -120,6 +120,38 @@ office autopilot on|off · office pause · office resume · office open
 - **Quota.** Autopilot reviews are capped at 20 per hour and Claude may queue at most 40 tasks per
   hour. A typical task uses 50-100k tokens. The top bar shows the remaining 5-hour and weekly Gemini limits.
 
+## Knowledge graphs and token economy (`office/graphs.py`)
+
+Agents get graphify's MCP tools over a graph scoped to their own work, never the global brain
+(which also holds personal notes and unrelated projects). `graphs/<agent>.json` is merged from the
+hub graphs (`~/Obsidian/graphify-out/<repo>/graph.json`) of the repos the agent studies or lists
+under `"graphs"` in config.json; `graphs/workspace.json` maps the company workspace and is rebuilt
+when it changes. Both live in the office state folder and refresh from the hub every 20 minutes. Each
+agy profile has one stdio MCP server, `graph`, serving the file in `$OFFICE_AGENT_GRAPH`.
+
+Measured on mkert (2026-10-11, same question with and without the graph):
+
+| Question | With graph | Grep only |
+|---|---|---|
+| Architecture: components, dependencies, frame flow | 70k tokens | 96k |
+| A named function: where, what it does | 102k | 60k |
+
+So agents use the graph for orientation and grep when they know the name. The larger savings come
+from how they work. Earlier tasks cost 350-790k tokens each; the same kind of question answered with
+the rules below took 60-100k:
+
+- **Economical reading** (every agent's brief): grep -n with narrow patterns, files in line ranges, no
+  full-file dumps or long command output, no re-reading. agy re-sends the whole context every step,
+  so context size multiplies by the number of steps.
+- **Scoped conversations:** tasks of the same project continue one thread; tasks without a project
+  start fresh, and a thread that cost more than 400k tokens is not resumed (chats: 250k). Memory
+  lives in the workspace files, task reports and `--after` chains, not in ever-growing threads.
+- **Study sessions** start fresh and read `STATE.md` (600 words) instead of the whole knowledge base.
+
+Graphs for repos with no hub graph are built code-only (no model calls) with
+`GRAPHIFY_OUT=~/Obsidian/graphify-out/<repo> graphify update ~/mke/<repo>`. Never run that over a hub
+graph that was built with semantic extraction: it replaces the document and rationale nodes.
+
 ## When the quota runs out (`office/quota.py`)
 
 Work never needs restarting by hand. When an agent hits the Gemini limit, its task goes back to the

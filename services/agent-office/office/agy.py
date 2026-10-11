@@ -41,13 +41,14 @@ def write_agy_settings():
     (Belt and braces: the sandbox already hides the secrets.) Agents that must learn code only from
     the local copies get their own agy home: the web is open for research, but the code hosts
     (Bitbucket, the internal git server) and every git network command are denied."""
-    deny = ["mcp(*)"]
-    deny += [f"read_file({HOME / p})" for p in SECRET_DIRS + SECRET_FILES]
-    deny += [f"read_file({DATA})"]
+    # MCP is allowed: the only server configured in the agents' agy profiles is the scoped knowledge graph
+    deny = [f"read_file({HOME / p})" for p in SECRET_DIRS + SECRET_FILES]
+    # the office's own files (agy's home sits in DATA too and must stay readable: MCP tool schemas live there)
+    deny += [f"read_file({DATA / p})" for p in ("office.db", "office.db-wal", "office.db-shm", "logs", "tts")]
     for home, offline in ((AGY_HOME, False), (AGY_HOME_LOCAL, True)):
         cfg_dir = home / ".gemini" / "antigravity-cli"
         cfg_dir.mkdir(parents=True, exist_ok=True)
-        allow = ["command(*)", f"write_file({COMPANY})", "read_url(*)", "execute_url(*)"]
+        allow = ["command(*)", f"write_file({COMPANY})", "read_url(*)", "execute_url(*)", "mcp(*)"]
         d = list(deny)
         if offline:
             for host in CODE_HOSTS:
@@ -75,6 +76,9 @@ def _bwrap_prefix(ro_dirs=(), home=AGY_HOME):
         d = Path(d).expanduser()
         if d.is_dir():
             args += ["--ro-bind", str(d), str(d)]
+    graphs = STATE / "graphs"
+    if graphs.is_dir():                                            # ... the scoped knowledge graphs ...
+        args += ["--ro-bind", str(graphs), str(graphs)]
     args += ["--bind", str(home), str(home),                       # ... agy's home and the workspace
              "--bind", str(COMPANY), str(COMPANY),
              "--bind", str(AGENT_TMP), "/tmp",
@@ -82,12 +86,14 @@ def _bwrap_prefix(ro_dirs=(), home=AGY_HOME):
     return args
 
 
-def _env(agent_name, home=AGY_HOME):
+def _env(agent_name, home=AGY_HOME, graph=None):
     env = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
     env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     extra = f"{HOME}/.local/bin:{HOME}/bin"   # where the agy installer puts agy
     env["PATH"] = f"{extra}:{env['PATH']}"
     env.update(HOME=str(home), TERM="dumb", AGENT_NAME=agent_name, NO_COLOR="1")
+    if graph:
+        env["OFFICE_AGENT_GRAPH"] = str(graph)       # which graph the "graph" MCP server serves
     return env
 
 
@@ -159,7 +165,7 @@ class AgyResult:
 class AgyRun:
     """One agy process. `await run.wait()` returns an AgyResult; `run.cancel()` kills it."""
 
-    def __init__(self, prompt, *, agent_name, model, conv_id=None, timeout_min=30, on_event=None, ro_dirs=(), offline=False):
+    def __init__(self, prompt, *, agent_name, model, conv_id=None, timeout_min=30, on_event=None, ro_dirs=(), offline=False, graph=None):
         self.prompt = prompt[-120_000:]   # stay under the kernel's single-argument limit
         self.agent_name = agent_name
         self.model = model
@@ -167,6 +173,7 @@ class AgyRun:
         self.timeout = int(timeout_min * 60)
         self.on_event = on_event
         self.home = AGY_HOME_LOCAL if offline else AGY_HOME
+        self.graph = graph
         self.ro_dirs = [str(Path(d).expanduser()) for d in ro_dirs if Path(d).expanduser().is_dir()]
         self.proc = None
         self.result = AgyResult()
@@ -181,7 +188,7 @@ class AgyRun:
             cmd += ["--add-dir", d]
         try:
             self.proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=str(COMPANY), env=_env(self.agent_name, self.home),
+                *cmd, cwd=str(COMPANY), env=_env(self.agent_name, self.home, self.graph),
                 stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, start_new_session=True, limit=16 * 1024 * 1024)
         except FileNotFoundError as e:
