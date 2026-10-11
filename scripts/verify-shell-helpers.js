@@ -174,3 +174,6 @@ console.log('Shell helper checks passed');
 check(U.resolveAdaptiveDir("/home/u", "/custom/path", null) === "/custom/path", "adaptive dir: respects env override");
 check(U.resolveAdaptiveDir("/home/u", null, "/custom/adaptive-desktop/shell/adaptive-shell@local") === "/custom/adaptive-desktop", "adaptive dir: resolves from extension dir in repo");
 check(U.resolveAdaptiveDir("/home/u", null, "/home/u/.local/share/gnome-shell/extensions/adaptive-shell@local") === "/home/u/adaptive-desktop", "adaptive dir: falls back to ~/adaptive-desktop");
+
+check(U.isDropdownWindow("gnome-terminal", "gnome-terminal-server", null, 1234, 1234), "dropdown: matches spawned pid on Wayland");
+check(!U.isDropdownWindow("gnome-terminal", "gnome-terminal-server", null, 5678, 1234), "dropdown: rejects other terminal pid on Wayland");

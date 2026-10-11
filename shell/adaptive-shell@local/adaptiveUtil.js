@@ -344,11 +344,13 @@ function dropdownArgv(kind, folder) {
 
 // Whether a window that has just appeared is the terminal we started. The
 // role says so on X11; on Wayland there is no role, and the class has to do.
-function isDropdownWindow(kind, wmClass, role) {
+function isDropdownWindow(kind, wmClass, role, winPid = 0, targetPid = 0) {
     if (role === DROPDOWN_ROLE)
         return true;
     if (role)
         return false;
+    if (targetPid && winPid)
+        return winPid === targetPid;
     const name = String(wmClass || '').toLowerCase();
     return kind === 'terminator' ? name.includes('terminator') : name.includes('gnome-terminal');
 }

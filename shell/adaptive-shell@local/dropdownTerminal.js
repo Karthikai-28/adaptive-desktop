@@ -45,6 +45,8 @@ var DropdownTerminal = class DropdownTerminal {
         this._createdId = 0;
         this._expireId = 0;
         this._kind = '';
+        this._pendingTimeouts = new Set();
+        this._targetPid = 0;
     }
 
     attach() {
@@ -98,11 +100,33 @@ var DropdownTerminal = class DropdownTerminal {
 
         this._createdId = global.display.connect('window-created', (_d, window) => {
             // The window's class and role are not always set at creation.
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
-                if (this._createdId && Util.isDropdownWindow(this._kind, window.get_wm_class(), window.get_role()))
-                    this._adopt(window, true);
+            let unmanagedId = 0;
+            const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+                this._pendingTimeouts.delete(timeoutId);
+                if (unmanagedId && window) {
+                    try { window.disconnect(unmanagedId); } catch (e) {}
+                    unmanagedId = 0;
+                }
+                if (this._createdId) {
+                    try {
+                        const wmClass = window.get_wm_class ? window.get_wm_class() : null;
+                        const role = window.get_role ? window.get_role() : null;
+                        const winPid = window.get_pid ? window.get_pid() : 0;
+                        if (Util.isDropdownWindow(this._kind, wmClass, role, winPid, this._targetPid))
+                            this._adopt(window, true);
+                    } catch (e) {
+                        // Window might have been destroyed or unmanaged
+                    }
+                }
                 return GLib.SOURCE_REMOVE;
             });
+            this._pendingTimeouts.add(timeoutId);
+            try {
+                unmanagedId = window.connect('unmanaged', () => {
+                    GLib.source_remove(timeoutId);
+                    this._pendingTimeouts.delete(timeoutId);
+                });
+            } catch (e) {}
         });
         this._expireId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, ADOPT_FOR_S, () => {
             this._expireId = 0;
@@ -112,8 +136,9 @@ var DropdownTerminal = class DropdownTerminal {
 
         this._activeProjectFolder(folder => {
             try {
-                GLib.spawn_async(folder, Util.dropdownArgv(this._kind, folder), null,
+                const [, pid] = GLib.spawn_async(folder, Util.dropdownArgv(this._kind, folder), null,
                     GLib.SpawnFlags.SEARCH_PATH, null);
+                this._targetPid = pid;
             } catch (e) {
                 logError(e, '[Adaptive Dropdown] starting the terminal');
                 this._stopWaiting();
@@ -193,5 +218,11 @@ var DropdownTerminal = class DropdownTerminal {
             GLib.source_remove(this._expireId);
             this._expireId = 0;
         }
+        if (this._pendingTimeouts) {
+            for (const id of this._pendingTimeouts)
+                GLib.source_remove(id);
+            this._pendingTimeouts.clear();
+        }
+        this._targetPid = 0;
     }
 };
