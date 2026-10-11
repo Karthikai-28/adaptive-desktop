@@ -1109,7 +1109,7 @@ class Palette(Gtk.ApplicationWindow):
              lambda: self._in_background("ResumeProject", "(s)", ("",))),
             ("Quick Note", "One line into the project's inbox", "document-edit-symbolic", "",
              lambda: self._run(["./scripts/adaptive-quick-note.py"])),
-            ("Copy Text from Screen", "Select an area and copy the words in it", "insert-text-symbolic", "",
+            ("Copy Text from Screen", "Select words from any visible image · Super+Shift+T", "insert-text-symbolic", "",
              lambda: self._in_background("CopyScreenText")),
             ("Clear Clipboard History", "Forget what was copied, except what is pinned", "edit-clear-all-symbolic", "",
              lambda: self._in_background("ClipboardClear")),

@@ -98,7 +98,7 @@ CHECKS = [
     {
         "id": "screen_text",
         "backlog": "Copy text from screen.",
-        "prompt": "With tesseract-ocr installed, does Control Center > Copy Text from Screen put the selected words on the clipboard?",
+        "prompt": "With tesseract-ocr and tesseract-ocr-eng installed, does Super+Shift+T let you select words or a line in an image and copy with Ctrl+C, while Esc preserves the clipboard?",
     },
     {
         "id": "phone_link",

@@ -88,6 +88,8 @@ step "Every this._method() is defined" quiet shell_methods
 step "What one shell module takes from another is exported" quiet python3 "$REPO/scripts/verify-shell-imports.py" "$SHELL_DIR"
 step "No undefined names in the shell" undefined_names
 step "Shell helpers (git, watchdog, battery, clipboard, drop-down)" quiet node "$REPO/scripts/verify-shell-helpers.js"
+step "Screen text geometry and selection" quiet node "$REPO/scripts/verify-screen-text.js"
+step "Screen text contrast and enlargement" quiet /usr/bin/python3 -s "$REPO/scripts/verify-screen-text-image.py"
 step "Python parses" python_syntax
 step "Shell scripts have no errors" shell_scripts
 step "Feature logic (palette, projects, backup, power, annotate)" quiet python3 "$REPO/scripts/verify-feature-logic.py"
@@ -107,7 +109,7 @@ step "Files inspector: every method the controller calls is defined" quiet inspe
 if [ "$QUICK" = 0 ]; then
     step "Command palette window (virtual display)" quiet python3 "$REPO/scripts/verify-palette.py"
     step "Annotate window (virtual display)" quiet python3 "$REPO/scripts/verify-annotate.py"
-    step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh"
+    step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh" --extra "$REPO/scripts/verify-screen-text-nested.sh"
     step "Files with the inspector (the Nautilus fork, sandboxed)" quiet python3 "$REPO/scripts/verify-files-inspector.py"
     step "Adaptive Link: the daemon against a phone and three intruders" quiet python3 "$REPO/scripts/verify-link.py"
     step "Adaptive Link: the Android app on a device (skips with none attached)" quiet python3 "$REPO/scripts/verify-link-android.py"

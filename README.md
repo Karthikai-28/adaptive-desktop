@@ -197,3 +197,19 @@ Full procedures: `docs/RECOVERY_RUNBOOK.md`, `docs/UNINSTALL_AND_RECOVERY.md`.
 | `docs/GNOME_PORT.md` | What a move to GNOME 45+ and Wayland would take |
 | `docs/ADAPTIVE_LINK.md` | The computer from your phone: setup and security model |
 | `docs/REPO_DOCUMENTATION_MAP.md` | Everything else |
+
+## Copy text from any image
+
+Install English recognition once with `sudo apt install tesseract-ocr tesseract-ocr-eng python3-pil`.
+After syncing the shell and installing keybindings, press **Super+Shift+T**, or
+choose **Copy Text from Screen** in Control Center or the command palette.
+The desktop freezes while English words are recognized locally, without uploads.
+Click a word, drag across words within a text block, or double-click a line.
+Press **Ctrl+C** or **Copy** to copy the selection and close; **Ctrl+A** selects
+all recognized words across the displays. **Esc** or **Cancel** leaves the clipboard unchanged. Use **Move** if the toolbar
+covers text you want to select.
+
+Works with visible images in local viewers, browsers, scanned PDFs and paused
+video. Enlarge blurry or small text for better results. Only visible, capturable
+pixels are recognized; handwriting and individual-character selection are not
+supported. Recognition stops after 30 seconds, and temporary captures are removed.

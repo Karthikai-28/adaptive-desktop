@@ -67,6 +67,8 @@ python3 "${REPO}/scripts/verify-shell-imports.py" "${REPO}/shell/adaptive-shell@
 # The decisions inside the new shell modules (git status, the watchdog rule,
 # battery health, clipboard bounds), checked on the shipped file under Node.
 node "${REPO}/scripts/verify-shell-helpers.js"
+node "${REPO}/scripts/verify-screen-text.js"
+/usr/bin/python3 -s "${REPO}/scripts/verify-screen-text-image.py"
 python3 "${REPO}/scripts/verify-shell-memory.py" --seconds 5 --interval 1 --allow-missing
 
 echo
@@ -85,7 +87,7 @@ echo "== Windows and shell, run for real on a virtual display =="
 # machine-specific ones above.
 python3 "${REPO}/scripts/verify-palette.py"
 python3 "${REPO}/scripts/verify-annotate.py"
-"${REPO}/scripts/verify-shell-nested.sh"
+"${REPO}/scripts/verify-shell-nested.sh" --extra "${REPO}/scripts/verify-screen-text-nested.sh"
 python3 "${REPO}/scripts/verify-files-inspector.py"
 
 echo

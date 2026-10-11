@@ -35,6 +35,7 @@ for name in [
     "adaptive-dropdown-terminal",
     "adaptive-shortcuts",
     "adaptive-annotate",
+    "adaptive-screen-text",
 ]:
     key = f"{base}/{name}/"
     if key not in values:
@@ -73,6 +74,8 @@ set_binding "adaptive-quick-note" "Adaptive Quick Note" "${REPO}/scripts/adaptiv
 set_binding "adaptive-dropdown-terminal" "Adaptive Drop-down Terminal" "gdbus call --session -d org.gnome.Shell -o /org/adaptive/Shell -m org.adaptive.Shell.Run dropdown-terminal" "<Super>Return"
 set_binding "adaptive-shortcuts" "Adaptive Keyboard Shortcuts" "${REPO}/scripts/adaptive-command-launch.sh --query 'keys '" "<Super>slash"
 set_binding "adaptive-annotate" "Adaptive Annotate Screenshot" "${REPO}/apps/adaptive-annotate/main.py" "<Super><Shift>s"
+
+set_binding "adaptive-screen-text" "Adaptive Copy Text from Screen" "gdbus call --session -d org.gnome.Shell -o /org/adaptive/Shell -m org.adaptive.Shell.CopyScreenText" "<Super><Shift>t"
 
 #
 # GNOME's own switch-to-workspace-left/right also list Super+Alt+Left/Right.
@@ -186,4 +189,5 @@ Installed Adaptive Desktop shortcuts:
   Super+Return       Drop-down terminal
   Super+/            Keyboard shortcuts (this list, searchable)
   Super+Shift+S      Annotate a screenshot
+  Super+Shift+T      Select and copy text from screen
 EOF
