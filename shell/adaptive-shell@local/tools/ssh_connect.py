@@ -115,7 +115,7 @@ def probe(host, user, password):
     # With no password, BatchMode says whether a key (or agent) already works.
     argv = ["/usr/bin/ssh", *SSH_OPTS, "-o", "ConnectTimeout=6"]
     argv += ["-o", "BatchMode=yes"] if password is None else []
-    argv += [f"{user}@{host}", "true"]
+    argv += ["--", f"{user}@{host}", "true"]
     try:
         run = subprocess.run(argv, capture_output=True, text=True, timeout=20,
                              env=ssh_env(host, user, password), stdin=subprocess.DEVNULL)
@@ -127,7 +127,7 @@ def probe(host, user, password):
 
 
 def open_terminal(host, user):
-    ssh = ["ssh", *SSH_OPTS, f"{user}@{host}"]
+    ssh = ["ssh", *SSH_OPTS, "--", f"{user}@{host}"]
     if shutil.which("terminator"):
         argv = ["terminator", "-T", f"{user}@{host}", "-x", *ssh]
     elif shutil.which("gnome-terminal"):

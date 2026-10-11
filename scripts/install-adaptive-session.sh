@@ -28,8 +28,10 @@ echo
 
 source /etc/os-release
 
-[[ "${VERSION_ID:-}" == "22.04" ]] \
-    || fail "This installer is intentionally restricted to Ubuntu 22.04."
+if [[ -z "${ADAPTIVE_ALLOW_OS_OVERRIDE:-}" ]]; then
+    [[ "${VERSION_ID:-}" == "22.04" || "${VERSION_ID:-}" == "24.04" ]] \
+        || fail "This installer is intentionally restricted to Ubuntu 22.04 or 24.04 (set ADAPTIVE_ALLOW_OS_OVERRIDE=1 to bypass)."
+fi
 
 [[ -x /usr/bin/gnome-session ]] \
     || fail "/usr/bin/gnome-session not found."
