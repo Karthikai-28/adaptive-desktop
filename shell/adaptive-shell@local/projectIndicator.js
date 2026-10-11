@@ -222,7 +222,7 @@ var ProjectIndicator = class ProjectIndicator {
     _render() {
         if (!this._button || !this._project)
             return;
-        this._name.text = Util.cleanProjectName(this._project.name);
+        this._name.text = Util.cleanProjectName(this._project.name, this._project.path);
         const status = Util.formatGitStatus(this._git, this._defaultBranch);
         this._status.text = status ? `  ${status}` : '';
         this._status.visible = !!status;

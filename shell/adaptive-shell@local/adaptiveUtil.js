@@ -52,11 +52,28 @@ function parseGitStatus(text) {
 
 // Clean human-readable project name: underscores and dashes to spaces,
 // sensible capitalisation (e.g. 'Azure_Kinect_ROS_Driver' -> 'Azure Kinect ROS Driver').
-function cleanProjectName(name) {
+function cleanProjectName(name, folderPath = null) {
     if (!name || typeof name !== 'string')
         return '';
+
+    const acronyms = new Map();
+    if (folderPath && typeof folderPath === 'string') {
+        const folderName = folderPath.split('/').filter(Boolean).pop() || '';
+        const folderWords = folderName.replace(/[_-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+        for (const fw of folderWords) {
+            if (/^[A-Z0-9]+$/.test(fw) && /[A-Z]/.test(fw) && fw.length >= 2) {
+                acronyms.set(fw.toLowerCase(), fw);
+            }
+        }
+    }
+
     const words = name.replace(/[_-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
     return words.map(word => {
+        const lower = word.toLowerCase();
+        if (acronyms.has(lower))
+            return acronyms.get(lower);
+        if (/^[A-Z0-9]+$/.test(word) && /[A-Z]/.test(word) && word.length >= 2)
+            return word;
         if (/^[a-z0-9]+$/.test(word))
             return word.charAt(0).toUpperCase() + word.slice(1);
         return word;

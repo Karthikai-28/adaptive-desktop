@@ -45,6 +45,7 @@ check(U.formatGitStatus(null) === '', 'git: no status, no text');
 
 // project name
 check(U.cleanProjectName('Azure_Kinect_ROS_Driver') === 'Azure Kinect ROS Driver', 'project: clean name with underscores & caps');
+check(U.cleanProjectName('Azure Kinect Ros Driver', '/home/karthi/ros_ws/src/Azure_Kinect_ROS_Driver') === 'Azure Kinect ROS Driver', 'project: acronym kept from folder path');
 check(U.cleanProjectName('adaptive-desktop') === 'Adaptive Desktop', 'project: clean name with dashes');
 check(U.cleanProjectName('clean-project-label') === 'Clean Project Label', 'project: clean name title casing');
 check(U.cleanProjectName('') === '', 'project: empty name');
