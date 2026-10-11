@@ -6,7 +6,8 @@
 // scripts/verify-shell-helpers.js loads this very file under Node and checks
 // it, rather than keeping a copy that could drift.
 
-/* exported parseGitStatus, formatGitStatus, watchdogVerdict, WATCHDOG,
+/* exported parseGitStatus, formatGitStatus, cleanProjectName, isDefaultBranch,
+   watchdogVerdict, WATCHDOG,
    batteryHealth, verificationSummary, classifyApp, clipboardPush,
    clipboardPushImage, clipboardPin, clipboardClear, clipboardTrim, pngSize,
    formatBytes, isSecretClipboard, CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS,
@@ -49,17 +50,43 @@ function parseGitStatus(text) {
     return status;
 }
 
-// "main", "main ±3", "main ±3 ↑1 ↓2". The ± is uncommitted files.
-function formatGitStatus(status) {
+// Clean human-readable project name: underscores and dashes to spaces,
+// sensible capitalisation (e.g. 'Azure_Kinect_ROS_Driver' -> 'Azure Kinect ROS Driver').
+function cleanProjectName(name) {
+    if (!name || typeof name !== 'string')
+        return '';
+    const words = name.replace(/[_-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+    return words.map(word => {
+        if (/^[a-z0-9]+$/.test(word))
+            return word.charAt(0).toUpperCase() + word.slice(1);
+        return word;
+    }).join(' ');
+}
+
+// Whether branch is considered the repository's default branch.
+function isDefaultBranch(branch, defaultBranch = null) {
+    if (!branch)
+        return false;
+    const b = branch.trim();
+    if (defaultBranch && b === defaultBranch.trim())
+        return true;
+    return b === 'main' || b === 'master';
+}
+
+// Top-bar git status text:
+// - default branch, clean: "" (hidden)
+// - default branch, dirty: "•" (small dot only)
+// - non-default branch, clean: "feature"
+// - non-default branch, dirty: "feature •"
+// No ±/↑/↓ counters in the bar.
+function formatGitStatus(status, defaultBranch = null) {
     if (!status)
         return '';
-    const parts = [status.branch];
+    const parts = [];
+    if (!isDefaultBranch(status.branch, defaultBranch) && status.branch)
+        parts.push(status.branch);
     if (status.dirty)
-        parts.push(`±${status.dirty}`);
-    if (status.ahead)
-        parts.push(`↑${status.ahead}`);
-    if (status.behind)
-        parts.push(`↓${status.behind}`);
+        parts.push('•');
     return parts.join(' ');
 }
 

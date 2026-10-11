@@ -1,7 +1,9 @@
 // Adaptive project indicator - the active project in the top bar.
 //
-// Left of the top bar, where Activities used to be: the active project's name,
-// its branch and how much is uncommitted ("adaptive-desktop · main ±3 ↑1").
+// Left of the top bar, where Activities used to be: a clean, human-readable
+// project name ("Adaptive Desktop"). Non-default branches appear short and
+// subtle; uncommitted changes show at most a small dot. Full git details stay
+// in the menu.
 // Hidden when no project is active. Its menu is the project's hub: open it in
 // a terminal or Files, jot a quick note, park it or bring it back.
 //
@@ -46,6 +48,7 @@ var ProjectIndicator = class ProjectIndicator {
         this._timerId = 0;
         this._project = null;
         this._git = null;
+        this._defaultBranch = null;
         this._gitSerial = 0;
         this._cancellable = new Gio.Cancellable();
     }
@@ -150,8 +153,10 @@ var ProjectIndicator = class ProjectIndicator {
             return;
         const changed = (project && project.path) !== (this._project && this._project.path);
         this._project = project;
-        if (changed)
+        if (changed) {
             this._git = null;
+            this._defaultBranch = null;
+        }
         this._button.container.visible = !!project;
         this._render();
         // PopupMenu.open() returns early on an empty menu, so a menu that is
@@ -185,6 +190,31 @@ var ProjectIndicator = class ProjectIndicator {
         } catch (e) {
             logError(e, '[Adaptive Project] git status');
         }
+
+        if (this._defaultBranch === null) {
+            try {
+                const procHead = Gio.Subprocess.new(
+                    ['git', '--no-optional-locks', '-C', project.path, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+                    Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+                procHead.communicate_utf8_async(null, this._cancellable, (p, res) => {
+                    let out = '';
+                    try {
+                        [, out] = p.communicate_utf8_finish(res);
+                    } catch (e) {
+                        return;
+                    }
+                    if (serial !== this._gitSerial || !this._button)
+                        return;
+                    const head = String(out || '').trim().replace(/^origin\//, '');
+                    if (head) {
+                        this._defaultBranch = head;
+                        this._render();
+                    }
+                });
+            } catch (e) {
+                // Not a git repository or no origin/HEAD reference
+            }
+        }
     }
 
     // ---------------------------------------------------------- render
@@ -192,8 +222,8 @@ var ProjectIndicator = class ProjectIndicator {
     _render() {
         if (!this._button || !this._project)
             return;
-        this._name.text = this._project.name;
-        const status = Util.formatGitStatus(this._git);
+        this._name.text = Util.cleanProjectName(this._project.name);
+        const status = Util.formatGitStatus(this._git, this._defaultBranch);
         this._status.text = status ? `  ${status}` : '';
         this._status.visible = !!status;
         if (this._git && this._git.dirty)

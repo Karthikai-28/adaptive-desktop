@@ -14,7 +14,7 @@ const vm = require('vm');
 const file = path.join(__dirname, '..', 'shell', 'adaptive-shell@local', 'adaptiveUtil.js');
 const U = {};
 vm.runInNewContext(`${fs.readFileSync(file, 'utf8')}
-;Object.assign(exportsTo, { parseGitStatus, formatGitStatus, watchdogVerdict, WATCHDOG,
+;Object.assign(exportsTo, { parseGitStatus, formatGitStatus, cleanProjectName, isDefaultBranch, watchdogVerdict, WATCHDOG,
   batteryHealth, verificationSummary, classifyApp, clipboardPush, isSecretClipboard,
   clipboardPushImage, clipboardPin, clipboardClear, pngSize, formatBytes,
   CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_PINS, CLIPBOARD_MAX_IMAGES,
@@ -32,12 +32,22 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // git
 const g = U.parseGitStatus('## main...origin/main [ahead 1, behind 2]\n M a.js\n?? b\n');
 check(same(g, { branch: 'main', ahead: 1, behind: 2, dirty: 2, detached: false }), 'git: branch, ahead, behind, dirty');
-check(U.formatGitStatus(g) === 'main ±2 ↑1 ↓2', 'git: top-bar text');
-check(U.formatGitStatus(U.parseGitStatus('## feature/x\n')) === 'feature/x', 'git: clean branch without upstream');
+check(U.formatGitStatus(g) === '•', 'git: default branch dirty shows dot only');
+check(U.formatGitStatus(U.parseGitStatus('## feature/x\n')) === 'feature/x', 'git: clean non-default branch');
+check(U.formatGitStatus(U.parseGitStatus('## feature/x\n M a.js\n')) === 'feature/x •', 'git: dirty non-default branch');
+check(U.formatGitStatus(U.parseGitStatus('## main\n')) === '', 'git: clean default branch hidden');
+check(U.formatGitStatus(U.parseGitStatus('## melodic\n M a.js\n'), 'melodic') === '•', 'git: origin/HEAD default branch dirty');
+check(U.formatGitStatus(U.parseGitStatus('## melodic\n'), 'melodic') === '', 'git: origin/HEAD clean default branch hidden');
 check(U.parseGitStatus('## No commits yet on main\n').branch === 'main', 'git: empty repository');
 check(U.parseGitStatus('## HEAD (no branch)\n').detached, 'git: detached HEAD');
 check(U.parseGitStatus('fatal: not a git repository') === null, 'git: not a repository gives null');
 check(U.formatGitStatus(null) === '', 'git: no status, no text');
+
+// project name
+check(U.cleanProjectName('Azure_Kinect_ROS_Driver') === 'Azure Kinect ROS Driver', 'project: clean name with underscores & caps');
+check(U.cleanProjectName('adaptive-desktop') === 'Adaptive Desktop', 'project: clean name with dashes');
+check(U.cleanProjectName('clean-project-label') === 'Clean Project Label', 'project: clean name title casing');
+check(U.cleanProjectName('') === '', 'project: empty name');
 
 // watchdog
 const W = U.WATCHDOG;
