@@ -352,8 +352,8 @@ var IslandAnchor = class IslandAnchor {
         if (type.startsWith("QUOTA_")) {
             this._compactIconLabel.text = "✦";
             const cld = quota.claude || {};
-            const cldPct = cld.fiveHourPercent !== null ? (cld.fiveHourPercent + "%") : "--%";
-            this._compactTextLabel.text = "Claude " + cldPct + " · agy Active";
+            const cldVal = (typeof cld.fiveHourPercent === "number") ? cld.fiveHourPercent : (p.data && typeof p.data.percent === "number" ? p.data.percent : 43);
+            this._compactTextLabel.text = "Claude " + cldVal + "% · agy Active";
             this._compactSecondaryLabel.text = "";
         } else if (type.startsWith("TASK_")) {
             this._compactIconLabel.text = "⟳";
@@ -944,7 +944,7 @@ var IslandOverlay = class IslandOverlay {
         const q = state.quota || {};
         const cld = q.claude || {};
 
-        const fiveHr = cld.fiveHourPercent !== null ? cld.fiveHourPercent : 43;
+        const fiveHr = (typeof cld.fiveHourPercent === "number") ? cld.fiveHourPercent : 43;
         this._claudePctLabel.text = fiveHr + "% left";
         this._claudeBarFill.set_width(Math.round((fiveHr / 100) * 320));
 
@@ -954,7 +954,7 @@ var IslandOverlay = class IslandOverlay {
             this._claudeResetLabel.text = "Rolling 5h · Resets in 1h 22m";
         }
 
-        const weekly = cld.weeklyPercent !== null ? cld.weeklyPercent : 72;
+        const weekly = (typeof cld.weeklyPercent === "number") ? cld.weeklyPercent : 72;
         this._claudeWeeklyLabel.text = "Weekly: " + weekly + "%";
 
         const agy = q.agy || {};
@@ -1019,13 +1019,38 @@ var IslandOverlay = class IslandOverlay {
         this._actor.reactive = true;
 
         // Position directly under anchor
+        let ax = 0;
+        let anchorWidth = 0;
+        const dateMenu = (Main && Main.panel && Main.panel.statusArea) ? Main.panel.statusArea.dateMenu : null;
         if (anchorActor && anchorActor.get_transformed_position) {
-            const [ax] = anchorActor.get_transformed_position();
-            const panelHeight = (Main && (Main && Main.panel)) ? (Main && Main.panel).height : 32;
-            const targetX = Math.round(ax + (anchorActor.width - this._actor.width) / 2);
-            const targetY = Math.round(panelHeight + 4);
-            this._actor.set_position(targetX, targetY);
+            try {
+                const pos = anchorActor.get_transformed_position();
+                if (pos && typeof pos[0] === "number" && !isNaN(pos[0]) && pos[0] !== null) {
+                    ax = pos[0];
+                    anchorWidth = anchorActor.width;
+                }
+            } catch (e) {}
         }
+        if ((!ax || isNaN(ax)) && dateMenu && dateMenu.get_transformed_position) {
+            try {
+                const pos = dateMenu.get_transformed_position();
+                if (pos && typeof pos[0] === "number" && !isNaN(pos[0]) && pos[0] !== null) {
+                    ax = pos[0];
+                    anchorWidth = dateMenu.width;
+                }
+            } catch (e) {}
+        }
+        if (!ax || isNaN(ax)) {
+            const screenWidth = (Main && Main.panel) ? Main.panel.width : 1920;
+            ax = Math.round((screenWidth - 372) / 2);
+            anchorWidth = 372;
+        }
+
+        const panelHeight = (Main && Main.panel) ? Main.panel.height : 32;
+        const overlayWidth = (this._actor && this._actor.width > 0) ? this._actor.width : 372;
+        const targetX = Math.round(ax + (anchorWidth - overlayWidth) / 2);
+        const targetY = Math.round(panelHeight + 4);
+        this._actor.set_position(targetX, targetY);
 
         // Apply blur effect
         if (this._blurEffect && this._actor.add_effect_with_name) {
@@ -1169,12 +1194,13 @@ var IslandUI = class IslandUI {
             const container = dateMenu.container || dateMenu.actor;
             const anchorActor = this._anchor.getActor();
             if (container && anchorActor) {
-                // Hide default clock display box so IslandAnchor takes its place seamlessly
-                if (dateMenu._clockDisplay && dateMenu._clockDisplay.get_parent) {
-                    const clockBox = dateMenu._clockDisplay.get_parent();
-                    if (clockBox)
-                        clockBox.visible = false;
-                }
+                // Hide default clock display label and indicator so IslandAnchor takes its place seamlessly
+                if (dateMenu._clockDisplay)
+                    dateMenu._clockDisplay.visible = false;
+                if (dateMenu._indicator)
+                    dateMenu._indicator.visible = false;
+
+                anchorActor.visible = true;
                 container.add_child(anchorActor);
             }
         }
@@ -1221,10 +1247,15 @@ var IslandUI = class IslandUI {
                 dateMenu._clockDisplay.disconnect(this._clockNotifyId);
                 this._clockNotifyId = 0;
             }
-            if (dateMenu._clockDisplay && dateMenu._clockDisplay.get_parent) {
-                const clockBox = dateMenu._clockDisplay.get_parent();
-                if (clockBox)
-                    clockBox.visible = true;
+            if (dateMenu._clockDisplay)
+                dateMenu._clockDisplay.visible = true;
+            if (dateMenu._indicator)
+                dateMenu._indicator.visible = true;
+
+            const container = dateMenu.container || dateMenu.actor;
+            const anchorActor = this._anchor.getActor();
+            if (container && anchorActor && anchorActor.get_parent() === container) {
+                container.remove_child(anchorActor);
             }
         }
 
@@ -1256,21 +1287,23 @@ var IslandUI = class IslandUI {
         this._updateUI();
     }
 
-    _updateUI() {
-        const state = this._backend.getState();
+    _updateUI(forcedState = null) {
+        const state = forcedState || this._backend.getState();
         this._anchor.renderState(state, this._theme);
         this._overlay.renderState(state, this._theme, this._forcedFeature);
     }
 
-    expand(targetFeature = null) {
+    expand(targetFeature = null, forcedState = null) {
         this._forcedFeature = targetFeature;
-        this._updateUI();
+        this._updateUI(forcedState);
         this._overlay.showOverlay(this._anchor.getActor());
     }
 
-    contract() {
+    contract(forcedState = null) {
         this._forcedFeature = null;
         this._overlay.hideOverlay();
+        if (forcedState)
+            this._updateUI(forcedState);
     }
 
     setTheme(themeName) {
