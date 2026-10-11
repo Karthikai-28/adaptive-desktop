@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""office - drive the Agent Office from a terminal (Claude, the manager, uses this too).
+
+  office status                                   team status, queues, quota
+  office assign <agent> "<title>" [--body TEXT] [--project NAME] [--after ID]
+  office tasks [--agent A] [--status queued,running,done,failed] [-n N]
+  office show <task id>                           full task with its report and activity
+  office cancel <task id> | office retry <task id>
+  office ask <agent> "<message>" [--no-wait]      direct message; waits for the reply
+  office log [--agent A] [-n N]                   recent activity
+  office meeting start "<topic>" --with maya,arjun[,claude]
+  office meeting say "<text>" | office meeting invite a,b | office meeting end | office meeting show
+  office autopilot on|off | office pause | office resume
+  office open                                     open the office in the browser
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+URL = os.environ.get("OFFICE_URL", "http://127.0.0.1:8790").rstrip("/")
+ACTOR = os.environ.get("OFFICE_ACTOR", "operator")
+
+
+def call(method, path, body=None, query=None):
+    url = URL + path + ("?" + urllib.parse.urlencode({k: v for k, v in (query or {}).items() if v is not None})
+                        if query else "")
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Content-Type": "application/json", "X-Office": "1"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read()).get("detail") or e.reason
+        except Exception:
+            detail = e.reason
+        sys.exit(f"office: {detail}")
+    except urllib.error.URLError:
+        sys.exit(f"office: the office server is not running at {URL} "
+                 "(start it: systemctl --user start adaptive-agent-office)")
+
+
+def ago(ts):
+    if not ts:
+        return ""
+    s = int(time.time() - ts)
+    return f"{s}s" if s < 90 else f"{s // 60}m" if s < 5400 else f"{s // 3600}h"
+
+
+def names(state):
+    return {p["id"]: p["name"] for p in state["roster"]}
+
+
+def cmd_status(a):
+    st = call("GET", "/api/state")
+    n = names(st)
+    print(f"{st['company']} — model {st['model']}")
+    s = st["settings"]
+    flags = [f"autopilot {'on' if s['autopilot'] else 'off'}", f"max parallel {s['max_parallel']}"]
+    if s["paused"]:
+        flags.append("WORK PAUSED")
+    if st["quota_until"] > time.time():
+        flags.append(f"Gemini quota pause for {int((st['quota_until'] - time.time()) / 60)} more min")
+    print("  " + ", ".join(flags))
+    if st.get("meeting"):
+        m = st["meeting"]
+        print(f"  meeting running: \"{m['topic']}\" with {', '.join(n.get(x, x) for x in m['attendees'])}")
+    print()
+    roles = {p["id"]: p["role"] for p in st["roster"]}
+    for ag in st["agents"]:
+        line = f"  {n[ag['id']]:<8} {roles[ag['id']]:<22} {ag['status']:<9}"
+        if ag["task"]:
+            line += f" #{ag['task']['id']} {ag['task']['title'][:50]}"
+        if ag["queued"]:
+            line += f"  (+{ag['queued']} queued)"
+        if ag["in_meeting"]:
+            line += "  [in meeting]"
+        print(line)
+        if ag["activity"] and ag["status"] != "idle":
+            print(f"  {'':<8} └ {ag['activity'][:90]}  ({ago(ag['activity_ts'])} ago)")
+
+
+def cmd_assign(a):
+    t = call("POST", "/api/tasks", {"agent": a.agent.lower(), "title": a.title, "body": a.body or "",
+                                    "project": a.project or "", "after": a.after, "created_by": ACTOR})
+    dep = f", starts after #{t['depends_on']}" if t["depends_on"] else ""
+    print(f"task #{t['id']} assigned to {t['agent']}{dep}: {t['title']}")
+
+
+def cmd_tasks(a):
+    for t in call("GET", "/api/tasks", query={"agent": a.agent, "status": a.status, "limit": a.n}):
+        dep = f" after #{t['depends_on']}" if t["depends_on"] else ""
+        proj = f" [{t['project']}]" if t["project"] else ""
+        print(f"#{t['id']:<4} {t['status']:<9} {t['agent']:<7} {t['title'][:70]}{proj}{dep}  ({ago(t['created_at'])} ago)")
+
+
+def cmd_show(a):
+    t = call("GET", f"/api/tasks/{a.id}")
+    print(f"#{t['id']} {t['title']}\n  agent {t['agent']}  status {t['status']}  by {t['created_by']}"
+          f"  project {t['project'] or '-'}  steps {t['steps']}  tokens {t['tokens']}")
+    if t["body"]:
+        print(f"\nDetails:\n{t['body']}")
+    if t["error"]:
+        print(f"\nError: {t['error']}")
+    if t["result"]:
+        print(f"\nReport:\n{t['result']}")
+    if a.events:
+        print("\nActivity:")
+        for e in t["events"]:
+            print(f"  {time.strftime('%H:%M:%S', time.localtime(e['ts']))} {e['text']}")
+
+
+def cmd_cancel(a):
+    t = call("POST", f"/api/tasks/{a.id}/cancel")
+    print(f"#{t['id']} {t['status']}")
+
+
+def cmd_retry(a):
+    t = call("POST", f"/api/tasks/{a.id}/retry")
+    print(f"#{t['id']} {t['status']}")
+
+
+def cmd_ask(a):
+    to = a.agent.lower()
+    m = call("POST", "/api/chat", {"to": to, "text": a.message,
+                                   "sender": "claude" if ACTOR == "manager" else "operator"})
+    if a.no_wait:
+        print("sent")
+        return
+    thread = "manager" if to == "claude" else f"dm:{to}"
+    deadline = time.time() + a.timeout
+    while time.time() < deadline:
+        time.sleep(3)
+        for r in call("GET", "/api/messages", query={"thread": thread, "after": m["id"]}):
+            if r["sender"] == to:
+                print(r["text"])
+                return
+    sys.exit(f"office: no reply from {to} within {a.timeout}s (it will still appear in the office)")
+
+
+def cmd_log(a):
+    st = call("GET", "/api/state")
+    n = names(st)
+    for e in call("GET", "/api/events", query={"agent": a.agent, "limit": a.n}):
+        print(f"{time.strftime('%H:%M:%S', time.localtime(e['ts']))} {n.get(e['agent'], e['agent']):<7} {e['text']}")
+
+
+def cmd_meeting(a):
+    if a.action == "start":
+        who = [x.strip().lower() for x in (a.with_ or "").split(",") if x.strip()]
+        if not who:
+            sys.exit("office: say who attends, e.g. --with maya,arjun,claude")
+        m = call("POST", "/api/meeting/start", {"topic": a.text or "", "attendees": who})
+        print(f"meeting #{m['id']} started: {m['topic']}")
+    elif a.action == "say":
+        call("POST", "/api/meeting/say", {"text": a.text})
+        print("said")
+    elif a.action == "invite":
+        call("POST", "/api/meeting/invite", {"attendees": [x.strip().lower() for x in a.text.split(",")]})
+        print("invited")
+    elif a.action == "end":
+        m = call("POST", "/api/meeting/end")
+        print(f"meeting ended; notes in {m['minutes_path']}")
+    else:
+        d = call("GET", "/api/meeting")
+        if not d["meeting"]:
+            print("no meeting is running")
+            return
+        print(f"meeting #{d['meeting']['id']}: {d['meeting']['topic']}")
+        for msg in d["messages"]:
+            print(f"  {msg['sender']}: {msg['text']}")
+
+
+def cmd_settings(a, **kw):
+    s = call("POST", "/api/settings", kw)
+    print(", ".join(f"{k}={v}" for k, v in s.items()))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="office", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("status")
+    sub.add_parser("help")
+    s = sub.add_parser("assign"); s.add_argument("agent"); s.add_argument("title")
+    s.add_argument("--body", "-b"); s.add_argument("--project", "-p"); s.add_argument("--after", type=int)
+    s = sub.add_parser("tasks"); s.add_argument("--agent"); s.add_argument("--status"); s.add_argument("-n", type=int, default=30)
+    s = sub.add_parser("show"); s.add_argument("id", type=int); s.add_argument("--events", action="store_true")
+    s = sub.add_parser("cancel"); s.add_argument("id", type=int)
+    s = sub.add_parser("retry"); s.add_argument("id", type=int)
+    s = sub.add_parser("ask"); s.add_argument("agent"); s.add_argument("message")
+    s.add_argument("--no-wait", action="store_true"); s.add_argument("--timeout", type=int, default=900)
+    s = sub.add_parser("log"); s.add_argument("--agent"); s.add_argument("-n", type=int, default=40)
+    s = sub.add_parser("meeting"); s.add_argument("action", choices=["start", "say", "invite", "end", "show"])
+    s.add_argument("text", nargs="?"); s.add_argument("--with", dest="with_")
+    s = sub.add_parser("autopilot"); s.add_argument("state", choices=["on", "off"])
+    sub.add_parser("pause"); sub.add_parser("resume"); sub.add_parser("open")
+    a = p.parse_args()
+    if a.cmd in (None, "help"):
+        print(__doc__.strip())
+    elif a.cmd == "autopilot":
+        cmd_settings(a, autopilot=a.state == "on")
+    elif a.cmd == "pause":
+        cmd_settings(a, paused=True)
+    elif a.cmd == "resume":
+        cmd_settings(a, paused=False, clear_quota=True)
+    elif a.cmd == "open":
+        subprocess.Popen(["xdg-open", URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        globals()[f"cmd_{a.cmd}"](a)
+
+
+if __name__ == "__main__":
+    main()

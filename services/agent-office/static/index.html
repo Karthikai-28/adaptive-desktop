@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Office</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%235865f2'/%3E%3Crect x='4' y='4' width='3' height='3' fill='white'/%3E%3Crect x='9' y='4' width='3' height='3' fill='white'/%3E%3Crect x='4' y='9' width='8' height='3' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand"><span class="logo"></span><b id="company">Agent Office</b><span id="summary"></span></div>
+  <div id="quota"></div>
+  <nav>
+    <button id="btnClaude" class="btn primary"></button>
+    <button id="btnMeeting" class="btn"></button>
+    <button id="btnTasks" class="btn"></button>
+    <button id="btnFiles" class="btn"></button>
+    <button id="btnVoice" class="btn icon" title="Read replies aloud"></button>
+    <button id="btnSettings" class="btn icon" title="Settings"></button>
+  </nav>
+</header>
+<main>
+  <section id="world">
+    <canvas id="map" aria-label="The office floor"></canvas>
+    <div id="meetingBar" class="hidden"></div>
+    <div id="hint" class="hint hidden"></div>
+    <div id="tip" class="tip hidden"></div>
+    <div id="zoomCtl"><button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">−</button><button data-z="fit" title="Fit">⤢</button></div>
+    <div id="keys" class="keys">WASD / arrows to walk · click to go somewhere · <b>E</b> to talk to who's next to you</div>
+    <div id="conn" class="conn hidden">Reconnecting to the office…</div>
+  </section>
+  <aside id="panel"></aside>
+</main>
+<div id="toasts"></div>
+<div id="modalWrap" class="hidden"><div id="modal" role="dialog" aria-modal="true"></div></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

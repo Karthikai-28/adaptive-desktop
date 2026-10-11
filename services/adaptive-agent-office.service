@@ -1,0 +1,21 @@
+[Unit]
+Description=Agent Office: an AI company of Gemini agents managed by Claude (http://127.0.0.1:8790)
+After=default.target
+
+[Service]
+# scripts/install-agent-office.sh rewrites %h/adaptive-desktop when the repo lives elsewhere
+WorkingDirectory=%h/adaptive-desktop/services/agent-office
+ExecStart=/usr/bin/python3 %h/adaptive-desktop/services/agent-office/server.py
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=%h/adaptive-desktop/.local/office-pydeps
+Environment=PATH=%h/adaptive-desktop/services/agent-office/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+# agy finds its Google sign-in in the OS keyring over the session bus
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

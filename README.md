@@ -36,6 +36,7 @@ first.
 | Command palette | `apps/adaptive-command/` (`providers.py` answers, `modes.py` modes), the shell bridge `shellActions.js` |
 | Screenshot annotation | `apps/adaptive-annotate/` |
 | Phone link | `services/adaptive-link/` (daemon), `apps/adaptive-link-android/` (Android app) |
+| AI company (Agent Office) | `services/agent-office/`: Gemini agents through `agy`, managed by Claude, in a pixel office at 127.0.0.1:8790 |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/` |
 
 ### Canonical paths
@@ -196,6 +197,7 @@ Full procedures: `docs/RECOVERY_RUNBOOK.md`, `docs/UNINSTALL_AND_RECOVERY.md`.
 | `docs/RECOVERY_RUNBOOK.md` | Getting back to a working desktop |
 | `docs/GNOME_PORT.md` | What a move to GNOME 45+ and Wayland would take |
 | `docs/ADAPTIVE_LINK.md` | The computer from your phone: setup and security model |
+| `docs/AGENT_OFFICE.md` | The AI company: one-command setup, how to use it, security model |
 | `docs/REPO_DOCUMENTATION_MAP.md` | Everything else |
 
 ## Copy text from any image
