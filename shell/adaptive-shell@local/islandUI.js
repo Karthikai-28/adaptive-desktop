@@ -244,8 +244,9 @@ var IslandAnchor = class IslandAnchor {
     }
 
     _onPillClicked(event) {
+        const isExpanded = this._ui.isExpanded();
         const state = this._ui.backend.getState();
-        if (state.activityState === IslandState.IDLE && !state.surfacedEvent) {
+        if (!isExpanded && state.activityState === IslandState.IDLE && !state.surfacedEvent) {
             // In idle mode, let the click propagate so dateMenu opens the native calendar
             return Clutter.EVENT_PROPAGATE;
         }
@@ -610,7 +611,7 @@ var IslandOverlay = class IslandOverlay {
         });
 
         const cldHeaderRow = new St.BoxLayout({ vertical: false });
-        cldHeaderRow.add_child(new St.Label({ text: "Claude 3.5 Sonnet", style_class: "adaptive-island-subcard-title" }));
+        cldHeaderRow.add_child(new St.Label({ text: "Claude", style_class: "adaptive-island-subcard-title" }));
         cldHeaderRow.add_child(new St.Widget({ x_expand: true }));
         this._claudePctLabel = new St.Label({ text: "43% left", style_class: "adaptive-island-val-bold" });
         cldHeaderRow.add_child(this._claudePctLabel);
@@ -640,7 +641,7 @@ var IslandOverlay = class IslandOverlay {
         });
 
         const agyHeaderRow = new St.BoxLayout({ vertical: false });
-        agyHeaderRow.add_child(new St.Label({ text: "Gemini Pro / agy", style_class: "adaptive-island-subcard-title" }));
+        agyHeaderRow.add_child(new St.Label({ text: "Gemini (agy)", style_class: "adaptive-island-subcard-title" }));
         agyHeaderRow.add_child(new St.Widget({ x_expand: true }));
         this._agyStatusLabel = new St.Label({ text: "✦ Active", style_class: "adaptive-island-status-active" });
         agyHeaderRow.add_child(this._agyStatusLabel);
@@ -1171,6 +1172,10 @@ var IslandUI = class IslandUI {
         return this._backend;
     }
 
+    isExpanded() {
+        return this._overlay ? this._overlay._isExpanded : false;
+    }
+
     attach() {
         if (this._attached) return;
         this._attached = true;
@@ -1181,7 +1186,7 @@ var IslandUI = class IslandUI {
 
         // 2. Mount Anchor onto dateMenu
         const dateMenu = (Main && (Main && Main.panel)) ? (Main && Main.panel).statusArea.dateMenu : null;
-        if (dateMenu && dateMenu.actor) {
+        if (dateMenu && (dateMenu.actor || dateMenu._clockDisplay)) {
             // Locate clock label
             if (dateMenu._clockDisplay) {
                 this._anchor.syncClock(dateMenu._clockDisplay.text || "");
@@ -1190,18 +1195,20 @@ var IslandUI = class IslandUI {
                 });
             }
 
-            // Reparent into dateMenu container
-            const container = dateMenu.container || dateMenu.actor;
+            // Mount into dateMenu clock box
             const anchorActor = this._anchor.getActor();
-            if (container && anchorActor) {
-                // Hide default clock display label and indicator so IslandAnchor takes its place seamlessly
-                if (dateMenu._clockDisplay)
+            if (dateMenu._clockDisplay && anchorActor) {
+                const clockBox = dateMenu._clockDisplay.get_parent();
+                if (clockBox) {
+                    // Hide default clock display label and indicator so IslandAnchor takes its place seamlessly
                     dateMenu._clockDisplay.visible = false;
-                if (dateMenu._indicator)
-                    dateMenu._indicator.visible = false;
+                    if (dateMenu._indicator)
+                        dateMenu._indicator.visible = false;
 
-                anchorActor.visible = true;
-                container.add_child(anchorActor);
+                    anchorActor.visible = true;
+                    clockBox.insert_child_above(anchorActor, dateMenu._clockDisplay);
+                    this._clockBox = clockBox;
+                }
             }
         }
 
@@ -1252,11 +1259,14 @@ var IslandUI = class IslandUI {
             if (dateMenu._indicator)
                 dateMenu._indicator.visible = true;
 
-            const container = dateMenu.container || dateMenu.actor;
             const anchorActor = this._anchor.getActor();
-            if (container && anchorActor && anchorActor.get_parent() === container) {
-                container.remove_child(anchorActor);
+            if (anchorActor) {
+                const parent = anchorActor.get_parent();
+                if (parent) {
+                    parent.remove_child(anchorActor);
+                }
             }
+            this._clockBox = null;
         }
 
         // Remove from scene graph
