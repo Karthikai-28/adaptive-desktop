@@ -16,22 +16,40 @@ var BATTERY_ATTRS = [
     'cycle_count', 'charge_control_end_threshold',
 ];
 
+let _batteryCache = null;
+let _batteryCacheTime = 0;
+
 // The first battery's health attributes as strings; {} without a battery.
-// Small sysfs reads, made only when the power dropdown syncs.
+// Cached for 30s so repeated dropdown syncs do not block the UI with sysfs reads.
 function readBattery() {
+    const now = GLib.get_monotonic_time() / 1e6;
+    if (_batteryCache && (now - _batteryCacheTime < 30))
+        return _batteryCache;
+
     const values = {};
+    let children = null;
     try {
         const dir = Gio.File.new_for_path('/sys/class/power_supply');
-        const children = dir.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+        try {
+            children = dir.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+        } catch (e) {
+            return values;
+        }
         let info;
         let battery = null;
-        while (!battery && (info = children.next_file(null))) {
-            if (/^BAT/.test(info.get_name()))
-                battery = dir.get_child(info.get_name());
+        try {
+            while (!battery && (info = children.next_file(null))) {
+                if (/^BAT/.test(info.get_name()))
+                    battery = dir.get_child(info.get_name());
+            }
+        } finally {
+            try { children.close(null); } catch (e) {}
         }
-        children.close(null);
-        if (!battery)
+        if (!battery) {
+            _batteryCache = values;
+            _batteryCacheTime = now;
             return values;
+        }
         for (const attr of BATTERY_ATTRS) {
             try {
                 const [ok, bytes] = GLib.file_get_contents(battery.get_child(attr).get_path());
@@ -44,6 +62,8 @@ function readBattery() {
     } catch (e) {
         logError(e, '[Adaptive Control Center] reading battery health');
     }
+    _batteryCache = values;
+    _batteryCacheTime = now;
     return values;
 }
 

@@ -421,27 +421,23 @@ function openDownloadsStack(button, menuManager, trackMenu) {
     dir.enumerate_children_async(attrs, Gio.FileQueryInfoFlags.NONE,
         GLib.PRIORITY_DEFAULT, null, (d, res) => {
             let files = [];
+            let enumerator;
             try {
-                const enumerator = d.enumerate_children_finish(res);
-                let info;
-                while ((info = enumerator.next_file(null)) !== null) {
-                    if (!info.get_is_hidden())
-                        files.push(info);
-                }
-                enumerator.close(null);
+                enumerator = d.enumerate_children_finish(res);
             } catch (e) {
                 status.text = "Couldn't read Downloads.";
                 return;
             }
 
-            files.sort((a, b) =>
-                b.get_attribute_uint64('time::modified') - a.get_attribute_uint64('time::modified'));
-            files = files.slice(0, STACK_MAX);
+            const finish = () => {
+                files.sort((a, b) =>
+                    b.get_attribute_uint64('time::modified') - a.get_attribute_uint64('time::modified'));
+                files = files.slice(0, STACK_MAX);
 
-            status.visible = files.length === 0;
-            status.text = 'Downloads is empty.';
+                status.visible = files.length === 0;
+                status.text = 'Downloads is empty.';
 
-            files.forEach((info, i) => {
+                files.forEach((info, i) => {
                 const file = dir.get_child(info.get_name());
                 const tile = new St.Button({
                     style_class: 'adaptive-dock-stack-item',
@@ -478,6 +474,26 @@ function openDownloadsStack(button, menuManager, trackMenu) {
                 });
                 grid.layout_manager.attach(tile, i % STACK_COLUMNS, Math.floor(i / STACK_COLUMNS), 1, 1);
             });
+            };
+
+            const readBatch = () => {
+                enumerator.next_files_async(100, GLib.PRIORITY_DEFAULT, null, (e, resFiles) => {
+                    try {
+                        const batch = e.next_files_finish(resFiles);
+                        if (batch.length > 0) {
+                            for (const info of batch) {
+                                if (!info.get_is_hidden())
+                                    files.push(info);
+                            }
+                            readBatch();
+                            return;
+                        }
+                    } catch (err) {}
+                    try { enumerator.close(null); } catch (err) {}
+                    finish();
+                });
+            };
+            readBatch();
         });
 
     menu.open();

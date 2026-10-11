@@ -96,32 +96,40 @@ function readProcesses(uid) {
         return table;
     }
 
-    let info;
-    while ((info = dir.next_file(null)) !== null) {
-        const name = info.get_name();
-        if (!/^\d+$/.test(name) || info.get_attribute_uint32('unix::uid') !== uid)
-            continue;
+    try {
+        let info;
+        while ((info = dir.next_file(null)) !== null) {
+            const name = info.get_name();
+            if (!/^\d+$/.test(name) || info.get_attribute_uint32('unix::uid') !== uid)
+                continue;
 
-        const stat = readText(`/proc/${name}/stat`);
-        const statm = readText(`/proc/${name}/statm`);
-        if (!stat || !statm)
-            continue;
+            const stat = readText();
+            const statm = readText();
+            if (!stat || !statm)
+                continue;
 
-        // comm is in parentheses and may itself hold spaces or parentheses.
-        const open = stat.indexOf('(');
-        const close = stat.lastIndexOf(')');
-        const comm = stat.slice(open + 1, close);
-        const fields = stat.slice(close + 2).split(' ');
-        table.set(Number(name), {
-            pid: Number(name),
-            comm,
-            state: fields[0],
-            ppid: Number(fields[1]),
-            ticks: Number(fields[11]) + Number(fields[12]),
-            rss: Number(statm.split(' ')[1]) * PAGE_SIZE,
-        });
+            // comm is in parentheses and may itself hold spaces or parentheses.
+            const open = stat.indexOf('(');
+            const close = stat.lastIndexOf(')');
+            if (open < 0 || close < 0 || close < open)
+                continue;
+            const comm = stat.slice(open + 1, close);
+            const fields = stat.slice(close + 2).split(' ');
+            if (fields.length < 13)
+                continue;
+            table.set(Number(name), {
+                pid: Number(name),
+                comm,
+                state: fields[0],
+                ppid: Number(fields[1]),
+                ticks: Number(fields[11]) + Number(fields[12]),
+                rss: Number(statm.split(' ')[1]) * PAGE_SIZE,
+            });
+        }
+    } catch (e) {
+    } finally {
+        try { dir.close(null); } catch (e) {}
     }
-    dir.close(null);
     return table;
 }
 
@@ -174,6 +182,9 @@ var TaskPanel = class TaskPanel {
         this._structure = '';
         this._stale = false;
         this._totalCpu = { busy: 0, total: 0, percent: 0 };
+        this._samplerHelper = Me.dir.get_child('tools').get_child('process_sampler.py').get_path();
+        this._active = false;
+        this._sampling = false;
     }
 
     attach() {
@@ -282,6 +293,7 @@ var TaskPanel = class TaskPanel {
     // --------------------------------------------------------------- data
 
     _start() {
+        this._active = true;
         this._lastTicks.clear();
         this._structure = '';
         this._sample();
@@ -298,6 +310,7 @@ var TaskPanel = class TaskPanel {
     }
 
     _stop() {
+        this._active = false;
         if (this._timerId) {
             GLib.Source.remove(this._timerId);
             this._timerId = 0;
@@ -305,26 +318,58 @@ var TaskPanel = class TaskPanel {
     }
 
     _sample() {
-        const now = GLib.get_monotonic_time() / 1e6;
-        const procs = readProcesses(this._uid);
-        const elapsed = this._lastTime ? now - this._lastTime : 0;
-        const cpus = GLib.get_num_processors();
+        if (!this._active || this._sampling)
+            return;
+        this._sampling = true;
 
-        // Share of the whole machine, as Windows' Task Manager shows it.
-        this._cpu.clear();
-        for (const [pid, p] of procs) {
-            const before = this._lastTicks.get(pid);
-            const percent = before !== undefined && elapsed > 0
-                ? Math.max(0, (p.ticks - before) / CLOCK_TICKS / elapsed / cpus * 100) : 0;
-            this._cpu.set(pid, percent);
+        const onProcesses = procsMap => {
+            this._sampling = false;
+            if (!this._active)
+                return;
+
+            const now = GLib.get_monotonic_time() / 1e6;
+            const elapsed = this._lastTime ? now - this._lastTime : 0;
+            const cpus = GLib.get_num_processors();
+
+            // Share of the whole machine, as Windows' Task Manager shows it.
+            this._cpu.clear();
+            for (const [pid, p] of procsMap) {
+                const before = this._lastTicks.get(pid);
+                const percent = before !== undefined && elapsed > 0
+                    ? Math.max(0, (p.ticks - before) / CLOCK_TICKS / elapsed / cpus * 100) : 0;
+                this._cpu.set(pid, percent);
+            }
+            this._lastTicks = new Map([...procsMap].map(([pid, p]) => [pid, p.ticks]));
+            this._lastTime = now;
+            this._procs = procsMap;
+
+            this._readSystem();
+            this._buildModel();
+            this._render();
+        };
+
+        try {
+            const proc = Gio.Subprocess.new(
+                ['/usr/bin/python3', this._samplerHelper, 'user', String(this._uid)],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE
+            );
+            proc.communicate_utf8_async(null, null, (p, res) => {
+                let map = null;
+                try {
+                    const [, stdout] = p.communicate_utf8_finish(res);
+                    if (p.get_successful() && stdout) {
+                        const items = JSON.parse(stdout);
+                        map = new Map(items.map(item => [item.pid, item]));
+                    }
+                } catch (e) {}
+                if (!map)
+                    map = readProcesses(this._uid);
+                onProcesses(map);
+            });
+        } catch (e) {
+            this._sampling = false;
+            onProcesses(readProcesses(this._uid));
         }
-        this._lastTicks = new Map([...procs].map(([pid, p]) => [pid, p.ticks]));
-        this._lastTime = now;
-        this._procs = procs;
-
-        this._readSystem();
-        this._buildModel();
-        this._render();
     }
 
     _readSystem() {

@@ -21,6 +21,8 @@
 
 const { GLib, Gio } = imports.gi;
 const Main = imports.ui.main;
+const ExtensionUtils = imports.misc.extensionUtils;
+const Me = ExtensionUtils.getCurrentExtension();
 
 // Hoisted: a tick decodes about twenty-five small files and there is no reason
 // to build a decoder for each one.
@@ -120,17 +122,25 @@ function readNumber(path) {
 // Cheap directory listing. Used only during discovery, never per tick.
 function listDir(path) {
     const names = [];
+    let iter = null;
     try {
         const dir = Gio.File.new_for_path(path);
-        const iter = dir.enumerate_children(
-            'standard::name',
-            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
-            null
-        );
+        try {
+            iter = dir.enumerate_children(
+                'standard::name',
+                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                null
+            );
+        } catch (e) {
+            return names;
+        }
         let info;
-        while ((info = iter.next_file(null)) !== null)
-            names.push(info.get_name());
-        iter.close(null);
+        try {
+            while ((info = iter.next_file(null)) !== null)
+                names.push(info.get_name());
+        } finally {
+            try { iter.close(null); } catch (e) {}
+        }
     } catch (e) {
         // Directory absent on this machine. Callers handle an empty list.
     }
@@ -156,6 +166,8 @@ var Telemetry = class Telemetry {
         this._nextSlowZoneTick = 1;
         // Walking /proc is only worth it when something is showing the result.
         this._detailed = true;
+        this._samplerHelper = Me.dir.get_child('tools').get_child('process_sampler.py').get_path();
+        this._samplingProcesses = false;
 
         this._discover();
 
@@ -868,101 +880,85 @@ var Telemetry = class Telemetry {
     // ------------------------------------------------------------ processes
 
     _sampleProcesses() {
-        const names = listDir('/proc');
-        const current = new Map();
-        let count = 0;
+        if (this._samplingProcesses)
+            return;
+        this._samplingProcesses = true;
 
-        for (const name of names) {
-            // Numeric entries are the processes; everything else in /proc is
-            // kernel state that would just cost a failed open.
-            if (!/^\d+$/.test(name))
-                continue;
+        try {
+            const proc = Gio.Subprocess.new(
+                ['/usr/bin/python3', this._samplerHelper, 'telemetry'],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE
+            );
+            proc.communicate_utf8_async(null, null, (p, res) => {
+                this._samplingProcesses = false;
+                try {
+                    const [, stdout] = p.communicate_utf8_finish(res);
+                    if (!p.get_successful() || !stdout)
+                        return;
+                    const data = JSON.parse(stdout);
+                    this.snapshot.processes.count = data.count || 0;
 
-            count += 1;
+                    const current = new Map();
+                    for (const [pid, command, jiffies, rssBytes] of (data.procs || [])) {
+                        current.set(String(pid), {
+                            command,
+                            jiffies,
+                            rssBytes,
+                        });
+                    }
 
-            const stat = readText(`/proc/${name}/stat`);
-            if (stat === null)
-                continue;
+                    const now = GLib.get_monotonic_time() / 1000000;
+                    if (this._prevProcs) {
+                        const seconds = now - this._prevProcs.now;
+                        const rows = new Map();
 
-            // The command sits in parentheses and may itself contain spaces or
-            // parentheses, so split on the LAST ')' rather than tokenising.
-            const close = stat.lastIndexOf(')');
-            const open = stat.indexOf('(');
-            if (open < 0 || close < 0 || close < open)
-                continue;
+                        if (seconds > 0) {
+                            for (const [pid, procItem] of current) {
+                                const before = this._prevProcs.map.get(pid);
+                                if (!before)
+                                    continue;
 
-            const command = stat.slice(open + 1, close);
-            const rest = stat.slice(close + 2).split(' ');
+                                const delta = procItem.jiffies - before.jiffies;
+                                if (delta < 0)
+                                    continue;
 
-            // Fields after comm and state: utime is 11, stime is 12, rss is 21
-            // (0-indexed into `rest`, which begins at field 3 of the record).
-            const utime = Number(rest[11]);
-            const stime = Number(rest[12]);
-            const rssPages = Number(rest[21]);
-            if (!Number.isFinite(utime) || !Number.isFinite(stime))
-                continue;
+                                const row = rows.get(procItem.command) || {
+                                    command: procItem.command,
+                                    percent: 0,
+                                    rssBytes: 0,
+                                    instances: 0,
+                                };
+                                row.percent += delta / USER_HZ / seconds * 100;
+                                if (Number.isFinite(procItem.rssBytes))
+                                    row.rssBytes += procItem.rssBytes;
+                                row.instances += 1;
+                                rows.set(procItem.command, row);
+                            }
+                        }
 
-            current.set(name, {
-                command,
-                jiffies: utime + stime,
-                rssBytes: Number.isFinite(rssPages) ? rssPages * PAGE_SIZE : NaN,
-            });
-        }
+                        const all = [...rows.values()];
 
-        const now = GLib.get_monotonic_time() / 1000000;
-        this.snapshot.processes.count = count;
+                        this.snapshot.processes.byCpu = all
+                            .slice()
+                            .sort((a, b) => b.percent - a.percent)
+                            .slice(0, PROCESS_ROWS);
 
-        if (this._prevProcs) {
-            const seconds = now - this._prevProcs.now;
-            const rows = new Map();
+                        this.snapshot.processes.byMemory = all
+                            .slice()
+                            .sort((a, b) => b.rssBytes - a.rssBytes)
+                            .slice(0, PROCESS_ROWS);
+                    }
 
-            if (seconds > 0) {
-                for (const [pid, proc] of current) {
-                    const before = this._prevProcs.map.get(pid);
-                    // A process that started since the last scan has no baseline
-                    // to subtract, so it waits one round rather than reporting
-                    // its whole lifetime's CPU as if it were spent just now.
-                    if (!before)
-                        continue;
-
-                    const delta = proc.jiffies - before.jiffies;
-                    if (delta < 0)
-                        continue;
-
-                    // Aggregate by command name. A browser is twenty processes
-                    // called "chrome"; five rows that all say chrome tell you
-                    // far less than one row that says what chrome costs.
-                    const row = rows.get(proc.command) || {
-                        command: proc.command,
-                        percent: 0,
-                        rssBytes: 0,
-                        instances: 0,
-                    };
-                    row.percent += delta / USER_HZ / seconds * 100;
-                    if (Number.isFinite(proc.rssBytes))
-                        row.rssBytes += proc.rssBytes;
-                    row.instances += 1;
-                    rows.set(proc.command, row);
+                    this._prevProcs = { map: current, now };
+                } catch (e) {
+                    logError(e, '[Adaptive Telemetry] process sampling');
                 }
-            }
-
-            const all = [...rows.values()];
-
-            this.snapshot.processes.byCpu = all
-                .slice()
-                .sort((a, b) => b.percent - a.percent)
-                .slice(0, PROCESS_ROWS);
-
-            this.snapshot.processes.byMemory = all
-                .slice()
-                .sort((a, b) => b.rssBytes - a.rssBytes)
-                .slice(0, PROCESS_ROWS);
+            });
+        } catch (e) {
+            this._samplingProcesses = false;
+            logError(e, '[Adaptive Telemetry] launching process sampler');
         }
-
-        this._prevProcs = { map: current, now };
     }
-
-    // ----------------------------------------------------------------- disk
 
     _refreshDisks() {
         const mounts = [
