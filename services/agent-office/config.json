@@ -15,50 +15,227 @@
     "voice": "en-US-AndrewMultilingualNeural",
     "autopilot": true,
     "autopilot_max_per_hour": 20,
-    "look": {"skin": "#f1c7a5", "hair": "#3b2a20", "hairStyle": "short", "shirt": "#d97757", "pants": "#3a3f58"}
+    "look": {
+      "skin": "#f1c7a5",
+      "hair": "#3b2a20",
+      "hairStyle": "short",
+      "shirt": "#d97757",
+      "pants": "#3a3f58"
+    }
   },
   "agents": [
     {
-      "id": "maya", "name": "Maya", "role": "Product Manager", "team": "Product", "desk": "p1",
+      "id": "maya",
+      "name": "Maya",
+      "role": "Product Manager",
+      "team": "Product",
+      "desk": "p1",
       "voice": "en-US-AvaNeural",
-      "look": {"skin": "#e0ac85", "hair": "#2b1b17", "hairStyle": "long", "shirt": "#6c8cff", "pants": "#2f3550"},
+      "look": {
+        "skin": "#e0ac85",
+        "hair": "#2b1b17",
+        "hairStyle": "long",
+        "shirt": "#6c8cff",
+        "pants": "#2f3550"
+      },
       "brief": "You turn goals into clear plans: specs, user stories, acceptance criteria, priorities and roadmaps. You keep scope tight and decisions written down."
     },
     {
-      "id": "zoe", "name": "Zoe", "role": "Designer", "team": "Product", "desk": "p2",
+      "id": "zoe",
+      "name": "Zoe",
+      "role": "Designer",
+      "team": "Product",
+      "desk": "p2",
       "voice": "en-US-EmmaNeural",
-      "look": {"skin": "#8d5a3b", "hair": "#ff8fab", "hairStyle": "bun", "shirt": "#f4c95d", "pants": "#3a3f58"},
+      "look": {
+        "skin": "#8d5a3b",
+        "hair": "#ff8fab",
+        "hairStyle": "bun",
+        "shirt": "#f4c95d",
+        "pants": "#3a3f58"
+      },
       "brief": "You design UX flows, wireframes, visual systems and assets. You can generate images with your image tool, write HTML/CSS mockups, and you explain design choices briefly."
     },
     {
-      "id": "priya", "name": "Priya", "role": "Writer & Marketing", "team": "Product", "desk": "p3",
+      "id": "priya",
+      "name": "Priya",
+      "role": "Writer & Marketing",
+      "team": "Product",
+      "desk": "p3",
       "voice": "en-IN-NeerjaNeural",
-      "look": {"skin": "#c68a62", "hair": "#1d1d1d", "hairStyle": "long", "shirt": "#e56b8a", "pants": "#2c2c3a"},
+      "look": {
+        "skin": "#c68a62",
+        "hair": "#1d1d1d",
+        "hairStyle": "long",
+        "shirt": "#e56b8a",
+        "pants": "#2c2c3a"
+      },
       "brief": "You write docs, READMEs, landing-page copy, emails, blog posts and launch plans. Clear, warm and concise writing."
     },
     {
-      "id": "arjun", "name": "Arjun", "role": "Senior Engineer", "team": "Engineering", "desk": "e1",
+      "id": "arjun",
+      "name": "Arjun",
+      "role": "Senior Engineer",
+      "team": "Engineering",
+      "desk": "e1",
       "voice": "en-IN-PrabhatNeural",
-      "look": {"skin": "#b57a50", "hair": "#141414", "hairStyle": "short", "shirt": "#3fb68b", "pants": "#26303f"},
+      "look": {
+        "skin": "#b57a50",
+        "hair": "#141414",
+        "hairStyle": "short",
+        "shirt": "#3fb68b",
+        "pants": "#26303f"
+      },
       "brief": "You design and build backends, CLIs, data pipelines and architecture. You write working, tested code and run it to prove it works."
     },
     {
-      "id": "lena", "name": "Lena", "role": "Frontend Engineer", "team": "Engineering", "desk": "e2",
+      "id": "lena",
+      "name": "Lena",
+      "role": "Frontend Engineer",
+      "team": "Engineering",
+      "desk": "e2",
       "voice": "en-GB-LibbyNeural",
-      "look": {"skin": "#f3d2b8", "hair": "#d9a441", "hairStyle": "long", "shirt": "#8e6cf0", "pants": "#2f3550"},
+      "look": {
+        "skin": "#f3d2b8",
+        "hair": "#d9a441",
+        "hairStyle": "long",
+        "shirt": "#8e6cf0",
+        "pants": "#2f3550"
+      },
       "brief": "You build web frontends and apps (HTML/CSS/JS, React, etc.) that look good and work. You check your UI actually renders and runs."
     },
     {
-      "id": "omar", "name": "Omar", "role": "QA & Code Reviewer", "team": "Engineering", "desk": "e3",
+      "id": "omar",
+      "name": "Omar",
+      "role": "QA & Code Reviewer",
+      "team": "Engineering",
+      "desk": "e3",
       "voice": "en-GB-RyanNeural",
-      "look": {"skin": "#a8714a", "hair": "#2a1d14", "hairStyle": "curly", "shirt": "#ef8a3c", "pants": "#2b3445"},
+      "look": {
+        "skin": "#a8714a",
+        "hair": "#2a1d14",
+        "hairStyle": "curly",
+        "shirt": "#ef8a3c",
+        "pants": "#2b3445"
+      },
       "brief": "You test and review: write and run tests, try edge cases, read code critically, and report concrete bugs with reproduction steps. You never rubber-stamp."
     },
     {
-      "id": "ravi", "name": "Ravi", "role": "Research Analyst", "team": "Research", "desk": "r1",
+      "id": "ravi",
+      "name": "Ravi",
+      "role": "Research Analyst",
+      "team": "Research",
+      "desk": "r1",
       "voice": "en-AU-WilliamMultilingualNeural",
-      "look": {"skin": "#9c6644", "hair": "#3a3a3a", "hairStyle": "short", "shirt": "#4fb3d9", "pants": "#30343f"},
+      "look": {
+        "skin": "#9c6644",
+        "hair": "#3a3a3a",
+        "hairStyle": "short",
+        "shirt": "#4fb3d9",
+        "pants": "#30343f"
+      },
       "brief": "You research with the web: markets, competitors, technologies, papers, prices. You cite sources with links and separate facts from your judgement."
+    },
+    {
+      "id": "max",
+      "name": "Max",
+      "role": "Codebase Scholar (MagikEye)",
+      "team": "Research",
+      "desk": "r2",
+      "voice": "en-GB-ThomasNeural",
+      "code_local_only": true,
+      "look": {
+        "skin": "#d9a27a",
+        "hair": "#4a2f1d",
+        "hairStyle": "short",
+        "shirt": "#2d6cdf",
+        "pants": "#262b38"
+      },
+      "brief": "You are becoming the company's master of the MagikEye codebases. You learn them from scratch like a great student: you ask yourself sharp questions, answer them from the code with evidence, keep a careful knowledge base, and can teach any topic clearly to anyone, from a beginner to an expert. You learn the code only from the local copies on this machine and never go near Bitbucket or any code host; you use the web only to research concepts, libraries and hardware."
+    }
+  ],
+  "studies": [
+    {
+      "id": "mke",
+      "agent": "max",
+      "title": "MagikEye codebase mastery",
+      "gap_min": 10,
+      "max_sessions_per_day": 30,
+      "start_active": true,
+      "repos": [
+        {
+          "path": "~/mke/mkert",
+          "phase": 1
+        },
+        {
+          "path": "~/mke/mkecc",
+          "phase": 2
+        },
+        {
+          "path": "~/mke/mkeICC",
+          "phase": 2
+        },
+        {
+          "path": "~/mke/pymkerc",
+          "phase": 2
+        },
+        {
+          "path": "~/mke/mkestudio",
+          "phase": 2
+        },
+        {
+          "path": "~/mke/mkesensorinit",
+          "phase": 2
+        },
+        {
+          "path": "~/mke/mkeexperiments",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/sensor_dashboard",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/standard_testing_procedures",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/usb-rp2040-spi",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/calibrator_sw",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/iltstitch",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/pyiltdd",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/mke_module_dashboard",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/tracker",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/mkepicam",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/mkecamerademo",
+          "phase": 3
+        },
+        {
+          "path": "~/mke/glfw_viewer",
+          "phase": 3
+        }
+      ]
     }
   ]
 }

@@ -17,10 +17,11 @@ DATA = STATE / "data"
 COMPANY = STATE / "company"
 STATIC = ROOT / "static"
 AGY_HOME = DATA / "agy-home"          # isolated HOME for agy (sign-in comes from the OS keyring)
+AGY_HOME_LOCAL = DATA / "agy-home-local"   # the same for agents that must learn code only from local copies
 TTS_CACHE = DATA / "tts"
 LOGS = DATA / "logs"
 
-for d in (DATA, COMPANY / "projects", COMPANY / "meetings", AGY_HOME, TTS_CACHE, LOGS):
+for d in (DATA, COMPANY / "projects", COMPANY / "meetings", COMPANY / "study", AGY_HOME, AGY_HOME_LOCAL, TTS_CACHE, LOGS):
     d.mkdir(parents=True, exist_ok=True)
 
 

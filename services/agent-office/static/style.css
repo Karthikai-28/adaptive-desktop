@@ -225,3 +225,13 @@ textarea.in { resize: vertical; min-height: 110px; }
   main { flex-direction: column; } #world { flex: none; height: 46vh; } #panel { width: 100%; flex: 1; border-left: none; }
   #toasts { right: 12px; } #quota { display: none; } .keys { display: none; }
 }
+
+/* learning */
+.topic { padding: 8px 10px; border-radius: 10px; background: var(--soft); margin-bottom: 6px; font-size: 13px; }
+.topic .tt { display: flex; justify-content: space-between; gap: 10px; align-items: center; font-weight: 600; }
+.topic .tl { display: flex; gap: 12px; margin-top: 4px; font-size: 12px; }
+.topic .tl a { color: var(--accent); cursor: pointer; text-decoration: none; font-weight: 600; }
+.topic .tl a:hover { text-decoration: underline; }
+.mbar { display: inline-flex; gap: 2px; flex: none; }
+.mbar i { width: 12px; height: 7px; border-radius: 2px; background: #dfe2ee; }
+.mbar i.on { background: var(--accent); }

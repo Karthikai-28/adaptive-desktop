@@ -47,6 +47,28 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Tasks** | Kanban board of every task with live activity, full reports, cancel and retry. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
 
+## Study programs: an agent that masters codebases
+
+**Max** (Codebase Scholar) studies the MagikEye codebases on his own, session after session (config.json
+`"studies"`: phase 1 `mkert`; phase 2 `mkecc`, `mkeICC`, `pymkerc`, `mkestudio`, `mkesensorinit`; phase 3
+the rest of the `~/mke` product repos). Each session he starts a fresh conversation, reads his knowledge base,
+picks the weakest foundational topic, asks himself questions, answers them from the code with evidence
+(file:line, commits), writes notes and lessons, raises deeper questions, and sends you a learning report.
+Session 1 surveys every repo and builds the curriculum; every fifth session is a self-examination
+(answer old questions from memory, check against the code, score honestly).
+
+| | |
+|---|---|
+| Knowledge base | `company/study/mke/`: `CURRICULUM.md`, `QUESTIONS.md`, `notes/`, `lessons/`, `glossary.md`, `JOURNAL.md`, `reports/`, `progress.json` |
+| Learning tab | on Max's card: mastery per topic, questions, self-test scores, **Teach me** / **Ask** per topic, his questions for you, pause / resume / study now |
+| Pace | a session every `gap_min` (10) minutes, at most `max_sessions_per_day` (30); pauses with work and with Gemini quota |
+| Terminal | `office study`, `office study pause`, `office study resume`, `office study now` |
+
+**Local code only.** The repos are mounted read-only and only those he is assigned; Bitbucket and the
+internal git server (192.168.1.10) are denied in his agy profile, git network commands fail inside the
+sandbox, and SSH keys do not exist for him. He may use the web for research (concepts, libraries, hardware)
+but is told never to put company code or names into a search. Repos not present on a machine are skipped.
+
 ## Where things live
 
 | | |
@@ -85,10 +107,11 @@ office autopilot on|off · office pause · office resume · office open
 
 ## Safety
 
-- Every agent runs inside **bubblewrap**: the whole filesystem is read-only except the company
-  workspace. SSH, GPG, cloud and Claude/Codex credentials, `~/.zshenv`, browser profiles and the
-  office database are masked and simply don't exist for agents. agy's own sandbox additionally
-  confines shell commands. The environment is rebuilt from scratch, so no API key leaks in (an
+- Every agent runs inside **bubblewrap**: the system is read-only and the home folder is replaced
+  by an empty one holding only developer tools (read-only), agy's own home, the company workspace
+  (the only writable place) and the repos it studies (read-only). Documents, personal folders,
+  credentials and every other project simply don't exist for agents; `/tmp` is the office's own.
+  agy's own sandbox additionally confines shell commands. The environment is rebuilt from scratch, so no API key leaks in (an
   inherited `GEMINI_API_KEY` would also switch agy to paid API billing).
 - **Claude** can only run `office` and read files (`--permission-mode dontAsk`). Its brief says
   never to publish, push, buy or send anything off the machine unless you ask.

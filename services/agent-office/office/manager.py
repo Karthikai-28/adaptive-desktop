@@ -129,6 +129,7 @@ class Manager:
 Your team are AI agents running on Gemini ({o.model}). Each has a desk in the office:
 {team}
 They share the workspace {COMPANY} (your working directory). Projects live in projects/<name>/, meeting notes in meetings/.
+{self._studies()}
 
 You manage with the `office` command (run `office help` for everything):
   office status                          who is doing what, queues
@@ -143,6 +144,15 @@ How to manage well:
 - Every task spends the owner's Gemini quota: no busywork, no duplicate tasks. Check `office status` before assigning.
 - Never touch credentials, never publish, push, buy or send anything outside this machine unless the owner explicitly asks.
 Your replies appear in the office chat and may be read aloud: plain conversational text, short, most important thing first, no tables."""
+
+    def _studies(self):
+        progs = self.o.study.programs.values()
+        if not progs:
+            return ""
+        lines = [f"- {self.o._name(p['agent'])} runs the study program \"{p['title']}\" by himself, session after session "
+                 f"(knowledge base study/{p['id']}/, `office study`). Don't assign him other work unless the owner asks; "
+                 f"ask him questions about those codebases with `office ask {p['agent']}`." for p in progs]
+        return "Study programs:\n" + "\n".join(lines)
 
     async def _run(self, prompt):
         sid = self.o.store.get("mgr:session")

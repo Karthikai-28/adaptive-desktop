@@ -14,6 +14,7 @@ import time
 from . import agy
 from .config import COMPANY
 from .manager import Manager
+from .study import Study
 
 QUOTA_PAUSE_S = 15 * 60
 NAME_RE_CACHE = {}
@@ -48,6 +49,7 @@ class Office:
         self.meet_runs = {}                 # agent id -> AgyRun
         self.quota_until = store.get("quota_until", 0)
         self.manager = Manager(self)
+        self.study = Study(self)
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 
@@ -65,6 +67,7 @@ class Office:
         for aid in self.agents:
             self._spawn(self._chat_worker(aid))
         self.manager.start()
+        self.study.start()
         self.kick()
 
     def _spawn(self, coro):
@@ -164,6 +167,7 @@ class Office:
             "meeting": self.store.active_meeting(),
             "settings": self.settings(),
             "quota_until": self.quota_until,
+            "studies": self.study.all_status(),
         }
 
     # ------------------------------------------------------------------ prompts
@@ -178,7 +182,13 @@ class Office:
             f"Team: {self._team_line()}; manager: Claude.\n"
             f"Workspace: your current directory {COMPANY} is the company's shared workspace; teammates' files "
             f"are here too. Work only inside it. Projects live in projects/<project-name>/, meeting notes in meetings/.\n"
+            + self.study.persona_line(a["id"])
         )
+
+    def _run_opts(self, aid):
+        """Sandbox options for every agy run of this agent: the repos it studies (read-only), and the
+        guarded profile for agents that must learn code only from local copies."""
+        return {"ro_dirs": self.study.repo_paths(aid), "offline": bool(self.agents[aid].get("code_local_only"))}
 
     def _task_prompt(self, t):
         a = self.agents[t["agent"]]
@@ -301,9 +311,11 @@ class Office:
         async def on_event(kind, text):
             await self.activity(aid, kind, text, t["id"])
 
-        run = agy.AgyRun(self._task_prompt(t), agent_name=self.agents[aid]["name"], model=self.model,
-                         conv_id=self.store.get(f"conv:{aid}"), timeout_min=self.cfg.get("task_timeout_min", 45),
-                         on_event=on_event)
+        study = self.study.program_of(t)
+        run = agy.AgyRun(self.study.prompt(t) if study else self._task_prompt(t),
+                         agent_name=self.agents[aid]["name"], model=self.model,
+                         conv_id=None if study else self.store.get(f"conv:{aid}"),   # study sessions start fresh
+                         timeout_min=self.cfg.get("task_timeout_min", 45), on_event=on_event, **self._run_opts(aid))
         self.task_runs[t["id"]] = run
         self._spawn(self._run_task(t, run))
 
@@ -320,10 +332,17 @@ class Office:
         finally:
             self.task_runs.pop(tid, None)
             self.rt[aid]["task"] = None
-        if r.conv_id:
+        study = self.study.program_of(t)
+        if r.conv_id and not study:
             self.store.set(f"conv:{aid}", r.conv_id)
         now = time.time()
-        if r.ok:
+        if r.ok and study:
+            t = self.store.update_task(tid, status="done", result=r.text.strip(), finished_at=now,
+                                       steps=r.steps, tokens=r.tokens, error="")
+            await self.activity(aid, "done", f"Finished {t['title']}", tid)
+            await self.post(f"dm:{aid}", aid, r.text.strip(), {"task": tid, "kind": "learning", "program": study})
+            await self.toast(f"{name} has a learning report ({t['title'].split(':')[0]})", "ok", aid)
+        elif r.ok:
             t = self.store.update_task(tid, status="done", result=r.text.strip(), finished_at=now,
                                        steps=r.steps, tokens=r.tokens, error="")
             await self.activity(aid, "done", f"Finished task #{tid}: {t['title']}", tid)
@@ -356,6 +375,8 @@ class Office:
             await self.toast(f"{name}: task #{tid} failed", "error", aid)
         await self.broadcast({"type": "task", "task": t})
         await self.push_agent(aid)
+        if study and t["status"] in ("done", "failed", "cancelled"):
+            await self.study.finished(t, t["status"] == "done")
         if t["status"] in ("done", "failed") and t["created_by"] in ("manager", "meeting"):
             self.manager.task_finished(t)
         self.kick()
@@ -397,14 +418,15 @@ class Office:
                     await self.activity(aid, kind, text)
 
             run = agy.AgyRun(prompt, agent_name=a["name"], model=self.model, conv_id=conv,
-                             timeout_min=self.cfg.get("chat_timeout_min", 15), on_event=on_event)
+                             timeout_min=self.cfg.get("chat_timeout_min", 15), on_event=on_event, **self._run_opts(aid))
             self.chat_runs[aid] = run
             try:
                 r = await run.wait()
                 if not r.ok and conv and not r.quota and not r.cancelled:   # stale thread: retry fresh once
                     self.store.delete(f"chatconv:{aid}")
                     run = agy.AgyRun(self._persona(a) + prompt, agent_name=a["name"], model=self.model,
-                                     timeout_min=self.cfg.get("chat_timeout_min", 15), on_event=on_event)
+                                     timeout_min=self.cfg.get("chat_timeout_min", 15), on_event=on_event,
+                                     **self._run_opts(aid))
                     self.chat_runs[aid] = run
                     r = await run.wait()
             except Exception as e:
@@ -522,7 +544,7 @@ class Office:
             self.rt[aid]["meeting_busy"] = True
             await self.push_agent(aid)
             run = agy.AgyRun(prompt, agent_name=a["name"], model=self.model, conv_id=conv,
-                             timeout_min=self.cfg.get("meeting_timeout_min", 4))
+                             timeout_min=self.cfg.get("meeting_timeout_min", 4), **self._run_opts(aid))
             self.meet_runs[aid] = run
             try:
                 r = await run.wait()

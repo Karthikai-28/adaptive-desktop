@@ -230,6 +230,20 @@ async def meeting_current():
     return {"meeting": m, "messages": store.messages(f"meeting:{m['id']}", limit=500) if m else []}
 
 
+# ---------------------------------------------------------------- study programs
+@app.get("/api/study")
+async def study():
+    return office.study.all_status()
+
+
+@app.post("/api/study/{pid}/{action}")
+async def study_control(pid: str, action: str):
+    try:
+        return await office.study.control(pid, action)
+    except ValueError as e:
+        bad(e)
+
+
 # ---------------------------------------------------------------- settings / usage
 class SettingsIn(BaseModel):
     autopilot: bool | None = None

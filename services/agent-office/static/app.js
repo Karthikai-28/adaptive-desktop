@@ -22,7 +22,7 @@ const savePrefs = () => { try { localStorage.setItem('office.prefs', JSON.string
 const S = {
   roster: {}, order: [], agents: {}, tasks: new Map(), meeting: null, settings: {}, usage: null, quotaUntil: 0,
   threads: {}, unread: {}, events: [], view: { kind: 'home' }, tab: 'chat', operator: 'You', company: '', model: '',
-  ready: false, eventsLoaded: new Set(),
+  ready: false, eventsLoaded: new Set(), studies: [],
 };
 const YOU_LOOK = { skin: '#c68a62', hair: '#1d1d1d', hairStyle: 'short', shirt: '#2fb67c', pants: '#2f3550' };
 
@@ -174,6 +174,7 @@ function handle(m) {
     case 'toast': return toast(m.text, m.level, m.agent);
     case 'settings': S.settings = m.settings; S.quotaUntil = m.quota_until; renderQuota(); return;
     case 'usage': S.usage = m; renderQuota(); return;
+    case 'study': S.studies = m.studies; if (S.view.kind === 'agent' && S.tab === 'learning') renderBody(); return;
   }
 }
 
@@ -184,7 +185,7 @@ function onState(m) {
   S.roster = Object.fromEntries(m.roster.map(p => [p.id, p]));
   S.agents = Object.fromEntries(m.agents.map(a => [a.id, a]));
   S.tasks = new Map(m.tasks.map(t => [t.id, t]));
-  S.settings = m.settings; S.quotaUntil = m.quota_until;
+  S.settings = m.settings; S.quotaUntil = m.quota_until; S.studies = m.studies || [];
   document.title = `${m.company} · Agent Office`;
   $('#company').textContent = m.company;
   world.syncPeople(m.roster);
@@ -225,7 +226,8 @@ function onMessage(msg) {
   const fromAgent = msg.sender !== 'operator' && msg.sender !== 'system';
   const willSpeak = prefs.voice && th.startsWith('meeting:');     // its bubble shows while it is spoken
   if (fromAgent && !willSpeak) {
-    const short = msg.meta?.kind === 'report' ? `Done with #${msg.meta.task} ✓` : msg.meta?.kind === 'minutes' ? 'Minutes are ready' : msg.text;
+    const short = msg.meta?.kind === 'report' ? `Done with #${msg.meta.task} ✓` : msg.meta?.kind === 'minutes' ? 'Minutes are ready' :
+      msg.meta?.kind === 'learning' ? 'New learning report 📚' : msg.text;
     world.say(msg.sender, short, Math.min(14000, 4000 + short.length * 45));
   }
   const visible = visibleThread() === th;
@@ -241,6 +243,7 @@ function maybeSpeak(msg, visible) {
   if (th.startsWith('meeting:')) return speak(msg.sender, msg.text);
   if (kind === 'report') { if (visible) speak(msg.sender, `I've finished task ${msg.meta.task}. The report is in our chat.`); return; }
   if (kind === 'minutes') return speak(MGR, 'The meeting minutes are ready in our chat.');
+  if (kind === 'learning') { if (visible) speak(msg.sender, 'I finished a study session. My learning report is in our chat.'); return; }
   if (visible || (th === 'manager' && kind === 'report')) speak(msg.sender, msg.text);
 }
 
@@ -467,6 +470,7 @@ function renderTabs() {
   const tab = (key, label, extra) => h('button', { class: `tab ${S.tab === key ? 'on' : ''}`, onclick: () => setView(S.view, key) }, label, extra);
   V.tabs.replaceChildren(
     tab('chat', 'Chat', unread && S.tab !== 'chat' ? h('span', { class: 'badge' }, unread) : null),
+    studyOf(id) ? tab('learning', 'Learning') : null,
     tab('activity', 'Activity'),
     id === MGR ? null : tab('tasks', 'Tasks', n ? h('span', { class: 'pill running' }, n) : null));
 }
@@ -491,6 +495,9 @@ async function renderBody() {
     updateTyping();
     V.body.scrollTop = V.body.scrollHeight;
     V.actFeed = null;
+  } else if (S.tab === 'learning') {
+    V.actFeed = null;
+    renderLearning(id);
   } else if (S.tab === 'activity') {
     V.actFeed = h('div', { class: 'feed' });
     V.body.replaceChildren(V.actFeed);
@@ -512,6 +519,69 @@ async function renderBody() {
   }
 }
 
+// ---- learning (study programs)
+const studyOf = (id) => S.studies.find(p => p.agent === id);
+function askInChat(id, text) {
+  setView({ kind: 'agent', id }, 'chat');
+  setTimeout(() => V.composer?.setText(text), 40);
+}
+function renderLearning(id) {
+  const p = studyOf(id);
+  if (!p) { V.body.replaceChildren(h('div', { class: 'empty' }, 'No study program.')); return; }
+  const pr = p.progress || {};
+  const topics = [...(pr.topics || [])].sort((a, b) => (a.repo || '').localeCompare(b.repo || '') || (b.mastery || 0) - (a.mastery || 0));
+  const avg = topics.length ? topics.reduce((n, t) => n + (t.mastery || 0), 0) / topics.length : 0;
+  const q = pr.questions || {};
+  const ctl = (action, label, cls = 'act') => h('button', { class: cls, style: 'flex:none;padding:0 12px', onclick: () =>
+    api('POST', `/api/study/${p.id}/${action}`).then(st => { const i = S.studies.findIndex(x => x.id === p.id); if (i >= 0) S.studies[i] = st; renderBody(); toast(action === 'now' ? 'Starting a study session' : action === 'pause' ? 'Study paused' : 'Study resumed', 'ok'); })
+      .catch(e => toast(e.message, 'error')) }, label);
+  let when = '';
+  if (p.current) when = `In session now: ${p.current.title}`;
+  else if (!p.active) when = 'Paused';
+  else if (p.today >= p.max_per_day) when = `Done for today (${p.today}/${p.max_per_day} sessions)`;
+  else if (p.next_at) { const m = Math.ceil((p.next_at - Date.now() / 1000) / 60); when = m <= 0 ? 'Next session starting shortly' : `Next session in ${m} min`; }
+  const bar = (v) => h('span', { class: 'mbar' }, ...[1, 2, 3, 4, 5].map(i => h('i', { class: i <= v ? 'on' : '' })));
+  const file = (path, label) => h('a', { class: 'file', 'data-path': `${p.kb}/${path}` }, label);
+  const repos = {};
+  for (const r of p.repos) (repos[r.phase] = repos[r.phase] || []).push(r);
+  const byRepo = {};
+  for (const t of topics) (byRepo[t.repo || 'other'] = byRepo[t.repo || 'other'] || []).push(t);
+  V.body.replaceChildren(
+    h('div', { class: 'box' },
+      h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:8px' },
+        h('b', null, p.title), h('span', { class: `pill ${p.current ? 'running' : p.active ? 'idle' : 'cancelled'}` }, p.current ? 'studying' : p.active ? 'active' : 'paused')),
+      h('div', { class: 'hintline' }, `${p.sessions} session(s) done · ${p.today}/${p.max_per_day} today · every ${p.gap_min} min`),
+      h('div', { class: 'hintline' }, when),
+      h('div', { class: 'toolbar', style: 'margin-top:10px;flex-wrap:wrap' },
+        p.active ? ctl('pause', 'Pause') : ctl('resume', 'Resume', 'act primary'),
+        p.current ? null : ctl('now', 'Study now'),
+        p.latest_report ? h('button', { class: 'act', style: 'flex:none;padding:0 12px', onclick: () => openFiles(p.latest_report) }, 'Latest report') : null,
+        h('button', { class: 'act', style: 'flex:none;padding:0 12px', onclick: () => openFiles(p.kb) }, 'Knowledge base'))),
+    h('div', { class: 'section' }, 'Mastery'),
+    topics.length ? h('div', { class: 'box' },
+      h('div', { style: 'display:flex;gap:16px;flex-wrap:wrap' },
+        h('div', null, h('b', { style: 'font-size:20px' }, avg.toFixed(1)), ' / 5 average'),
+        h('div', null, h('b', { style: 'font-size:20px' }, topics.length), ' topics'),
+        h('div', null, h('b', { style: 'font-size:20px' }, q.answered ?? 0), ' answered · ', h('b', null, q.open ?? 0), ' open')),
+      (pr.selftest || []).length ? h('div', { class: 'hintline' }, 'Self-tests: ' + pr.selftest.map(x => `session ${x.session}: ${x.score}`).join(' · ')) : null)
+      : h('div', { class: 'empty' }, p.progress_error || (p.sessions || p.current ? 'The first survey is building the curriculum…' : 'Nothing learned yet. The first session surveys every codebase.')),
+    ...Object.entries(byRepo).map(([repo, list]) => [
+      h('div', { class: 'section' }, repo),
+      ...list.map(t => h('div', { class: 'topic' },
+        h('div', { class: 'tt' }, h('span', null, t.title || t.id), bar(t.mastery || 0)),
+        h('div', { class: 'tl' },
+          t.notes ? file(t.notes, 'Notes') : null, t.lesson ? file(t.lesson, 'Lesson') : null,
+          h('a', { onclick: () => askInChat(id, `Teach me "${t.title || t.id}" from the very beginning: explain it simply, show me where it lives in the code, then quiz me.`) }, 'Teach me'),
+          h('a', { onclick: () => askInChat(id, `About "${t.title || t.id}": `) }, 'Ask'))))]).flat(),
+    (pr.questions_for_owner || []).length ? [h('div', { class: 'section' }, `${nameOf(id)} asks you`),
+      ...pr.questions_for_owner.map(qq => h('div', { class: 'topic' }, h('div', null, qq),
+        h('div', { class: 'tl' }, h('a', { onclick: () => askInChat(id, `Answer to your question "${qq}": `) }, 'Answer'))))] : null,
+    h('div', { class: 'section' }, 'Codebases'),
+    ...Object.entries(repos).map(([ph, list]) => h('div', { class: 'hintline', style: 'margin-bottom:6px' },
+      h('b', null, `Phase ${ph}: `), list.map(r => r.path.split('/').pop() + (r.present ? '' : ' (missing)')).join(', '))),
+    h('div', { class: 'hintline', style: 'margin-top:10px' }, 'Code is learned only from the local copies (read-only); Bitbucket and the internal git server are blocked. The web is used only for research.'));
+}
+
 function updateTyping() {
   if (!V.typing || S.view.kind !== 'agent') return;
   const id = S.view.id, a = S.agents[id] || {};
@@ -527,11 +597,12 @@ function msgEl(m, showFrom) {
   const mine = m.sender === 'operator';
   const kind = m.meta?.kind;
   const body = h('div', { class: 'body md', html: md(m.text) });
-  const el = h('div', { class: `msg ${mine ? 'me' : 'them'} ${kind === 'report' ? 'report' : ''} ${kind === 'failure' ? 'failure' : ''}` });
+  const el = h('div', { class: `msg ${mine ? 'me' : 'them'} ${kind === 'report' || kind === 'learning' ? 'report' : ''} ${kind === 'failure' ? 'failure' : ''}` });
   if (!mine && (showFrom || m.sender !== S.view.id || kind)) {
     el.append(h('div', { class: 'from' }, showFrom ? face(m.sender, 18) : null, nameOf(m.sender),
       kind === 'report' ? h('span', { class: 'pill done' }, `task #${m.meta.task}`) : null,
       kind === 'minutes' ? h('span', { class: 'pill meeting' }, 'minutes') : null,
+      kind === 'learning' ? h('span', { class: 'pill thinking' }, 'learning report') : null,
       h('button', { class: 'say', title: 'Read aloud', onclick: () => speak(m.sender, m.text) }, iconEl('play'))));
   } else if (!mine) {
     el.append(h('div', { class: 'from' }, h('button', { class: 'say', title: 'Read aloud', onclick: () => speak(m.sender, m.text) }, iconEl('play'))));
@@ -674,7 +745,7 @@ function composer({ placeholder, onSend, meeting }) {
   };
   const el = h('div', { class: 'composer' }, h('div', { class: 'row' }, ta, micBtn, hfBtn, sendBtn), note);
   if (handsFree && meeting) setTimeout(() => { const m = ensureMic(); m.start(true); }, 50);
-  return { el, focus: () => ta.focus() };
+  return { el, focus: () => ta.focus(), setText: (t) => { ta.value = t; grow(); ta.focus(); ta.setSelectionRange(t.length, t.length); } };
 }
 function stopHandsFree() { if (handsFree) { handsFree = false; mic?.stop(); } }
 

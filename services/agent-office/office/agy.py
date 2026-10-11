@@ -1,10 +1,12 @@
 """Run one Gemini turn through the Antigravity CLI (agy) on the AI Pro subscription.
 
-Every run is wrapped in bubblewrap: the whole filesystem is read-only except the shared
-company workspace, agy's own isolated HOME and /tmp, and credential paths are masked so
-they do not exist inside the sandbox. agy's own --sandbox additionally confines shell
-commands. The environment is rebuilt from scratch so no API key can leak in (an inherited
-GEMINI_API_KEY would also switch agy from the subscription to paid API billing).
+Every run is wrapped in bubblewrap. The system is read-only; the home folder is replaced by an
+empty one that holds only what an agent needs: its developer tools (read-only), agy's own home,
+the shared company workspace (the only place it can write), and the repositories it was
+assigned to study (read-only). Everything else in the home folder - documents, personal files,
+credentials, other projects - does not exist for agents. /tmp is the office's own. agy's
+--sandbox additionally confines shell commands. The environment is rebuilt from scratch so no
+API key can leak in (an inherited GEMINI_API_KEY would also switch agy to paid API billing).
 """
 import asyncio
 import json
@@ -12,8 +14,13 @@ import os
 import signal
 from pathlib import Path
 
-from .config import AGY_HOME, COMPANY, DATA, HOME, ROOT
+from .config import AGY_HOME, AGY_HOME_LOCAL, COMPANY, DATA, HOME, ROOT, STATE
 
+# developer tools agents may use, shown read-only inside their otherwise empty home
+HOME_TOOLS = [".local/bin", ".local/lib", ".local/share/uv/python", ".local/share/uv/tools", "bin",
+              ".cargo/bin", ".rustup", ".nvm", ".npm-global", ".bun", ".deno", "micromamba", ".pyenv"]
+# credential files that can sit inside those tool folders
+TOOL_SECRETS = [".cargo/credentials", ".cargo/credentials.toml"]
 SECRET_DIRS = [".ssh", ".gnupg", ".aws", ".codex", ".claude", ".config/gh", ".gemini", ".kube",
                ".docker", ".password-store", ".local/share/keyrings", ".mozilla",
                ".config/google-chrome", ".config/chromium", ".kaggle", ".cache/huggingface",
@@ -22,50 +29,65 @@ SECRET_FILES = [".netrc", ".git-credentials", ".zshenv", ".claude.json", ".npmrc
                 ".bash_history", ".zsh_history", ".python_history"]
 KEEP_ENV = ("PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ", "DBUS_SESSION_BUS_ADDRESS",
             "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "SHELL")
+AGENT_TMP = STATE / "tmp"
+# where the company code lives remotely - agents learning the code may never touch these
+CODE_HOSTS = ["bitbucket.org", "api.bitbucket.org", "bitbucket.io", "192.168.1.10"]
 
 QUOTA_MARKERS = ("RESOURCE_EXHAUSTED", "quota", "rate limit", "429", "usage limit")
 
 
 def write_agy_settings():
-    """Permissions for agents: write only inside the company workspace, never read secrets."""
-    cfg_dir = AGY_HOME / ".gemini" / "antigravity-cli"
-    cfg_dir.mkdir(parents=True, exist_ok=True)
+    """Permissions for agents: write only inside the company workspace, never read secrets.
+    (Belt and braces: the sandbox already hides the secrets.) Agents that must learn code only from
+    the local copies get their own agy home: the web is open for research, but the code hosts
+    (Bitbucket, the internal git server) and every git network command are denied."""
     deny = ["mcp(*)"]
     deny += [f"read_file({HOME / p})" for p in SECRET_DIRS + SECRET_FILES]
     deny += [f"read_file({DATA})"]
-    settings = {
-        "permissions": {
-            "allow": ["command(*)", f"write_file({COMPANY})", "read_url(*)", "execute_url(*)"],
-            "deny": deny,
-        },
-        "trustedWorkspaces": [str(COMPANY)],
-    }
-    (cfg_dir / "settings.json").write_text(json.dumps(settings, indent=1))
+    for home, offline in ((AGY_HOME, False), (AGY_HOME_LOCAL, True)):
+        cfg_dir = home / ".gemini" / "antigravity-cli"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        allow = ["command(*)", f"write_file({COMPANY})", "read_url(*)", "execute_url(*)"]
+        d = list(deny)
+        if offline:
+            for host in CODE_HOSTS:
+                for form in (host, f"https://{host}", f"http://{host}", f"*{host}*"):
+                    d += [f"read_url({form})", f"execute_url({form})"]
+            d += [f"command(git {c})" for c in ("fetch", "pull", "clone", "ls-remote", "remote update",
+                                                "submodule update", "push")]
+            d += [f"command({c})" for c in ("curl", "wget", "ssh", "scp", "sftp", "rsync")]
+        settings = {"permissions": {"allow": allow, "deny": d}, "trustedWorkspaces": [str(COMPANY)]}
+        (cfg_dir / "settings.json").write_text(json.dumps(settings, indent=1))
 
 
-def _bwrap_prefix():
+def _bwrap_prefix(ro_dirs=(), home=AGY_HOME):
+    AGENT_TMP.mkdir(parents=True, exist_ok=True)
     args = ["bwrap", "--ro-bind", "/", "/", "--dev-bind", "/dev", "/dev", "--bind", "/proc", "/proc",
-            "--bind", "/tmp", "/tmp", "--bind", str(COMPANY), str(COMPANY),
-            "--tmpfs", str(DATA),                     # hide the office db from agents ...
-            "--bind", str(AGY_HOME), str(AGY_HOME),   # ... but keep agy's own home
-            "--die-with-parent"]
-    for p in SECRET_DIRS:
+            "--tmpfs", str(HOME)]                                  # an empty home ...
+    for p in HOME_TOOLS:                                           # ... with the tools ...
         path = HOME / p
-        if path.is_dir():
-            args += ["--tmpfs", str(path)]
-    for p in SECRET_FILES:
-        path = HOME / p
-        if path.is_file():
-            args += ["--ro-bind", "/dev/null", str(path)]
-    return args + ["--chdir", str(COMPANY)]
+        if path.exists():
+            args += ["--ro-bind", str(path), str(path)]
+    for p in TOOL_SECRETS:
+        if (HOME / p).is_file():
+            args += ["--ro-bind", "/dev/null", str(HOME / p)]
+    for d in ro_dirs:                                              # ... the assigned repositories ...
+        d = Path(d).expanduser()
+        if d.is_dir():
+            args += ["--ro-bind", str(d), str(d)]
+    args += ["--bind", str(home), str(home),                       # ... agy's home and the workspace
+             "--bind", str(COMPANY), str(COMPANY),
+             "--bind", str(AGENT_TMP), "/tmp",
+             "--die-with-parent", "--chdir", str(COMPANY)]
+    return args
 
 
-def _env(agent_name):
+def _env(agent_name, home=AGY_HOME):
     env = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
     env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     extra = f"{HOME}/.local/bin:{HOME}/bin"   # where the agy installer puts agy
     env["PATH"] = f"{extra}:{env['PATH']}"
-    env.update(HOME=str(AGY_HOME), TERM="dumb", AGENT_NAME=agent_name, NO_COLOR="1")
+    env.update(HOME=str(home), TERM="dumb", AGENT_NAME=agent_name, NO_COLOR="1")
     return env
 
 
@@ -137,25 +159,29 @@ class AgyResult:
 class AgyRun:
     """One agy process. `await run.wait()` returns an AgyResult; `run.cancel()` kills it."""
 
-    def __init__(self, prompt, *, agent_name, model, conv_id=None, timeout_min=30, on_event=None):
+    def __init__(self, prompt, *, agent_name, model, conv_id=None, timeout_min=30, on_event=None, ro_dirs=(), offline=False):
         self.prompt = prompt[-120_000:]   # stay under the kernel's single-argument limit
         self.agent_name = agent_name
         self.model = model
         self.conv_id = conv_id
         self.timeout = int(timeout_min * 60)
         self.on_event = on_event
+        self.home = AGY_HOME_LOCAL if offline else AGY_HOME
+        self.ro_dirs = [str(Path(d).expanduser()) for d in ro_dirs if Path(d).expanduser().is_dir()]
         self.proc = None
         self.result = AgyResult()
 
     async def wait(self):
         r = self.result
-        cmd = _bwrap_prefix() + ["agy", "-p", self.prompt, "--model", self.model, "--sandbox",
+        cmd = _bwrap_prefix(self.ro_dirs, self.home) + ["agy", "-p", self.prompt, "--model", self.model, "--sandbox",
                                  "--output-format", "stream-json", "--print-timeout", f"{self.timeout}s"]
         if self.conv_id:
             cmd += ["--conversation", self.conv_id]
+        for d in self.ro_dirs:              # let agy's file tools read the assigned repositories
+            cmd += ["--add-dir", d]
         try:
             self.proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=str(COMPANY), env=_env(self.agent_name),
+                *cmd, cwd=str(COMPANY), env=_env(self.agent_name, self.home),
                 stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, start_new_session=True, limit=16 * 1024 * 1024)
         except FileNotFoundError as e:

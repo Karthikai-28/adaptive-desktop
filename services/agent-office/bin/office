@@ -10,6 +10,7 @@
   office log [--agent A] [-n N]                   recent activity
   office meeting start "<topic>" --with maya,arjun[,claude]
   office meeting say "<text>" | office meeting invite a,b | office meeting end | office meeting show
+  office study [status|pause|resume|now] [PROGRAM]  a learning program (e.g. Max studying the MKE repos)
   office autopilot on|off | office pause | office resume
   office open                                     open the office in the browser
 """
@@ -178,6 +179,38 @@ def cmd_meeting(a):
             print(f"  {msg['sender']}: {msg['text']}")
 
 
+def cmd_study(a):
+    progs = call("GET", "/api/study")
+    if not progs:
+        print("no study programs (add one under \"studies\" in config.json)")
+        return
+    if a.action != "status":
+        pid = a.program or progs[0]["id"]
+        progs = [call("POST", f"/api/study/{pid}/{a.action}")]
+    for p in progs:
+        state = "active" if p["active"] else "paused"
+        print(f"{p['id']}: {p['title']} - {p['agent']} - {state}, {p['sessions']} session(s), "
+              f"{p['today']}/{p['max_per_day']} today")
+        if p["current"]:
+            print(f"  now: #{p['current']['id']} {p['current']['title']} ({p['current']['status']})")
+        elif p["active"] and p["next_at"]:
+            wait = int(p["next_at"] - time.time())
+            print(f"  next session {'now' if wait <= 0 else f'in {wait // 60} min'}")
+        pr = p.get("progress") or {}
+        topics = pr.get("topics") or []
+        if topics:
+            avg = sum(t.get("mastery", 0) for t in topics) / len(topics)
+            q = pr.get("questions") or {}
+            print(f"  {len(topics)} topics, average mastery {avg:.1f}/5, questions {q.get('answered', 0)} answered / {q.get('open', 0)} open")
+            for t in sorted(topics, key=lambda t: -t.get("mastery", 0))[:a.n]:
+                print(f"    {'#' * int(t.get('mastery', 0)):<5} {t.get('mastery', 0)}  {t.get('title', t.get('id'))} [{t.get('repo', '')}]")
+        if p["latest_report"]:
+            print(f"  latest report: {p['latest_report']}")
+        missing = [r["path"] for r in p["repos"] if not r["present"]]
+        if missing:
+            print(f"  not on this machine: {', '.join(missing)}")
+
+
 def cmd_settings(a, **kw):
     s = call("POST", "/api/settings", kw)
     print(", ".join(f"{k}={v}" for k, v in s.items()))
@@ -200,6 +233,8 @@ def main():
     s = sub.add_parser("meeting"); s.add_argument("action", choices=["start", "say", "invite", "end", "show"])
     s.add_argument("text", nargs="?"); s.add_argument("--with", dest="with_")
     s = sub.add_parser("autopilot"); s.add_argument("state", choices=["on", "off"])
+    s = sub.add_parser("study"); s.add_argument("action", nargs="?", default="status", choices=["status", "pause", "resume", "now"])
+    s.add_argument("program", nargs="?"); s.add_argument("-n", type=int, default=12)
     sub.add_parser("pause"); sub.add_parser("resume"); sub.add_parser("open")
     a = p.parse_args()
     if a.cmd in (None, "help"):

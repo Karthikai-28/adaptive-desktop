@@ -33,6 +33,9 @@ for a in cfg["agents"]:
     for k in ("name", "role", "team", "desk", "voice", "look", "brief"):
         assert a.get(k), f"{a['id']}: missing {k}"
     assert a["desk"] in desks, f"{a['id']}: desk {a['desk']} is not on the map"
+for st in cfg.get("studies", []):
+    assert st["agent"] in ids, f"study {st['id']}: unknown agent {st['agent']}"
+    assert st["repos"] and all(r.get("path") for r in st["repos"]), f"study {st['id']}: needs repos"
 used = [a["desk"] for a in cfg["agents"]]
 assert len(used) == len(set(used)), "two agents share a desk"
 print(f"roster ok: {len(ids)} agents + {cfg['manager']['name']}")
@@ -43,7 +46,7 @@ PY
 PYTHONPATH="$REPO/.local/office-pydeps" python3 -c "import fastapi, uvicorn" 2>/dev/null ||
     { echo "skipped server checks: run scripts/install-agent-office.sh first"; exit 0; }
 PORT=8799
-OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT PYTHONPATH="$REPO/.local/office-pydeps" \
+OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 PYTHONPATH="$REPO/.local/office-pydeps" \
     python3 "$APP/server.py" >"$TMP/server.log" 2>&1 &
 SERVER=$!
 for _ in $(seq 1 40); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/state" 2>/dev/null && break; sleep 0.25; done
@@ -60,4 +63,19 @@ B="http://127.0.0.1:$PORT"
 [ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"autopilot":false}' "$B/api/settings")" = 200 ] || fail "settings"
 curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["roster"]) >= 2 and d["settings"]["autopilot"] is False' || fail "state"
 [ -d "$TMP/state/company/projects" ] || fail "state folder layout"
+curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' || fail "study api"
+[ "$(code -X POST -H 'X-Office: 1' "$B/api/study/nope/now")" = 400 ] || fail "unknown study program was accepted"
+# the sandbox: an empty home with only tools, the workspace and assigned repos; nothing personal
+python3 - "$APP" "$TMP/state" <<'PY' || fail "agent sandbox exposes too much"
+import os, subprocess, sys
+os.environ["OFFICE_STATE"] = sys.argv[2]
+sys.path.insert(0, sys.argv[1])
+from office import agy
+home = os.path.expanduser("~")
+probe = os.path.join(home, "Documents")
+out = subprocess.run(agy._bwrap_prefix([]) + ["sh", "-c", f"ls -A {home}; test -e {probe} && echo LEAK; touch /usr/x 2>/dev/null && echo LEAK; true"],
+                     capture_output=True, text=True).stdout
+assert "LEAK" not in out, out
+assert not {"Documents", ".ssh", ".claude", ".gnupg"} & set(out.split()), out
+PY
 echo "agent office checks passed"
