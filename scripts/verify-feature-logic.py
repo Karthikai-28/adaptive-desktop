@@ -84,7 +84,7 @@ def providers():
     ]
     check([w["id"] for w in P.match_windows(windows, "readme")] == [3, 1], "windows: match, focused one last")
     check(P.match_windows(windows, "r") == [], "windows: one letter matches nothing")
-    check(P.shell_call("ListWindows") is None, "shell bridge: unreachable shell gives None, not an error")
+    check(P.shell_call("NonExistentMethod") is None, "shell bridge: unreachable shell gives None, not an error")
 
 
 def quick_note():

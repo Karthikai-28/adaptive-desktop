@@ -10,7 +10,7 @@ from pathlib import Path
 import gi
 gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
-from gi.repository import Gio, GLib
+from gi.repository import Gio, GLib  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import extras  # noqa: E402 - the GTK-free half: git, time, startup, tasks, templates

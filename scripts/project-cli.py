@@ -7,7 +7,7 @@ from pathlib import Path
 import gi
 gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
-from gi.repository import Gio, GLib
+from gi.repository import Gio, GLib  # noqa: E402
 
 BUS_NAME = "org.adaptive.ProjectContext"
 OBJECT_PATH = "/org/adaptive/ProjectContext"
@@ -167,7 +167,11 @@ def do_list(args):
 def do_clear(args):
     proxy = get_proxy()
     res = proxy.call_sync("SetActiveProject", GLib.Variant("(s)", ("",)), Gio.DBusCallFlags.NONE, -1, None)
-    print("Cleared active project.")
+    success = res.unpack()[0]
+    if success:
+        print("Cleared active project.")
+    else:
+        print("Failed to clear active project.")
 
 def all_projects(proxy):
     res = proxy.call_sync("ListProjects", None, Gio.DBusCallFlags.NONE, -1, None)

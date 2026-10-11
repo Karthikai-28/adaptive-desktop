@@ -4,7 +4,6 @@ Only disposable fixture apps run; no application or input on the physical
 laptop is touched. Called by the existing Link verification entry point.
 """
 import asyncio
-import json
 import os
 from pathlib import Path
 import sys

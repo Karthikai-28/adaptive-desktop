@@ -1,6 +1,5 @@
 """Adaptive Link Presenter Engine: slide notes extraction and live synchronization."""
 import asyncio
-import os
 import re
 import time
 import urllib.parse
@@ -307,7 +306,6 @@ def find_active_presentation():
     for win in wins:
         title = win.get("title", "")
         pid = win.get("pid", 0)
-        app = win.get("app", "")
         candidates = []
 
         # 1. Direct FD inspection (most reliable for LibreOffice / Impress / PDF viewers)

@@ -17,13 +17,10 @@ and saying for each thing that is wrong the one thing that puts it right.
 """
 
 import json
-import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 
-import desktop
 import machine
 import system
 
