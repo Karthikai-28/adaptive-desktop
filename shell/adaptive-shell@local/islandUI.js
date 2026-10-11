@@ -601,14 +601,12 @@ var IslandOverlay = class IslandOverlay {
         this._quotaCard = new St.BoxLayout({
             style_class: "adaptive-island-card adaptive-island-quota-card",
             vertical: true,
-            spacing: 8,
         });
 
         // Claude Sub-Card
         const claudeBox = new St.BoxLayout({
             style_class: "adaptive-island-subcard",
             vertical: true,
-            spacing: 4,
         });
 
         const cldHeaderRow = new St.BoxLayout({ vertical: false });
@@ -639,7 +637,6 @@ var IslandOverlay = class IslandOverlay {
         const agyBox = new St.BoxLayout({
             style_class: "adaptive-island-subcard",
             vertical: true,
-            spacing: 4,
         });
 
         const agyHeaderRow = new St.BoxLayout({ vertical: false });
@@ -708,7 +705,6 @@ var IslandOverlay = class IslandOverlay {
         this._tasksCard = new St.BoxLayout({
             style_class: "adaptive-island-card adaptive-island-tasks-card",
             vertical: true,
-            spacing: 8,
             visible: false,
         });
 
@@ -761,12 +757,11 @@ var IslandOverlay = class IslandOverlay {
         this._mediaCard = new St.BoxLayout({
             style_class: "adaptive-island-card adaptive-island-media-card",
             vertical: true,
-            spacing: 8,
             visible: false,
         });
 
         // Track Info
-        const trackRow = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER, spacing: 10 });
+        const trackRow = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER });
         const artBox = new St.BoxLayout({
             style_class: "adaptive-island-media-art",
             vertical: false,
@@ -776,7 +771,7 @@ var IslandOverlay = class IslandOverlay {
         artBox.add_child(new St.Label({ text: "♫", style_class: "adaptive-island-media-art-icon" }));
         trackRow.add_child(artBox);
 
-        const infoBox = new St.BoxLayout({ vertical: true, spacing: 2 });
+        const infoBox = new St.BoxLayout({ vertical: true });
         this._mediaTitleLabel = new St.Label({ text: "Midnight City", style_class: "adaptive-island-val-bold" });
         if (this._mediaTitleLabel.clutter_text)
             this._mediaTitleLabel.clutter_text.ellipsize = imports.gi.Pango.EllipsizeMode.END;
@@ -788,7 +783,7 @@ var IslandOverlay = class IslandOverlay {
         this._mediaCard.add_child(trackRow);
 
         // Scrubber bar
-        const scrubRow = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER, spacing: 6 });
+        const scrubRow = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER });
         this._mediaElapsedLabel = new St.Label({ text: "1:42", style_class: "adaptive-island-subtext" });
         this._mediaDurationLabel = new St.Label({ text: "4:03", style_class: "adaptive-island-subtext" });
 
@@ -807,7 +802,6 @@ var IslandOverlay = class IslandOverlay {
             style_class: "adaptive-island-transport-row",
             vertical: false,
             x_align: Clutter.ActorAlign.CENTER,
-            spacing: 16,
         });
 
         const prevBtn = new St.Button({ style_class: "adaptive-island-transport-btn", label: "⏮", can_focus: false });
@@ -830,7 +824,6 @@ var IslandOverlay = class IslandOverlay {
         this._timerCard = new St.BoxLayout({
             style_class: "adaptive-island-card adaptive-island-timer-card",
             vertical: true,
-            spacing: 8,
             visible: false,
         });
 
@@ -844,7 +837,7 @@ var IslandOverlay = class IslandOverlay {
         this._timerCard.add_child(digitsRow);
 
         // Preset Chips
-        const chipsRow = new St.BoxLayout({ vertical: false, spacing: 6 });
+        const chipsRow = new St.BoxLayout({ vertical: false });
         const p25 = new St.Button({ style_class: "adaptive-island-chip", label: "25m Focus", can_focus: false });
         p25.connect("clicked", () => this._ui.backend.timers.startPomodoro());
         chipsRow.add_child(p25);
@@ -860,7 +853,7 @@ var IslandOverlay = class IslandOverlay {
         this._timerCard.add_child(chipsRow);
 
         // Controls
-        const ctrlRow = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER, spacing: 8 });
+        const ctrlRow = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER });
         const extBtn = new St.Button({ style_class: "adaptive-island-btn", label: "+5m", can_focus: false });
         extBtn.connect("clicked", () => this._ui.backend.timers.extend(300));
         ctrlRow.add_child(extBtn);
@@ -1035,8 +1028,12 @@ var IslandOverlay = class IslandOverlay {
         }
 
         // Apply blur effect
-        if (this._blurEffect && !this._actor.has_effect(this._blurEffect)) {
-            try { this._actor.add_effect(this._blurEffect); } catch (e) {}
+        if (this._blurEffect && this._actor.add_effect_with_name) {
+            try {
+                if (this._actor.get_effect && !this._actor.get_effect("island-blur")) {
+                    this._actor.add_effect_with_name("island-blur", this._blurEffect);
+                }
+            } catch (e) {}
         }
 
         // Hardware Clutter ease transition (EASE_OUT_BACK for spring drop approximation)
@@ -1093,16 +1090,16 @@ var IslandOverlay = class IslandOverlay {
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 onComplete: () => {
                     this._actor.visible = false;
-                    if (this._blurEffect) {
-                        try { this._actor.remove_effect(this._blurEffect); } catch (e) {}
+                    if (this._blurEffect && this._actor.remove_effect_by_name) {
+                        try { this._actor.remove_effect_by_name("island-blur"); } catch (e) {}
                     }
                 },
             });
         } else {
             this._actor.visible = false;
             this._actor.opacity = 0;
-            if (this._blurEffect) {
-                try { this._actor.remove_effect(this._blurEffect); } catch (e) {}
+            if (this._blurEffect && this._actor.remove_effect_by_name) {
+                try { this._actor.remove_effect_by_name("island-blur"); } catch (e) {}
             }
         }
     }
@@ -1197,6 +1194,10 @@ var IslandUI = class IslandUI {
             this._backend.init();
         }
 
+        if (typeof Main !== "undefined" && Main) {
+            Main._dynamicIsland = this;
+        }
+
         this._updateUI();
     }
 
@@ -1230,6 +1231,10 @@ var IslandUI = class IslandUI {
         // Remove from scene graph
         if ((Main && Main.layoutManager) && (Main && Main.layoutManager).uiGroup && this._overlay.getActor()) {
             (Main && Main.layoutManager).uiGroup.remove_child(this._overlay.getActor());
+        }
+
+        if (typeof Main !== "undefined" && Main && Main._dynamicIsland === this) {
+            Main._dynamicIsland = null;
         }
 
         this._overlay.destroy();
