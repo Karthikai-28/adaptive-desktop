@@ -158,6 +158,7 @@ class AdaptiveShellV16 {
             'adaptive-display-guard.py',
         ]);
         this._rescueTimerId = 0;
+        this._standDownId = 0;
         this._displayGuardRunAt = 0;
         this._windowCli = GLib.build_filenamev([
             GLib.get_home_dir(),
@@ -517,6 +518,11 @@ class AdaptiveShellV16 {
             this._lockedOnlyCleanup();
             this._lockScreenStop();
             return;
+        }
+
+        if (this._standDownId) {
+            GLib.source_remove(this._standDownId);
+            this._standDownId = 0;
         }
 
         // Stood down by the watchdog: nothing was built either.
@@ -917,7 +923,12 @@ class AdaptiveShellV16 {
     _standDown() {
         this._watchdogTripped = true;
         log('[Adaptive Shell] watchdog: desktop not built after repeated crashes');
-        GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
+        if (this._standDownId) {
+            GLib.source_remove(this._standDownId);
+            this._standDownId = 0;
+        }
+        this._standDownId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
+            this._standDownId = 0;
             Main.notify('Adaptive Desktop stood down',
                 'The Adaptive shell crashed several times in a row, so it is off for now. ' +
                 'Re-enable it in Adaptive Settings → Updates & Recovery.');
