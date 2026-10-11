@@ -34,6 +34,7 @@ const MinimizeEffect = Me.imports.minimizeEffect;
 const ClipboardHistory = Me.imports.clipboardHistory;
 const ProjectSnapshots = Me.imports.projectSnapshots;
 const ProjectIndicator = Me.imports.projectIndicator;
+const IslandUI = Me.imports.islandUI;
 const ScreenText = Me.imports.screenText;
 const DropdownTerminal = Me.imports.dropdownTerminal;
 const Watchdog = Me.imports.watchdog;
@@ -92,6 +93,7 @@ class AdaptiveShellV16 {
         this._screenText = null;
         this._dropdown = null;
         this._projectIndicator = null;
+        this._dynamicIsland = null;
         // Crash watchdog: set when this start stood down instead of building.
         this._watchdogTripped = false;
         this._healthyId = 0;
@@ -303,6 +305,7 @@ class AdaptiveShellV16 {
         this._installPaletteServices();
         this._installShellActions();
         this._installProjectIndicator();
+        this._installDynamicIsland();
         this._installRail();
         this._minimizeFx = new MinimizeEffect.GenieMinimize(w => this._dockIconRect(w));
         this._minimizeFx.attach();
@@ -559,6 +562,11 @@ class AdaptiveShellV16 {
         if (this._projectIndicator) {
             this._projectIndicator.detach();
             this._projectIndicator = null;
+        }
+
+        if (this._dynamicIsland) {
+            this._dynamicIsland.detach();
+            this._dynamicIsland = null;
         }
 
         if (this._shellActions) {
@@ -890,6 +898,17 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the project indicator');
             this._projectIndicator = null;
+        }
+    }
+
+    // Dynamic Island: in-panel anchor on dateMenu + floating overlay HUD.
+    _installDynamicIsland() {
+        try {
+            this._dynamicIsland = new IslandUI.IslandUI(this);
+            this._dynamicIsland.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the dynamic island');
+            this._dynamicIsland = null;
         }
     }
 

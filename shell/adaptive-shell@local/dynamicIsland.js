@@ -404,6 +404,30 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         return () => this._stateChangeListeners.delete(cb);
     }
 
+    onSurfaced(cb) {
+        return this.onEventSurfaced(cb);
+    }
+
+    onTucked(cb) {
+        return this.onEventTucked(cb);
+    }
+
+    onStateChange(cb) {
+        return this.onStateChanged(cb);
+    }
+
+    offSurfaced(cb) {
+        this._surfacedListeners.delete(cb);
+    }
+
+    offTucked(cb) {
+        this._tuckedListeners.delete(cb);
+    }
+
+    offStateChange(cb) {
+        this._stateChangeListeners.delete(cb);
+    }
+
     _notifySurfaced(eventItem) {
         for (const cb of this._surfacedListeners) {
             try { cb(this, eventItem); } catch (e) { /* ignore listener exception */ }

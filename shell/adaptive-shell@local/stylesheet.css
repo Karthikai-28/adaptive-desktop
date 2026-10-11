@@ -2583,3 +2583,362 @@
     background-color: rgba(255, 69, 58, 0.12);
     color: #FF453A;
 }
+
+/* ------------------------------------------------------------------
+ * Dynamic Island (islandUI.js): in-panel anchor and floating overlay
+ * ------------------------------------------------------------------ */
+
+.adaptive-island-anchor {
+    spacing: 8px;
+}
+
+.adaptive-island-pill {
+    border-radius: 9999px;
+    background-color: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    padding: 0 10px;
+    height: 28px;
+    color: #ffffff;
+    transition-duration: 250ms;
+}
+
+.adaptive-island-pill:hover {
+    border-color: rgba(255, 255, 255, 0.45);
+}
+
+.adaptive-island-pill-idle {
+    min-width: 148px;
+}
+
+.adaptive-island-pill-compact {
+    min-width: 220px;
+}
+
+.adaptive-island-pill-inner {
+    spacing: 6px;
+}
+
+.adaptive-island-idle-box {
+    spacing: 4px;
+}
+
+.adaptive-island-clock-text {
+    font-size: 12px;
+    font-weight: 500;
+    color: #ffffff;
+}
+
+.adaptive-island-spark {
+    font-size: 11px;
+}
+
+.adaptive-island-spark-cyan {
+    color: #38bdf8;
+}
+
+.adaptive-island-spark-amber {
+    color: #fbbf24;
+}
+
+.adaptive-island-spark-crimson {
+    color: #f43f5e;
+}
+
+.adaptive-island-compact-box {
+    spacing: 6px;
+}
+
+.adaptive-island-compact-icon {
+    font-size: 12px;
+    color: #38bdf8;
+}
+
+.adaptive-island-compact-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #ffffff;
+}
+
+.adaptive-island-compact-secondary {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.adaptive-island-satellite {
+    width: 32px;
+    height: 28px;
+    border-radius: 9999px;
+    background-color: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.adaptive-island-satellite-icon {
+    font-size: 12px;
+    color: #38bdf8;
+}
+
+/* Floating Overlay HUD */
+.adaptive-island-overlay {
+    border-radius: 24px;
+    background-color: rgba(15, 23, 42, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
+    color: #ffffff;
+    padding: 14px 16px;
+}
+
+.adaptive-island-overlay-inner {
+    spacing: 10px;
+}
+
+.adaptive-island-card-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 6px;
+    spacing: 6px;
+}
+
+.adaptive-island-card-icon {
+    font-size: 13px;
+    color: #38bdf8;
+}
+
+.adaptive-island-card-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+    letter-spacing: 0.5px;
+}
+
+.adaptive-island-card-badge {
+    background-color: rgba(255, 255, 255, 0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.adaptive-island-card-btn {
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.adaptive-island-card-btn:hover {
+    color: #ffffff;
+}
+
+.adaptive-island-card-btn.pinned {
+    color: #38bdf8;
+}
+
+.adaptive-island-card-body {
+    spacing: 8px;
+}
+
+.adaptive-island-subcard {
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+.adaptive-island-subcard-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.adaptive-island-val-bold {
+    font-size: 13px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.adaptive-island-subtext {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.adaptive-island-mono-subtext {
+    font-size: 10px;
+    font-family: monospace;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.adaptive-island-status-active {
+    font-size: 10px;
+    font-weight: 600;
+    color: #34d399;
+}
+
+.adaptive-island-progress-track {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 9999px;
+    height: 6px;
+}
+
+.adaptive-island-progress-fill {
+    border-radius: 9999px;
+    height: 6px;
+}
+
+.adaptive-island-fill-cyan {
+    background-color: #38bdf8;
+}
+
+.adaptive-island-fill-amber {
+    background-color: #fb923c;
+}
+
+.adaptive-island-fill-green {
+    background-color: #34d399;
+}
+
+.adaptive-island-footer-row {
+    spacing: 8px;
+    padding-top: 4px;
+}
+
+.adaptive-island-btn {
+    background-color: rgba(255, 255, 255, 0.10);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #ffffff;
+}
+
+.adaptive-island-btn:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.adaptive-island-btn-alert {
+    background-color: rgba(244, 63, 94, 0.20);
+    color: #fca5a5;
+    border: 1px solid rgba(244, 63, 94, 0.35);
+}
+
+.adaptive-island-btn-alert:hover {
+    background-color: rgba(244, 63, 94, 0.35);
+    color: #ffffff;
+}
+
+.adaptive-island-terminal {
+    background-color: #06080e;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 6px 8px;
+    spacing: 2px;
+}
+
+.adaptive-island-terminal-line {
+    font-size: 10px;
+    font-family: monospace;
+    color: #94a3b8;
+}
+
+.adaptive-island-terminal-line.active {
+    color: #38bdf8;
+}
+
+.adaptive-island-media-art {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.adaptive-island-media-art-icon {
+    font-size: 20px;
+    color: #34d399;
+}
+
+.adaptive-island-transport-row {
+    spacing: 16px;
+}
+
+.adaptive-island-transport-btn {
+    font-size: 15px;
+    padding: 4px 10px;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.adaptive-island-transport-btn:hover {
+    color: #ffffff;
+}
+
+.adaptive-island-btn-play {
+    background-color: rgba(255, 255, 255, 0.14);
+    border-radius: 9999px;
+    padding: 6px 12px;
+}
+
+.adaptive-island-big-digits {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: monospace;
+    color: #ffffff;
+}
+
+.adaptive-island-chip {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.adaptive-island-chip:hover {
+    background-color: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+}
+
+/* --- THEME VARIATIONS --- */
+
+/* Theme 1: Liquid Glass (Default) */
+.adaptive-island-theme-liquid-glass.adaptive-island-overlay {
+    border-radius: 24px;
+    background-color: rgba(15, 23, 42, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.adaptive-island-theme-liquid-glass .adaptive-island-pill {
+    border-radius: 9999px;
+}
+
+/* Theme 2: Dark Precision */
+.adaptive-island-theme-dark-precision.adaptive-island-overlay {
+    border-radius: 14px;
+    background-color: #090a0f;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.90);
+    font-family: monospace;
+}
+
+.adaptive-island-theme-dark-precision .adaptive-island-pill {
+    border-radius: 8px;
+    background-color: #090a0f;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.adaptive-island-theme-dark-precision .adaptive-island-satellite {
+    border-radius: 6px;
+    background-color: #090a0f;
+}
+
+/* Alert States */
+.adaptive-island-pill.caution,
+.adaptive-island-overlay.caution {
+    border-color: #fbbf24 !important;
+}
+
+.adaptive-island-pill.critical,
+.adaptive-island-overlay.critical {
+    border-color: #f43f5e !important;
+}
