@@ -21,6 +21,7 @@
   },
   "provider": "gemini",
   "fallback": "local",
+  "study_on_fallback": true,
   "max_parallel_tasks": 3,
   "task_timeout_min": 45,
   "chat_timeout_min": 15,
