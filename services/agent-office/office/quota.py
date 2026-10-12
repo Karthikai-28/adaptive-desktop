@@ -9,6 +9,7 @@ Study programs, tasks, chats and meetings all go through the same pause.
 """
 import asyncio
 import datetime as dt
+import re
 import time
 
 from . import agy
@@ -17,6 +18,16 @@ from .config import COMPANY
 FALLBACK_S = 5 * 60         # pause when /usage shows no exhausted window (a short rate limit)
 PROBE_S = 5 * 60            # while paused, how often to look whether the quota came back early
 TICK_S = 30
+_RESETS_IN = re.compile(r"resets? in\s*(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?!s))?\s*(?:(\d+)\s*s)?", re.I)
+
+
+def reset_from_error(err, now=None):
+    """The reset time Gemini states in its quota error ("... Resets in 2h44m48s."), or None."""
+    m = _RESETS_IN.search(err or "")
+    if not m or not any(m.groups()):
+        return None
+    d, h, mi, s = (int(x or 0) for x in m.groups())
+    return (time.time() if now is None else now) + d * 86400 + h * 3600 + mi * 60 + s
 
 
 def _pct(row):
@@ -39,6 +50,7 @@ class QuotaGuard:
         self.usage = {"ts": 0, "rows": [], "error": ""}
         self.deferred_chats = {}          # agent id -> [(message, sender)] that hit the limit
         self._last_probe = 0
+        self._announced = 0
         self._refreshing = None
 
     def start(self):
@@ -75,18 +87,31 @@ class QuotaGuard:
         return max(resets) if resets else None
 
     # ------------------------------------------------------------------ hitting the limit
-    async def hit(self, agent=None):
-        """An agent ran into the limit: pause until the real reset time."""
+    async def hit(self, agent=None, error=""):
+        """An agent ran into the limit: pause until the quota really comes back.
+
+        The reset time comes from /usage when it shows an exhausted window (an exact timestamp), else from
+        Gemini's error ("... Resets in 2h44m48s"), else a short pause. With a known reset time the office
+        just waits for it: no early probing, because every retry re-sends the agent's whole conversation."""
         now = time.time()
-        first = self.o.quota_until <= now
+        if self.o.quota_until > now and self.o.store.get("quota_known", False):
+            return                                                         # already waiting for a known reset
         self.o.quota_until = max(self.o.quota_until, now + FALLBACK_S)    # stop new work right away
         self.o.store.set("quota_until", self.o.quota_until)
-        if not first:
-            return
         await self.refresh()
-        until = self.exhausted_until()
-        self.o.quota_until = (until + 60) if until and until > now else now + FALLBACK_S
+        until, stated = self.exhausted_until(), reset_from_error(error, now)
+        if until and until > now:
+            target, known = until + 60, True
+        elif stated:
+            target, known = stated + 60, True
+        else:
+            target, known = now + FALLBACK_S, False
+        self.o.quota_until = max(target, self.o.quota_until if known else 0)
         self.o.store.set("quota_until", self.o.quota_until)
+        self.o.store.set("quota_known", known)
+        if abs(self.o.quota_until - self._announced) < 120:
+            return                                                         # this pause was announced already
+        self._announced = self.o.quota_until
         self._last_probe = time.time()
         when = dt.datetime.fromtimestamp(self.o.quota_until).strftime("%H:%M" if self.o.quota_until - now < 20 * 3600 else "%a %H:%M")
         await self.o.broadcast({"type": "settings", "settings": self.o.settings(), "quota_until": self.o.quota_until})
@@ -101,6 +126,7 @@ class QuotaGuard:
     async def resume(self, early=False):
         self.o.quota_until = 0
         self.o.store.set("quota_until", 0)
+        self.o.store.set("quota_known", False)
         await self.o.broadcast({"type": "settings", "settings": self.o.settings(), "quota_until": 0})
         await self.o.toast("Gemini quota is back" + (" early" if early else "") + " - the team is working again.", "ok")
         for aid, batch in list(self.deferred_chats.items()):
@@ -120,7 +146,9 @@ class QuotaGuard:
                 if self.o.quota_until and now >= self.o.quota_until:
                     await self.resume()
                 elif self.o.quota_until > now:
-                    if now - self._last_probe >= PROBE_S:          # did it come back early?
+                    if self.o.store.get("quota_known", False):
+                        pass                                       # the reset time is known: wait for it
+                    elif now - self._last_probe >= PROBE_S:        # did it come back early?
                         self._last_probe = now
                         await self.refresh()
                         rows = self.usage.get("rows", [])

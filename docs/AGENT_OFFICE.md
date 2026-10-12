@@ -48,6 +48,7 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Meetings and calls** | **Call meeting** → pick people → everyone walks to the meeting room. Type or talk; agents answer out loud. Say a name ("Arjun, …") to ask one person. **Hands-free** keeps listening and pauses while agents speak. With Claude in the room, it chairs the meeting, writes minutes at the end and assigns the agreed action items. **Call** on an agent's card starts a 1:1 call. |
 | **Tasks** | Kanban board of every task with live activity, full reports, cancel and retry. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
+| **Tokens** | Live token usage: who spends what, on which work, and how. The **Tokens** button shows the team (per person by kind of work, over time, by step, by project, by how tasks ended, the most expensive tasks); click a person for their own breakdown (context per call, tasks, every run). Each person's card also has a **Tokens** tab. Windows: last hour to all time. It updates by itself as agents work. |
 
 ## Study programs: an agent that masters codebases
 
@@ -111,6 +112,10 @@ office autopilot on|off · office pause · office resume · office open
   takes over that turn on the same session. Meetings and minutes always stay on Sonnet. At most
   `opus_max_per_hour` (6) Opus turns an hour; past that Sonnet handles it. `verify-agent-office.sh`
   rejects any other model.
+- **Manager session size.** Every call re-reads the whole session, so once one call carries more than
+  `rotate_context_tokens` (120k) the next turn starts a fresh session. It opens with a hand-over: the
+  last 12 messages between you and Claude, and an instruction to check `office status` first. Every
+  session id is kept in `mgr:sessions` for the token ledger.
 - **Scheduler.** One task at a time per agent, up to three agents at once (Settings). `--after`
   chains work. Interrupted tasks resume after a restart, and transient failures retry once.
 
@@ -164,18 +169,41 @@ graph that was built with semantic extraction: it replaces the document and rati
 ## When the quota runs out (`office/quota.py`)
 
 Work never needs restarting by hand. When an agent hits the Gemini limit, its task goes back to the
-queue untouched and the office asks agy (`/usage`) when the exhausted window resets. All agent work
-(tasks and study sessions) then pauses until that time, which the top bar shows ("Quota out ·
-resumes 22:12"). A watchdog runs every 30 seconds:
+queue untouched and the office works out when the quota comes back: the exhausted window's reset in
+agy's `/usage` when one shows 0%, otherwise the time in Gemini's error ("Resets in 2h44m48s"). All
+agent work (tasks and study sessions) then pauses until that time, which the top bar shows ("Quota out
+· resumes 22:12"). A watchdog runs every 30 seconds:
 
-- at the reset time, or earlier if `/usage` shows quota again (checked every 5 minutes), it resumes
-  everything and tells you;
+- at the reset time it resumes everything and tells you. With a known reset time it does not probe
+  earlier: every retry re-sends the agent's whole conversation (on 12 Oct a 5-minute retry loop
+  re-sent Omar's 120k-token thread 53 times in three hours);
 - direct messages that hit the limit are answered automatically once it is back;
 - queued work with free slots is always started, so nothing can stay stuck after a missed wake-up.
 
-When `/usage` shows no window at 0% (a short rate limit), the pause is 5 minutes. Claude has the same
+Only when neither gives a time (a short rate limit) is the pause 5 minutes, with an early check. Claude has the same
 behaviour for its own usage limit: the manager keeps the message or review and retries every 10 minutes
 (up to six hours). Settings → "Resume now" ends a pause by hand.
+
+## Token ledger (`office/ledger.py`)
+
+Nothing is estimated. agy records every model call in the conversation's SQLite file
+(`agy-home*/.gemini/antigravity-cli/conversations/<id>.db`, one `steps` row per call with its usage in
+protobuf: fresh input, cached input, output, thinking). Claude's calls are in its session transcripts
+(`~/.claude/projects/*/<session>.jsonl`). Every 10 seconds the ledger re-reads only the files that
+changed (a full read of ~70 conversations takes about a second, in a worker thread) and attributes each
+call: the **person** from the persona the conversation opens with (or the study program), the **kind**
+and **task** from the prompt that started that turn (`=== TASK #38`, `STUDY SESSION 4`, a direct
+message, a meeting), and the **step** the call chose (run a command, read a file, edit, answer).
+When anything changed it sends a `tokens` message on the socket and open views redraw.
+
+- `GET /api/tokens?since=<unix>`: the team: totals, per person (by kind, last 10 minutes), timeline,
+  steps, projects, task outcomes, the most expensive tasks.
+- `GET /api/tokens/agent/<id>?since=<unix>`: one person: the same plus context per call, tasks and
+  every run.
+
+Three numbers per call: **fresh input** (new to the model), **re-read context** (served from cache:
+the conversation sent again with every step, about 95% of all tokens), **output** (thinking
+included). The task board's own count is fresh input + output of a task's last attempt only.
 
 ## Checks
 

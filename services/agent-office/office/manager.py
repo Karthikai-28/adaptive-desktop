@@ -24,6 +24,7 @@ LIMIT_RETRY_S = 10 * 60
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_COMPLEX_MODEL = "claude-opus-5"
 ESCALATE = "ESCALATE_TO_OPUS"
+ROTATE_CONTEXT = 120_000        # start a fresh session once one call re-reads more context than this
 _OPUS_ASK_RE = re.compile(r"(^|\]:)\s*(opus\s*[:,]|/opus\b)|\b(think hard|think deeply|use opus|deep dive)\b", re.I)
 _LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|resets? (at|in)|overloaded|429", re.I)
 
@@ -44,6 +45,7 @@ class Manager:
         self._flush_handle = None
         self._cancelled = False
         self._limit_tries = {}      # prompt -> attempts while Claude's usage limit is hit
+        self._rotate = 0            # context size that made the session due for a fresh start
 
     @property
     def pending(self):
@@ -205,6 +207,8 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
 
     async def _turn(self, prompt, kind):
         """Sonnet by default; Opus when the owner asks for it or Sonnet escalates (within the hourly cap)."""
+        if self._rotate:
+            await self._fresh_session()
         escalatable = kind in ("chat", "autopilot") and self.complex_model != self.model
         if escalatable and kind == "chat" and _OPUS_ASK_RE.search(prompt) and self._use_opus():
             await self.o.activity(self.id, "think", "Thinking it through (Opus)")
@@ -221,14 +225,47 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
                                f"as well as you can; do not reply {ESCALATE}.", self.model)
         return text, err
 
+    # ------------------------------------------------------------------ session size
+    @property
+    def rotate_at(self):
+        return int(self.cfg.get("rotate_context_tokens") or ROTATE_CONTEXT)
+
+    async def _fresh_session(self):
+        """The session got big: every call re-reads all of it. Start over with a short hand-over instead.
+        Done between turns, never inside one, so an escalation still sees the message it escalated."""
+        size, self._rotate = self._rotate, 0
+        self.o.store.delete("mgr:session")
+        self.o.store.set("mgr:handoff", True)
+        await self.o.activity(self.id, "think", f"Starting a fresh session (the old one re-read {size // 1000}k tokens a call)")
+
+    def _handoff(self):
+        lines = []
+        for m in self.o.store.messages("manager", limit=12):
+            who = self.o.operator if m["sender"] == "operator" else "You" if m["sender"] == self.id else m["sender"]
+            text = " ".join(m["text"].split())
+            lines.append(f"{who}: {text[:600] + '…' if len(text) > 600 else text}")
+        recent = "\n".join(lines) or "(no messages yet)"
+        return ("[office] Your previous session grew too long to keep re-reading, so this is a fresh one. "
+                f"The latest messages between you and {self.o.operator}:\n{recent}\n"
+                "Run `office status` and `office tasks` for the team's current state before acting on anything "
+                "from before. Then handle this:\n\n")
+
     async def _run(self, prompt, model):
         sid = self.o.store.get("mgr:session")
-        text, err, new_sid = await self._claude(prompt, sid, model)
+        handoff = not sid and self.o.store.get("mgr:handoff", False)
+        text, err, new_sid, ctx = await self._claude((self._handoff() if handoff else "") + prompt, sid, model)
         if not text and sid and ("session" in err.lower() or "conversation" in err.lower()) and not self._cancelled:
             self.o.store.delete("mgr:session")
-            text, err, new_sid = await self._claude(prompt, None, model)
+            text, err, new_sid, ctx = await self._claude(self._handoff() + prompt, None, model)
         if new_sid:
             self.o.store.set("mgr:session", new_sid)
+            seen = self.o.store.get("mgr:sessions", [])
+            if new_sid not in seen:                    # every session ever used, for the token ledger
+                self.o.store.set("mgr:sessions", seen + [new_sid])
+            if handoff and text:
+                self.o.store.delete("mgr:handoff")
+        if ctx > self.rotate_at:
+            self._rotate = ctx
         return text, err
 
     async def _claude(self, prompt, sid, model):
@@ -246,7 +283,7 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=True, limit=16 * 1024 * 1024)
         err_task = asyncio.create_task(self.proc.stderr.read())
-        out = {"text": "", "err": "", "sid": None}
+        out = {"text": "", "err": "", "sid": None, "ctx": 0}
 
         async def read():
             async for raw in self.proc.stdout:
@@ -256,6 +293,10 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
                     continue
                 out["sid"] = d.get("session_id") or out["sid"]
                 if d.get("type") == "assistant":
+                    u = d.get("message", {}).get("usage") or {}
+                    ctx = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                                            "cache_creation_input_tokens"))
+                    out["ctx"] = max(out["ctx"], ctx)
                     for c in d.get("message", {}).get("content", []):
                         if c.get("type") == "tool_use":
                             await self.o.activity(self.id, "run", _tool_line(c))
@@ -277,7 +318,7 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
             err = stderr[-500:] or f"claude exited {self.proc.returncode}"
         if self._cancelled:
             err = err or "cancelled"
-        return text, err, new_sid
+        return text, err, new_sid, out["ctx"]
 
 
 def _tool_line(c):

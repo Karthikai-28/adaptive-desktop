@@ -258,6 +258,19 @@ async def usage():
     return office.quota.usage
 
 
+# ---------------------------------------------------------------- token ledger
+@app.get("/api/tokens")
+async def tokens(since: float = 0):
+    return office.ledger.overview(since)
+
+
+@app.get("/api/tokens/agent/{aid}")
+async def tokens_agent(aid: str, since: float = 0):
+    if aid not in office.rt:
+        raise HTTPException(404, "no such agent")
+    return office.ledger.agent(aid, since)
+
+
 # ---------------------------------------------------------------- voice
 @app.get("/api/tts")
 async def tts(who: str, text: str):

@@ -16,6 +16,7 @@ from .config import COMPANY
 from .manager import Manager
 from .quota import QuotaGuard
 from .graphs import Graphs
+from .ledger import Ledger
 from .study import Study
 
 NAME_RE_CACHE = {}
@@ -57,6 +58,7 @@ class Office:
         self.study = Study(self)
         self.quota = QuotaGuard(self)
         self.graphs = Graphs(self)
+        self.ledger = Ledger(self)
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 
@@ -78,6 +80,7 @@ class Office:
         self.study.start()
         self.quota.start()
         self.graphs.start()
+        self.ledger.start()
         self.kick()
 
     def _spawn(self, coro):
@@ -392,7 +395,7 @@ class Office:
             # back in the queue untouched; the quota guard resumes it when Gemini resets
             t = self.store.update_task(tid, status="queued", attempts=max(0, t["attempts"] - 1), error=r.error)
             await self.activity(aid, "error", "Gemini quota reached — waiting for it to reset", tid)
-            self._spawn(self.quota.hit(aid))
+            self._spawn(self.quota.hit(aid, r.error))
         elif "conversation" in r.error.lower() and key and self.store.get(key) and t["attempts"] < 3:
             self.store.delete(key)   # a stale work thread: start a fresh one
             t = self.store.update_task(tid, status="queued", error=r.error)
@@ -477,7 +480,7 @@ class Office:
                 self.quota.defer_chat(aid, batch)       # answered automatically when the quota is back
                 await self.post(f"dm:{aid}", aid, "(I've hit the Gemini usage limit. I'll answer this automatically "
                                                   "as soon as it resets.)", {"kind": "failure"})
-                self._spawn(self.quota.hit(aid))
+                self._spawn(self.quota.hit(aid, r.error))
             elif not r.cancelled:
                 await self.post(f"dm:{aid}", aid, f"(Sorry, I couldn't reply: {r.error[:300]})", {"kind": "failure"})
             await self.push_agent(aid)
@@ -602,7 +605,7 @@ class Office:
                     await self.post(f"meeting:{m['id']}", aid, say)
             elif r.quota:
                 await self.post(f"meeting:{m['id']}", "system", f"{a['name']} is out of Gemini quota for now.")
-                self._spawn(self.quota.hit(aid))
+                self._spawn(self.quota.hit(aid, r.error))
             elif not r.cancelled:
                 await self.post(f"meeting:{m['id']}", "system", f"{a['name']} couldn't answer ({r.error[:120]}).")
             await self.push_agent(aid)

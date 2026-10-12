@@ -2,6 +2,7 @@
 import * as world from './world.js';
 import { portrait } from './sprites.js';
 import { speak, stopSpeaking, setMuted, onSpeak, isSpeaking, Mic, sttSupported } from './voice.js';
+import { createTokens } from './tokens.js';
 
 const MGR = 'claude';
 const $ = (s, r = document) => r.querySelector(s);
@@ -48,6 +49,7 @@ const P = {
   hf: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
   play: '<path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7"/>',
   reset: '<path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M7 16v-5M12 16V8M17 16v-8"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24">${P[n]}</svg>`;
 const iconEl = (n) => { const s = document.createElement('span'); s.style.display = 'inline-flex'; s.innerHTML = icon(n); return s.firstChild; };
@@ -175,6 +177,7 @@ function handle(m) {
     case 'settings': S.settings = m.settings; S.quotaUntil = m.quota_until; renderQuota(); return;
     case 'usage': S.usage = m; renderQuota(); return;
     case 'study': S.studies = m.studies; if (S.view.kind === 'agent' && S.tab === 'learning') renderBody(); return;
+    case 'tokens': tokens.changed(m); return;
   }
 }
 
@@ -292,6 +295,7 @@ function renderTop() {
   $('#btnMeeting').innerHTML = `${icon(S.meeting ? 'users' : 'phone')}<span class="lbl">${S.meeting ? 'In meeting' : 'Call meeting'}</span>`;
   $('#btnTasks').innerHTML = `${icon('clip')}<span class="lbl">Tasks</span>${queued ? `<span class="badge" style="background:#5865f2">${queued}</span>` : ''}`;
   $('#btnFiles').innerHTML = `${icon('folder')}<span class="lbl">Files</span>`;
+  $('#btnTokens').innerHTML = `${icon('chart')}<span class="lbl">Tokens</span>`;
   $('#btnVoice').innerHTML = icon(prefs.voice ? 'vol' : 'mute');
   $('#btnVoice').classList.toggle('on', prefs.voice);
   $('#btnVoice').title = prefs.voice ? 'Replies are read aloud (click to mute)' : 'Replies are muted (click to read aloud)';
@@ -475,6 +479,7 @@ function renderTabs() {
     tab('chat', 'Chat', unread && S.tab !== 'chat' ? h('span', { class: 'badge' }, unread) : null),
     studyOf(id) ? tab('learning', 'Learning') : null,
     tab('activity', 'Activity'),
+    tab('tokens', 'Tokens'),
     id === MGR ? null : tab('tasks', 'Tasks', n ? h('span', { class: 'pill running' }, n) : null));
 }
 
@@ -501,6 +506,11 @@ async function renderBody() {
   } else if (S.tab === 'learning') {
     V.actFeed = null;
     renderLearning(id);
+  } else if (S.tab === 'tokens') {
+    V.actFeed = null;
+    const el = h('div');
+    V.body.replaceChildren(el);
+    tokens.panelTab(el, id);
   } else if (S.tab === 'activity') {
     V.actFeed = h('div', { class: 'feed' });
     V.body.replaceChildren(V.actFeed);
@@ -1020,11 +1030,15 @@ world.setAmbient(prefs.ambient);
 setMuted(!prefs.voice);
 document.querySelectorAll('#zoomCtl button').forEach(b => b.onclick = () => world.setZoom(b.dataset.z));
 
+// ------------------------------------------------------------------ token usage
+const tokens = createTokens({ h, api, face, iconEl, S, MGR, openModal, modalKind: () => modalKind, openTask });
+
 // ------------------------------------------------------------------ top bar buttons
 $('#btnClaude').onclick = () => setView({ kind: 'agent', id: MGR }, 'chat');
 $('#btnMeeting').onclick = () => S.meeting ? setView({ kind: 'meeting' }) : openMeetingSetup();
 $('#btnTasks').onclick = () => openBoard();
 $('#btnFiles').onclick = () => openFiles('');
+$('#btnTokens').onclick = () => tokens.open();
 $('#btnVoice').onclick = () => { prefs.voice = !prefs.voice; savePrefs(); setMuted(!prefs.voice); renderTop(); toast(prefs.voice ? 'Replies will be read aloud' : 'Muted', 'info'); };
 $('#btnSettings').onclick = openSettings;
 setInterval(() => { renderQuota(); if (S.view.kind === 'agent') renderAgentHeader(); }, 30000);
