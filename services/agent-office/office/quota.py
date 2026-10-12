@@ -146,13 +146,12 @@ class QuotaGuard:
                 if self.o.quota_until and now >= self.o.quota_until:
                     await self.resume()
                 elif self.o.quota_until > now:
-                    if self.o.store.get("quota_known", False):
-                        pass                                       # the reset time is known: wait for it
-                    elif now - self._last_probe >= PROBE_S:        # did it come back early?
+                    if now - self._last_probe >= PROBE_S:
                         self._last_probe = now
-                        await self.refresh()
+                        await self.refresh()                       # keeps the usage shown everywhere current
                         rows = self.usage.get("rows", [])
-                        if rows and all((_pct(r) or 0) > 0 for r in rows):
+                        # with a known reset time, wait for it; otherwise resume as soon as quota is back
+                        if not self.o.store.get("quota_known", False) and rows and all((_pct(r) or 0) > 0 for r in rows):
                             await self.resume(early=True)
                 else:
                     if now - last_usage >= 180:                    # keep the top bar fresh
