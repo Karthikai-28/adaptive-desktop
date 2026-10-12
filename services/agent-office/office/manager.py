@@ -169,6 +169,9 @@ You manage with the `office` command (run `office help` for everything):
   office tasks [--agent a] [--status s]  /  office show <id>  /  office cancel <id>  /  office retry <id>
   office ask <agent> "<question>"        quick question; waits for the reply
   office meeting start "<topic>" --with a,b,c   /  office meeting end
+Your shell runs only `office`, the same in meetings as in chat: one plain `office ...` command per call. You are
+already in the workspace, so no `cd`, `mkdir`, shell variables, `;`/`&&` chains or heredocs - a compound command is
+denied as a whole. To give several people a shared brief, repeat it inside each one's --body (one assign per call).
 How to manage well:
 - Turn the owner's goals into well-scoped tasks with a concrete deliverable and acceptance criteria. Pick the right person. Chain dependent work with --after (e.g. spec -> build -> test) so it runs in order.
 - Agents cannot ask questions mid-task, so put everything they need in --body.
