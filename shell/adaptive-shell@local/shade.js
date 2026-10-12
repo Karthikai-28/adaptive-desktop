@@ -39,7 +39,7 @@ const VERIFICATION_PATH = GLib.build_filenamev([
 
 // Layout bounds for _fitToMonitor().
 const NOTIFICATION_MIN_HEIGHT = 220;
-const MIN_SYSTEM_HEIGHT = 260;
+const MIN_SYSTEM_HEIGHT = 120;
 
 // Apple's dark-appearance system colours. Blue is the one UI accent; indigo
 // and cyan only tell data series apart; orange and red are status.
@@ -996,7 +996,7 @@ var Shade = class Shade {
         if (!this._systemScroll || !this._systemSection)
             return;
 
-        const monitor = Main.layoutManager.primaryMonitor;
+        const monitor = Main.layoutManager.findMonitorForActor(this._dateMenu) || Main.layoutManager.primaryMonitor;
         if (!monitor)
             return;
 
@@ -1010,7 +1010,7 @@ var Shade = class Shade {
 
         // Room kept for the panel, the popup's own chrome and header, and
         // enough of the notification list to be worth showing.
-        const reserved = 170 + NOTIFICATION_MIN_HEIGHT;
+        const reserved = 260 + NOTIFICATION_MIN_HEIGHT;
         const cap = Math.max(MIN_SYSTEM_HEIGHT, monitor.height - reserved);
         const height = Math.min(natural, cap);
 

@@ -2594,13 +2594,13 @@
 
 .adaptive-island-pill {
     border-radius: 9999px;
-    background-color: rgba(15, 23, 42, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.22);
+    background-color: rgba(28, 28, 30, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
     padding: 0 10px;
-    height: 28px;
+    height: 24px;
     color: #ffffff;
-    transition-duration: 250ms;
+    transition-duration: 160ms;
 }
 
 .adaptive-island-pill:hover {
@@ -2608,15 +2608,15 @@
 }
 
 .adaptive-island-pill-idle {
-    min-width: 148px;
+    min-width: 0;
 }
 
 .adaptive-island-pill-compact {
-    min-width: 220px;
+    min-width: 0;
 }
 
 .adaptive-island-pill-inner {
-    spacing: 6px;
+    spacing: 12px;
 }
 
 .adaptive-island-idle-box {
@@ -2634,7 +2634,7 @@
 }
 
 .adaptive-island-spark-cyan {
-    color: #38bdf8;
+    color: #0a84ff;
 }
 
 .adaptive-island-spark-amber {
@@ -2646,12 +2646,15 @@
 }
 
 .adaptive-island-compact-box {
-    spacing: 6px;
+    width: 200px;
+    spacing: 8px;
+    padding-left: 12px;
+    border-left: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 .adaptive-island-compact-icon {
     font-size: 12px;
-    color: #38bdf8;
+    color: #0a84ff;
 }
 
 .adaptive-island-compact-label {
@@ -2661,16 +2664,17 @@
 }
 
 .adaptive-island-compact-secondary {
+    max-width: 64px;
     font-size: 11px;
     color: rgba(255, 255, 255, 0.65);
 }
 
 .adaptive-island-satellite {
     width: 32px;
-    height: 28px;
+    height: 24px;
     border-radius: 9999px;
-    background-color: rgba(15, 23, 42, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.22);
+    background-color: rgba(28, 28, 30, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     color: #ffffff;
     text-align: center;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -2678,13 +2682,13 @@
 
 .adaptive-island-satellite-icon {
     font-size: 12px;
-    color: #38bdf8;
+    color: #0a84ff;
 }
 
 /* Floating Overlay HUD */
 .adaptive-island-overlay {
     border-radius: 24px;
-    background-color: rgba(15, 23, 42, 0.94);
+    background-color: rgba(28, 28, 30, 0.96);
     border: 1px solid rgba(255, 255, 255, 0.24);
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
     color: #ffffff;
@@ -2703,7 +2707,7 @@
 
 .adaptive-island-card-icon {
     font-size: 13px;
-    color: #38bdf8;
+    color: #0a84ff;
 }
 
 .adaptive-island-card-title {
@@ -2733,7 +2737,15 @@
 }
 
 .adaptive-island-card-btn.pinned {
-    color: #38bdf8;
+    color: #0a84ff;
+}
+
+.adaptive-island-card {
+    spacing: 12px;
+}
+
+.adaptive-island-actions {
+    spacing: 8px;
 }
 
 .adaptive-island-card-body {
@@ -2788,7 +2800,7 @@
 }
 
 .adaptive-island-fill-cyan {
-    background-color: #38bdf8;
+    background-color: #0a84ff;
 }
 
 .adaptive-island-fill-amber {
@@ -2843,7 +2855,7 @@
 }
 
 .adaptive-island-terminal-line.active {
-    color: #38bdf8;
+    color: #0a84ff;
 }
 
 .adaptive-island-media-art {
@@ -2904,8 +2916,8 @@
 /* Theme 1: Liquid Glass (Default) */
 .adaptive-island-theme-liquid-glass.adaptive-island-overlay {
     border-radius: 24px;
-    background-color: rgba(15, 23, 42, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.22);
+    background-color: rgba(28, 28, 30, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .adaptive-island-theme-liquid-glass .adaptive-island-pill {
@@ -2941,4 +2953,63 @@
 .adaptive-island-pill.critical,
 .adaptive-island-overlay.critical {
     border-color: #f43f5e !important;
+}
+
+.adaptive-island-center {
+    spacing: 10px;
+    padding-bottom: 14px;
+}
+
+.adaptive-island-embedded.adaptive-island-overlay {
+    padding: 12px;
+    border-radius: 16px;
+    box-shadow: none;
+}
+
+.adaptive-island-chip:checked {
+    background-color: rgba(10, 132, 255, 0.22);
+    color: #ffffff;
+}
+
+/* AI usage card: how much of each plan's limits is used */
+.adaptive-island-fill-red {
+    background-color: #f87171;
+}
+
+.adaptive-island-usage {
+    spacing: 4px;
+}
+
+.adaptive-island-usage-rows {
+    spacing: 2px;
+}
+
+.adaptive-island-usage-row {
+    spacing: 8px;
+    padding-top: 2px;
+}
+
+.adaptive-island-usage-label {
+    min-width: 46px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.adaptive-island-usage-value {
+    font-size: 11px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.adaptive-island-usage-caution {
+    color: #fdba74;
+}
+
+.adaptive-island-usage-critical {
+    color: #fca5a5;
+}
+
+.adaptive-island-usage-reset {
+    padding-left: 54px;
 }

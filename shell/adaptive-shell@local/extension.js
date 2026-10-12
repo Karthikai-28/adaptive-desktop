@@ -547,7 +547,13 @@ class AdaptiveShellV16 {
         this._lockScreenStop();
         this._lockActive = false;
 
-        // Before anything else: the shade holds GNOME's own message list and
+        // The island owns activity controls embedded in the shade.
+        if (this._dynamicIsland) {
+            this._dynamicIsland.detach();
+            this._dynamicIsland = null;
+        }
+
+        // The shade holds GNOME's own message list and
         // has to hand it back intact whatever else happens during teardown.
         if (this._shade) {
             this._shade.detach();
@@ -569,11 +575,6 @@ class AdaptiveShellV16 {
         if (this._projectIndicator) {
             this._projectIndicator.detach();
             this._projectIndicator = null;
-        }
-
-        if (this._dynamicIsland) {
-            this._dynamicIsland.detach();
-            this._dynamicIsland = null;
         }
 
         if (this._shellActions) {

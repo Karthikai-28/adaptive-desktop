@@ -1,10 +1,12 @@
 // Dynamic Island AI Quota Provider
 //
-// Telemetry provider for Claude Code and agy (Gemini on Google AI Pro).
-// Reads ONLY non-secret local sources (localhost :8790/api/usage & transcript.jsonl).
+// How much of each AI plan's limits is used: Codex, Claude and Gemini, side by side.
+// quotaSnapshot.py reads what each tool already records on this machine (Codex session rollouts,
+// Claude Code's cached plan usage, agy's /usage via the Agent Office on loopback) and prints one
+// shape per provider: { ts, stale, error, windows: [{ label, used, resetsAt, expired }] }.
 // Hard rule: NEVER reads credentials, tokens, or calls external APIs.
 
-/* exported IslandQuotaProvider */
+/* exported IslandQuotaProvider, describeUsage, PROVIDERS */
 /* global require, module, setTimeout, clearTimeout */
 
 let Gio, GLib;
@@ -41,14 +43,69 @@ const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {} } = Types;
 
 const DEFAULT_ACTIVE_POLL_MS = 60000;   // 60s when visible/compact
 const DEFAULT_IDLE_POLL_MS   = 300000;  // 300s when dormant/idle
-const USAGE_URL = 'http://127.0.0.1:8790/api/usage';
+
+var PROVIDERS = [['codex', 'Codex'], ['claude', 'Claude'], ['gemini', 'Gemini']];
+const CAUTION_USED = 80;
+const CRITICAL_USED = 95;
+const LEVELS = { normal: 0, caution: 1, critical: 2 };
+
+const _blank = error => ({ ts: 0, stale: true, error: error || 'Not read yet', windows: [] });
+
+function _clean(p) {
+    if (!p || typeof p !== 'object')
+        return _blank('Unavailable');
+    const windows = (Array.isArray(p.windows) ? p.windows : []).filter(w =>
+        w && typeof w.used === 'number' && isFinite(w.used) && w.used >= 0 && w.used <= 100);
+    return { ts: Number(p.ts) || 0, stale: !!p.stale, error: p.error ? String(p.error) : '', windows };
+}
+
+// The tightest live window of a provider: the one closest to its limit.
+function _tightest(p, now) {
+    let best = null;
+    for (const w of p.windows) {
+        if (w.expired || w.resetsAt <= now)
+            continue;
+        if (!best || w.used > best.used)
+            best = w;
+    }
+    return best;
+}
+
+function _level(used) {
+    return used >= CRITICAL_USED ? 'critical' : used >= CAUTION_USED ? 'caution' : 'normal';
+}
+
+// What the usage card shows, as plain data (kept out of the widgets so it can be tested headless).
+function describeUsage(data, now) {
+    now = now || Date.now() / 1000;
+    return PROVIDERS.map(([key, name]) => {
+        const p = _clean((data || {})[key]);
+        const rows = p.windows.map(w => {
+            const expired = w.expired || w.resetsAt <= now;
+            return {
+                label: w.label,
+                used: expired ? null : Math.round(w.used),
+                text: expired ? 'reset, awaiting update' : `${Math.round(w.used)}% used`,
+                resetsAt: w.resetsAt,
+                level: expired ? 'normal' : _level(w.used),
+            };
+        });
+        const tight = _tightest(p, now);
+        return {
+            key, name, rows,
+            ts: p.ts,
+            stale: p.stale,
+            unavailable: rows.length ? '' : (p.error || 'Unavailable'),
+            level: tight ? _level(tight.used) : 'normal',
+        };
+    });
+}
 
 var IslandQuotaProvider = class IslandQuotaProvider {
     constructor(options = {}) {
         this._bus = options.bus || null;
         this._activePollMs = options.activePollMs || DEFAULT_ACTIVE_POLL_MS;
         this._idlePollMs = options.idlePollMs || DEFAULT_IDLE_POLL_MS;
-        this._usageUrl = options.usageUrl || USAGE_URL;
         this._transcriptPath = options.transcriptPath || null;
         this._customFetcher = options.fetcher || null; // for tests/mocking
 
@@ -56,14 +113,10 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         this._isDormant = false;
         this._destroyed = false;
 
-        this._claudeData = {
-            window5h: { remaining: '100%', percent: 100, resets: '' },
-            weekly:   { remaining: '100%', percent: 100, resets: '' },
-            ts: 0,
-            stale: false,
-            staleSince: 0,
-            error: '',
-        };
+        this._usage = { codex: _blank(), claude: _blank(), gemini: _blank() };
+        this._levels = { codex: 'normal', claude: 'normal', gemini: 'normal' };
+        this._peak = { codex: 0, claude: 0, gemini: 0 };
+        this._error = '';
 
         this._agyData = {
             status: 'healthy',
@@ -75,9 +128,7 @@ var IslandQuotaProvider = class IslandQuotaProvider {
             lastTurnAt: '',
         };
 
-        this._prev5hPercent = 100;
-        this._prevWeeklyPercent = 100;
-
+        this._snapshotProcess = null;
         this._transcriptMonitor = null;
         this._transcriptCancellable = null;
     }
@@ -85,7 +136,7 @@ var IslandQuotaProvider = class IslandQuotaProvider {
     init() {
         this._destroyed = false;
         this._initAgyWatcher();
-        this.pollClaude();
+        this.poll();
         this._scheduleNextPoll();
     }
 
@@ -109,168 +160,123 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         const interval = this._isDormant ? this._idlePollMs : this._activePollMs;
         if (typeof GLib !== 'undefined' && GLib.timeout_add) {
             this._pollTimerId = GLib.timeout_add(GLib.PRIORITY_LOW, interval, () => {
-                this.pollClaude();
+                this.poll();
                 return GLib.SOURCE_CONTINUE;
             });
         } else if (typeof setTimeout !== 'undefined') {
             this._pollTimerId = setTimeout(() => {
-                this.pollClaude();
+                this.poll();
                 this._scheduleNextPoll();
             }, interval);
         }
     }
 
+    // kept for callers written before Codex and Gemini were added
     pollClaude() {
+        this.poll();
+    }
+
+    poll() {
         if (this._destroyed)
             return;
 
         if (this._customFetcher) {
             this._customFetcher((err, data) => {
                 if (err)
-                    this._handleClaudeFailure(err.message || String(err));
+                    this.handleFailure(err.message || String(err));
                 else
-                    this._handleClaudeSuccess(data);
+                    this.applySnapshot(data);
             });
             return;
         }
 
-        // Standard Gio HTTP async read from local agent-office loopback
-        if (typeof Gio !== 'undefined' && Gio.File) {
-            try {
-                const file = Gio.File.new_for_uri(this._usageUrl);
-                file.load_contents_async(null, (source, res) => {
-                    try {
-                        const [, contents] = source.load_contents_finish(res);
-                        const raw = new TextDecoder('utf-8').decode(contents);
-                        const parsed = JSON.parse(raw);
-                        this._handleClaudeSuccess(parsed);
-                    } catch (e) {
-                        this._handleClaudeFailure(e.message || 'Fetch failed');
-                    }
-                });
-            } catch (e) {
-                this._handleClaudeFailure(e.message || 'Connection error');
-            }
-        }
-    }
-
-    _handleClaudeSuccess(data) {
-        if (!data || !Array.isArray(data.rows)) {
-            this._handleClaudeFailure('Invalid usage payload');
+        if (typeof Gio === 'undefined' || !Me || this._snapshotProcess)
             return;
-        }
-
-        const now = Math.floor(Date.now() / 1000);
-        let parsed5h = null;
-        let parsedWeek = null;
-
-        for (const row of data.rows) {
-            const remStr = String(row.remaining || '');
-            const pct = parseInt(remStr.replace('%', ''), 10);
-            const val = {
-                remaining: remStr || 'N/A',
-                percent: isNaN(pct) ? null : pct,
-                resets: row.resets || '',
-            };
-            if (row.window === '5h')
-                parsed5h = val;
-            else if (row.window === 'week')
-                parsedWeek = val;
-        }
-
-        if (parsed5h)
-            this._claudeData.window5h = parsed5h;
-        if (parsedWeek)
-            this._claudeData.weekly = parsedWeek;
-
-        this._claudeData.ts = data.ts || now;
-        this._claudeData.stale = false;
-        this._claudeData.staleSince = 0;
-        this._claudeData.error = '';
-
-        this._evaluateClaudeThresholds();
-    }
-
-    _handleClaudeFailure(errorMsg) {
-        const now = Math.floor(Date.now() / 1000);
-        this._claudeData.stale = true;
-        if (!this._claudeData.staleSince)
-            this._claudeData.staleSince = now;
-        this._claudeData.error = errorMsg;
-
-        if (this._bus) {
-            this._bus.emitEvent(IslandEvents.QUOTA_UPDATED || 'QUOTA_UPDATED', {
-                provider: 'quota',
-                priority: IslandPriority.P4_AMBIENT || 4,
-                dwellMs: IslandDwellMs.P4_AMBIENT || 2000,
-                data: this.getData(),
+        try {
+            const proc = Gio.Subprocess.new(['python3', `${Me.path}/quotaSnapshot.py`],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+            this._snapshotProcess = proc;
+            proc.communicate_utf8_async(null, null, (source, res) => {
+                this._snapshotProcess = null;
+                if (this._destroyed)
+                    return;
+                try {
+                    const [, output] = source.communicate_utf8_finish(res);
+                    if (!source.get_successful())
+                        throw new Error('Usage snapshot unavailable');
+                    this.applySnapshot(JSON.parse(output));
+                } catch (e) {
+                    this.handleFailure(e.message || 'Usage snapshot unavailable');
+                }
             });
+        } catch (e) {
+            this.handleFailure(e.message || 'Usage snapshot unavailable');
         }
     }
 
-    _evaluateClaudeThresholds() {
-        const cur5h = this._claudeData.window5h.percent;
-        if (cur5h === null)
+    applySnapshot(data) {
+        const now = Date.now() / 1000;
+        for (const [key] of PROVIDERS)
+            this._usage[key] = _clean((data || {})[key]);
+        this._error = '';
+
+        // Speak up only when something changes: a provider crossing 80% or 95% used, or a reset.
+        let event = null;
+        for (const [key, name] of PROVIDERS) {
+            const tight = _tightest(this._usage[key], now);
+            if (!tight)
+                continue;
+            const level = _level(tight.used);
+            const before = this._levels[key];
+            const used = Math.round(tight.used);
+            const resets = new Date(tight.resetsAt * 1000).toISOString();
+            if (LEVELS[level] > LEVELS[before]) {
+                const critical = level === 'critical';
+                const e = {
+                    type: critical ? IslandEvents.QUOTA_CRITICAL_BREACH || 'QUOTA_CRITICAL_BREACH'
+                        : IslandEvents.QUOTA_CAUTION_BREACH || 'QUOTA_CAUTION_BREACH',
+                    payload: {
+                        provider: 'quota',
+                        priority: critical ? IslandPriority.P1_URGENT || 1 : IslandPriority.P2_HIGH || 2,
+                        dwellMs: critical ? IslandDwellMs.P1_STICKY || -1 : IslandDwellMs.P2_CAUTION || 6000,
+                        message: `${name} ${tight.label} limit ${used}% used`,
+                        source: key, window: tight.label, used, resets,
+                        canPauseTasks: critical,
+                    },
+                };
+                if (!event || LEVELS[level] > LEVELS[event.level])
+                    event = { ...e, level };
+            } else if (this._peak[key] >= 60 && used <= 20 && !event) {
+                event = {
+                    level: 'normal',
+                    type: IslandEvents.QUOTA_RESET_CONFIRMED || 'QUOTA_RESET_CONFIRMED',
+                    payload: {
+                        provider: 'quota',
+                        priority: IslandPriority.P3_NORMAL || 3,
+                        dwellMs: IslandDwellMs.P3_NORMAL || 3000,
+                        message: `${name} limits reset (${used}% used)`,
+                        source: key, window: tight.label, used, resets,
+                    },
+                };
+            }
+            this._levels[key] = level;
+            this._peak[key] = used <= 20 ? used : Math.max(this._peak[key], used);
+        }
+
+        if (!this._bus)
             return;
+        if (event)
+            this._bus.emitEvent(event.type, { ...event.payload, data: this.getData() });
+        else if (this._bus._notifyStateChange)
+            this._bus._notifyStateChange();       // refresh open views without surfacing anything
+    }
 
-        // 1. Critical breach (<= 5%)
-        if (cur5h <= 5 && (this._prev5hPercent > 5 || this._prev5hPercent === null)) {
-            if (this._bus) {
-                this._bus.emitEvent(IslandEvents.QUOTA_CRITICAL_BREACH || 'QUOTA_CRITICAL_BREACH', {
-                    provider: 'quota',
-                    priority: IslandPriority.P1_URGENT || 1,
-                    dwellMs: IslandDwellMs.P1_STICKY || -1,
-                    message: `Claude quota critical (${cur5h}% remaining)`,
-                    window: '5h',
-                    remaining: `${cur5h}%`,
-                    resets: this._claudeData.window5h.resets,
-                    canPauseTasks: true,
-                    data: this.getData(),
-                });
-            }
-        }
-        // 2. Caution breach (<= 20%)
-        else if (cur5h <= 20 && cur5h > 5 && this._prev5hPercent > 20) {
-            if (this._bus) {
-                this._bus.emitEvent(IslandEvents.QUOTA_CAUTION_BREACH || 'QUOTA_CAUTION_BREACH', {
-                    provider: 'quota',
-                    priority: IslandPriority.P2_HIGH || 2,
-                    dwellMs: IslandDwellMs.P2_CAUTION || 6000,
-                    message: `Claude quota low (${cur5h}% remaining)`,
-                    window: '5h',
-                    remaining: `${cur5h}%`,
-                    resets: this._claudeData.window5h.resets,
-                    data: this.getData(),
-                });
-            }
-        }
-        // 3. Reset confirmed (jump upward > 20%)
-        else if (cur5h >= 80 && this._prev5hPercent !== null && this._prev5hPercent < 40) {
-            if (this._bus) {
-                this._bus.emitEvent(IslandEvents.QUOTA_RESET_CONFIRMED || 'QUOTA_RESET_CONFIRMED', {
-                    provider: 'quota',
-                    priority: IslandPriority.P3_NORMAL || 3,
-                    dwellMs: IslandDwellMs.P3_NORMAL || 3000,
-                    message: `Claude rate limits refreshed (${cur5h}%)`,
-                    window: '5h',
-                    remaining: `${cur5h}%`,
-                    data: this.getData(),
-                });
-            }
-        } else {
-            // Routine update
-            if (this._bus) {
-                this._bus.emitEvent(IslandEvents.QUOTA_UPDATED || 'QUOTA_UPDATED', {
-                    provider: 'quota',
-                    priority: IslandPriority.P4_AMBIENT || 4,
-                    dwellMs: IslandDwellMs.P4_AMBIENT || 2000,
-                    data: this.getData(),
-                });
-            }
-        }
-
-        this._prev5hPercent = cur5h;
-        this._prevWeeklyPercent = this._claudeData.weekly.percent;
+    handleFailure(errorMsg) {
+        this._error = errorMsg;
+        for (const [key] of PROVIDERS)
+            this._usage[key] = { ...this._usage[key], stale: true };
+        if (this._bus && this._bus._notifyStateChange)
+            this._bus._notifyStateChange();
     }
 
     _initAgyWatcher() {
@@ -372,31 +378,35 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         this._agyData.lastTurnAt = lastTimestamp;
         this._agyData.status = 'healthy';
 
-        if (this._bus) {
-            this._bus.emitEvent(IslandEvents.QUOTA_UPDATED || 'QUOTA_UPDATED', {
-                provider: 'quota',
-                priority: IslandPriority.P4_AMBIENT || 4,
-                dwellMs: IslandDwellMs.P4_AMBIENT || 2000,
-                data: this.getData(),
-            });
-        }
+        if (this._bus && this._bus._notifyStateChange)
+            this._bus._notifyStateChange();
     }
 
     refresh() {
-        this.pollClaude();
+        this.poll();
         if (this._transcriptPath)
             this._readAgyTranscript(this._transcriptPath);
     }
 
     getData() {
+        const levels = Object.values(this._levels);
         return {
-            claude: { ...this._claudeData },
+            codex: { ...this._usage.codex },
+            claude: { ...this._usage.claude },
+            gemini: { ...this._usage.gemini },
             agy: { ...this._agyData },
+            error: this._error,
+            criticalBreach: levels.includes('critical'),
+            cautionBreach: levels.includes('caution'),
         };
     }
 
     destroy() {
         this._destroyed = true;
+        if (this._snapshotProcess) {
+            this._snapshotProcess.force_exit();
+            this._snapshotProcess = null;
+        }
         if (this._pollTimerId && typeof GLib !== 'undefined' && GLib.source_remove) {
             GLib.source_remove(this._pollTimerId);
             this._pollTimerId = 0;
@@ -416,5 +426,5 @@ var IslandQuotaProvider = class IslandQuotaProvider {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { IslandQuotaProvider };
+    module.exports = { IslandQuotaProvider, describeUsage, PROVIDERS };
 }

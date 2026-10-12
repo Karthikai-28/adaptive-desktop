@@ -47,66 +47,81 @@ async function main() {
     // =========================================================================
     // 1. AI Quota Provider Tests
     // =========================================================================
-    console.log('-- Provider 1: AI Quota (Claude & agy) --');
+    console.log('-- Provider 1: AI usage (Codex, Claude, Gemini) --');
 
     let quotaEvents = [];
     const mockBus = {
         emitEvent: (type, payload) => quotaEvents.push({ type, payload }),
     };
 
-    // Test 1.1: Claude standard parse
-    const mockUsageData = {
-        ts: 1791708242,
-        rows: [
-            { window: 'week', remaining: '72%', resets: '2026-10-15T20:18:26Z' },
-            { window: '5h', remaining: '43%', resets: '2026-10-11T10:36:31Z' },
-        ],
-        error: '',
-    };
+    // Test 1.1: one shape for every provider, in % used
+    const nowS = Math.floor(Date.now() / 1000);
+    const snap = (codex5h, claude5h) => ({
+        codex: { ts: nowS, stale: false, error: '', windows: [
+            { label: '5h', used: codex5h, resetsAt: nowS + 3600, expired: false },
+            { label: 'Weekly', used: 28, resetsAt: nowS + 86400, expired: false }] },
+        claude: { ts: nowS, stale: false, error: '', windows: [
+            { label: '5h', used: claude5h, resetsAt: nowS + 7200, expired: false }] },
+        gemini: { ts: 0, stale: true, error: 'The Agent Office is not running', windows: [] },
+    });
+    const mockUsageData = snap(40, 17);
+    let nextSnap = mockUsageData;
 
     const quota = new IslandQuotaProvider({
         bus: mockBus,
-        fetcher: (cb) => cb(null, mockUsageData),
+        fetcher: (cb) => cb(null, nextSnap),
     });
 
-    quota.pollClaude();
+    quota.poll();
     const qData = quota.getData();
-    check(qData.claude.window5h.percent === 43, 'quota: parsed 5h percentage (43%)');
-    check(qData.claude.weekly.percent === 72, 'quota: parsed weekly percentage (72%)');
-    check(qData.claude.stale === false, 'quota: not stale on successful query');
+    check(qData.codex.windows[0].used === 40, 'quota: Codex 5h used (40%)');
+    check(qData.claude.windows[0].used === 17, 'quota: Claude 5h used (17%)');
+    check(qData.gemini.windows.length === 0 && qData.gemini.error.includes('not running'), 'quota: Gemini unavailable says why');
+    check(quotaEvents.length === 0, 'quota: a routine reading surfaces nothing');
 
-    // Test 1.2: Caution threshold breach (<= 20%)
+    // Test 1.2: Caution when a window reaches 80% used
     quotaEvents = [];
-    quota._handleClaudeSuccess({
-        ts: 1791708300,
-        rows: [
-            { window: 'week', remaining: '70%', resets: '2026-10-15T20:18:26Z' },
-            { window: '5h', remaining: '18%', resets: '2026-10-11T10:36:31Z' },
-        ],
-    });
-    check(quotaEvents.some(e => e.type === 'QUOTA_CAUTION_BREACH'), 'quota: emitted QUOTA_CAUTION_BREACH at 18%');
+    nextSnap = snap(82, 17);
+    quota.poll();
+    const caution = quotaEvents.find(e => e.type === 'QUOTA_CAUTION_BREACH');
+    check(!!caution, 'quota: emitted QUOTA_CAUTION_BREACH at 82% used');
+    check(caution && caution.payload.message === 'Codex 5h limit 82% used', 'quota: caution names the provider and window');
+    check(quota.getData().cautionBreach === true, 'quota: caution flag set for the pill');
+    quotaEvents = [];
+    quota.poll();
+    check(quotaEvents.length === 0, 'quota: no repeat while the level stays the same');
 
-    // Test 1.3: Critical threshold breach (<= 5%)
+    // Test 1.3: Critical at 95% used
     quotaEvents = [];
-    quota._handleClaudeSuccess({
-        ts: 1791708350,
-        rows: [
-            { window: 'week', remaining: '68%', resets: '2026-10-15T20:18:26Z' },
-            { window: '5h', remaining: '4%', resets: '2026-10-11T10:36:31Z' },
-        ],
-    });
-    check(quotaEvents.some(e => e.type === 'QUOTA_CRITICAL_BREACH'), 'quota: emitted QUOTA_CRITICAL_BREACH at 4%');
+    nextSnap = snap(82, 96);
+    quota.poll();
     const critEvent = quotaEvents.find(e => e.type === 'QUOTA_CRITICAL_BREACH');
-    check(critEvent.payload.dwellMs === -1, 'quota: critical breach has sticky dwell (-1)');
+    check(!!critEvent && critEvent.payload.message === 'Claude 5h limit 96% used', 'quota: emitted QUOTA_CRITICAL_BREACH at 96% used');
+    check(critEvent && critEvent.payload.dwellMs === -1, 'quota: critical breach has sticky dwell (-1)');
 
-    // Test 1.4: Stale flag and fallback on fetch failure
-    quota._handleClaudeFailure('Connection refused');
+    // Test 1.4: a reset is announced once usage falls back
+    quotaEvents = [];
+    nextSnap = snap(82, 3);
+    quota.poll();
+    check(quotaEvents.some(e => e.type === 'QUOTA_RESET_CONFIRMED'), 'quota: reset confirmed when Claude drops to 3%');
+
+    // Test 1.5: failure keeps the last reading, marked stale
+    quota.handleFailure('Usage snapshot unavailable');
     const staleData = quota.getData();
-    check(staleData.claude.stale === true, 'quota: marked stale on connection error');
-    check(staleData.claude.window5h.percent === 4, 'quota: retained cached values when stale');
-    check(staleData.claude.error === 'Connection refused', 'quota: recorded error message');
+    check(staleData.claude.stale === true, 'quota: marked stale on failure');
+    check(staleData.claude.windows[0].used === 3, 'quota: retained last values when stale');
+    check(staleData.error === 'Usage snapshot unavailable', 'quota: recorded error message');
 
-    // Test 1.5: agy log parsing and Google AI Pro server gap representation
+    // Test 1.6: the card's model
+    const { describeUsage } = require(path.join(shellDir, 'islandQuota.js'));
+    const model = describeUsage({ ...snap(82, 96), codex: { ts: nowS, windows: [
+        { label: '5h', used: 100, resetsAt: nowS - 10, expired: true }] } }, nowS);
+    check(model.map(p => p.name).join() === 'Codex,Claude,Gemini', 'quota: card lists Codex, Claude, Gemini');
+    check(model[0].rows[0].text === 'reset, awaiting update', 'quota: an ended window never invents a refill');
+    check(model[1].rows[0].text === '96% used' && model[1].rows[0].level === 'critical', 'quota: card shows % used with its level');
+    check(model[2].unavailable.includes('not running'), 'quota: card says why Gemini is missing');
+
+    // Test 1.7: agy log parsing and Google AI Pro server gap representation
     const sampleLogLines = [
         JSON.stringify({ step_index: 1, input_tokens: 1000, output_tokens: 200, cache_read_tokens: 5000, created_at: '2026-10-11T14:00:00Z' }),
         JSON.stringify({ step_index: 2, input_tokens: 1500, output_tokens: 300, cache_read_tokens: 8000, created_at: '2026-10-11T14:01:00Z' }),

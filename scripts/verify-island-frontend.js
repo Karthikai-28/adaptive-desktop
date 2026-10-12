@@ -134,6 +134,81 @@ ui._updateUI();
 state = ui.getState();
 check(state.uiState === IslandState.SATELLITE, "Concurrent activities resolve to SATELLITE state");
 
+// The panel clock must survive notifications, including long media titles.
+const { IslandAnchor } = require("../shell/adaptive-shell@local/islandUI.js");
+const anchor = new IslandAnchor(ui);
+const actor = () => ({ visible: true, text: "", add_style_class_name() {}, remove_style_class_name() {} });
+for (const key of ["_actor", "_pillButton", "_idleBox", "_idleClockLabel", "_idleSparkLabel",
+    "_compactBox", "_compactIconLabel", "_compactTextLabel", "_compactSecondaryLabel",
+    "_satelliteButton", "_satelliteIconLabel"])
+    anchor[key] = actor();
+anchor.syncClock("12:34");
+for (const type of ["TASK_STARTED", "TRACK_CHANGED", "TIMER_STARTED", "QUOTA_CAUTION_BREACH"]) {
+    anchor.renderState({ surfacedEvent: { type, payload: { title: "A long notification title" } }, quota: {} }, "liquid-glass");
+    check(anchor._idleBox.visible && anchor._idleClockLabel.text === "12:34", `Clock remains visible for ${type}`);
+    check(anchor._compactBox.visible, `Activity remains visible beside clock for ${type}`);
+}
+anchor.renderState({ quota: {}, multiActivity: {} }, "liquid-glass");
+check(anchor._idleBox.visible && !anchor._compactBox.visible, "Returning to idle preserves clock and removes activity");
+
+// Exercise an interrupted close using the actual overlay implementation.
+const vm = require("vm");
+const fs = require("fs");
+const context = {
+    module: { exports: {} }, require: require("module").createRequire(require.resolve("../shell/adaptive-shell@local/islandUI.js")),
+    imports: { gi: { Clutter: { AnimationMode: { EASE_OUT_CUBIC: 1, EASE_OUT_QUAD: 2 } } },
+        ui: { main: { layoutManager: {
+            findMonitorForActor: () => ({ x: 1920, width: 1280 }),
+        } } }, misc: { extensionUtils: { getCurrentExtension: () => null } } },
+    global: { stage: { connect: () => 1, disconnect() {} } },
+};
+vm.runInNewContext(fs.readFileSync(require.resolve("../shell/adaptive-shell@local/islandUI.js"), "utf8"), context);
+const overlay = new context.module.exports.IslandOverlay(ui);
+let transition;
+overlay._actor = {
+    opacity: 255, width: 400, visible: true,
+    set_width(w) { this.width = w; }, set_position(x, y) { this.x = x; this.y = y; },
+    remove_all_transitions() {}, ease(options) { transition = options; },
+};
+const anchorActor = {
+    get_transformed_position: () => [1920, 100], get_transformed_size: () => [100, 24],
+    connect: () => 1,
+};
+overlay.showOverlay(anchorActor);
+check(overlay._actor.x === 1932 && overlay._actor.y === 132, "Overlay respects monitor edge and panel vertical offset");
+overlay.hideOverlay();
+const closing = transition;
+overlay.showOverlay(anchorActor);
+closing.onComplete();
+check(overlay._actor.visible, "Interrupted closing callback cannot hide a reopened card");
+check(transition.duration === 220 && transition.translation_y === 0, "Reopening settles to the anchor without bounce");
+
+// Clicking the island opens the shared center even with an active event.
+const centerMenu = { isOpen: false, toggle() { this.isOpen = !this.isOpen; } };
+context.imports.ui.main.panel = { statusArea: { dateMenu: { menu: centerMenu } } };
+const centerUI = new context.module.exports.IslandUI(null, { backend });
+centerUI.toggleCenter();
+check(centerUI.isCenterOpen(), "Island opens the calendar and system notification center");
+centerUI.expand("timer");
+check(!centerUI.isExpanded(), "Floating preview stays closed while unified center is open");
+centerUI.toggleCenter();
+check(!centerUI.isCenterOpen(), "Second click closes the unified center");
+
+const usageOverlay = new context.module.exports.IslandOverlay(ui);
+usageOverlay._titleIcon = {};
+usageOverlay._titleLabel = {};
+usageOverlay._badgeLabel = {};
+const nowS = Date.now() / 1000;
+usageOverlay._renderQuotaData({ quota: { codex: { ts: nowS, windows: [
+    { label: "5h", used: 100, resetsAt: nowS + 3600 },
+    { label: "Weekly", used: 75, resetsAt: nowS - 10 },
+] } } });
+const usage = usageOverlay._usageModel;
+check(usage[0].rows[0].text === "100% used", "Exhausted Codex window shows 100% used");
+check(usage[0].rows[1].text === "reset, awaiting update", "Ended Codex window never invents a refill");
+check(usage[1].unavailable && usage[1].rows.length === 0, "Missing Claude limits never display sample values");
+check(usageOverlay._badgeLabel.text === "USED", "Usage card is labelled as used");
+
 // -- Suite 6: Teardown & Resource Cleanup --
 ui.detach();
 check(ui._attached === false, "UI successfully detached");

@@ -2,7 +2,7 @@
 //
 // Implements in-panel IslandAnchor on dateMenu and IslandOverlay on (Main && Main.layoutManager).uiGroup.
 // Provides idle, compact, satellite, and expanded presentation states for the 4 MVP features:
-// 1. AI Quota Monitor (Claude % + reset countdowns; agy session compute & limits)
+// 1. AI usage (how much of the Codex, Claude and Gemini limits is used, with reset times)
 // 2. Background AI Tasks (Task slug, progress %, live stdout log tail, emergency actions)
 // 3. Now-Playing Media (Album glyph, truncated marquee title, scrubber bar, transport controls)
 // 4. Focus Timers (Big digits, Pomodoro presets, +5m extend, 0% idle CPU)
@@ -46,6 +46,8 @@ function _loadModule(name) {
 
 const Types = _loadModule("islandTypes");
 const DynamicIsland = _loadModule("dynamicIsland");
+const { describeUsage = () => [] } = _loadModule("islandQuota");
+const USAGE_TRACK_PX = 132;
 const { DynamicIslandBackend } = DynamicIsland;
 const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {} } = Types;
 
@@ -96,6 +98,7 @@ var IslandAnchor = class IslandAnchor {
 
         this._actor = new St.BoxLayout({
             style_class: "adaptive-island-anchor",
+            y_align: Clutter.ActorAlign.CENTER,
             reactive: true,
             track_hover: true,
             can_focus: false,
@@ -130,7 +133,7 @@ var IslandAnchor = class IslandAnchor {
         });
 
         this._idleSparkLabel = new St.Label({
-            text: " ✦",
+            text: "✦",
             style_class: "adaptive-island-spark adaptive-island-spark-cyan",
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -156,6 +159,7 @@ var IslandAnchor = class IslandAnchor {
         this._compactTextLabel = new St.Label({
             text: "",
             style_class: "adaptive-island-compact-label",
+            x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
         if (this._compactTextLabel.clutter_text) {
@@ -206,11 +210,14 @@ var IslandAnchor = class IslandAnchor {
 
     _onMouseEnter() {
         this._clearGraceExitTimer();
+        if (this._ui.isCenterOpen()) return;
+        const state = this._ui.backend.getState();
+        if (!state.surfacedEvent && !(state.multiActivity && state.multiActivity.primary)) return;
         this._ui.backend.pauseDwell();
 
-        // 80ms hover intent dwell before expanding
+        // Deliberate hover intent avoids opening while crossing the panel.
         if (!this._hoverDwellTimerId) {
-            this._hoverDwellTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
+            this._hoverDwellTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 180, () => {
                 this._hoverDwellTimerId = 0;
                 this._ui.expand();
                 return GLib.SOURCE_REMOVE;
@@ -228,6 +235,8 @@ var IslandAnchor = class IslandAnchor {
         this._clearGraceExitTimer();
         this._graceExitTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
             this._graceExitTimerId = 0;
+            if (this._ui.isCenterOpen() || this._actor.hover || (this._ui._overlay.getActor() && this._ui._overlay.getActor().hover))
+                return GLib.SOURCE_REMOVE;
             this._ui.backend.resumeDwell();
             if (!this._ui.backend.getState().isPinned) {
                 this._ui.contract();
@@ -244,21 +253,7 @@ var IslandAnchor = class IslandAnchor {
     }
 
     _onPillClicked(event) {
-        const isExpanded = this._ui.isExpanded();
-        const state = this._ui.backend.getState();
-        if (!isExpanded && state.activityState === IslandState.IDLE && !state.surfacedEvent) {
-            // In idle mode, let the click propagate so dateMenu opens the native calendar
-            return Clutter.EVENT_PROPAGATE;
-        }
-
-        // When an activity is active or surfaced, click toggles pinning and expands
-        const isPinned = !state.isPinned;
-        this._ui.backend.setPinned(isPinned);
-        if (isPinned)
-            this._ui.expand();
-        else
-            this._ui.contract();
-
+        this._ui.toggleCenter();
         return Clutter.EVENT_STOP;
     }
 
@@ -314,6 +309,9 @@ var IslandAnchor = class IslandAnchor {
             this._idleSparkLabel.add_style_class_name("adaptive-island-spark-cyan");
         }
 
+        this._idleSparkLabel.visible = !hasSurfaced && !hasPrimary;
+
+        // Keep the clock present in every presentation state.
         // Decide display mode (Idle vs Compact vs Satellite)
         if (!hasSurfaced && !hasPrimary) {
             // 1. Idle state
@@ -326,7 +324,7 @@ var IslandAnchor = class IslandAnchor {
             // 2. Compact / Activity state
             this._pillButton.remove_style_class_name("adaptive-island-pill-idle");
             this._pillButton.add_style_class_name("adaptive-island-pill-compact");
-            this._idleBox.visible = false;
+            this._idleBox.visible = true;
             this._compactBox.visible = true;
 
             // Populate compact content
@@ -352,9 +350,7 @@ var IslandAnchor = class IslandAnchor {
 
         if (type.startsWith("QUOTA_")) {
             this._compactIconLabel.text = "✦";
-            const cld = quota.claude || {};
-            const cldVal = (typeof cld.fiveHourPercent === "number") ? cld.fiveHourPercent : (p.data && typeof p.data.percent === "number" ? p.data.percent : 43);
-            this._compactTextLabel.text = "Claude " + cldVal + "% · agy Active";
+            this._compactTextLabel.text = p.message || "AI usage";
             this._compactSecondaryLabel.text = "";
         } else if (type.startsWith("TASK_")) {
             this._compactIconLabel.text = "⟳";
@@ -429,8 +425,9 @@ var IslandAnchor = class IslandAnchor {
 // IslandOverlay: Floating 372px HUD mounted to (Main && Main.layoutManager).uiGroup
 // -----------------------------------------------------------------------------
 var IslandOverlay = class IslandOverlay {
-    constructor(uiController) {
+    constructor(uiController, embedded = false) {
         this._ui = uiController;
+        this._embedded = embedded;
         this._actor = null;
         this._blurEffect = null;
 
@@ -478,6 +475,8 @@ var IslandOverlay = class IslandOverlay {
         this._activeCardType = "quota";
         this._isExpanded = false;
         this._stageClickId = 0;
+        this._anchorAllocationId = 0;
+        this._anchorActor = null;
     }
 
     build() {
@@ -485,6 +484,7 @@ var IslandOverlay = class IslandOverlay {
 
         this._actor = new St.Widget({
             style_class: "adaptive-island-overlay",
+            layout_manager: new Clutter.BinLayout(),
             reactive: false,
             visible: false,
             can_focus: false,
@@ -493,10 +493,14 @@ var IslandOverlay = class IslandOverlay {
         });
 
         // Set dimensions (372px x 208px default)
-        this._actor.set_size(372, 208);
+        this._actor.set_width(400);
 
         const mainLayout = new St.BoxLayout({
             style_class: "adaptive-island-overlay-inner",
+            x_expand: true,
+            y_expand: true,
+            x_align: Clutter.ActorAlign.FILL,
+            y_align: Clutter.ActorAlign.FILL,
             vertical: true,
             reactive: true,
         });
@@ -515,8 +519,9 @@ var IslandOverlay = class IslandOverlay {
         });
 
         this._titleLabel = new St.Label({
-            text: "AI QUOTA MONITOR",
+            text: "AI usage",
             style_class: "adaptive-island-card-title",
+            x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
 
@@ -526,7 +531,6 @@ var IslandOverlay = class IslandOverlay {
             y_align: Clutter.ActorAlign.CENTER,
         });
 
-        const spacer = new St.Widget({ x_expand: true });
 
         this._pinButton = new St.Button({
             style_class: "adaptive-island-card-btn adaptive-island-pin-btn",
@@ -543,7 +547,6 @@ var IslandOverlay = class IslandOverlay {
         this._headerBox.add_child(this._titleIcon);
         this._headerBox.add_child(this._titleLabel);
         this._headerBox.add_child(this._badgeLabel);
-        this._headerBox.add_child(spacer);
         this._headerBox.add_child(this._pinButton);
         this._headerBox.add_child(this._closeButton);
         mainLayout.add_child(this._headerBox);
@@ -563,6 +566,18 @@ var IslandOverlay = class IslandOverlay {
         mainLayout.add_child(this._cardContentBox);
         this._actor.add_child(mainLayout);
 
+        if (this._embedded) {
+            this._pinButton.hide();
+            this._closeButton.hide();
+            this._actor.add_style_class_name("adaptive-island-embedded");
+            this._actor.set_width(-1);
+            this._actor.x_expand = true;
+            this._actor.opacity = 255;
+            this._actor.visible = true;
+            this._actor.reactive = true;
+            return;
+        }
+
         // Header button events
         this._pinButton.connect("clicked", () => {
             const isPinned = !this._ui.backend.getState().isPinned;
@@ -576,13 +591,11 @@ var IslandOverlay = class IslandOverlay {
         });
 
         // Hover tracking to pause/resume dwell while inside overlay
-        this._actor.connect("enter-event", () => this._ui.backend.pauseDwell());
-        this._actor.connect("leave-event", () => {
-            this._ui.backend.resumeDwell();
-            if (!this._ui.backend.getState().isPinned) {
-                this._ui.contract();
-            }
+        this._actor.connect("enter-event", () => {
+            this._ui._anchor._clearGraceExitTimer();
+            this._ui.backend.pauseDwell();
         });
+        this._actor.connect("leave-event", () => this._ui._anchor._onMouseLeave());
 
         // Optional Shell.BlurEffect
         if (Shell && Shell.BlurEffect) {
@@ -600,105 +613,25 @@ var IslandOverlay = class IslandOverlay {
 
     _buildQuotaCard() {
         this._quotaCard = new St.BoxLayout({
-            style_class: "adaptive-island-card adaptive-island-quota-card",
-            vertical: true,
+            style_class: "adaptive-island-card adaptive-island-quota-card", vertical: true,
         });
-
-        // Claude Sub-Card
-        const claudeBox = new St.BoxLayout({
-            style_class: "adaptive-island-subcard",
-            vertical: true,
-        });
-
-        const cldHeaderRow = new St.BoxLayout({ vertical: false });
-        cldHeaderRow.add_child(new St.Label({ text: "Claude", style_class: "adaptive-island-subcard-title" }));
-        cldHeaderRow.add_child(new St.Widget({ x_expand: true }));
-        this._claudePctLabel = new St.Label({ text: "43% left", style_class: "adaptive-island-val-bold" });
-        cldHeaderRow.add_child(this._claudePctLabel);
-        claudeBox.add_child(cldHeaderRow);
-
-        // 5h bar track
-        const cldTrack = new St.Widget({ style_class: "adaptive-island-progress-track" });
-        this._claudeBarFill = new St.Widget({ style_class: "adaptive-island-progress-fill adaptive-island-fill-amber" });
-        this._claudeBarFill.set_width(140);
-        cldTrack.add_child(this._claudeBarFill);
-        claudeBox.add_child(cldTrack);
-
-        const cldSubRow = new St.BoxLayout({ vertical: false });
-        this._claudeResetLabel = new St.Label({ text: "Rolling 5h · Resets in 1h 22m", style_class: "adaptive-island-subtext" });
-        cldSubRow.add_child(this._claudeResetLabel);
-        cldSubRow.add_child(new St.Widget({ x_expand: true }));
-        this._claudeWeeklyLabel = new St.Label({ text: "Weekly: 72%", style_class: "adaptive-island-subtext" });
-        cldSubRow.add_child(this._claudeWeeklyLabel);
-        claudeBox.add_child(cldSubRow);
-
-        this._quotaCard.add_child(claudeBox);
-
-        // agy Sub-Card (Strict Rule: token telemetry only, never a fake %)
-        const agyBox = new St.BoxLayout({
-            style_class: "adaptive-island-subcard",
-            vertical: true,
-        });
-
-        const agyHeaderRow = new St.BoxLayout({ vertical: false });
-        agyHeaderRow.add_child(new St.Label({ text: "Gemini (agy)", style_class: "adaptive-island-subcard-title" }));
-        agyHeaderRow.add_child(new St.Widget({ x_expand: true }));
-        this._agyStatusLabel = new St.Label({ text: "✦ Active", style_class: "adaptive-island-status-active" });
-        agyHeaderRow.add_child(this._agyStatusLabel);
-        agyBox.add_child(agyHeaderRow);
-
-        this._agyTokensLabel = new St.Label({
-            text: "Session: 2.5k In · 500 Out · 13.0k Cache",
-            style_class: "adaptive-island-mono-subtext",
-        });
-        agyBox.add_child(this._agyTokensLabel);
-
-        const agySubRow = new St.BoxLayout({ vertical: false });
-        agySubRow.add_child(new St.Label({
-            text: "Subscription Quota: Unavailable (Server-enforced)",
-            style_class: "adaptive-island-subtext",
-        }));
-        agyBox.add_child(agySubRow);
-
-        this._quotaCard.add_child(agyBox);
-
-        // Action & Telemetry Footer
-        const footerRow = new St.BoxLayout({
-            style_class: "adaptive-island-footer-row",
-            vertical: false,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-
-        this._burnRateLabel = new St.Label({
-            text: "⚡ ~340 tok/min",
-            style_class: "adaptive-island-subtext",
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        footerRow.add_child(this._burnRateLabel);
-        footerRow.add_child(new St.Widget({ x_expand: true }));
-
-        const refreshBtn = new St.Button({
-            style_class: "adaptive-island-btn",
-            label: "Refresh",
-            can_focus: false,
-        });
-        refreshBtn.connect("clicked", () => this._ui.backend.quota.refresh());
-        footerRow.add_child(refreshBtn);
-
-        const pauseBtn = new St.Button({
-            style_class: "adaptive-island-btn adaptive-island-btn-alert",
-            label: "Pause Tasks",
-            can_focus: false,
-        });
-        pauseBtn.connect("clicked", () => {
-            const active = this._ui.backend.tasks.getActiveTasks();
-            if (active.length > 0) {
-                this._ui.backend.tasks.cancelTask(active[0].id);
-            }
-        });
-        footerRow.add_child(pauseBtn);
-
-        this._quotaCard.add_child(footerRow);
+        this._usageViews = {};
+        for (const { key, name } of describeUsage({})) {
+            const card = new St.BoxLayout({ style_class: "adaptive-island-subcard adaptive-island-usage", vertical: true });
+            const head = new St.BoxLayout({ vertical: false });
+            head.add_child(new St.Label({ text: name, style_class: "adaptive-island-subcard-title", x_expand: true }));
+            const status = new St.Label({ text: "", style_class: "adaptive-island-subtext", y_align: Clutter.ActorAlign.CENTER });
+            head.add_child(status);
+            const rows = new St.BoxLayout({ vertical: true, style_class: "adaptive-island-usage-rows" });
+            card.add_child(head);
+            card.add_child(rows);
+            this._usageViews[key] = { status, rows };
+            this._quotaCard.add_child(card);
+        }
+        const refresh = new St.Button({ label: "Refresh usage", can_focus: true,
+            style_class: "adaptive-island-btn", x_align: Clutter.ActorAlign.END });
+        refresh.connect("clicked", () => this._ui.backend.quota.refresh());
+        this._quotaCard.add_child(refresh);
         this._cardContentBox.add_child(this._quotaCard);
     }
 
@@ -838,7 +771,7 @@ var IslandOverlay = class IslandOverlay {
         this._timerCard.add_child(digitsRow);
 
         // Preset Chips
-        const chipsRow = new St.BoxLayout({ vertical: false });
+        const chipsRow = new St.BoxLayout({ vertical: false, style_class: "adaptive-island-actions" });
         const p25 = new St.Button({ style_class: "adaptive-island-chip", label: "25m Focus", can_focus: false });
         p25.connect("clicked", () => this._ui.backend.timers.startPomodoro());
         chipsRow.add_child(p25);
@@ -854,7 +787,7 @@ var IslandOverlay = class IslandOverlay {
         this._timerCard.add_child(chipsRow);
 
         // Controls
-        const ctrlRow = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER });
+        const ctrlRow = new St.BoxLayout({ vertical: false, style_class: "adaptive-island-actions", y_align: Clutter.ActorAlign.CENTER });
         const extBtn = new St.Button({ style_class: "adaptive-island-btn", label: "+5m", can_focus: false });
         extBtn.connect("clicked", () => this._ui.backend.timers.extend(300));
         ctrlRow.add_child(extBtn);
@@ -919,12 +852,9 @@ var IslandOverlay = class IslandOverlay {
         this._mediaCard.visible = card === "media";
         this._timerCard.visible = card === "timer";
 
-        // Resize overlay height for task stdout
-        if (card === "tasks") {
-            this._actor.set_size(372, 242);
-        } else {
-            this._actor.set_size(372, 208);
-        }
+        // Let the active card determine its height; fixed heights clip controls.
+        this._actor.remove_style_class_name("caution");
+        this._actor.remove_style_class_name("critical");
 
         // Update card data
         if (card === "quota") {
@@ -940,46 +870,57 @@ var IslandOverlay = class IslandOverlay {
 
     _renderQuotaData(state) {
         this._titleIcon.text = "✦";
-        this._titleLabel.text = "AI QUOTA MONITOR";
-
-        const q = state.quota || {};
-        const cld = q.claude || {};
-
-        const fiveHr = (typeof cld.fiveHourPercent === "number") ? cld.fiveHourPercent : 43;
-        this._claudePctLabel.text = fiveHr + "% left";
-        this._claudeBarFill.set_width(Math.round((fiveHr / 100) * 320));
-
-        if (cld.fiveHourResetsAt) {
-            this._claudeResetLabel.text = `Rolling 5h · Resets: ${new Date(cld.fiveHourResetsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-        } else {
-            this._claudeResetLabel.text = "Rolling 5h · Resets in 1h 22m";
-        }
-
-        const weekly = (typeof cld.weeklyPercent === "number") ? cld.weeklyPercent : 72;
-        this._claudeWeeklyLabel.text = "Weekly: " + weekly + "%";
-
-        const agy = q.agy || {};
-        const inTok = agy.sessionInputTokens || 2500;
-        const outTok = agy.sessionOutputTokens || 500;
-        const cacheTok = agy.sessionCacheReadTokens || 13000;
-        this._agyTokensLabel.text = "Session: " + (inTok / 1000).toFixed(1) + "k In · " + (outTok / 1000).toFixed(1) + "k Out · " + (cacheTok / 1000).toFixed(1) + "k Cache";
-
-        if (q.criticalBreach) {
-            this._badgeLabel.text = "CRITICAL";
-            this._actor.add_style_class_name("critical");
-        } else if (q.cautionBreach) {
-            this._badgeLabel.text = "CAUTION";
-            this._actor.add_style_class_name("caution");
-        } else {
-            this._badgeLabel.text = "ACTIVE";
-            this._actor.remove_style_class_name("caution");
-            this._actor.remove_style_class_name("critical");
+        this._titleLabel.text = "AI usage";
+        this._badgeLabel.text = "USED";
+        const now = Date.now() / 1000;
+        this._usageModel = describeUsage(state.quota || {}, now);
+        if (!this._usageViews || typeof St === "undefined")
+            return;
+        const when = (seconds, withDay) => {
+            const date = new Date(seconds * 1000);
+            if (!Number.isFinite(date.getTime()))
+                return "";
+            const sameDay = date.toDateString() === new Date().toDateString();
+            return date.toLocaleString([], withDay || !sameDay
+                ? { weekday: "short", hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit" });
+        };
+        const inTime = (seconds) => {
+            const m = Math.max(0, Math.round((seconds - now) / 60));
+            return m >= 1440 ? `${Math.floor(m / 1440)}d ${Math.floor(m % 1440 / 60)}h` : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+        };
+        for (const p of this._usageModel) {
+            const view = this._usageViews[p.key];
+            if (!view)
+                continue;
+            view.status.text = p.unavailable ? "" : p.ts ? `${p.stale ? "Last read" : "Updated"} ${when(p.ts)}` : "";
+            view.rows.destroy_all_children();
+            if (p.unavailable) {
+                view.rows.add_child(new St.Label({ text: p.unavailable, style_class: "adaptive-island-subtext" }));
+                continue;
+            }
+            for (const r of p.rows) {
+                const line = new St.BoxLayout({ vertical: false, style_class: "adaptive-island-usage-row" });
+                line.add_child(new St.Label({ text: r.label, style_class: "adaptive-island-usage-label", y_align: Clutter.ActorAlign.CENTER }));
+                const track = new St.Widget({ style_class: "adaptive-island-progress-track", y_align: Clutter.ActorAlign.CENTER });
+                track.set_width(USAGE_TRACK_PX);
+                const color = r.level === "critical" ? "red" : r.level === "caution" ? "amber" : "green";
+                const fill = new St.Widget({ style_class: `adaptive-island-progress-fill adaptive-island-fill-${color}` });
+                fill.set_width(r.used === null ? 0 : Math.max(r.used > 0 ? 3 : 0, Math.round(USAGE_TRACK_PX * r.used / 100)));
+                track.add_child(fill);
+                line.add_child(track);
+                line.add_child(new St.Label({ text: r.text, x_expand: true, x_align: Clutter.ActorAlign.END,
+                    style_class: `adaptive-island-usage-value adaptive-island-usage-${r.level}`, y_align: Clutter.ActorAlign.CENTER }));
+                view.rows.add_child(line);
+                if (r.resetsAt)
+                    view.rows.add_child(new St.Label({ text: r.used === null ? `Window ended ${when(r.resetsAt)}`
+                        : `Resets ${when(r.resetsAt, r.label !== "5h")} · in ${inTime(r.resetsAt)}`, style_class: "adaptive-island-subtext adaptive-island-usage-reset" }));
+            }
         }
     }
 
     _renderTasksData(state) {
         this._titleIcon.text = "⟳";
-        this._titleLabel.text = "BACKGROUND AI TASKS";
+        this._titleLabel.text = "Background tasks";
         this._badgeLabel.text = "RUNNING";
 
         const tasks = state.tasks || [];
@@ -992,7 +933,7 @@ var IslandOverlay = class IslandOverlay {
 
     _renderMediaData(state) {
         this._titleIcon.text = "♫";
-        this._titleLabel.text = "NOW-PLAYING MEDIA";
+        this._titleLabel.text = "Now playing";
 
         const m = state.media || {};
         this._mediaTitleLabel.text = m.title || "No Media Playing";
@@ -1003,13 +944,28 @@ var IslandOverlay = class IslandOverlay {
 
     _renderTimerData(state) {
         this._titleIcon.text = "⏱";
-        this._titleLabel.text = "FOCUS TIMERS";
+        this._titleLabel.text = "Focus timer";
 
         const t = state.timer || {};
         this._timerDigitsLabel.text = t.formatted || "00:00";
         this._timerStatusTag.text = t.status || "IDLE";
         this._badgeLabel.text = t.status || "IDLE";
         this._timerPauseBtn.label = t.status === "RUNNING" ? "Pause" : "Resume";
+    }
+
+    _positionOverlay() {
+        const anchorActor = this._anchorActor;
+        if (!anchorActor || !this._actor) return;
+        // Use stage coordinates so secondary monitors and panel offsets work.
+        const monitor = Main.layoutManager.findMonitorForActor(anchorActor) || Main.layoutManager.primaryMonitor;
+        const [ax, ay] = anchorActor.get_transformed_position();
+        const [aw, ah] = anchorActor.get_transformed_size();
+        const width = Math.min(400, monitor.width - 24);
+        this._actor.set_width(width);
+        const targetX = Math.max(monitor.x + 12,
+            Math.min(ax + (aw - width) / 2, monitor.x + monitor.width - width - 12));
+        this._actor.set_position(Math.round(targetX), Math.round(ay + ah + 8));
+
     }
 
     showOverlay(anchorActor) {
@@ -1019,39 +975,13 @@ var IslandOverlay = class IslandOverlay {
         this._actor.visible = true;
         this._actor.reactive = true;
 
-        // Position directly under anchor
-        let ax = 0;
-        let anchorWidth = 0;
-        const dateMenu = (Main && Main.panel && Main.panel.statusArea) ? Main.panel.statusArea.dateMenu : null;
-        if (anchorActor && anchorActor.get_transformed_position) {
-            try {
-                const pos = anchorActor.get_transformed_position();
-                if (pos && typeof pos[0] === "number" && !isNaN(pos[0]) && pos[0] !== null) {
-                    ax = pos[0];
-                    anchorWidth = anchorActor.width;
-                }
-            } catch (e) {}
+        this._anchorActor = anchorActor;
+        this._positionOverlay();
+        if (!this._anchorAllocationId) {
+            this._anchorAllocationId = anchorActor.connect("notify::allocation", () => {
+                if (this._isExpanded) this._positionOverlay();
+            });
         }
-        if ((!ax || isNaN(ax)) && dateMenu && dateMenu.get_transformed_position) {
-            try {
-                const pos = dateMenu.get_transformed_position();
-                if (pos && typeof pos[0] === "number" && !isNaN(pos[0]) && pos[0] !== null) {
-                    ax = pos[0];
-                    anchorWidth = dateMenu.width;
-                }
-            } catch (e) {}
-        }
-        if (!ax || isNaN(ax)) {
-            const screenWidth = (Main && Main.panel) ? Main.panel.width : 1920;
-            ax = Math.round((screenWidth - 372) / 2);
-            anchorWidth = 372;
-        }
-
-        const panelHeight = (Main && Main.panel) ? Main.panel.height : 32;
-        const overlayWidth = (this._actor && this._actor.width > 0) ? this._actor.width : 372;
-        const targetX = Math.round(ax + (anchorWidth - overlayWidth) / 2);
-        const targetY = Math.round(panelHeight + 4);
-        this._actor.set_position(targetX, targetY);
 
         // Apply blur effect
         if (this._blurEffect && this._actor.add_effect_with_name) {
@@ -1062,15 +992,16 @@ var IslandOverlay = class IslandOverlay {
             } catch (e) {}
         }
 
-        // Hardware Clutter ease transition (EASE_OUT_BACK for spring drop approximation)
-        this._actor.translation_y = -16;
-        this._actor.opacity = 0;
+        // Cancel an interrupted close without jumping back to the starting frame.
+        this._actor.remove_all_transitions();
+        if (this._actor.opacity === 0)
+            this._actor.translation_y = -6;
         if (Clutter && this._actor.ease) {
             this._actor.ease({
                 translation_y: 0,
                 opacity: 255,
-                duration: 380,
-                mode: Clutter.AnimationMode.EASE_OUT_BACK,
+                duration: 220,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
             });
         } else {
             this._actor.translation_y = 0;
@@ -1102,6 +1033,7 @@ var IslandOverlay = class IslandOverlay {
         this._isExpanded = false;
         if (!this._actor) return;
         this._actor.reactive = false;
+        this._actor.remove_all_transitions();
 
         if (this._stageClickId && global.stage) {
             global.stage.disconnect(this._stageClickId);
@@ -1110,11 +1042,12 @@ var IslandOverlay = class IslandOverlay {
 
         if (Clutter && this._actor.ease) {
             this._actor.ease({
-                translation_y: -16,
+                translation_y: -6,
                 opacity: 0,
-                duration: 250,
+                duration: 160,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 onComplete: () => {
+                    if (!this._actor || this._isExpanded) return;
                     this._actor.visible = false;
                     if (this._blurEffect && this._actor.remove_effect_by_name) {
                         try { this._actor.remove_effect_by_name("island-blur"); } catch (e) {}
@@ -1135,6 +1068,11 @@ var IslandOverlay = class IslandOverlay {
     }
 
     destroy() {
+        if (this._anchorAllocationId && this._anchorActor) {
+            this._anchorActor.disconnect(this._anchorAllocationId);
+            this._anchorAllocationId = 0;
+        }
+        this._anchorActor = null;
         if (this._stageClickId && global.stage) {
             global.stage.disconnect(this._stageClickId);
             this._stageClickId = 0;
@@ -1166,6 +1104,11 @@ var IslandUI = class IslandUI {
         this._attached = false;
         this._forcedFeature = null;
         this._clockNotifyId = 0;
+        this._centerOverlay = null;
+        this._centerSection = null;
+        this._centerFeature = "quota";
+        this._centerButtons = [];
+        this._menuOpenId = 0;
     }
 
     get backend() {
@@ -1217,6 +1160,23 @@ var IslandUI = class IslandUI {
             (Main && Main.layoutManager).uiGroup.add_child(this._overlay.getActor());
         }
 
+        this._buildCenter();
+        if (dateMenu && dateMenu.menu) {
+            this._menuOpenId = dateMenu.menu.connect("open-state-changed", (menu, open) => {
+                if (open) {
+                    this._anchor._clearGraceExitTimer();
+                    if (this._anchor._hoverDwellTimerId) {
+                        GLib.source_remove(this._anchor._hoverDwellTimerId);
+                        this._anchor._hoverDwellTimerId = 0;
+                    }
+                    this.contract();
+                    this._backend.pauseDwell();
+                } else {
+                    this._backend.resumeDwell();
+                }
+            });
+        }
+
         // 4. Hook Backend Event Subscriptions
         this._surfacedUnsub = this._backend.onSurfaced((bus, event) => this._onSurfaced(event));
         this._tuckedUnsub = this._backend.onTucked((bus, event) => this._onTucked(event));
@@ -1234,6 +1194,43 @@ var IslandUI = class IslandUI {
         this._updateUI();
     }
 
+    _buildCenter() {
+        const shade = this._extension && this._extension._shade;
+        if (!St || !shade || !shade._systemSection) return;
+        this._centerSection = new St.BoxLayout({ vertical: true,
+            style_class: "adaptive-island-center", x_expand: true });
+        const tabs = new St.BoxLayout({ style_class: "adaptive-island-actions", x_expand: true });
+        for (const [feature, label] of [["quota", "AI usage"], ["tasks", "Tasks"], ["media", "Music"], ["timer", "Focus"]]) {
+            const button = new St.Button({ label, can_focus: true, x_expand: true,
+                style_class: "adaptive-island-chip" });
+            button.connect("clicked", () => {
+                this._centerFeature = feature;
+                this._updateUI();
+            });
+            tabs.add_child(button);
+            this._centerButtons.push([feature, button]);
+        }
+        this._centerSection.add_child(tabs);
+        this._centerOverlay = new IslandOverlay(this, true);
+        this._centerOverlay.build();
+        this._centerSection.add_child(this._centerOverlay.getActor());
+        // Share the system scroll area so small displays keep their calendar
+        // and notifications accessible without a second scrolling container.
+        shade._systemSection.insert_child_at_index(this._centerSection, 0);
+    }
+
+    isCenterOpen() {
+        const menu = Main && Main.panel && Main.panel.statusArea.dateMenu;
+        return !!(menu && menu.menu && menu.menu.isOpen);
+    }
+
+    toggleCenter() {
+        const dateMenu = Main && Main.panel && Main.panel.statusArea.dateMenu;
+        if (!dateMenu || !dateMenu.menu) return;
+        this.contract();
+        dateMenu.menu.toggle();
+    }
+
     detach() {
         if (!this._attached) return;
         this._attached = false;
@@ -1247,9 +1244,23 @@ var IslandUI = class IslandUI {
             this._backend.destroy();
         }
 
+        if (this._centerOverlay) {
+            this._centerOverlay.destroy();
+            this._centerOverlay = null;
+        }
+        if (this._centerSection) {
+            this._centerSection.destroy();
+            this._centerSection = null;
+        }
+        this._centerButtons = [];
+
         // Restore dateMenu clock box
         const dateMenu = (Main && (Main && Main.panel)) ? (Main && Main.panel).statusArea.dateMenu : null;
         if (dateMenu) {
+            if (this._menuOpenId) {
+                dateMenu.menu.disconnect(this._menuOpenId);
+                this._menuOpenId = 0;
+            }
             if (this._clockNotifyId && dateMenu._clockDisplay) {
                 dateMenu._clockDisplay.disconnect(this._clockNotifyId);
                 this._clockNotifyId = 0;
@@ -1301,9 +1312,17 @@ var IslandUI = class IslandUI {
         const state = forcedState || this._backend.getState();
         this._anchor.renderState(state, this._theme);
         this._overlay.renderState(state, this._theme, this._forcedFeature);
+        if (this._centerOverlay) {
+            this._centerOverlay.renderState(state, this._theme, this._centerFeature);
+            for (const [feature, button] of this._centerButtons) {
+                if (feature === this._centerFeature) button.add_style_pseudo_class("checked");
+                else button.remove_style_pseudo_class("checked");
+            }
+        }
     }
 
     expand(targetFeature = null, forcedState = null) {
+        if (this.isCenterOpen()) return;
         this._forcedFeature = targetFeature;
         this._updateUI(forcedState);
         this._overlay.showOverlay(this._anchor.getActor());

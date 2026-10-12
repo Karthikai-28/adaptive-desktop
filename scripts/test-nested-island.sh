@@ -21,7 +21,7 @@ mkdir -p "$XDG_DATA_HOME/gnome-shell/extensions" "$XDG_CONFIG_HOME"
 cp -r "$REPO/shell/adaptive-shell@local" "$XDG_DATA_HOME/gnome-shell/extensions/"
 cp -r "$REPO/scripts/nested-probe/adaptive-probe@local" "$XDG_DATA_HOME/gnome-shell/extensions/"
 
-xvfb-run --server-args="-screen 0 1920x1080x24" dbus-run-session bash << 'INNER_EOF'
+xvfb-run -a --server-args="-screen 0 1920x1080x24" dbus-run-session bash << 'INNER_EOF'
 set -Eeuo pipefail
 SANDBOX="$HOME"
 REPO="/home/karthi/adaptive-desktop"
@@ -109,6 +109,14 @@ echo "Dynamic Island attached: $ISLAND_ACTIVE"
 echo "Capturing 01_idle_state.png..."
 probe "
 const island = Main._dynamicIsland;
+if (island && island._backend) {
+    island._backend._surfacedEvent = null;
+    island._backend._queue = [];
+    if (island._backend._dwellTimerId) {
+        GLib.source_remove(island._backend._dwellTimerId);
+        island._backend._dwellTimerId = 0;
+    }
+}
 island._anchor.syncClock('19:15');
 island.contract({
     surfacedEvent: null,
@@ -121,6 +129,7 @@ island.contract({
 return true;
 "
 take_shot "$SCREEN_DIR/01_idle_state.png"
+cp "$SCREEN_DIR/01_idle_state.png" "$SCREEN_DIR/fix_idle.png"
 
 # 2. Screenshot: COMPACT Quota
 echo "Capturing 02_compact_quota.png..."
@@ -130,12 +139,13 @@ island.contract({
     surfacedEvent: {
         type: 'QUOTA_CAUTION_BREACH',
         priority: 2,
-        payload: { message: 'Claude 43% remaining', data: { percent: 43 } }
+        payload: { message: 'Codex 5h limit 82% used', source: 'codex', used: 82 }
     },
     multiActivity: { primary: null, secondary: null },
     quota: {
-        claude: { fiveHourPercent: 43, weeklyPercent: 72 },
-        agy: { sessionInputTokens: 2500, sessionOutputTokens: 500, sessionCacheReadTokens: 13000 },
+        codex: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 78, resetsAt: Date.now() / 1000 + 9000 }, { label: 'Weekly', used: 28, resetsAt: Date.now() / 1000 + 400000 }] },
+        claude: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 17, resetsAt: Date.now() / 1000 + 12000 }, { label: 'Weekly', used: 31, resetsAt: Date.now() / 1000 + 300000 }] },
+        gemini: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 100, resetsAt: Date.now() / 1000 + 3000 }, { label: 'Weekly', used: 85, resetsAt: Date.now() / 1000 + 250000 }] },
         cautionBreach: true,
         criticalBreach: false
     },
@@ -146,6 +156,7 @@ island.contract({
 return true;
 "
 take_shot "$SCREEN_DIR/02_compact_quota.png"
+cp "$SCREEN_DIR/02_compact_quota.png" "$SCREEN_DIR/fix_compact.png"
 
 # 3. Screenshot: COMPACT Task
 echo "Capturing 03_compact_task.png..."
@@ -235,8 +246,9 @@ const state = {
     surfacedEvent: null,
     multiActivity: { primary: null, secondary: null },
     quota: {
-        claude: { fiveHourPercent: 43, weeklyPercent: 72 },
-        agy: { sessionInputTokens: 2500, sessionOutputTokens: 500, sessionCacheReadTokens: 13000 },
+        codex: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 78, resetsAt: Date.now() / 1000 + 9000 }, { label: 'Weekly', used: 28, resetsAt: Date.now() / 1000 + 400000 }] },
+        claude: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 17, resetsAt: Date.now() / 1000 + 12000 }, { label: 'Weekly', used: 31, resetsAt: Date.now() / 1000 + 300000 }] },
+        gemini: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 100, resetsAt: Date.now() / 1000 + 3000 }, { label: 'Weekly', used: 85, resetsAt: Date.now() / 1000 + 250000 }] },
         cautionBreach: false,
         criticalBreach: false
     },
@@ -251,6 +263,7 @@ if (ov) { ov.opacity = 255; ov.translation_y = 0; }
 return true;
 "
 take_shot "$SCREEN_DIR/07_expanded_quota_liquid_glass.png"
+cp "$SCREEN_DIR/07_expanded_quota_liquid_glass.png" "$SCREEN_DIR/fix_expanded.png"
 
 # 8. Screenshot: EXPANDED Background Tasks (Liquid Glass)
 echo "Capturing 08_expanded_tasks_liquid_glass.png..."
@@ -345,8 +358,9 @@ const state = {
     surfacedEvent: null,
     multiActivity: { primary: null, secondary: null },
     quota: {
-        claude: { fiveHourPercent: 28, weeklyPercent: 55 },
-        agy: { sessionInputTokens: 5200, sessionOutputTokens: 1100, sessionCacheReadTokens: 24000 },
+        codex: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 82, resetsAt: Date.now() / 1000 + 9000 }, { label: 'Weekly', used: 40, resetsAt: Date.now() / 1000 + 400000 }] },
+        claude: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 28, resetsAt: Date.now() / 1000 + 12000 }, { label: 'Weekly', used: 55, resetsAt: Date.now() / 1000 + 300000 }] },
+        gemini: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 12, resetsAt: Date.now() / 1000 + 3000 }, { label: 'Weekly', used: 60, resetsAt: Date.now() / 1000 + 250000 }] },
         cautionBreach: true,
         criticalBreach: false
     },
