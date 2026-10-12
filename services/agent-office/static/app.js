@@ -176,6 +176,7 @@ function handle(m) {
     case 'toast': return toast(m.text, m.level, m.agent);
     case 'settings': S.settings = m.settings; S.quotaUntil = m.quota_until; renderQuota(); return;
     case 'usage': S.usage = m; renderQuota(); return;
+    case 'providers': S.providers = m.providers; renderQuota(); if (S.view.kind === 'home') renderPanel(); return;
     case 'study': S.studies = m.studies; if (S.view.kind === 'agent' && S.tab === 'learning') renderBody(); return;
     case 'tokens': tokens.changed(m); return;
   }
@@ -188,7 +189,7 @@ function onState(m) {
   S.roster = Object.fromEntries(m.roster.map(p => [p.id, p]));
   S.agents = Object.fromEntries(m.agents.map(a => [a.id, a]));
   S.tasks = new Map(m.tasks.map(t => [t.id, t]));
-  S.settings = m.settings; S.quotaUntil = m.quota_until; S.studies = m.studies || [];
+  S.settings = m.settings; S.quotaUntil = m.quota_until; S.studies = m.studies || []; S.providers = m.providers || [];
   document.title = `${m.company} · Agent Office`;
   $('#company').textContent = m.company;
   world.syncPeople(m.roster);
@@ -304,8 +305,17 @@ function renderTop() {
 function renderQuota() {
   const q = $('#quota'); q.replaceChildren();
   if (S.quotaUntil > Date.now() / 1000) {
-    const at = new Date(S.quotaUntil * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    q.append(h('span', { class: 'q out', title: 'Gemini quota is used up. Work resumes by itself at the reset (or earlier if it comes back).' }, `Quota out · resumes ${at}`));
+    const at = new Date(S.quotaUntil * 1000).toLocaleString([], S.quotaUntil - Date.now() / 1000 > 72000 ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+    const fb = provider(S.settings?.fallback);
+    q.append(fb && fb.engine !== 'agy'
+      ? h('span', { class: 'q low', title: `Gemini quota is used up. Agents work on ${provLabel(fb.id)} until it resets.` }, `Gemini out · on ${fb.label} until ${at}`)
+      : h('span', { class: 'q out', title: 'Gemini quota is used up. Work resumes by itself at the reset (or earlier if it comes back).' }, `Quota out · resumes ${at}`));
+  }
+  for (const p of S.providers || []) {
+    if (p.engine !== 'ollama') continue;
+    const state = !p.up ? ['out', 'Ollama is not running'] : !p.pulled ? ['out', `the model is not pulled: ollama pull ${p.model}`] : ['', p.loaded ? 'model loaded in memory' : 'ready (loads on first use)'];
+    q.append(h('span', { class: `q ${state[0]}`, title: `${p.label}: ${p.model} on Ollama ${p.version || ''} · ${state[1]}` },
+      h('span', { class: `dot ${state[0] ? 'quota' : ''}` }), `${p.label} · ${p.model}`));
   }
   if (S.settings?.paused) q.append(h('span', { class: 'q out' }, 'Work paused'));
   for (const r of S.usage?.rows || []) {
@@ -345,7 +355,8 @@ function renderHome() {
     h('div', { class: 'ph' },
       h('div', { class: 'who' }, h('div', { class: 'meta' },
         h('div', { class: 'name' }, S.company),
-        h('div', { class: 'role' }, `${S.order.length - 1} agents on ${prettyModel(S.model)} · managed by Claude`))),
+        h('div', { class: 'role' }, `${S.order.length - 1} agents on ${provLabel(S.settings?.provider)}` +
+          (S.settings?.fallback ? ` (${provider(S.settings.fallback)?.label || S.settings.fallback} when out of quota)` : '') + ' · managed by Claude'))),
       h('div', { class: 'actions' },
         h('button', { class: 'act primary', onclick: () => setView({ kind: 'agent', id: MGR }) }, iconEl('spark'), 'Ask Claude'),
         h('button', { class: 'act', onclick: () => S.meeting ? setView({ kind: 'meeting' }) : openMeetingSetup() }, iconEl('phone'), S.meeting ? 'Join meeting' : 'Meeting'),
@@ -354,6 +365,9 @@ function renderHome() {
   V.team = team;
   fillFeed();
 }
+const provider = (id) => (S.providers || []).find(p => p.id === id);
+// "Gemini 3.8 Flash (High)" for agy, "Local (granite4:3b)" for anything else
+const provLabel = (id) => { const p = provider(id); return !p ? prettyModel(S.model) : p.engine === 'agy' ? prettyModel(p.model) : `${p.label} (${p.model})`; };
 const prettyModel = (m) => (m || '').replace(/^gemini-/, 'Gemini ').replace(/-(high|medium|low)$/, (_, e) => ` (${e[0].toUpperCase() + e.slice(1)})`).replace(/-/g, ' ').replace(/(\d) (\d)/g, '$1.$2').replace(/ flash/i, ' Flash');
 
 function statusText(a, id) {
@@ -461,7 +475,7 @@ function renderAgentHeader() {
     h('button', { class: 'back', onclick: () => setView({ kind: 'home' }) }, iconEl('back'), 'Team'),
     h('div', { class: 'who' }, face(id, 56), h('div', { class: 'meta' },
       h('div', { class: 'name' }, p.name, h('span', { class: `status` }, h('span', { class: `dot ${cls}` }), label)),
-      h('div', { class: 'role' }, isMgr ? 'Manager · Claude · your point of contact' : `${p.role} · ${p.team} · ${prettyModel(S.model)}`))),
+      h('div', { class: 'role' }, isMgr ? 'Manager · Claude · your point of contact' : `${p.role} · ${p.team} · ${provLabel(S.agents[id]?.provider || S.settings?.provider)}`))),
     doing,
     h('div', { class: 'actions' },
       h('button', { class: 'act primary', onclick: () => { if (S.tab !== 'chat') setView(S.view, 'chat'); else V.composer?.focus(); } }, iconEl('chat'), 'Message'),
@@ -979,6 +993,12 @@ function openSettings() {
   };
   const par = h('select', { class: 'in', style: 'width:auto' }, ...[1, 2, 3, 4, 5, 6].map(n => h('option', { value: n, selected: n === S.settings.max_parallel }, n)));
   par.onchange = () => api('POST', '/api/settings', { max_parallel: +par.value }).then(s => { S.settings = s; toast('Saved', 'ok'); });
+  const provOpts = (sel, none) => [...(none ? [h('option', { value: '', selected: !sel }, none)] : []),
+    ...(S.providers || []).map(p => h('option', { value: p.id, selected: p.id === sel }, p.engine === 'agy' ? prettyModel(p.model) : `${p.label} · ${p.model}`))];
+  const prov = h('select', { class: 'in', style: 'width:auto' }, ...provOpts(S.settings.provider));
+  prov.onchange = () => api('POST', '/api/settings', { provider: prov.value }).then(s => { S.settings = s; renderQuota(); renderPanel(); toast('Saved', 'ok'); }).catch(e => toast(e.message, 'error'));
+  const fall = h('select', { class: 'in', style: 'width:auto' }, ...provOpts(S.settings.fallback, 'Pause'));
+  fall.onchange = () => api('POST', '/api/settings', { fallback: fall.value }).then(s => { S.settings = s; renderQuota(); renderPanel(); toast('Saved', 'ok'); }).catch(e => toast(e.message, 'error'));
   const lang = h('select', { class: 'in', style: 'width:auto' }, ...['en-US', 'en-IN', 'en-GB', 'en-AU', 'ta-IN', 'hi-IN'].map(l => h('option', { value: l, selected: l === prefs.lang }, l)));
   lang.onchange = () => { prefs.lang = lang.value; savePrefs(); mic?.stop(); mic = null; micOwner = null; };
   const body = h('div', null,
@@ -986,6 +1006,8 @@ function openSettings() {
     sw('Autopilot', 'Claude reviews finished work by itself, assigns follow-ups and reports back.', S.settings.autopilot, v => api('POST', '/api/settings', { autopilot: v }).then(s => { S.settings = s; })),
     sw('Pause all work', 'Queued tasks and study sessions wait; running tasks finish. Chats and meetings still work.', S.settings.paused, v => api('POST', '/api/settings', { paused: v }).then(s => { S.settings = s; renderQuota(); })),
     h('label', { class: 'switch' }, h('div', null, 'Agents working at the same time', h('small', null, 'More is faster but spends Gemini quota quicker.')), par),
+    h('label', { class: 'switch' }, h('div', null, 'Agents run on', h('small', null, 'Gemini on your AI Pro plan, or a local model through Ollama (private, free, much slower and weaker).')), prov),
+    h('label', { class: 'switch' }, h('div', null, 'When Gemini runs out', h('small', null, 'Carry on with this provider until the quota resets, or pause.')), fall),
     S.quotaUntil > Date.now() / 1000 ? h('label', { class: 'switch' }, h('div', null, 'Quota pause active', h('small', null, 'Resume now if the Gemini limit has reset.')),
       h('button', { class: 'act', style: 'flex:none;padding:0 12px', onclick: () => api('POST', '/api/settings', { clear_quota: true }).then(() => toast('Resumed', 'ok')) }, 'Resume')) : null,
     h('div', { class: 'section' }, 'Voice (this browser)'),
@@ -995,7 +1017,7 @@ function openSettings() {
     h('div', { class: 'section' }, 'Office'),
     sw('Office life', 'Free agents wander to the kitchen and lounge.', prefs.ambient, v => { prefs.ambient = v; savePrefs(); world.setAmbient(v); }),
     h('div', { class: 'hintline', style: 'margin-top:14px;line-height:1.6' },
-      `Agents run ${prettyModel(S.model)} through agy on your Google AI Pro plan. Claude manages through the `, h('code', null, 'office'),
+      `Gemini runs through agy on your Google AI Pro plan; local models through Ollama on this computer. Claude manages through the `, h('code', null, 'office'),
       ` command — you can use it too: `, h('code', null, 'office status'), ', ', h('code', null, 'office assign maya "…"'), ', ', h('code', null, 'office ask claude "…"'), '.'));
   openModal('settings', 'Settings', body);
 }

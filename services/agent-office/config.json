@@ -2,7 +2,25 @@
   "company": "Karthi Labs",
   "operator": "Karthi",
   "port": 8790,
-  "gemini_model": "gemini-3.8-flash-high",
+  "providers": {
+    "gemini": {
+      "engine": "agy",
+      "label": "Gemini",
+      "model": "gemini-3.8-flash-high"
+    },
+    "local": {
+      "engine": "ollama",
+      "label": "Local",
+      "model": "granite4:3b",
+      "url": "http://127.0.0.1:11434",
+      "num_ctx": 8192,
+      "think": false,
+      "max_steps": 30,
+      "max_parallel": 1
+    }
+  },
+  "provider": "gemini",
+  "fallback": "local",
   "max_parallel_tasks": 3,
   "task_timeout_min": 45,
   "chat_timeout_min": 15,

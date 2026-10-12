@@ -245,12 +245,17 @@ class SettingsIn(BaseModel):
     autopilot: bool | None = None
     max_parallel: int | None = None
     paused: bool | None = None
+    provider: str | None = None
+    fallback: str | None = None
     clear_quota: bool = False
 
 
 @app.post("/api/settings")
 async def settings(s: SettingsIn):
-    return await office.update_settings(**s.model_dump())
+    try:
+        return await office.update_settings(**s.model_dump())
+    except ValueError as e:
+        bad(e)
 
 
 @app.get("/api/usage")
@@ -260,15 +265,15 @@ async def usage():
 
 # ---------------------------------------------------------------- token ledger
 @app.get("/api/tokens")
-async def tokens(since: float = 0):
-    return office.ledger.overview(since)
+async def tokens(since: float = 0, provider: str | None = None):
+    return office.ledger.overview(since, provider or None)
 
 
 @app.get("/api/tokens/agent/{aid}")
-async def tokens_agent(aid: str, since: float = 0):
+async def tokens_agent(aid: str, since: float = 0, provider: str | None = None):
     if aid not in office.rt:
         raise HTTPException(404, "no such agent")
-    return office.ledger.agent(aid, since)
+    return office.ledger.agent(aid, since, provider or None)
 
 
 # ---------------------------------------------------------------- voice

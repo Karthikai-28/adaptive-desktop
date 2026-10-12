@@ -2,7 +2,8 @@
 
 A pixel-art office where an AI company works for you. **Claude** is the manager and your single
 point of contact. The staff are **Gemini 3.8 Flash (High)** agents running through the Antigravity
-CLI (`agy`) on your Google AI Pro subscription, so there is no API billing.
+CLI (`agy`) on your Google AI Pro subscription, so there is no API billing. When the Gemini quota runs
+out they carry on with a **local model** through Ollama ([Model providers](#model-providers-gemini-and-local-models-officelocalpy)).
 
 Open **http://127.0.0.1:8790** (Chrome is recommended because voice input uses Chrome's speech recognition).
 On the phone, the **Adaptive Link** app has all of it under **Office**, at home and away
@@ -94,6 +95,8 @@ office assign maya "Write a spec" --body "..." --project launch [--after 12]
 office tasks / office show 12 --events / office cancel 12 / office retry 12
 office ask claude "what's the status of the launch?"     (waits for the reply)
 office meeting start "Weekly sync" --with maya,arjun,claude / office meeting end
+office provider [gemini|local] [--fallback local|none]   what agents run on
+office tokens [--since 24h|7d|all] [--provider local]    token usage, split by provider
 office autopilot on|off · office pause · office resume · office open
 ```
 
@@ -184,22 +187,66 @@ Only when neither gives a time (a short rate limit) is the pause 5 minutes, with
 behaviour for its own usage limit: the manager keeps the message or review and retries every 10 minutes
 (up to six hours). Settings → "Resume now" ends a pause by hand.
 
+## Model providers: Gemini and local models (`office/local.py`)
+
+`config.json` lists the **providers** agents can run on. Each has an `engine` (`agy` for Gemini through
+the Antigravity CLI, `ollama` for a local model) and a `model`; Ollama ones also take `url`, `num_ctx`
+(context window), `think`, `max_steps` (tool calls per turn) and `max_parallel` (tasks at once).
+`provider` is what agents run on and `fallback` is what they switch to while it is out of quota. Both
+can be changed in Settings or with `office provider`; an agent can be pinned to one with its own
+`"provider"`. Adding another local model is one more entry, for example
+`"coder": {"engine": "ollama", "label": "Coder", "model": "qwen3:4b"}`, and its usage is counted on
+its own straight away.
+
+- **Switching.** While Gemini is out of quota (see below) and `fallback` is set, queued tasks, study
+  sessions, direct messages and meetings run on the fallback; a chat that hits the limit is answered by the
+  fallback at once. At the reset, new turns go back to Gemini. Each provider keeps its own conversations
+  (the key gets `@<provider>`), so a thread never jumps between models.
+  A local provider takes work only while Ollama is up and its model is pulled. Study programs do not
+  move to the fallback (a session every 10 minutes would keep the CPU busy all day) unless
+  `"study_on_fallback": true` is set in `config.json`.
+- **The local loop.** agy has its own agent loop; Ollama is only a model, so `LocalRun` is the loop: it
+  sends the conversation with a small tool set (`run_command`, `read_file`, `write_file`, `edit_file`,
+  `list_dir`, `search_files`, `fetch_url`), runs what the model asks for, and repeats until it answers.
+  Commands run in the same bubblewrap sandbox as agy; agents that learn code only from local copies get
+  `--unshare-net` and no `fetch_url`. File tools resolve paths and refuse anything outside the workspace
+  (write) or the workspace, assigned repositories and graphs (read). Meetings run without tools to stay
+  short. Old tool output is trimmed when a conversation nears `num_ctx`. There is no image tool and no
+  graph MCP on the local path.
+- **Status.** The top bar shows each local provider (green: Ollama up and the model pulled; red: not
+  running, or `ollama pull <model>` needed). `office status` shows it too, and which provider each
+  agent is on.
+- **What to expect.** A 3-4B model on this laptop's CPU is far weaker and slower than Gemini: fine for
+  chat, meetings, summaries and small well-specified tasks, poor at long multi-step engineering. The
+  manager's brief says so.
+
+Local models that fit this machine (i7-1360P, 16 GB RAM shared with everything else, no usable GPU):
+see the table in [Local models](#local-models).
+
 ## Token ledger (`office/ledger.py`)
 
 Nothing is estimated. agy records every model call in the conversation's SQLite file
 (`agy-home*/.gemini/antigravity-cli/conversations/<id>.db`, one `steps` row per call with its usage in
 protobuf: fresh input, cached input, output, thinking). Claude's calls are in its session transcripts
-(`~/.claude/projects/*/<session>.jsonl`). Every 10 seconds the ledger re-reads only the files that
+(`~/.claude/projects/*/<session>.jsonl`). Local-model calls are appended by the office to
+`data/usage/<provider>.jsonl` with Ollama's own counts (`prompt_eval_count` as fresh input, `eval_count`
+as output; Ollama does not report cached input separately). Every 10 seconds the ledger re-reads only the files that
 changed (a full read of ~70 conversations takes about a second, in a worker thread) and attributes each
 call: the **person** from the persona the conversation opens with (or the study program), the **kind**
 and **task** from the prompt that started that turn (`=== TASK #38`, `STUDY SESSION 4`, a direct
 message, a meeting), and the **step** the call chose (run a command, read a file, edit, answer).
 When anything changed it sends a `tokens` message on the socket and open views redraw.
 
-- `GET /api/tokens?since=<unix>`: the team: totals, per person (by kind, last 10 minutes), timeline,
-  steps, projects, task outcomes, the most expensive tasks.
-- `GET /api/tokens/agent/<id>?since=<unix>`: one person: the same plus context per call, tasks and
-  every run.
+Every call carries its **provider** (`gemini`, `local`, any other configured one, or `claude` for the
+manager), and providers are never added into one another's numbers.
+
+- `GET /api/tokens?since=<unix>[&provider=<id>]`: the team: one summary per provider, then totals, per
+  person (by kind and by provider, last 10 minutes), timeline, steps, projects, task outcomes, the most
+  expensive tasks. With `provider` every number but the per-provider summaries is that provider's only.
+- `GET /api/tokens/agent/<id>?since=<unix>[&provider=<id>]`: one person: the same plus context per
+  call, tasks and every run.
+
+The Tokens window has the same switch (All · Gemini · Local · Claude) next to the time range.
 
 Three numbers per call: **fresh input** (new to the model), **re-read context** (served from cache:
 the conversation sent again with every step, about 95% of all tokens), **output** (thinking

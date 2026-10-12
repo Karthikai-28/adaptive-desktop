@@ -1,6 +1,8 @@
 // Agent Office — token usage: who spends tokens on what, live from the office's token ledger.
 // The page asks /api/tokens (the team) and /api/tokens/agent/<id> (one person) and redraws whenever the
-// ledger says something changed (a `tokens` message on the socket).
+// ledger says something changed (a `tokens` message on the socket). Every provider (Gemini, a local model,
+// whatever config.json adds later) is counted on its own: the provider filter narrows every number on the
+// page to one of them, and the team view opens with one summary per provider.
 
 const NS = 'http://www.w3.org/2000/svg';
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
@@ -29,10 +31,19 @@ const kindName = (k) => (KIND[k] || [k])[0];
 const kindColor = (k) => (KIND[k] || [0, '#b9bdd0'])[1];
 const MODEL = (m) => { const x = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/i.exec(m || ''); return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}${x[3] ? '.' + x[3] : ''}` : /gemini/i.test(m) ? 'Gemini' : m; };
 
+const ENGINE_COLOR = { agy: '#4285f4', ollama: '#2fb67c', claude: '#d97757' };
+const SPARE = ['#a46cf0', '#f5a524', '#38bdf8', '#e2557a'];
+
 export function createTokens(ctx) {
   const { h, api, face, iconEl, S, MGR, openModal, modalKind, openTask } = ctx;
-  const T = { win: 'all', view: 'team', agent: null, data: null, busy: false, pending: false, version: -1, box: null };
-  try { T.win = localStorage.getItem('office.tokens.win') || 'all'; } catch { /* private mode */ }
+  const T = { win: 'all', prov: '', view: 'team', agent: null, data: null, busy: false, pending: false, version: -1, box: null };
+  try { T.win = localStorage.getItem('office.tokens.win') || 'all'; T.prov = localStorage.getItem('office.tokens.prov') || ''; } catch { /* private mode */ }
+  const provs = () => [...(S.providers || []), { id: 'claude', label: 'Claude', engine: 'claude', model: '' }];
+  const provOf = (id) => provs().find(p => p.id === id);
+  const provName = (id) => provOf(id)?.label || id;
+  const provColor = (id) => { const p = provOf(id); if (p && ENGINE_COLOR[p.engine] && provs().filter(q => q.engine === p.engine).length === 1) return ENGINE_COLOR[p.engine]; const i = provs().findIndex(q => q.id === id); return SPARE[(i < 0 ? 0 : i) % SPARE.length]; };
+  const provQuery = () => T.prov ? `&provider=${encodeURIComponent(T.prov)}` : '';
+  const provSplit = (m) => { const e = Object.entries(m || {}).filter(([, v]) => v).sort((a, b) => b[1] - a[1]); return e.length > 1 || (e.length === 1 && !T.prov) ? e.map(([k, v]) => `${provName(k)} ${fmt(v)}`).join(' · ') : ''; };
   const since = () => { const w = WINDOWS.find(x => x[0] === T.win); return w && w[2] ? Date.now() / 1000 - w[2] : 0; };
   const nameOf = (id) => id === 'other' ? 'Setup & tests' : (S.roster[id]?.name || id);
   const colorOf = (id) => id === 'other' ? '#b9bdd0' : (S.roster[id]?.look?.shirt || '#8b90a8');
@@ -148,6 +159,7 @@ export function createTokens(ctx) {
   // ---------------------------------------------------------------- the team
   function teamView(d) {
     const t = d.totals, c = d.claude;
+    const scope = T.prov ? provName(T.prov) : 'Agent';
     const agents = d.agents;
     const max = Math.max(1, ...agents.map(a => a.total));
     const now = agents.reduce((a, x) => a + x.last10m, 0);
@@ -156,27 +168,34 @@ export function createTokens(ctx) {
     const outcomes = Object.entries(d.outcomes || {}).map(([k, v]) => ({ k, ...v })).sort((a, b) => b.total - a.total);
     const statusName = { done: 'Finished', failed: 'Failed', cancelled: 'Cancelled', queued: 'Waiting (retries)', running: 'Running now' };
     return h('div', { class: 'tk' },
+      card('By provider', 'Each model provider is counted on its own. Click one to see only its usage.',
+        h('div', { class: 'tk-kpis tk-provs' }, ...(d.providers || []).filter(p => p.calls || p.engine !== 'claude').map(p => {
+          const el = kpi(p.label, fmt(p.total), `${p.model ? p.model + ' · ' : ''}${num(p.calls)} calls · ${fmt(p.new)} new`, `${p.last10m ? 'live' : ''} ${T.prov === p.id ? 'on' : ''} click`);
+          el.style.borderTop = `3px solid ${provColor(p.id)}`;
+          el.onclick = () => setProv(T.prov === p.id ? '' : p.id);
+          return el;
+        }))),
       h('div', { class: 'tk-kpis' },
-        kpi('Gemini tokens processed', fmt(t.total), `${windowLabel().toLowerCase()} · all agents`),
+        kpi(`${scope} tokens processed`, fmt(t.total), `${windowLabel().toLowerCase()} · all agents`),
         kpi('New tokens', fmt(t.new), 'fresh input + output'),
         kpi('Re-read context', pct(t.total ? t.cached / t.total : 0), 'of every token: the conversation sent again each step'),
         kpi('Model calls', num(t.calls), `avg ${fmt(t.avg_ctx)} tokens of context each`),
         kpi('Using now', fmt(now), 'tokens in the last 10 minutes', now ? 'live' : ''),
-        kpi('Claude (manager)', fmt(c.total), `${num(c.calls)} calls · avg ${fmt(c.avg_ctx)} context`)),
+        T.prov && T.prov !== 'claude' ? null : kpi('Claude (manager)', fmt(c.total), `${num(c.calls)} calls · avg ${fmt(c.avg_ctx)} context`)),
       card('Who uses the most', 'All tokens, split by the kind of work. Click a person for the full breakdown.',
         legend(kindsUsed.map(k => [kindName(k), kindColor(k)])),
         h('div', { class: 'tk-team' }, ...agents.map(a => h('button', { class: 'tk-row', onclick: () => openAgent(a.id) },
           a.id === 'other' ? h('span', { class: 'tk-face blank' }) : face(a.id, 32),
           h('span', { class: 'tk-name' }, h('b', null, nameOf(a.id)), h('small', null, roleOf(a.id))),
           stack(Object.keys(KIND).map(k => [k, a.kinds[k] || 0, kindColor(k), kindName(k)]), max, a.total),
-          h('span', { class: 'nums' }, h('b', null, fmt(a.total)), h('small', null, `${fmt(a.new)} new · ${num(a.calls)} calls`)),
+          h('span', { class: 'nums' }, h('b', null, fmt(a.total)), h('small', null, `${fmt(a.new)} new · ${num(a.calls)} calls`), provSplit(a.providers) ? h('small', null, provSplit(a.providers)) : null),
           h('span', { class: `now ${a.last10m ? 'on' : ''}`, title: 'Tokens in the last 10 minutes' }, a.last10m ? fmt(a.last10m) : '—'))))),
       card('When', `Tokens per ${d.timeline.size >= 3600 ? (d.timeline.size === 3600 ? 'hour' : `${d.timeline.size / 3600} hours`) : `${d.timeline.size / 60} minutes`}, by person.`,
         legend(ids.map(id => [nameOf(id), colorOf(id)])), timeline(d.timeline, ids)),
       h('div', { class: 'tk-grid' },
         card('Where the tokens go', 'The step each model call chose. Every step re-sends the whole conversation, so many small steps cost the most.',
           bars(d.steps.slice(0, 10), { label: r => stepName(r.step), value: r => r.total, note: r => ` ${num(r.calls)} calls` })),
-        card('By kind of work', 'Gemini agents.',
+        card('By kind of work', T.prov ? `${provName(T.prov)} only.` : 'All agents, every provider.',
           bars(Object.entries(d.kinds).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v), { label: r => kindName(r.k), value: r => r.v, color: r => kindColor(r.k) })),
         card('By project', 'Assigned tasks only.',
           d.projects.length ? bars(d.projects.slice(0, 8), { label: r => r.project, value: r => r.total, note: r => ` ${fmt(r.new)} new` }) : empty('No project work in this window.')),
@@ -211,12 +230,13 @@ export function createTokens(ctx) {
     const id = d.id, s = d.summary;
     const isMgr = id === MGR;
     const models = Object.entries(d.models || {}).sort((a, b) => b[1] - a[1]);
+    const byProv = Object.entries(d.providers || {}).map(([p, v]) => ({ p, v })).sort((a, b) => b.v - a.v);
     const runs = d.runs.slice(0, compactView ? 12 : 60);
     const kinds = Object.entries(d.kinds).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
     const runList = h('div', { class: 'tk-runs' }, ...(runs.length ? runs.map(r => h('div', { class: `tk-run ${r.task ? 'click' : ''}`, onclick: r.task ? () => openTask(r.task) : null },
       h('span', { class: 'when' }, new Date(r.ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })),
       h('span', { class: 'what' }, h('i', { style: `background:${kindColor(r.kind)}` }), runWhat(r),
-        h('small', null, `${num(r.calls)} call${r.calls === 1 ? '' : 's'}` + (isMgr ? ` · ${Object.keys(r.models).map(MODEL).join(', ')}` : '') + ' · ' +
+        h('small', null, `${num(r.calls)} call${r.calls === 1 ? '' : 's'}` + (isMgr ? ` · ${Object.keys(r.models).map(MODEL).join(', ')}` : ` · ${provName(r.provider)}`) + ' · ' +
           Object.entries(r.steps).slice(0, 3).map(([k, n]) => `${stepName(k)} ×${n}`).join(' · '))),
       h('span', { class: 'tok' }, h('b', null, fmt(r.total)), h('small', null, `${fmt(r.new)} new · max ${fmt(r.max_ctx)} ctx`)))) : [empty('Nothing in this window.')]));
     const head = h('div', { class: 'tk-kpis' },
@@ -229,13 +249,15 @@ export function createTokens(ctx) {
     if (compactView) {
       return h('div', { class: 'tk tk-compact' }, head,
         card('On what', null, kinds.length ? bars(kinds, { label: r => kindName(r.k), value: r => r.v, color: r => kindColor(r.k) }) : empty('Nothing in this window.')),
+        !isMgr && byProv.length > 1 ? card('Which provider', null, bars(byProv, { label: r => provName(r.p), value: r => r.v, color: r => provColor(r.p) })) : null,
         card('Recent work', 'Each run and what it cost. Click a task to open it.', runList));
     }
     return h('div', { class: 'tk' }, head,
       h('div', { class: 'tk-grid' },
         card('On what', 'Tokens by kind of work.', kinds.length ? bars(kinds, { label: r => kindName(r.k), value: r => r.v, color: r => kindColor(r.k) }) : empty('Nothing in this window.')),
         card('Doing what', 'The step each model call chose.', d.steps.length ? bars(d.steps.slice(0, 10), { label: r => stepName(r.step), value: r => r.total, note: r => ` ${num(r.calls)} calls` }) : empty('Nothing in this window.')),
-        isMgr ? card('Which model', 'Sonnet by default; Opus only for complex turns.', bars(models.map(([m, v]) => ({ m, v })), { label: r => MODEL(r.m), value: r => r.v, color: r => /opus/i.test(r.m) ? '#d97757' : 'var(--accent)' })) : null),
+        isMgr ? card('Which model', 'Sonnet by default; Opus only for complex turns.', bars(models.map(([m, v]) => ({ m, v })), { label: r => MODEL(r.m), value: r => r.v, color: r => /opus/i.test(r.m) ? '#d97757' : 'var(--accent)' }))
+          : card('Which provider', 'Gemini, the local model, or anything added later: each counted on its own.', byProv.length ? bars(byProv, { label: r => provName(r.p), value: r => r.v, color: r => provColor(r.p) }) : empty('Nothing in this window.'))),
       card('Context sent per call', 'Every bar is one model call, in order, coloured by the kind of work. It climbs as a conversation grows and drops when one starts fresh.',
         legend(Object.keys(KIND).filter(k => d.context.some(p => p.kind === k)).map(k => [kindName(k), kindColor(k)])), contextChart(d.context)),
       card('When', null, timeline(d.timeline, [id])),
@@ -246,10 +268,12 @@ export function createTokens(ctx) {
   // ---------------------------------------------------------------- the window
   function shell(body) {
     const seg = h('div', { class: 'tk-seg' }, ...WINDOWS.map(([k, label]) => h('button', { class: T.win === k ? 'on' : '', onclick: () => { T.win = k; try { localStorage.setItem('office.tokens.win', k); } catch { /* ignore */ } refresh(true); } }, label)));
+    const pseg = h('div', { class: 'tk-seg' }, h('button', { class: T.prov ? '' : 'on', onclick: () => setProv('') }, 'All'),
+      ...provs().map(p => h('button', { class: T.prov === p.id ? 'on' : '', title: p.model || '', onclick: () => setProv(p.id) }, p.label)));
     const back = T.view === 'agent' ? h('button', { class: 'act', style: 'flex:none;padding:0 10px', onclick: () => { T.view = 'team'; refresh(true); } }, iconEl('back'), 'Team') : null;
     const live = h('span', { class: 'tk-live', title: 'Updates by itself as agents work' }, h('i'), 'Live');
     const title = T.view === 'agent' ? h('div', { class: 'tk-title' }, face(T.agent, 28), h('span', null, `${nameOf(T.agent)} · token usage`)) : 'Token usage';
-    return { title, tools: h('div', { class: 'toolbar tk-tools' }, back, seg, live), body };
+    return { title, tools: h('div', { class: 'toolbar tk-tools' }, back, pseg, seg, live), body };
   }
   function render() {
     if (!T.box || !T.data) return;
@@ -263,7 +287,7 @@ export function createTokens(ctx) {
     if (T.busy) { T.pending = true; return; }
     T.busy = true;
     try {
-      const url = T.view === 'agent' ? `/api/tokens/agent/${T.agent}?since=${since()}` : `/api/tokens?since=${since()}`;
+      const url = (T.view === 'agent' ? `/api/tokens/agent/${T.agent}?since=${since()}` : `/api/tokens?since=${since()}`) + provQuery();
       const d = await api('GET', url);
       if (!isOpen()) return;
       T.data = d;
@@ -281,6 +305,7 @@ export function createTokens(ctx) {
     if (T.data) render(); else T.box.replaceChildren(empty('Reading the ledger…'));
   }
   const isOpen = () => modalKind() === 'tokens';
+  function setProv(id) { T.prov = id; try { localStorage.setItem('office.tokens.prov', id); } catch { /* ignore */ } refresh(true); }
 
   function open() { T.view = 'team'; T.data = null; mount(); refresh(true); }
   function openAgent(id) { T.view = 'agent'; T.agent = id; T.data = null; mount(); refresh(true); }
@@ -292,7 +317,7 @@ export function createTokens(ctx) {
     if (!el.firstChild) el.replaceChildren(empty('Reading the ledger…'));
     if (P.busy) return; P.busy = true;
     try {
-      const d = await api('GET', `/api/tokens/agent/${id}?since=${since()}`);
+      const d = await api('GET', `/api/tokens/agent/${id}?since=${since()}${provQuery()}`);
       if (P.el !== el || P.id !== id) return;
       const top = el.parentElement?.scrollTop;
       el.replaceChildren(h('div', { class: 'tk-seg small' }, ...WINDOWS.map(([k, label]) => h('button', { class: T.win === k ? 'on' : '', onclick: () => { T.win = k; try { localStorage.setItem('office.tokens.win', k); } catch { /* ignore */ } panelTab(el, id); } }, label))),

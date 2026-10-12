@@ -116,7 +116,8 @@ class Study:
             return None
         s = self.o.settings()
         if not force:
-            if s["paused"] or self.o.quota_until > time.time():
+            if s["paused"] or self.o.provider_paused(self.o.provider_for(p["agent"])) or \
+                    not self.o.study_allowed(p["agent"]):
                 return None
             if time.time() < self.next_at(pid) or st["today"] >= p.get("max_sessions_per_day", 30):
                 return None

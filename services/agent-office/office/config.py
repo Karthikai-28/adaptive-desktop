@@ -25,9 +25,23 @@ for d in (DATA, COMPANY / "projects", COMPANY / "meetings", COMPANY / "study", A
     d.mkdir(parents=True, exist_ok=True)
 
 
+ENGINES = ("agy", "ollama")
+
+
 def load() -> dict:
     cfg = json.loads((ROOT / "config.json").read_text())
     ids = [a["id"] for a in cfg["agents"]]
     if len(ids) != len(set(ids)) or cfg["manager"]["id"] in ids:
         raise SystemExit("config.json: agent ids must be unique and differ from the manager id")
+    if "providers" not in cfg:            # older configs name only the Gemini model
+        cfg["providers"] = {"gemini": {"engine": "agy", "label": "Gemini", "model": cfg["gemini_model"]}}
+    for pid, p in cfg["providers"].items():
+        if p.get("engine") not in ENGINES or not p.get("model") or "@" in pid:
+            raise SystemExit(f"config.json: provider {pid} needs an engine ({', '.join(ENGINES)}) and a model")
+    for k in ("provider", "fallback"):
+        if cfg.get(k) and cfg[k] not in cfg["providers"]:
+            raise SystemExit(f"config.json: {k} {cfg[k]!r} is not one of the providers")
+    for a in cfg["agents"]:
+        if a.get("provider") and a["provider"] not in cfg["providers"]:
+            raise SystemExit(f"config.json: {a['id']}: provider {a['provider']!r} is not one of the providers")
     return cfg

@@ -41,9 +41,18 @@ allowed = {"claude-sonnet-5", "claude-sonnet-5-5", "claude-opus-5", "claude-opus
 for k in ("model", "complex_model"):
     assert m.get(k, "") in allowed | {""}, f"manager {k} {m.get(k)!r}: use Sonnet 5/5.5, or Opus 5 or below"
 assert "sonnet" in (m.get("model") or "claude-sonnet-5-5"), "manager model must be Sonnet; Opus is only the complex_model"
+provs = cfg.get("providers") or {"gemini": {"engine": "agy", "model": cfg.get("gemini_model")}}
+for pid, pv in provs.items():
+    assert pv.get("engine") in ("agy", "ollama") and pv.get("model"), f"provider {pid}: needs engine agy|ollama and a model"
+    assert "@" not in pid and pid != "claude", f"provider id {pid!r} is reserved or invalid"
+assert any(pv["engine"] == "agy" for pv in provs.values()), "keep one agy (Gemini) provider"
+for k in ("provider", "fallback"):
+    assert not cfg.get(k) or cfg[k] in provs, f"{k} {cfg.get(k)!r} is not a provider"
+for a in cfg["agents"]:
+    assert not a.get("provider") or a["provider"] in provs, f"{a['id']}: unknown provider {a['provider']}"
 used = [a["desk"] for a in cfg["agents"]]
 assert len(used) == len(set(used)), "two agents share a desk"
-print(f"roster ok: {len(ids)} agents + {cfg['manager']['name']}")
+print(f"roster ok: {len(ids)} agents + {cfg['manager']['name']}; providers: {', '.join(provs)}")
 PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
@@ -70,6 +79,19 @@ curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); 
 [ -d "$TMP/state/company/projects" ] || fail "state folder layout"
 curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' || fail "study api"
 [ "$(code -X POST -H 'X-Office: 1' "$B/api/study/nope/now")" = 400 ] || fail "unknown study program was accepted"
+# providers: switching is validated, the token ledger keeps every provider apart
+[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"provider":"nope"}' "$B/api/settings")" = 400 ] || fail "unknown provider was accepted"
+curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["providers"] and d["settings"]["provider"] in [p["id"] for p in d["providers"]]' || fail "providers in state"
+mkdir -p "$TMP/state/data/usage"
+echo '{"ts": 1700000000, "turn": 1700000000, "agent": "maya", "provider": "local", "model": "test", "kind": "chat", "fresh": 100, "cached": 0, "out": 20, "step": "answer"}' > "$TMP/state/data/usage/local.jsonl"
+sleep 11   # one ledger scan
+curl -fsS "$B/api/tokens?provider=local" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+loc = [p for p in d["providers"] if p["id"] == "local"]
+assert loc and loc[0]["total"] == 120 and loc[0]["calls"] == 1, d["providers"]
+assert d["totals"]["total"] == 120 and d["claude"]["calls"] == 0, d["totals"]
+assert all(p["total"] == 0 for p in d["providers"] if p["id"] not in ("local", "claude")), "local usage leaked into another provider"' || fail "token ledger per provider"
 # the sandbox: an empty home with only tools, the workspace and assigned repos; nothing personal
 python3 - "$APP" "$TMP/state" <<'PY' || fail "agent sandbox exposes too much"
 import os, subprocess, sys

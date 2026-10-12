@@ -115,9 +115,15 @@ class QuotaGuard:
         self._last_probe = time.time()
         when = dt.datetime.fromtimestamp(self.o.quota_until).strftime("%H:%M" if self.o.quota_until - now < 20 * 3600 else "%a %H:%M")
         await self.o.broadcast({"type": "settings", "settings": self.o.settings(), "quota_until": self.o.quota_until})
-        await self.o.toast(f"Gemini quota used up. The team pauses and resumes by itself at {when}.", "warn")
+        fb = self.o.settings()["fallback"]
+        if fb and not self.o.provider_paused(fb):
+            await self.o.toast(f"Gemini quota used up. The team carries on with {self.o._label(fb)} and goes back "
+                               f"to Gemini at {when}.", "warn")
+        else:
+            await self.o.toast(f"Gemini quota used up. The team pauses and resumes by itself at {when}.", "warn")
         for aid in self.o.agents:
             await self.o.push_agent(aid)
+        self.o.kick()                       # queued work starts on the fallback right away
 
     def defer_chat(self, aid, batch):
         self.deferred_chats.setdefault(aid, []).extend(batch)

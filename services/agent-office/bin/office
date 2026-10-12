@@ -11,6 +11,8 @@
   office meeting start "<topic>" --with maya,arjun[,claude]
   office meeting say "<text>" | office meeting invite a,b | office meeting end | office meeting show
   office study [status|pause|resume|now] [PROGRAM]  a learning program (e.g. Max studying the MKE repos)
+  office provider [ID] [--fallback ID|none]       which model provider agents run on (gemini, local, ...)
+  office tokens [--since 24h] [--provider ID]     token usage, split by provider
   office autopilot on|off | office pause | office resume
   office open                                     open the office in the browser
 """
@@ -62,8 +64,16 @@ def names(state):
 def cmd_status(a):
     st = call("GET", "/api/state")
     n = names(st)
-    print(f"{st['company']} — model {st['model']}")
     s = st["settings"]
+    provs = {p["id"]: p for p in st.get("providers", [])}
+    label = lambda pid: f"{provs[pid]['label']} ({provs[pid]['model']})" if pid in provs else (pid or "-")
+    print(f"{st['company']} — agents on {label(s.get('provider'))}"
+          + (f", fallback {label(s['fallback'])}" if s.get("fallback") else ""))
+    for p in provs.values():
+        if p["engine"] == "ollama":
+            state = ("not running" if not p.get("up") else "model not pulled" if not p.get("pulled")
+                     else "loaded" if p.get("loaded") else "ready")
+            print(f"  {p['label']}: Ollama {p.get('version') or ''} {p['model']} - {state}")
     flags = [f"autopilot {'on' if s['autopilot'] else 'off'}", f"max parallel {s['max_parallel']}"]
     if s["paused"]:
         flags.append("WORK PAUSED")
@@ -76,7 +86,8 @@ def cmd_status(a):
     print()
     roles = {p["id"]: p["role"] for p in st["roster"]}
     for ag in st["agents"]:
-        line = f"  {n[ag['id']]:<8} {roles[ag['id']]:<22} {ag['status']:<9}"
+        line = f"  {n[ag['id']]:<8} {roles[ag['id']]:<22} {ag['status']:<9}" + (
+            f" [{provs.get(ag['provider'], {}).get('label', ag['provider'])}]" if ag.get("provider") else "")
         if ag["task"]:
             line += f" #{ag['task']['id']} {ag['task']['title'][:50]}"
         if ag["queued"]:
@@ -216,6 +227,48 @@ def cmd_settings(a, **kw):
     print(", ".join(f"{k}={v}" for k, v in s.items()))
 
 
+def cmd_provider(a):
+    st = call("GET", "/api/state")
+    kw = {}
+    if a.id:
+        kw["provider"] = a.id
+    if a.fallback:
+        kw["fallback"] = "" if a.fallback == "none" else a.fallback
+    s = call("POST", "/api/settings", kw) if kw else st["settings"]
+    for p in st.get("providers", []):
+        tag = " <- agents" if p["id"] == s["provider"] else " <- fallback" if p["id"] == s.get("fallback") else ""
+        extra = ""
+        if p["engine"] == "ollama":
+            extra = ("  (Ollama not running)" if not p.get("up") else "  (model not pulled)" if not p.get("pulled") else "")
+        print(f"  {p['id']:<10} {p['engine']:<7} {p['model']}{extra}{tag}")
+
+
+def _since(text):
+    if not text or text == "all":
+        return 0
+    n, unit = int(text[:-1]), text[-1]
+    return time.time() - n * {"m": 60, "h": 3600, "d": 86400}[unit]
+
+
+def cmd_tokens(a):
+    d = call("GET", "/api/tokens", query={"since": _since(a.since), "provider": a.provider})
+    print(f"token usage, {'all time' if a.since == 'all' else 'last ' + a.since}"
+          + (f", provider {a.provider}" if a.provider else ""))
+    print(f"  {'provider':<18} {'total':>12} {'new':>11} {'calls':>7}  model")
+    for p in d["providers"]:
+        if p["calls"] or p["engine"] != "claude":
+            print(f"  {p['label']:<18} {p['total']:>12,} {p['new']:>11,} {p['calls']:>7,}  {p['model']}")
+    print()
+    n = {}
+    try:
+        n = names(call("GET", "/api/state"))
+    except SystemExit:
+        pass
+    for ag in d["agents"]:
+        split = "  ".join(f"{k} {v:,}" for k, v in sorted(ag.get("providers", {}).items(), key=lambda x: -x[1]))
+        print(f"  {n.get(ag['id'], ag['id']):<10} {ag['total']:>12,}  {split}")
+
+
 def main():
     p = argparse.ArgumentParser(prog="office", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd")
@@ -235,6 +288,8 @@ def main():
     s = sub.add_parser("autopilot"); s.add_argument("state", choices=["on", "off"])
     s = sub.add_parser("study"); s.add_argument("action", nargs="?", default="status", choices=["status", "pause", "resume", "now"])
     s.add_argument("program", nargs="?"); s.add_argument("-n", type=int, default=12)
+    s = sub.add_parser("provider"); s.add_argument("id", nargs="?"); s.add_argument("--fallback")
+    s = sub.add_parser("tokens"); s.add_argument("--since", default="24h"); s.add_argument("--provider")
     sub.add_parser("pause"); sub.add_parser("resume"); sub.add_parser("open")
     a = p.parse_args()
     if a.cmd in (None, "help"):

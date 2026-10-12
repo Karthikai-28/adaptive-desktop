@@ -10,7 +10,8 @@
 # It installs: bubblewrap (apt, asks for sudo), the Python packages (into .local/office-pydeps),
 # the agy and claude command-line tools (their official installers), the `office` command, and the
 # adaptive-agent-office user service. The two sign-ins it cannot do for you - Google for agy and
-# Anthropic for claude - it checks and tells you how to do.
+# Anthropic for claude - it checks and tells you how to do. Local models (Ollama, the fallback while
+# Gemini is out of quota) are optional: it only reports whether Ollama runs and the model is pulled.
 #
 # What the office produces lives in ~/.local/share/adaptive-desktop/agent-office, outside the repo.
 # Undo with ./uninstall.sh (your office data stays). See docs/AGENT_OFFICE.md.
@@ -23,7 +24,9 @@ UNIT="adaptive-agent-office.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 BIN="$HOME/.local/bin"
 PORT="$(python3 -c "import json;print(json.load(open('$APP/config.json'))['port'])")"
-MODEL="$(python3 -c "import json;print(json.load(open('$APP/config.json'))['gemini_model'])")"
+MODEL="$(python3 -c "import json;c=json.load(open('$APP/config.json'));print(next((p['model'] for p in c.get('providers',{}).values() if p['engine']=='agy'),c.get('gemini_model','')))")"
+# local providers (engine ollama), one "model url" per line - optional: the office runs without them
+LOCAL="$(python3 -c "import json;c=json.load(open('$APP/config.json'));[print(p['model'],p.get('url','http://127.0.0.1:11434')) for p in c.get('providers',{}).values() if p['engine']=='ollama']")"
 PY_MODULES="fastapi uvicorn websockets pydantic edge_tts"
 PY_PACKAGES="fastapi>=0.110 uvicorn>=0.29 websockets>=12 pydantic>=2 edge-tts>=6.1"
 
@@ -41,6 +44,7 @@ export PATH="$BIN:$HOME/bin:$PATH"
 
 ok() { printf '  ok       %s\n' "$*"; }
 need() { printf '  needed   %s\n' "$*"; MISSING=$((MISSING + 1)); }
+opt() { printf '  optional %s\n' "$*"; }
 MISSING=0
 
 have_py() { PYTHONPATH="$PYDEPS" python3 -c "import ${PY_MODULES// /, }" 2>/dev/null; }
@@ -56,7 +60,7 @@ check() {
     if command -v agy >/dev/null; then
         if agy_signed_in; then
             agy models 2>/dev/null | grep -q "^$MODEL\b" && ok "agy signed in, $MODEL available" ||
-                need "$MODEL is not offered to this account (agy models lists what is; set gemini_model in $APP/config.json)"
+                need "$MODEL is not offered to this account (agy models lists what is; set the gemini provider's model in $APP/config.json)"
         else need "agy sign-in: run 'agy' once and sign in with the Google account that has AI Pro"; fi
     fi
     command -v claude >/dev/null && ok "claude $(claude --version 2>/dev/null | cut -d' ' -f1)" || need "claude (Claude Code CLI)"
@@ -65,6 +69,14 @@ check() {
     fi
     command -v edge-tts >/dev/null || PYTHONPATH="$PYDEPS" python3 -c "import edge_tts" 2>/dev/null &&
         ok "voices (edge-tts)" || need "edge-tts (agent voices)"
+    while read -r lm lurl; do
+        [ -n "$lm" ] || continue
+        if ! curl -fsS -o /dev/null --max-time 3 "$lurl/api/version" 2>/dev/null; then
+            opt "local model $lm: Ollama is not running at $lurl (install: curl -fsSL https://ollama.com/install.sh | sh)"
+        elif curl -fsS --max-time 3 "$lurl/api/tags" | python3 -c "import json,sys; n={m['name'] for m in json.load(sys.stdin)['models']}; sys.exit(0 if '$lm' in n or '$lm:latest' in n else 1)" 2>/dev/null; then
+            ok "local model $lm (Ollama)"
+        else opt "local model $lm is not pulled: ollama pull $lm"; fi
+    done <<< "$LOCAL"
     [ -x "$BIN/office" ] && ok "office command" || need "office command in $BIN"
     [ -f "$UNIT_DIR/$UNIT" ] && ok "user service installed" || need "user service $UNIT"
     server_up && ok "running at http://127.0.0.1:$PORT" || need "the office is not running"

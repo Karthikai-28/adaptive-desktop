@@ -2,8 +2,12 @@
 
 Nothing is estimated. Every Gemini model call an agent makes is recorded by agy in that conversation's
 SQLite file (one `steps` row per call, with the call's usage in protobuf); Claude's calls are in its
-session transcripts (~/.claude/projects/*/<session>.jsonl). The ledger re-reads only the files that
-changed, every few seconds, and attributes each call:
+session transcripts (~/.claude/projects/*/<session>.jsonl); local-model calls are appended by the office
+itself to data/usage/<provider>.jsonl with the counts Ollama reports. The ledger re-reads only the files
+that changed, every few seconds, and attributes each call:
+
+  provider  which config.json provider served it ("gemini", "local", ...), or "claude" for the manager;
+            every view can be narrowed to one provider, so their usage is never mixed
 
   agent   from the persona the conversation opens with ("You are Maya, ..."), or the study program
   kind    task / study / chat / meeting / other, from the prompt that started that turn
@@ -23,11 +27,12 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from .config import AGY_HOME, AGY_HOME_LOCAL, HOME
+from .config import AGY_HOME, AGY_HOME_LOCAL, DATA, HOME
 
 SCAN_S = 10
 CONV_DIRS = [AGY_HOME / ".gemini/antigravity-cli/conversations", AGY_HOME_LOCAL / ".gemini/antigravity-cli/conversations"]
 CLAUDE_PROJECTS = HOME / ".claude/projects"
+USAGE_DIR = DATA / "usage"                   # <provider>.jsonl, one line per local-model call
 KINDS = ("task", "study", "chat", "meeting", "other")
 
 
@@ -146,6 +151,8 @@ class Ledger:
         self.o = office
         self.files = {}          # conversation db path -> {"sig", "agent", "calls"}
         self.claude = {}         # transcript path -> {"pos", "kind", "msgs": {id: call}, "turn"}
+        self.local = {}          # usage file path -> {"pos", "calls"}
+        self.agy_provider = getattr(office, "main_agy", None) or "gemini"
         self.version = 0
         self._study_tasks = {}
 
@@ -170,7 +177,7 @@ class Ledger:
         half-updated one. No database access here (the office store belongs to the event loop)."""
         changed = False
         names = {a["name"].lower(): aid for aid, a in self.o.agents.items()}
-        files, claude = dict(self.files), dict(self.claude)
+        files, claude, loc = dict(self.files), dict(self.claude), dict(self.local)
         seen = set()
         for d in CONV_DIRS:
             for f in glob.glob(str(d / "*.db")):
@@ -194,7 +201,13 @@ class Ledger:
                 if self._read_claude(f, new):
                     claude[f] = new
                     changed = True
-        self.files, self.claude = files, claude
+        for f in glob.glob(str(USAGE_DIR / "*.jsonl")):
+            old = loc.get(f) or {"pos": 0, "calls": []}
+            new = {"pos": old["pos"], "calls": list(old["calls"])}
+            if _read_usage(f, new):
+                loc[f] = new
+                changed = True
+        self.files, self.claude, self.local = files, claude, loc
         if changed:
             self._study_tasks = {}
         return changed
@@ -232,7 +245,8 @@ class Ledger:
                 calls.append({
                     "ts": ts, "turn": turn["ts"], "conv": conv, "kind": turn["kind"], "ref": turn["ref"],
                     "fresh": _get(u, 2) or 0, "cached": _get(u, 5) or 0, "out": _get(u, 3) or 0,
-                    "think": _get(u, 9) or 0, "step": tool or "answer", "model": "gemini"})
+                    "think": _get(u, 9) or 0, "step": tool or "answer", "model": "gemini",
+                    "provider": self.agy_provider})
         return {"agent": agent or "other", "calls": calls}
 
     def _study_agent(self):
@@ -275,22 +289,27 @@ class Ledger:
                     "cached": int(u.get("cache_read_input_tokens") or 0), "out": int(u.get("output_tokens") or 0),
                     "think": int((u.get("output_tokens_details") or {}).get("thinking_tokens") or 0),
                     "step": (prev["step"] if prev and prev["step"] != "answer" else None) or (steps[0] if steps else "answer"),
-                    "model": msg.get("model") or "claude"}
+                    "model": msg.get("model") or "claude", "provider": "claude"}
         return True
 
     # ------------------------------------------------------------------ querying
-    def calls(self, since=0, agent=None):
+    def calls(self, since=0, agent=None, provider=None):
+        """Every call since a time, optionally one agent's, optionally one provider's."""
         mgr = self.o.mgr["id"]
         out = []
-        files, claude = self.files, self.claude
-        if agent in (None, mgr):
+        files, claude, loc = self.files, self.claude, self.local
+        if agent in (None, mgr) and provider in (None, "claude"):
             for st in claude.values():
                 out += [dict(c, agent=mgr) for c in st["msgs"].values() if c["ts"] >= since]
-        if agent != mgr:
+        if agent != mgr and provider in (None, self.agy_provider):
             for st in files.values():
                 if agent and st["agent"] != agent:
                     continue
                 out += [dict(c, agent=st["agent"]) for c in st["calls"] if c["ts"] >= since]
+        if agent != mgr:
+            for st in loc.values():
+                out += [dict(c) for c in st["calls"] if c["ts"] >= since and (not agent or c["agent"] == agent)
+                        and (not provider or c["provider"] == provider)]
         for c in out:
             c["task"] = self._task_of(c)
         return out
@@ -314,8 +333,23 @@ class Ledger:
             r[c["agent"]] += _total(c)
         return dict(r)
 
-    def overview(self, since=0):
-        cs = self.calls(since)
+    def providers(self, cs, now):
+        """One summary per provider: the configured ones (even when unused) and the manager's Claude."""
+        rows = defaultdict(list)
+        for c in cs:
+            rows[c["provider"]].append(c)
+        out = []
+        for pid, p in [*self.o.providers.items(), ("claude", {"engine": "claude", "label": "Claude (manager)", "model": self.o.mgr.get("model", "")})]:
+            r = rows.pop(pid, [])
+            out.append({"id": pid, "label": p.get("label") or pid, "engine": p["engine"], "model": p.get("model", ""),
+                        **_sum(r), "last10m": sum(_total(c) for c in r if c["ts"] >= now - 600)})
+        for pid, r in rows.items():               # a provider since removed from config.json: still counted
+            out.append({"id": pid, "label": pid, "engine": "", "model": "", **_sum(r),
+                        "last10m": sum(_total(c) for c in r if c["ts"] >= now - 600)})
+        return out
+
+    def overview(self, since=0, provider=None):
+        cs = self.calls(since, provider=provider)
         by_agent = defaultdict(list)
         for c in cs:
             by_agent[c["agent"]].append(c)
@@ -324,7 +358,7 @@ class Ledger:
         for aid, rows in by_agent.items():
             s = _sum(rows)
             s.update(id=aid, kinds=_by(rows, "kind"), last10m=sum(_total(c) for c in rows if c["ts"] >= now - 600),
-                     models=_by(rows, "model"))
+                     models=_by(rows, "model"), providers=_by(rows, "provider"))
             agents.append(s)
         agents.sort(key=lambda a: -a["total"])
         tasks = defaultdict(list)
@@ -337,7 +371,8 @@ class Ledger:
             projects[t.get("project") or "(no project)"] += rows
         gem = [c for c in cs if c["agent"] != self.o.mgr["id"]]
         return {
-            "now": now, "since": since, "version": self.version,
+            "now": now, "since": since, "version": self.version, "provider": provider,
+            "providers": self.providers(self.calls(since) if provider else cs, now),
             "totals": _sum(gem), "claude": _sum([c for c in cs if c["agent"] == self.o.mgr["id"]]),
             "agents": agents, "kinds": _by(gem, "kind"), "steps": _steps(gem),
             "projects": sorted(({"project": k, **_sum(v)} for k, v in projects.items()), key=lambda p: -p["total"]),
@@ -345,8 +380,8 @@ class Ledger:
             "tasks": self._tasks(tasks)[:30], "timeline": _timeline(cs, since, now),
         }
 
-    def agent(self, aid, since=0):
-        cs = self.calls(since, aid)
+    def agent(self, aid, since=0, provider=None):
+        cs = self.calls(since, aid, provider)
         now = time.time()
         tasks = defaultdict(list)
         for c in cs:
@@ -360,13 +395,15 @@ class Ledger:
             t = self.o.store.task(rows[0]["task"]) if rows[0]["task"] else None
             run_list.append({**_sum(rows), "ts": turn or rows[0]["ts"], "end": max(c["ts"] for c in rows),
                              "kind": rows[0]["kind"], "task": rows[0]["task"], "title": t["title"] if t else "",
-                             "steps": _by_count(rows, "step"), "models": _by(rows, "model")})
+                             "steps": _by_count(rows, "step"), "models": _by(rows, "model"),
+                             "provider": rows[0]["provider"]})
         run_list.sort(key=lambda r: -r["ts"])
         ordered = sorted(cs, key=lambda c: c["ts"])
         return {
-            "now": now, "since": since, "version": self.version, "id": aid,
+            "now": now, "since": since, "version": self.version, "id": aid, "provider": provider,
             "summary": {**_sum(cs), "last10m": sum(_total(c) for c in cs if c["ts"] >= now - 600)},
             "kinds": _by(cs, "kind"), "steps": _steps(cs), "models": _by(cs, "model"),
+            "providers": _by(cs, "provider"),
             "tasks": self._tasks(tasks), "runs": run_list[:60], "timeline": _timeline(cs, since, now),
             "context": [{"ts": c["ts"], "ctx": c["fresh"] + c["cached"], "out": c["out"], "kind": c["kind"]}
                         for c in ordered[-400:]],
@@ -389,6 +426,33 @@ class Ledger:
         for tid, rows in tasks.items():
             o[(self.o.store.task(tid) or {}).get("status", "unknown")] += rows
         return {k: _sum(v) for k, v in o.items()}
+
+
+def _read_usage(path, st):
+    """New whole lines of a local provider's usage file; False when nothing changed."""
+    try:
+        size = Path(path).stat().st_size
+    except OSError:
+        return False
+    if size < st["pos"]:                  # the file was replaced: read it again from the start
+        st["pos"], st["calls"] = 0, []
+    if size == st["pos"]:
+        return False
+    with open(path, "rb") as fh:
+        fh.seek(st["pos"])
+        data = fh.read()
+    end = data.rfind(b"\n") + 1
+    st["pos"] += end
+    for line in data[:end].splitlines():
+        try:
+            r = json.loads(line)
+            st["calls"].append({k: r.get(k, d) for k, d in (
+                ("ts", 0), ("turn", 0), ("conv", ""), ("kind", "other"), ("ref", None), ("fresh", 0), ("cached", 0),
+                ("out", 0), ("think", 0), ("step", "answer"), ("model", "local"), ("agent", "other"),
+                ("provider", Path(path).stem))})
+        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+            continue
+    return True
 
 
 # ---------------------------------------------------------------- arithmetic

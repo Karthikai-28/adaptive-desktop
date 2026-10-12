@@ -1,9 +1,16 @@
 """The office: agents, the task scheduler, direct messages and meetings.
 
-Each agent keeps three agy conversations so they never collide:
+Each agent keeps three conversations so they never collide:
   conv:<id>              its work thread (tasks, run one at a time, in order)
   chatconv:<id>          its direct-message thread (can run while it works)
   meetconv:<mid>:<id>    one per meeting it attends
+A thread belongs to one provider (config.json "providers"): the default Gemini provider uses the bare key,
+any other provider the key plus "@<provider>", so switching between Gemini and a local model never resumes
+the other's conversation.
+
+Providers: every agent runs on the office's provider (settings "provider", or the agent's own "provider" in
+config.json). When that provider is out of quota and a "fallback" is set, agents carry on with the fallback
+until the quota resets.
 """
 import asyncio
 import datetime as dt
@@ -11,7 +18,7 @@ import json
 import re
 import time
 
-from . import agy
+from . import agy, local
 from .config import COMPANY
 from .manager import Manager
 from .quota import QuotaGuard
@@ -43,7 +50,10 @@ class Office:
         self.store = store
         self.company = cfg["company"]
         self.operator = cfg["operator"]
-        self.model = cfg["gemini_model"]
+        self.providers = cfg["providers"]
+        self.main_agy = next((k for k, v in self.providers.items() if v["engine"] == "agy"), None)
+        self.model = self.providers[self.main_agy]["model"] if self.main_agy else ""
+        self.provider_status = {}           # provider id -> what the office last saw (local servers)
         self.mgr = cfg["manager"]
         self.agents = {a["id"]: a for a in cfg["agents"]}
         self.rt = {aid: self._fresh_rt() for aid in [*self.agents, self.mgr["id"]]}
@@ -81,6 +91,7 @@ class Office:
         self.quota.start()
         self.graphs.start()
         self.ledger.start()
+        self._spawn(self._provider_loop())
         self.kick()
 
     def _spawn(self, coro):
@@ -91,14 +102,22 @@ class Office:
 
     # ------------------------------------------------------------------ settings
     def settings(self):
+        prov = self.store.get("provider", self.cfg.get("provider") or self.main_agy)
+        fb = self.store.get("fallback", self.cfg.get("fallback") or "")
         return {
             "autopilot": self.store.get("autopilot", self.mgr.get("autopilot", True)),
             "max_parallel": self.store.get("max_parallel", self.cfg.get("max_parallel_tasks", 3)),
             "paused": self.store.get("paused", False),
+            "provider": prov if prov in self.providers else self.main_agy,
+            "fallback": fb if fb in self.providers else "",
         }
 
     async def update_settings(self, **kw):
-        for k in ("autopilot", "max_parallel", "paused"):
+        for k in ("provider", "fallback"):
+            v = kw.get(k)
+            if v is not None and v != "" and v not in self.providers:
+                raise ValueError(f"unknown provider '{v}'. Providers: {', '.join(self.providers)}")
+        for k in ("autopilot", "max_parallel", "paused", "provider", "fallback"):
             if k in kw and kw[k] is not None:
                 v = kw[k]
                 if k == "max_parallel":
@@ -109,6 +128,81 @@ class Office:
         await self.broadcast({"type": "settings", "settings": self.settings(), "quota_until": self.quota_until})
         self.kick()
         return self.settings()
+
+    # ------------------------------------------------------------------ providers
+    def provider_paused(self, pid):
+        """Can't take work right now: agy out of quota, or a local server down or without its model
+        (unknown until the first status check, a second after start)."""
+        p = self.providers.get(pid) or {}
+        if p.get("engine") == "agy":
+            return self.quota_until > time.time()
+        st = self.provider_status.get(pid)
+        return not (st and st.get("up") and st.get("pulled"))
+
+    def on_fallback(self, aid):
+        """The agent is running on the fallback only because its own provider is out of quota."""
+        s = self.settings()
+        return self.provider_for(aid) != (self.agents.get(aid, {}).get("provider") or s["provider"])
+
+    def study_allowed(self, aid):
+        """Study programs run session after session; on a local CPU model that would keep the laptop busy
+        all day, so they wait for Gemini unless config.json says "study_on_fallback": true."""
+        return not self.on_fallback(aid) or bool(self.cfg.get("study_on_fallback"))
+
+    def provider_for(self, aid):
+        """The provider this agent's next turn runs on: its own or the office's, or the fallback while
+        that one is out of quota."""
+        s = self.settings()
+        base = self.agents.get(aid, {}).get("provider") or s["provider"]
+        if base not in self.providers:
+            base = s["provider"]
+        fb = s["fallback"]
+        if self.provider_paused(base) and fb and fb != base and not self.provider_paused(fb):
+            return fb
+        return base
+
+    def provider_info(self):
+        return [{"id": k, "label": v.get("label") or k, "engine": v["engine"], "model": v.get("model", ""),
+                 **{x: y for x, y in self.provider_status.get(k, {}).items() if x not in ("engine", "model")}}
+                for k, v in self.providers.items()]
+
+    async def _provider_loop(self):
+        """Watch local model servers (is Ollama up, is the model pulled and loaded) for the top bar."""
+        while True:
+            try:
+                new = {k: await local.status(v) for k, v in self.providers.items() if v["engine"] == "ollama"}
+                if new != self.provider_status:
+                    self.provider_status = new
+                    await self.broadcast({"type": "providers", "providers": self.provider_info()})
+                    for aid in self.agents:
+                        await self.push_agent(aid)
+                    self.kick()                     # a local model became ready (or went away)
+            except Exception as e:  # the status light is advisory
+                print(f"provider status: {e}", flush=True)
+            await asyncio.sleep(30)
+
+    def _ck(self, key, pid):
+        """A conversation key for one provider (the main Gemini provider keeps the bare key)."""
+        return key if pid == self.main_agy else f"{key}@{pid}"
+
+    def _run(self, aid, pid, prompt, conv_id, timeout_min, on_event=None, tools=True, max_steps=None):
+        """One turn for an agent on a provider: an AgyRun or a LocalRun, same interface."""
+        a, p = self.agents[aid], self.providers[pid]
+        if p["engine"] == "agy":
+            run = agy.AgyRun(prompt, agent_name=a["name"], model=p["model"], conv_id=conv_id,
+                             timeout_min=timeout_min, on_event=on_event, **self._run_opts(aid))
+        elif p["engine"] == "ollama":
+            run = local.LocalRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p, conv_id=conv_id,
+                                 timeout_min=timeout_min, on_event=on_event, tools=tools, max_steps=max_steps,
+                                 **self._run_opts(aid))
+        else:
+            raise ValueError(f"provider {pid}: unknown engine {p['engine']!r}")
+        run.provider = pid
+        return run
+
+    def _label(self, pid):
+        p = self.providers.get(pid) or {}
+        return f"{p.get('label') or pid} ({p.get('model', '')})"
 
     # ------------------------------------------------------------------ broadcast
     async def broadcast(self, msg):
@@ -124,7 +218,7 @@ class Office:
 
     def roster(self):
         people = [{**{k: a[k] for k in ("id", "name", "role", "team", "desk", "voice", "look")},
-                   "kind": "gemini"} for a in self.agents.values()]
+                   "kind": "gemini", "provider": a.get("provider") or ""} for a in self.agents.values()]
         m = self.mgr
         people.append({"id": m["id"], "name": m["name"], "role": m["role"], "team": "Management",
                        "desk": "boss", "voice": m["voice"], "look": m["look"], "kind": "claude"})
@@ -139,7 +233,7 @@ class Office:
             queued = self.manager.pending
         else:
             queued = len(self.store.next_queued(aid))
-            if self.quota_until > time.time() and not rt["task"]:
+            if self.provider_paused(self.provider_for(aid)) and not rt["task"]:
                 status = "quota"
             elif rt["task"]:
                 status = "working"
@@ -147,7 +241,8 @@ class Office:
                 status = "thinking"
             else:
                 status = "idle"
-        return {"id": aid, "status": status, "in_meeting": in_meeting, "task": rt["task"],
+        prov = None if aid == self.mgr["id"] else (rt["task"] or {}).get("provider") or self.provider_for(aid)
+        return {"id": aid, "status": status, "in_meeting": in_meeting, "task": rt["task"], "provider": prov,
                 "activity": rt["activity"], "activity_ts": rt["activity_ts"], "queued": queued,
                 "chatting": rt["chatting"], "meeting_busy": rt["meeting_busy"]}
 
@@ -179,6 +274,7 @@ class Office:
             "meeting": self.store.active_meeting(),
             "settings": self.settings(),
             "quota_until": self.quota_until,
+            "providers": self.provider_info(),
             "studies": self.study.all_status(),
         }
 
@@ -198,12 +294,12 @@ class Office:
             + self._efficiency(a["id"])
         )
 
-    def _conv_key(self, t):
-        """Tasks of the same project continue one agy conversation; anything else starts fresh.
+    def _conv_key(self, t, pid):
+        """Tasks of the same project continue one conversation per provider; anything else starts fresh.
         Study sessions always start fresh (their memory is the knowledge base)."""
         if self.study.program_of(t) or not t.get("project"):
             return None
-        return f"conv:{t['agent']}:{t['project']}"
+        return self._ck(f"conv:{t['agent']}:{t['project']}", pid)
 
     def _efficiency(self, aid):
         graph = self.graphs.path_for(aid)
@@ -312,15 +408,26 @@ class Office:
 
     async def _schedule_locked(self):
         s = self.settings()
-        if s["paused"] or self.quota_until > time.time():
+        if s["paused"]:
             return
-        # oldest waiting task first, one running task per agent
+        # oldest waiting task first, one running task per agent, each provider within its own limit
         waiting = sorted((t for aid in self.agents for t in self.store.next_queued(aid)), key=lambda t: t["id"])
         busy = {a for a in self.agents if self.rt[a]["task"]}
+        running = {}
+        for run in self.task_runs.values():
+            running[run.provider] = running.get(run.provider, 0) + 1
         for t in waiting:
             if len(self.task_runs) >= s["max_parallel"]:
                 break
             if t["agent"] in busy:
+                continue
+            pid = self.provider_for(t["agent"])
+            if self.provider_paused(pid):
+                continue
+            if self.study.program_of(t) and not self.study_allowed(t["agent"]):
+                continue
+            cap = self.providers[pid].get("max_parallel")
+            if cap and running.get(pid, 0) >= cap:
                 continue
             if t["depends_on"]:
                 d = self.store.task(t["depends_on"])
@@ -335,21 +442,24 @@ class Office:
             if fresh["status"] != "queued":
                 continue
             busy.add(t["agent"])
-            self._run_task_start(fresh)
+            running[pid] = running.get(pid, 0) + 1
+            self._run_task_start(fresh, pid)
 
-    def _run_task_start(self, t):
+    def _run_task_start(self, t, pid):
         aid = t["agent"]
         t = self.store.update_task(t["id"], status="running", started_at=time.time(), attempts=t["attempts"] + 1)
-        self.rt[aid]["task"] = {"id": t["id"], "title": t["title"]}
+        self.rt[aid]["task"] = {"id": t["id"], "title": t["title"], "provider": pid}
 
         async def on_event(kind, text):
             await self.activity(aid, kind, text, t["id"])
 
         study = self.study.program_of(t)
-        run = agy.AgyRun(self.study.prompt(t) if study else self._task_prompt(t),
-                         agent_name=self.agents[aid]["name"], model=self.model,
-                         conv_id=self.store.get(self._conv_key(t)) if self._conv_key(t) else None,
-                         timeout_min=self.cfg.get("task_timeout_min", 45), on_event=on_event, **self._run_opts(aid))
+        key = self._conv_key(t, pid)
+        run = self._run(aid, pid, self.study.prompt(t) if study else self._task_prompt(t),
+                        self.store.get(key) if key else None, self.cfg.get("task_timeout_min", 45), on_event)
+        if pid != self.settings()["provider"] and not self.agents[aid].get("provider"):
+            self._spawn(self.activity(aid, "info", f"Working on {self._label(pid)} while "
+                                                   f"{self._label(self.settings()['provider'])} is out of quota", t["id"]))
         self.task_runs[t["id"]] = run
         self._spawn(self._run_task(t, run))
 
@@ -367,7 +477,7 @@ class Office:
             self.task_runs.pop(tid, None)
             self.rt[aid]["task"] = None
         study = self.study.program_of(t)
-        key = self._conv_key(t)
+        key = self._conv_key(t, run.provider)
         if key:
             # keep a project's thread for its next task, but start over once it has grown expensive
             if r.conv_id and r.tokens < CONV_ROTATE_TOKENS:
@@ -392,9 +502,11 @@ class Office:
             t = self.store.update_task(tid, status="cancelled", finished_at=now, steps=r.steps, tokens=r.tokens)
             await self.activity(aid, "info", f"Task #{tid} cancelled", tid)
         elif r.quota:
-            # back in the queue untouched; the quota guard resumes it when Gemini resets
+            # back in the queue untouched; it runs on the fallback provider, or when Gemini resets
             t = self.store.update_task(tid, status="queued", attempts=max(0, t["attempts"] - 1), error=r.error)
-            await self.activity(aid, "error", "Gemini quota reached — waiting for it to reset", tid)
+            fb = self.settings()["fallback"]
+            await self.activity(aid, "error", "Gemini quota reached — " + (
+                f"continuing on {self._label(fb)}" if fb and fb != run.provider else "waiting for it to reset"), tid)
             self._spawn(self.quota.hit(aid, r.error))
         elif "conversation" in r.error.lower() and key and self.store.get(key) and t["attempts"] < 3:
             self.store.delete(key)   # a stale work thread: start a fresh one
@@ -439,13 +551,11 @@ class Office:
                 batch.append(self.chat_q[aid].get_nowait())
             who = lambda s: self.operator if s == "operator" else ("Claude (manager)" if s == self.mgr["id"] else s)
             lines = "\n".join(f"{who(s)}: {mm['text']}" for mm, s in batch)
-            conv = self.store.get(f"chatconv:{aid}")
-            prompt = ((self._persona(a) if not conv else "") +
-                      "=== DIRECT MESSAGE ===\n" + lines +
-                      f"\n\n(Context, not from them: {self._status_line(aid)}.)\n"
-                      "Reply to them directly and conversationally, in your own voice. Keep it short unless they ask "
-                      "for detail — it may be read aloud, so avoid big tables and heavy markdown. If they ask you "
-                      "to do something, you can do it now with your tools and then tell them what you did.")
+            body = ("=== DIRECT MESSAGE ===\n" + lines +
+                    f"\n\n(Context, not from them: {self._status_line(aid)}.)\n"
+                    "Reply to them directly and conversationally, in your own voice. Keep it short unless they ask "
+                    "for detail — it may be read aloud, so avoid big tables and heavy markdown. If they ask you "
+                    "to do something, you can do it now with your tools and then tell them what you did.")
             self.rt[aid]["chatting"] = True
             await self.push_agent(aid)
 
@@ -453,34 +563,44 @@ class Office:
                 if kind not in ("think", "start"):
                     await self.activity(aid, kind, text)
 
-            run = agy.AgyRun(prompt, agent_name=a["name"], model=self.model, conv_id=conv,
-                             timeout_min=self.cfg.get("chat_timeout_min", 15), on_event=on_event, **self._run_opts(aid))
-            self.chat_runs[aid] = run
+            timeout = self.cfg.get("chat_timeout_min", 15)
+            r, tried = agy.AgyResult(), set()
             try:
-                r = await run.wait()
-                if not r.ok and conv and not r.quota and not r.cancelled:   # stale thread: retry fresh once
-                    self.store.delete(f"chatconv:{aid}")
-                    run = agy.AgyRun(self._persona(a) + prompt, agent_name=a["name"], model=self.model,
-                                     timeout_min=self.cfg.get("chat_timeout_min", 15), on_event=on_event,
-                                     **self._run_opts(aid))
+                while True:
+                    pid = self.provider_for(aid)
+                    tried.add(pid)
+                    ckey = self._ck(f"chatconv:{aid}", pid)
+                    conv = self.store.get(ckey)
+                    run = self._run(aid, pid, (self._persona(a) if not conv else "") + body, conv, timeout, on_event,
+                                    max_steps=8)
                     self.chat_runs[aid] = run
                     r = await run.wait()
+                    if not r.ok and conv and not r.quota and not r.cancelled:   # stale thread: retry fresh once
+                        self.store.delete(ckey)
+                        run = self._run(aid, pid, self._persona(a) + body, None, timeout, on_event, max_steps=8)
+                        self.chat_runs[aid] = run
+                        r = await run.wait()
+                    if r.quota:
+                        await self.quota.hit(aid, r.error)
+                        if self.provider_for(aid) not in tried:              # the fallback answers instead
+                            continue
+                    break
             except Exception as e:
                 r = agy.AgyResult(); r.error = str(e)
+                ckey = None
             finally:
                 self.chat_runs.pop(aid, None)
                 self.rt[aid]["chatting"] = False
-            if r.conv_id and r.tokens < CHAT_ROTATE_TOKENS:
-                self.store.set(f"chatconv:{aid}", r.conv_id)
-            elif r.conv_id:
-                self.store.delete(f"chatconv:{aid}")     # long thread: the next message starts a fresh one
+            if ckey and r.conv_id and r.tokens < CHAT_ROTATE_TOKENS:
+                self.store.set(ckey, r.conv_id)
+            elif ckey and r.conv_id:
+                self.store.delete(ckey)                  # long thread: the next message starts a fresh one
             if r.ok:
                 await self.post(f"dm:{aid}", aid, r.text.strip(), {"reply_to": batch[-1][0]["id"]})
             elif r.quota:
                 self.quota.defer_chat(aid, batch)       # answered automatically when the quota is back
                 await self.post(f"dm:{aid}", aid, "(I've hit the Gemini usage limit. I'll answer this automatically "
                                                   "as soon as it resets.)", {"kind": "failure"})
-                self._spawn(self.quota.hit(aid, r.error))
             elif not r.cancelled:
                 await self.post(f"dm:{aid}", aid, f"(Sorry, I couldn't reply: {r.error[:300]})", {"kind": "failure"})
             await self.push_agent(aid)
@@ -570,7 +690,9 @@ class Office:
             lines = self._transcript(m["id"], after_id=seen)
             if not lines:
                 return
-            conv = self.store.get(f"meetconv:{m['id']}:{aid}")
+            pid = self.provider_for(aid)
+            mkey = self._ck(f"meetconv:{m['id']}:{aid}", pid)
+            conv = self.store.get(mkey)
             others = ", ".join(self._name(x) for x in m["attendees"] if x != aid)
             head = ""
             if not conv:
@@ -583,8 +705,8 @@ class Office:
                       "of repeating it. If you have nothing useful to add, reply with exactly: PASS")
             self.rt[aid]["meeting_busy"] = True
             await self.push_agent(aid)
-            run = agy.AgyRun(prompt, agent_name=a["name"], model=self.model, conv_id=conv,
-                             timeout_min=self.cfg.get("meeting_timeout_min", 4), **self._run_opts(aid))
+            # meetings are talk: a local model answers without tools, which keeps the turn short
+            run = self._run(aid, pid, prompt, conv, self.cfg.get("meeting_timeout_min", 4), tools=False)
             self.meet_runs[aid] = run
             try:
                 r = await run.wait()
@@ -595,7 +717,7 @@ class Office:
                 self.rt[aid]["meeting_busy"] = False
             self.store.set(seen_key, lines[-1][0])
             if r.conv_id:
-                self.store.set(f"meetconv:{m['id']}:{aid}", r.conv_id)
+                self.store.set(mkey, r.conv_id)
             if not self.store.active_meeting():
                 await self.push_agent(aid)
                 return
@@ -671,8 +793,9 @@ class Office:
             self.store.delete("mgr:session")
         else:
             self.store.delete_prefix(f"conv:{aid}:")
-            self.store.delete(f"conv:{aid}")
-            self.store.delete(f"chatconv:{aid}")
+            for key in (f"conv:{aid}", f"chatconv:{aid}"):
+                self.store.delete(key)
+                self.store.delete_prefix(f"{key}@")
         await self.activity(aid, "info", "Memory reset — starting fresh conversations")
 
     async def stop_agent(self, aid):

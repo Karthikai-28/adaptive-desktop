@@ -258,6 +258,10 @@ textarea.in { resize: vertical; min-height: 110px; }
 .tk-kpi .v { font-size: 22px; font-weight: 750; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .tk-kpi .n { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
 .tk-kpi.live .v { color: var(--ok); }
+.tk-kpi.click { cursor: pointer; } .tk-kpi.click:hover { border-color: var(--accent); }
+.tk-kpi.on { background: #f3f5ff; border-color: var(--accent); }
+.tk-provs { margin-top: 2px; }
+.tk-row .nums small + small { color: var(--muted); }
 .tk-card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .tk-card h3 { margin: 0; font-size: 14px; }
 .tk-note { margin: -6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
