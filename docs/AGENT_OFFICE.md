@@ -236,16 +236,41 @@ single-step tool-call checks (list a folder, write a file, run a command).
 Too big for this machine: `gpt-oss:20b` (14 GB), `qwen3:30b-a3b` (19 GB). Change the model with the local
 provider's `model` in `config.json` after `ollama pull <model>`, and restart the office.
 
+### Backup chain: Gemini -> Claude Haiku -> local (`office/claude_agent.py`)
+
+`"fallback": "haiku"`, and the haiku provider names its own `"fallback": "local"`. Each turn runs on the
+first provider in the chain that can take work: while Gemini is out of quota agents work on Claude Haiku,
+and only when Haiku hits its limit too on the local model. `office provider` shows the chain.
+
+Haiku runs through Claude Code (`claude -p`) on the operator's own Claude login (the same one the manager
+uses), which the office never reads. The operator's Claude settings, hooks, plugins, MCP servers and memory
+are left out (`--setting-sources project`, `--strict-mcp-config`, auto memory off). Agents get only Bash,
+Read, Edit, Write and the web tools (`--tools`), in dontAsk mode:
+- Read only inside the workspace, the studied repos and the knowledge graphs; Edit/Write only in the
+  workspace. Agents search with grep/find in Bash.
+- Bash runs in Claude Code's bubblewrap sandbox (`failIfUnavailable`, no unsandboxed escape): the home
+  folder is unreadable apart from the workspace, the studied repos, the graphs and the developer tools; only
+  the workspace and /tmp are writable. Checked on 12 Oct 2026: writing or reading elsewhere in the home
+  folder fails ("No such file or directory"; file tools "denied").
+- `code_local_only` agents (Max) get no web tools.
+
+Haiku shares the operator's Claude subscription limits with the manager (and with any Claude Code session).
+Claude Code's own prompt is large: a short turn re-sends ~20k tokens, mostly cached. When Haiku reports its
+limit, it is paused until the reset in the message (an hour if none) and turns move to the local model.
+Usage is counted in `data/usage/haiku.jsonl`.
+
 ### Meetings on Codex (`office/codex.py`)
 
 `"meeting_provider": "codex"` sends every agent's meeting turn, and nothing else, to the Codex CLI
-(`codex exec`, provider `codex`: `gpt-5.6-luna`, `"reasoning": "medium"`). Codex signs in with the
-operator's own Codex login; the office never reads or copies it. A meeting turn is talk only: the shell,
-exec, browser, computer-use, app and plugin tools are switched off and live web search stays on. The
-operator's Codex config, rules and AGENTS.md are ignored. When Codex reports a usage limit, meetings go
-back to the agent's usual provider for an hour. Codex can't be the `provider` or `fallback`. Its usage is
-counted in `data/usage/codex.jsonl` like a local provider's. Remove `meeting_provider` and restart the
-office to turn this off.
+(`codex exec`: `gpt-5.6-luna`, `"meeting_reasoning": "medium"`). A meeting turn is talk only: shell, exec,
+browser, computer-use, app and plugin tools are off, live web search stays on. Because it can't touch
+files, it uses the operator's own `~/.codex` login (never read by the office) and ignores the operator's
+Codex config, rules and AGENTS.md. When Codex reports a usage limit, meetings use the agent's usual chain.
+
+Codex can also do work turns, but only signed in to its own home `data/codex-home` (`office codex-login`,
+token in the OS keyring): with shell access Codex's own sandbox can still read the whole disk, so work turns
+run inside the office's bubblewrap sandbox where the operator's `~/.codex` doesn't exist. Until it is signed
+in, Codex counts as unavailable for work.
 
 ## Token ledger (`office/ledger.py`)
 
