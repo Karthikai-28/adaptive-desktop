@@ -241,7 +241,8 @@ class LocalRun:
                 f"Your working directory is {COMPANY}; it is the only place you can write. "
                 f"Read-only folders you may also read: {roots}. {net} There is no image generation tool. "
                 "Use the tools to do real work: look before you change things, verify what you build by running it, "
-                "and keep tool output small. When you are done, answer without calling a tool.")
+                "and keep tool output small. Only create or change files when your task or the message asks for it; "
+                "a question just needs an answer. When you are done, answer without calling a tool.")
 
     def _fit(self, msgs):
         """Keep the conversation inside the model's context window: old tool output goes first, then the
