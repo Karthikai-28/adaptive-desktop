@@ -17,7 +17,7 @@ compatibility without keeping GNOME 42 working first.
 | Settings | `apps/adaptive-settings/` (Adaptive-only sections); rest is skinned gnome-control-center 41.7 | |
 | Project context (D-Bus) | `services/project-context/main.py` | |
 | Phone link | daemon `services/adaptive-link/` (`server.py` + one module per feature), Android app `apps/adaptive-link-android/` (Kotlin, Gradle) | `docs/ADAPTIVE_LINK.md` |
-| Agent Office (AI company, :8790) | `services/agent-office/`: `server.py`, `office/*.py` (`manager.py`, `agy.py` Gemini, `local.py` Ollama, `quota.py`, `ledger.py`, `graphs.py`, `study.py`), UI in `static/` | `docs/AGENT_OFFICE.md` (sections: setup, safety, providers, ledger, gotchas). All Agent Office work happens here and nowhere else |
+| Agent Office (AI company, :8790) | `services/agent-office/`: `server.py`, `office/*.py` (`manager.py`, `agy.py` Gemini, `local.py` Ollama, `codex.py` Codex for meetings, `quota.py`, `ledger.py`, `graphs.py`, `study.py`), UI in `static/` | `docs/AGENT_OFFICE.md` (sections: setup, safety, providers, ledger, gotchas). All Agent Office work happens here and nowhere else |
 | Screenshot annotate / screen text | `apps/adaptive-annotate/`, `shell/.../screenText*.js` | |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/`, `design/` | `docs/DESIGN_SYSTEM.md` |
 | systemd units, autostart | `services/*.service`, `*.timer` | |
@@ -52,4 +52,4 @@ are recorded with `scripts/record-live-verification.py`.
 - Repo conventions (single `master` branch, commit identity, commit cadence, UI palette, Files
   inspector scope) are in this repo's memory: `memctl read`.
 
-<!-- map-check: commit=e35ed3aeecdf time=1791821621 -->
+<!-- map-check: commit=cd00d8c0a4d9 time=1791823562 -->
