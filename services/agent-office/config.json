@@ -17,11 +17,19 @@
       "think": false,
       "max_steps": 30,
       "max_parallel": 1
+    },
+    "codex": {
+      "engine": "codex",
+      "label": "Codex",
+      "model": "gpt-5.6-luna",
+      "reasoning": "medium",
+      "web_search": true
     }
   },
   "provider": "gemini",
   "fallback": "local",
   "study_on_fallback": true,
+  "meeting_provider": "codex",
   "max_parallel_tasks": 3,
   "task_timeout_min": 45,
   "chat_timeout_min": 15,
