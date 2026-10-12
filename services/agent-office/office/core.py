@@ -11,7 +11,7 @@ the other's conversation.
 Providers: every agent runs on the office's provider (settings "provider", or the agent's own "provider" in
 config.json). When that provider is out of quota and a "fallback" is set, agents carry on with the fallback
 until the quota resets. A provider can name its own "fallback" in config.json, which makes a chain:
-Gemini -> Claude Haiku -> local; each turn runs on the first provider in the chain that can take work.
+Gemini -> Codex -> Claude Haiku -> local; each turn runs on the first provider in the chain that can take work.
 Meetings can have their own: "meeting_provider" (e.g. Codex) answers every agent's meeting turn, and only those; while it is out of quota, meetings use the agent's usual provider.
 """
 import asyncio
@@ -134,18 +134,13 @@ class Office:
 
     # ------------------------------------------------------------------ providers
     def provider_paused(self, pid, tools=True):
-        """Can't take work right now: agy or Codex out of quota, Codex's office login missing (work turns
-        only; talk-only turns use the operator's login), or a local server down or without its model
-        (unknown until the first status check, a second after start)."""
+        """Can't take work right now: Gemini, Codex or Claude out of quota, or a local server down or
+        without its model (unknown until the first status check, a second after start)."""
         p = self.providers.get(pid) or {}
         if p.get("engine") == "agy":
             return self.quota_until > time.time()
-        if p.get("engine") == "claude":
+        if p.get("engine") in ("claude", "codex"):
             return self.paused_until.get(pid, 0) > time.time()
-        if p.get("engine") == "codex":
-            if self.paused_until.get(pid, 0) > time.time():
-                return True
-            return tools and not (self.provider_status.get(pid) or {}).get("up")
         st = self.provider_status.get(pid)
         return not (st and st.get("up") and st.get("pulled"))
 
@@ -217,9 +212,6 @@ class Office:
         while True:
             try:
                 new = {k: await local.status(v) for k, v in self.providers.items() if v["engine"] == "ollama"}
-                for k, v in self.providers.items():
-                    if v["engine"] == "codex":            # signed in to the office's own Codex home?
-                        new[k] = {"up": await codex.logged_in()}
                 if new != self.provider_status:
                     self.provider_status = new
                     await self.broadcast({"type": "providers", "providers": self.provider_info()})

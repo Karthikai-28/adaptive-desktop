@@ -1,19 +1,20 @@
 """Run one agent turn through the Codex CLI (`codex exec`) on the operator's ChatGPT subscription.
 
-Codex answers meetings ("meeting_provider"). It can also do work turns, as a provider in the fallback
-chain, once the office's own Codex home is signed in (`office codex-login`); until then it counts as
-unavailable for work and the chain skips it.
+Codex is Gemini's first backup (config.json: "fallback": "codex"; the codex provider's own "fallback"
+names the next one) and answers meetings ("meeting_provider"). Every turn uses the operator's own Codex
+login in ~/.codex, which the office never reads; the operator's Codex config, rules and AGENTS.md are
+ignored (--ignore-user-config, --ignore-rules). Apps, plugins, browser, computer use and hooks are off.
 
-Two kinds of turn:
-- Talk only (meetings, tools=False): every tool that can touch the machine is switched off, so the turn
-  can only think, search the web and answer. It uses the operator's own Codex login in ~/.codex, which
-  the office never reads; the operator's Codex config, rules and AGENTS.md are ignored.
-- Work (tasks, direct messages): Codex runs inside the same bubblewrap sandbox as agy (read-only system,
-  an empty home, the workspace writable, the studied repos read-only) with its own home,
-  data/codex-home, signed in once by the operator (`office codex-login`) with the token in the OS
-  keyring, never in a file. The operator's ~/.codex does not exist inside the sandbox. Codex's own
-  workspace-write sandbox confines shell commands on top; agents that must learn code only from local
-  copies get no network in their shell and no web search.
+- Talk only (meetings): the shell and exec tools are off too, so the turn can only think, search the web
+  and answer.
+- Work (tasks, direct messages, study): shell commands and file edits run under a Codex permission profile
+  ("office") that lists everything they may see. The home folder is not in it, so ~/.codex (the login),
+  ~/.ssh and the rest of the operator's files don't exist for the agent; only Codex's own program folders
+  are added back, read-only, so its sandbox helper can start. Readable: the system folders, the developer
+  tools, the studied repos and the knowledge graphs; writable: the workspace and a temp dir. /run is left
+  out (it holds the session bus and the keyring) apart from the DNS resolver. Agents that must learn code
+  only from local copies get no network in their shell and no web search. Checked on 12 Oct 2026: a file
+  elsewhere in the home folder is "No such file or directory".
 
 Usage is appended to data/usage/<provider>.jsonl in the same shape as local runs, so the token ledger
 counts Codex on its own.
@@ -26,31 +27,15 @@ import signal
 import time
 
 from . import agy
-from .config import COMPANY, DATA
+from .config import COMPANY, DATA, HOME, STATE
 
-CODEX_HOME = DATA / "codex-home"            # the office's own Codex login and threads (work turns)
-KEYRING = ["-c", 'cli_auth_credentials_store="keyring"']
 # never available to an agent; talk-only turns lose the shell and exec tools as well
 NEVER = ("apps", "plugins", "browser_use", "browser_use_external", "in_app_browser", "computer_use",
          "image_generation", "hooks", "goals", "skill_mcp_dependency_install", "memories")
 TALK_ONLY = ("shell_tool", "unified_exec", "code_mode_host")
 QUOTA_MARKERS = ("usage limit", "rate limit", "429", "quota", "too many requests")
-CODEX_HOME.mkdir(parents=True, exist_ok=True)
-
-
-async def logged_in():
-    """Is the office's own Codex home signed in? (work turns need it; talk-only turns don't)"""
-    try:
-        p = await asyncio.create_subprocess_exec(
-            "codex", "login", "status", *KEYRING, env={**_base_env(), "CODEX_HOME": str(CODEX_HOME)},
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        return await asyncio.wait_for(p.wait(), 30) == 0
-    except (OSError, asyncio.TimeoutError):
-        return False
-
-
-def _base_env():
-    return {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "CODEX_API_KEY")}
+SYSTEM_RO = (":minimal", "/usr", "/etc", "/opt", "/snap", "/var", "/run/systemd/resolve")
+CODEX_PROGRAM = (".codex/packages", ".codex/tmp/arg0")     # Codex's binaries and sandbox helper, no login
 
 
 def reset_from_error(err, now=None):
@@ -61,6 +46,10 @@ def reset_from_error(err, now=None):
         return None
     d, h, mi = (int(x or 0) for x in m.groups())
     return now + d * 86400 + h * 3600 + mi * 60 + 60
+
+
+def _toml(v):
+    return json.dumps(v)          # a JSON string is a valid TOML basic string
 
 
 class CodexRun:
@@ -84,31 +73,34 @@ class CodexRun:
         self.result = agy.AgyResult()
         self.usage_file = DATA / "usage" / f"{provider}.jsonl"
 
+    def _profile(self):
+        """The office permission profile: what a work turn's commands and edits may see and change."""
+        fs = {p: "read" for p in SYSTEM_RO}
+        ro = [HOME / p for p in CODEX_PROGRAM + tuple(agy.HOME_TOOLS)] + list(self.ro_dirs) + [STATE / "graphs"]
+        fs.update({str(p): "read" for p in ro if os.path.isdir(p)})
+        fs.update({str(COMPANY): "write", ":tmpdir": "write"})
+        table = ",".join(f"{_toml(k)}={_toml(v)}" for k, v in fs.items())
+        return ["-c", 'default_permissions="office"', "-c", f"permissions.office.filesystem={{{table}}}",
+                "-c", f"permissions.office.network.enabled={'false' if self.offline else 'true'}"]
+
     def _cmd(self):
         web = self.cfg.get("web_search", True) and not self.offline
-        opts = ["--json", "-m", self.model, "--skip-git-repo-check", "--ignore-rules",
+        opts = ["--json", "-m", self.model, "--skip-git-repo-check", "--ignore-rules", "--ignore-user-config",
                 "-c", f'model_reasoning_effort="{self.reasoning}"',
                 "-c", f'web_search="{"live" if web else "disabled"}"']
         for f in NEVER + (() if self.tools else TALK_ONLY):
             opts += ["--disable", f]
         if self.tools:
-            opts += [*KEYRING, "-c", 'approval_policy="never"', "-c", 'sandbox_mode="workspace-write"',
-                     "-c", f"sandbox_workspace_write.network_access={'false' if self.offline else 'true'}"]
+            opts += ["-c", 'approval_policy="never"', *self._profile()]
         else:
-            opts += ["--ignore-user-config", "-s", "read-only"]
+            opts += ["-s", "read-only"]
         if self.conv_id:
-            cmd = ["codex", "exec", "resume", self.conv_id, *opts, "-"]
-        else:
-            cmd = ["codex", "exec", *opts, "-"]
-        if self.tools:
-            return agy._bwrap_prefix(self.ro_dirs, CODEX_HOME) + cmd
-        return cmd
+            return ["codex", "exec", "resume", self.conv_id, *opts, "-"]
+        return ["codex", "exec", *opts, "-"]
 
     def _env(self):
-        if not self.tools:
-            return _base_env()
-        env = agy._env(self.agent_name, CODEX_HOME)
-        env["CODEX_HOME"] = str(CODEX_HOME)
+        env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "CODEX_API_KEY")}
+        env["AGENT_NAME"] = self.agent_name
         return env
 
     async def wait(self):

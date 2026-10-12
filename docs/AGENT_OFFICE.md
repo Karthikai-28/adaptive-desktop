@@ -236,41 +236,36 @@ single-step tool-call checks (list a folder, write a file, run a command).
 Too big for this machine: `gpt-oss:20b` (14 GB), `qwen3:30b-a3b` (19 GB). Change the model with the local
 provider's `model` in `config.json` after `ollama pull <model>`, and restart the office.
 
-### Backup chain: Gemini -> Claude Haiku -> local (`office/claude_agent.py`)
+### Backup chain: Gemini -> Codex -> Claude Haiku -> local
 
-`"fallback": "haiku"`, and the haiku provider names its own `"fallback": "local"`. Each turn runs on the
-first provider in the chain that can take work: while Gemini is out of quota agents work on Claude Haiku,
-and only when Haiku hits its limit too on the local model. `office provider` shows the chain.
+`"fallback": "codex"`; the codex provider names `"fallback": "haiku"` and haiku names `"fallback": "local"`.
+Each turn runs on the first provider in the chain that can take work. When one reports its usage limit it
+is paused until the reset named in the message (an hour if none) and turns move down the chain.
+`office provider` shows the chain; a fallback set with `office provider --fallback` overrides config.json.
+
+#### Codex (`office/codex.py`): GPT-5.6-Luna, low effort for work, medium for meetings
+
+Every Codex turn uses the operator's own `~/.codex` login, which the office never reads; the operator's
+Codex config, rules and AGENTS.md are ignored. Apps, plugins, browser, computer use and hooks are off.
+- **Meetings** (`"meeting_provider": "codex"`) are talk only: no shell or exec tools; live web search on.
+- **Work turns** (tasks, direct messages, study) run shell commands and file edits under a Codex permission
+  profile that lists everything they may see: system folders, developer tools, the studied repos and the
+  graphs (read), the workspace and a temp dir (write). The home folder is not in it, so `~/.codex`, `~/.ssh`
+  and the operator's files don't exist for the agent; only Codex's own program folders
+  (`~/.codex/packages`, `~/.codex/tmp/arg0`, read-only) are added so its sandbox helper starts. `/run` is
+  left out (session bus, keyring) apart from the DNS resolver. `code_local_only` agents get no network and
+  no web search. Checked on 12 Oct 2026 through `codex exec`: a file elsewhere in the home folder is "No
+  such file or directory", and an edit outside the workspace is rejected.
+
+#### Claude Haiku (`office/claude_agent.py`)
 
 Haiku runs through Claude Code (`claude -p`) on the operator's own Claude login (the same one the manager
-uses), which the office never reads. The operator's Claude settings, hooks, plugins, MCP servers and memory
-are left out (`--setting-sources project`, `--strict-mcp-config`, auto memory off). Agents get only Bash,
-Read, Edit, Write and the web tools (`--tools`), in dontAsk mode:
-- Read only inside the workspace, the studied repos and the knowledge graphs; Edit/Write only in the
-  workspace. Agents search with grep/find in Bash.
-- Bash runs in Claude Code's bubblewrap sandbox (`failIfUnavailable`, no unsandboxed escape): the home
-  folder is unreadable apart from the workspace, the studied repos, the graphs and the developer tools; only
-  the workspace and /tmp are writable. Checked on 12 Oct 2026: writing or reading elsewhere in the home
-  folder fails ("No such file or directory"; file tools "denied").
-- `code_local_only` agents (Max) get no web tools.
-
-Haiku shares the operator's Claude subscription limits with the manager (and with any Claude Code session).
-Claude Code's own prompt is large: a short turn re-sends ~20k tokens, mostly cached. When Haiku reports its
-limit, it is paused until the reset in the message (an hour if none) and turns move to the local model.
-Usage is counted in `data/usage/haiku.jsonl`.
-
-### Meetings on Codex (`office/codex.py`)
-
-`"meeting_provider": "codex"` sends every agent's meeting turn, and nothing else, to the Codex CLI
-(`codex exec`: `gpt-5.6-luna`, `"meeting_reasoning": "medium"`). A meeting turn is talk only: shell, exec,
-browser, computer-use, app and plugin tools are off, live web search stays on. Because it can't touch
-files, it uses the operator's own `~/.codex` login (never read by the office) and ignores the operator's
-Codex config, rules and AGENTS.md. When Codex reports a usage limit, meetings use the agent's usual chain.
-
-Codex can also do work turns, but only signed in to its own home `data/codex-home` (`office codex-login`,
-token in the OS keyring): with shell access Codex's own sandbox can still read the whole disk, so work turns
-run inside the office's bubblewrap sandbox where the operator's `~/.codex` doesn't exist. Until it is signed
-in, Codex counts as unavailable for work.
+uses). The operator's Claude settings, hooks, plugins, MCP servers and memory are left out. Agents get only
+Bash, Read, Edit, Write and the web tools, in dontAsk mode: Read inside the workspace, the studied repos and
+the graphs; Edit/Write in the workspace; Bash in Claude Code's bubblewrap sandbox with the home folder
+unreadable apart from those (`failIfUnavailable`, no unsandboxed escape). Haiku shares the operator's
+Claude limits with the manager, and Claude Code's own prompt is large (a study session was ~8.6M tokens,
+mostly cached).
 
 ## Token ledger (`office/ledger.py`)
 
