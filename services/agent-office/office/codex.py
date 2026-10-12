@@ -86,6 +86,7 @@ class CodexRun:
     def _cmd(self):
         web = self.cfg.get("web_search", True) and not self.offline
         opts = ["--json", "-m", self.model, "--skip-git-repo-check", "--ignore-rules", "--ignore-user-config",
+                "-c", "skills.include_instructions=false",       # the operator's Codex skills stay theirs
                 "-c", f'model_reasoning_effort="{self.reasoning}"',
                 "-c", f'web_search="{"live" if web else "disabled"}"']
         for f in NEVER + (() if self.tools else TALK_ONLY):
