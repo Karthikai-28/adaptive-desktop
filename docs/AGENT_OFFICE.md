@@ -95,7 +95,7 @@ office assign maya "Write a spec" --body "..." --project launch [--after 12]
 office tasks / office show 12 --events / office cancel 12 / office retry 12
 office ask claude "what's the status of the launch?"     (waits for the reply)
 office meeting start "Weekly sync" --with maya,arjun,claude / office meeting end
-office provider [gemini|local] [--fallback local|none]   what agents run on
+office provider [gemini|local] [--fallback local|none]   what agents run on (meetings: config "meeting_provider")
 office tokens [--since 24h|7d|all] [--provider local]    token usage, split by provider
 office autopilot on|off · office pause · office resume · office open
 ```
@@ -235,6 +235,17 @@ single-step tool-call checks (list a folder, write a file, run a command).
 
 Too big for this machine: `gpt-oss:20b` (14 GB), `qwen3:30b-a3b` (19 GB). Change the model with the local
 provider's `model` in `config.json` after `ollama pull <model>`, and restart the office.
+
+### Meetings on Codex (`office/codex.py`)
+
+`"meeting_provider": "codex"` sends every agent's meeting turn, and nothing else, to the Codex CLI
+(`codex exec`, provider `codex`: `gpt-5.6-luna`, `"reasoning": "medium"`). Codex signs in with the
+operator's own Codex login; the office never reads or copies it. A meeting turn is talk only: the shell,
+exec, browser, computer-use, app and plugin tools are switched off and live web search stays on. The
+operator's Codex config, rules and AGENTS.md are ignored. When Codex reports a usage limit, meetings go
+back to the agent's usual provider for an hour. Codex can't be the `provider` or `fallback`. Its usage is
+counted in `data/usage/codex.jsonl` like a local provider's. Remove `meeting_provider` and restart the
+office to turn this off.
 
 ## Token ledger (`office/ledger.py`)
 
