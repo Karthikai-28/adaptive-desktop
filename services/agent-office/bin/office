@@ -11,7 +11,8 @@
   office meeting start "<topic>" --with maya,arjun[,claude]
   office meeting say "<text>" | office meeting invite a,b | office meeting end | office meeting show
   office study [status|pause|resume|now] [PROGRAM]  a learning program (e.g. Max studying the MKE repos)
-  office provider [ID] [--fallback ID|none]       which model provider agents run on (gemini, local, ...)
+  office provider [ID] [--fallback ID|none]       which model provider agents run on (gemini, codex, local)
+  office codex-login                              sign the office's own Codex in (only needed for Codex work turns)
   office tokens [--since 24h] [--provider ID]     token usage, split by provider
   office autopilot on|off | office pause | office resume
   office open                                     open the office in the browser
@@ -235,11 +236,19 @@ def cmd_provider(a):
     if a.fallback:
         kw["fallback"] = "" if a.fallback == "none" else a.fallback
     s = call("POST", "/api/settings", kw) if kw else st["settings"]
-    for p in st.get("providers", []):
-        tag = " <- agents" if p["id"] == s["provider"] else " <- fallback" if p["id"] == s.get("fallback") else ""
+    provs = {p["id"]: p for p in st.get("providers", [])}
+    chain, nxt = [s["provider"]], s.get("fallback")
+    while nxt and nxt in provs and nxt not in chain:      # each fallback can name its own fallback
+        chain.append(nxt)
+        nxt = provs[nxt].get("fallback")
+    for p in provs.values():
+        i = chain.index(p["id"]) if p["id"] in chain else -1
+        tag = " <- agents" if i == 0 else f" <- fallback {i}" if i > 0 else ""
         extra = ""
         if p["engine"] == "ollama":
             extra = ("  (Ollama not running)" if not p.get("up") else "  (model not pulled)" if not p.get("pulled") else "")
+        elif p["engine"] == "codex" and not p.get("up"):
+            extra = "  (not signed in: office codex-login)"
         print(f"  {p['id']:<10} {p['engine']:<7} {p['model']}{extra}{tag}")
 
 
@@ -248,6 +257,17 @@ def _since(text):
         return 0
     n, unit = int(text[:-1]), text[-1]
     return time.time() - n * {"m": 60, "h": 3600, "d": 86400}[unit]
+
+
+def cmd_codex_login(a):
+    """The office's Codex runs agents in a sandbox with its own home, so it needs its own sign-in; the token
+    goes to the OS keyring, never into a file the agents could read."""
+    state = os.environ.get("OFFICE_STATE") or os.path.expanduser("~/.local/share/adaptive-desktop/agent-office")
+    home = os.path.join(state, "data", "codex-home")
+    os.makedirs(home, exist_ok=True)
+    env = {**os.environ, "CODEX_HOME": home}
+    env.pop("OPENAI_API_KEY", None)
+    sys.exit(subprocess.call(["codex", "login", "--device-auth", "-c", 'cli_auth_credentials_store="keyring"'], env=env))
 
 
 def cmd_tokens(a):
@@ -290,7 +310,7 @@ def main():
     s.add_argument("program", nargs="?"); s.add_argument("-n", type=int, default=12)
     s = sub.add_parser("provider"); s.add_argument("id", nargs="?"); s.add_argument("--fallback")
     s = sub.add_parser("tokens"); s.add_argument("--since", default="24h"); s.add_argument("--provider")
-    sub.add_parser("pause"); sub.add_parser("resume"); sub.add_parser("open")
+    sub.add_parser("pause"); sub.add_parser("resume"); sub.add_parser("open"); sub.add_parser("codex-login")
     a = p.parse_args()
     if a.cmd in (None, "help"):
         print(__doc__.strip())
@@ -303,7 +323,7 @@ def main():
     elif a.cmd == "open":
         subprocess.Popen(["xdg-open", URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
-        globals()[f"cmd_{a.cmd}"](a)
+        globals()[f"cmd_{a.cmd.replace('-', '_')}"](a)
 
 
 if __name__ == "__main__":

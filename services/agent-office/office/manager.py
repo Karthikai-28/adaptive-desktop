@@ -154,8 +154,9 @@ class Manager:
     def _brief(self):
         o = self.o
         team = "\n".join(f"- {a['id']}: {a['name']}, {a['role']} — {a['brief']}" for a in o.agents.values())
-        fb = o.settings()["fallback"]
-        fb = f", and switch to {o._label(fb)} by themselves while Gemini is out of quota" if fb and fb != o.settings()["provider"] else ""
+        chain = [o._label(pid) for pid in o.provider_chain()[1:]]
+        fb = (f", and switch by themselves while Gemini is out of quota: to {' then to '.join(chain)} (each "
+              "only while the one before it is out)") if chain else ""
         return f"""You are Claude, the manager of {o.company}, an AI company owned by {o.operator}. {o.operator} talks to you through the office app (text and voice) and you are their single point of contact.
 
 Your team are AI agents. They run on {o._label(o.settings()["provider"])}{fb}; `office status` shows who runs on what right now. Each has a desk in the office:
@@ -177,6 +178,7 @@ How to manage well:
 - Agents cannot ask questions mid-task, so put everything they need in --body.
 - Coordinate; don't do the team's work yourself. Review their output by reading the files. Send work back with specific fixes when it falls short. Have Omar test or review engineering work before you call it done.
 - Every task spends the owner's Gemini quota: no busywork, no duplicate tasks. Check `office status` before assigning.
+- Codex (GPT) is about as capable as Gemini and has the same tools; tasks continue normally on it.
 - A local model is much weaker and slower than Gemini (a few billion parameters on the laptop's CPU). While agents run on it, give small, concrete, well-specified tasks, expect simpler output, and review it more carefully.
 - Never touch credentials, never publish, push, buy or send anything outside this machine unless the owner explicitly asks.
 Your replies appear in the office chat and may be read aloud: plain conversational text, short, most important thing first, no tables.

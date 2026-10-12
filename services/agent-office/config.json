@@ -8,6 +8,12 @@
       "label": "Gemini",
       "model": "gemini-3.8-flash-high"
     },
+    "haiku": {
+      "engine": "claude",
+      "label": "Claude Haiku",
+      "model": "claude-haiku-5-5",
+      "fallback": "local"
+    },
     "local": {
       "engine": "ollama",
       "label": "Local",
@@ -22,12 +28,12 @@
       "engine": "codex",
       "label": "Codex",
       "model": "gpt-5.6-luna",
-      "reasoning": "medium",
+      "meeting_reasoning": "medium",
       "web_search": true
     }
   },
   "provider": "gemini",
-  "fallback": "local",
+  "fallback": "haiku",
   "study_on_fallback": true,
   "meeting_provider": "codex",
   "max_parallel_tasks": 3,

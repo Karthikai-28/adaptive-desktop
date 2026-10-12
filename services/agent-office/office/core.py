@@ -10,8 +10,9 @@ the other's conversation.
 
 Providers: every agent runs on the office's provider (settings "provider", or the agent's own "provider" in
 config.json). When that provider is out of quota and a "fallback" is set, agents carry on with the fallback
-until the quota resets. Meetings can have their own: "meeting_provider" (e.g. Codex) answers every agent's
-meeting turn, and only those; while it is out of quota, meetings use the agent's usual provider.
+until the quota resets. A provider can name its own "fallback" in config.json, which makes a chain:
+Gemini -> Claude Haiku -> local; each turn runs on the first provider in the chain that can take work.
+Meetings can have their own: "meeting_provider" (e.g. Codex) answers every agent's meeting turn, and only those; while it is out of quota, meetings use the agent's usual provider.
 """
 import asyncio
 import datetime as dt
@@ -19,7 +20,7 @@ import json
 import re
 import time
 
-from . import agy, codex, local
+from . import agy, claude_agent, codex, local
 from .config import COMPANY
 from .manager import Manager
 from .quota import QuotaGuard
@@ -65,7 +66,7 @@ class Office:
         self.meet_locks = {aid: asyncio.Lock() for aid in self.agents}
         self.meet_runs = {}                 # agent id -> AgyRun
         self.quota_until = store.get("quota_until", 0)
-        self.paused_until = {}              # provider id -> out of quota until (providers other than agy)
+        self.paused_until = store.get("paused_until", {})   # provider id -> out of quota until (not agy)
         self.manager = Manager(self)
         self.study = Study(self)
         self.quota = QuotaGuard(self)
@@ -119,8 +120,6 @@ class Office:
             v = kw.get(k)
             if v is not None and v != "" and v not in self.providers:
                 raise ValueError(f"unknown provider '{v}'. Providers: {', '.join(self.providers)}")
-            if v and self.providers[v]["engine"] == "codex":
-                raise ValueError(f"{v} is for meetings only (config.json \"meeting_provider\")")
         for k in ("autopilot", "max_parallel", "paused", "provider", "fallback"):
             if k in kw and kw[k] is not None:
                 v = kw[k]
@@ -134,14 +133,19 @@ class Office:
         return self.settings()
 
     # ------------------------------------------------------------------ providers
-    def provider_paused(self, pid):
-        """Can't take work right now: agy out of quota, or a local server down or without its model
+    def provider_paused(self, pid, tools=True):
+        """Can't take work right now: agy or Codex out of quota, Codex's office login missing (work turns
+        only; talk-only turns use the operator's login), or a local server down or without its model
         (unknown until the first status check, a second after start)."""
         p = self.providers.get(pid) or {}
         if p.get("engine") == "agy":
             return self.quota_until > time.time()
-        if p.get("engine") == "codex":
+        if p.get("engine") == "claude":
             return self.paused_until.get(pid, 0) > time.time()
+        if p.get("engine") == "codex":
+            if self.paused_until.get(pid, 0) > time.time():
+                return True
+            return tools and not (self.provider_status.get(pid) or {}).get("up")
         st = self.provider_status.get(pid)
         return not (st and st.get("up") and st.get("pulled"))
 
@@ -162,20 +166,49 @@ class Office:
         base = self.agents.get(aid, {}).get("provider") or s["provider"]
         if base not in self.providers:
             base = s["provider"]
-        fb = s["fallback"]
-        if self.provider_paused(base) and fb and fb != base and not self.provider_paused(fb):
-            return fb
+        for pid in self.provider_chain(aid):
+            if not self.provider_paused(pid):
+                return pid
         return base
+
+    def provider_chain(self, aid=None):
+        """The agent's provider, then the office fallback, then each fallback's own "fallback"."""
+        s = self.settings()
+        base = (self.agents.get(aid, {}).get("provider") if aid else None) or s["provider"]
+        chain = [base if base in self.providers else s["provider"]]
+        nxt = s["fallback"]
+        while nxt and nxt in self.providers and nxt not in chain:
+            chain.append(nxt)
+            nxt = self.providers[nxt].get("fallback")
+        return chain
+
+    async def provider_quota(self, pid, aid, error):
+        """A provider reported its usage limit: pause it until the reset, so turns move down the chain."""
+        if self.providers[pid]["engine"] == "agy":
+            await self.quota.hit(aid, error)
+            return
+        mod = claude_agent if self.providers[pid]["engine"] == "claude" else codex
+        until = mod.reset_from_error(error) or time.time() + 3600
+        if until > self.paused_until.get(pid, 0):
+            self.paused_until[pid] = until
+            self.store.set("paused_until", self.paused_until)
+            nxt = self.provider_for(aid) if aid else ""
+            await self.toast(f"{self._label(pid)} is out of quota until "
+                             f"{dt.datetime.fromtimestamp(until):%H:%M}" + (f"; agents continue on {self._label(nxt)}"
+                                                                          if nxt and nxt != pid else ""), "info")
+            asyncio.get_running_loop().call_later(max(1, until - time.time()) + 5, self.kick)
+        self.kick()
 
     def meeting_provider_for(self, aid):
         """Meetings run on "meeting_provider" when one is set and has quota, else on the agent's usual provider."""
         mp = self.cfg.get("meeting_provider")
-        if mp in self.providers and not self.provider_paused(mp):
+        if mp in self.providers and not self.provider_paused(mp, tools=False):
             return mp
         return self.provider_for(aid)
 
     def provider_info(self):
         return [{"id": k, "label": v.get("label") or k, "engine": v["engine"], "model": v.get("model", ""),
+                 "fallback": v.get("fallback", ""),
                  **{x: y for x, y in self.provider_status.get(k, {}).items() if x not in ("engine", "model")}}
                 for k, v in self.providers.items()]
 
@@ -184,6 +217,9 @@ class Office:
         while True:
             try:
                 new = {k: await local.status(v) for k, v in self.providers.items() if v["engine"] == "ollama"}
+                for k, v in self.providers.items():
+                    if v["engine"] == "codex":            # signed in to the office's own Codex home?
+                        new[k] = {"up": await codex.logged_in()}
                 if new != self.provider_status:
                     self.provider_status = new
                     await self.broadcast({"type": "providers", "providers": self.provider_info()})
@@ -210,7 +246,12 @@ class Office:
                                  **self._run_opts(aid))
         elif p["engine"] == "codex":
             run = codex.CodexRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p, conv_id=conv_id,
-                                 timeout_min=timeout_min, on_event=on_event)
+                                 timeout_min=timeout_min, on_event=on_event, tools=tools,
+                                 reasoning=None if tools else p.get("meeting_reasoning"), **self._run_opts(aid))
+        elif p["engine"] == "claude":
+            run = claude_agent.ClaudeRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p,
+                                         conv_id=conv_id, timeout_min=timeout_min, on_event=on_event, tools=tools,
+                                         **self._run_opts(aid))
         else:
             raise ValueError(f"provider {pid}: unknown engine {p['engine']!r}")
         run.provider = pid
@@ -520,10 +561,11 @@ class Office:
         elif r.quota:
             # back in the queue untouched; it runs on the fallback provider, or when Gemini resets
             t = self.store.update_task(tid, status="queued", attempts=max(0, t["attempts"] - 1), error=r.error)
-            fb = self.settings()["fallback"]
-            await self.activity(aid, "error", "Gemini quota reached — " + (
-                f"continuing on {self._label(fb)}" if fb and fb != run.provider else "waiting for it to reset"), tid)
-            self._spawn(self.quota.hit(aid, r.error))
+            await self.provider_quota(run.provider, aid, r.error)
+            nxt = self.provider_for(aid)
+            await self.activity(aid, "error", f"{self.providers[run.provider].get('label') or run.provider} quota "
+                                "reached — " + (f"continuing on {self._label(nxt)}" if nxt != run.provider
+                                               else "waiting for it to reset"), tid)
         elif "conversation" in r.error.lower() and key and self.store.get(key) and t["attempts"] < 3:
             self.store.delete(key)   # a stale work thread: start a fresh one
             t = self.store.update_task(tid, status="queued", error=r.error)
@@ -597,7 +639,7 @@ class Office:
                         self.chat_runs[aid] = run
                         r = await run.wait()
                     if r.quota:
-                        await self.quota.hit(aid, r.error)
+                        await self.provider_quota(pid, aid, r.error)
                         if self.provider_for(aid) not in tried:              # the fallback answers instead
                             continue
                     break
@@ -742,7 +784,7 @@ class Office:
                 if say and say.upper().rstrip(".") != "PASS":
                     await self.post(f"meeting:{m['id']}", aid, say)
             elif r.quota and self.providers[pid]["engine"] == "codex":
-                self.paused_until[pid] = time.time() + 3600          # meetings fall back to the usual provider
+                await self.provider_quota(pid, None, r.error)        # meetings fall back to the usual provider
                 await self.post(f"meeting:{m['id']}", "system", f"{self._label(pid)} is out of quota for now; "
                                                                 "the team continues on their usual model.")
             elif r.quota:

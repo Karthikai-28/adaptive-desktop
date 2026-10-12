@@ -25,7 +25,7 @@ for d in (DATA, COMPANY / "projects", COMPANY / "meetings", COMPANY / "study", A
     d.mkdir(parents=True, exist_ok=True)
 
 
-ENGINES = ("agy", "ollama", "codex")
+ENGINES = ("agy", "ollama", "codex", "claude")
 
 
 def load() -> dict:
@@ -41,6 +41,9 @@ def load() -> dict:
     for k in ("provider", "fallback", "meeting_provider"):
         if cfg.get(k) and cfg[k] not in cfg["providers"]:
             raise SystemExit(f"config.json: {k} {cfg[k]!r} is not one of the providers")
+    for pid, p in cfg["providers"].items():
+        if p.get("fallback") and p["fallback"] not in cfg["providers"]:
+            raise SystemExit(f"config.json: provider {pid}: fallback {p['fallback']!r} is not one of the providers")
     for a in cfg["agents"]:
         if a.get("provider") and a["provider"] not in cfg["providers"]:
             raise SystemExit(f"config.json: {a['id']}: provider {a['provider']!r} is not one of the providers")

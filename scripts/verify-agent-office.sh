@@ -43,7 +43,7 @@ for k in ("model", "complex_model"):
 assert "sonnet" in (m.get("model") or "claude-sonnet-5-5"), "manager model must be Sonnet; Opus is only the complex_model"
 provs = cfg.get("providers") or {"gemini": {"engine": "agy", "model": cfg.get("gemini_model")}}
 for pid, pv in provs.items():
-    assert pv.get("engine") in ("agy", "ollama", "codex") and pv.get("model"), f"provider {pid}: needs engine agy|ollama|codex and a model"
+    assert pv.get("engine") in ("agy", "ollama", "codex", "claude") and pv.get("model"), f"provider {pid}: needs engine agy|ollama|codex|claude and a model"
     assert "@" not in pid and pid != "claude", f"provider id {pid!r} is reserved or invalid"
 assert any(pv["engine"] == "agy" for pv in provs.values()), "keep one agy (Gemini) provider"
 for k in ("provider", "fallback"):
