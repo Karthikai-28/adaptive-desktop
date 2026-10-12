@@ -220,8 +220,21 @@ its own straight away.
   chat, meetings, summaries and small well-specified tasks, poor at long multi-step engineering. The
   manager's brief says so.
 
-Local models that fit this machine (i7-1360P, 16 GB RAM shared with everything else, no usable GPU):
-see the table in [Local models](#local-models).
+### Local models
+
+Measured on this laptop (i7-1360P, 16 GB RAM, CPU only) on 12 Oct 2026, on battery in power-saver
+mode, with an 8k context window. Plugged in on Balanced or Performance, expect it to be 2-4 times faster. "Tools" is three
+single-step tool-call checks (list a folder, write a file, run a command).
+
+| Model | RAM loaded | Prompt tok/s | Output tok/s | Tools | Verdict |
+|---|---|---|---|---|---|
+| `granite4:tiny-h` (7B MoE, ~1B active) | 4.4 GB | 37 | 16 | 3/3 | **default**: fastest and reliable with tools |
+| `granite4:3b` | 2.8 GB | 12-15 | 6-8 | 3/3 | when RAM is tight |
+| `qwen3:4b` | 4.1 GB | 10 | 5 | 0/3 | not for agents (no tool calls with thinking off) |
+| `qwen3.5:4b` | 3.3 GB download | - | - | - | needs Ollama newer than 0.23.4 |
+
+Too big for this machine: `gpt-oss:20b` (14 GB), `qwen3:30b-a3b` (19 GB). Change the model with the local
+provider's `model` in `config.json` after `ollama pull <model>`, and restart the office.
 
 ## Token ledger (`office/ledger.py`)
 
