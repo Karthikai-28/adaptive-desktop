@@ -819,6 +819,9 @@ function openAssign(agent) {
   const body = h('textarea', { class: 'in', placeholder: 'What you want, the deliverable, and what “done” looks like.' });
   const projects = [...new Set([...S.tasks.values()].map(t => t.project).filter(Boolean))];
   const project = h('input', { class: 'in', list: 'projlist', placeholder: 'optional, e.g. landing-page' });
+  const repo = h('input', { class: 'in', list: 'repolist', placeholder: 'optional: a repo this task may change (path or name)' });
+  const repolist = h('datalist', { id: 'repolist' });
+  api('GET', '/api/repos').then(r => repolist.replaceChildren(...r.repos.map(p => h('option', { value: p })))).catch(() => {});
   const open = [...S.tasks.values()].filter(t => ['queued', 'running', 'done'].includes(t.status)).sort((a, b) => b.id - a.id).slice(0, 40);
   const after = h('select', { class: 'in' }, h('option', { value: '' }, 'Start right away'),
     ...open.map(t => h('option', { value: t.id }, `After #${t.id} ${nameOf(t.agent)}: ${t.title.slice(0, 60)} (${t.status})`)));
@@ -827,7 +830,7 @@ function openAssign(agent) {
     if (!title.value.trim()) return title.focus();
     go.disabled = true;
     try {
-      const t = await api('POST', '/api/tasks', { agent: sel.value, title: title.value, body: body.value, project: project.value, after: after.value ? +after.value : null });
+      const t = await api('POST', '/api/tasks', { agent: sel.value, title: title.value, body: body.value, project: project.value, after: after.value ? +after.value : null, repo: repo.value });
       toast(`Assigned #${t.id} to ${nameOf(t.agent)}`, 'ok', t.agent); closeModal();
     } catch (e) { toast(e.message, 'error'); go.disabled = false; }
   };
@@ -838,8 +841,9 @@ function openAssign(agent) {
     h('label', { class: 'f' }, 'Task'), title,
     h('label', { class: 'f' }, 'Details'), body,
     h('label', { class: 'f' }, 'Project'), project, h('datalist', { id: 'projlist' }, ...projects.map(p => h('option', { value: p }))),
+    h('label', { class: 'f' }, 'Writable repo'), repo, repolist,
     h('label', { class: 'f' }, 'When'), after,
-    h('div', { class: 'hintline' }, 'Tip: you can also just tell Claude what you want — it splits the work and assigns the right people.')),
+    h('div', { class: 'hintline' }, 'Every agent can read every repo on the laptop; only the repo named here can be changed, and nobody pushes. Tip: you can also just tell Claude what you want — it splits the work and assigns the right people.')),
   [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: closeModal }, 'Cancel'), go]);
 }
 
@@ -925,7 +929,7 @@ async function openTask(id) {
     h('div', { class: 'kv' },
       ...kv('Agent', nameOf(t.agent)), ...kv('Status', h('span', { class: `pill ${t.status}` }, t.status)),
       ...kv('Assigned by', t.created_by === 'operator' ? 'You' : t.created_by === 'manager' ? 'Claude' : t.created_by),
-      ...kv('Project', t.project), ...kv('After', t.depends_on ? `#${t.depends_on}` : ''),
+      ...kv('Project', t.project), ...kv('Repo', t.repo), ...kv('After', t.depends_on ? `#${t.depends_on}` : ''),
       ...kv('Created', when(t.created_at)), ...kv('Started', when(t.started_at)), ...kv('Finished', when(t.finished_at)),
       ...kv('Steps', t.steps || ''), ...kv('Tokens', t.tokens ? t.tokens.toLocaleString() : '')),
     t.body ? [h('div', { class: 'section' }, 'Details'), h('div', { class: 'box md', html: md(t.body) })] : null,
