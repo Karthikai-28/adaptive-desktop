@@ -94,7 +94,7 @@ class CodexRun:
         if self.tools:
             opts += ["-c", 'approval_policy="never"', *self._profile()]
         else:
-            opts += ["-s", "read-only"]
+            opts += ["-c", 'sandbox_mode="read-only"']    # `codex exec resume` has no -s flag
         if self.conv_id:
             return ["codex", "exec", "resume", self.conv_id, *opts, "-"]
         return ["codex", "exec", *opts, "-"]
@@ -115,9 +115,12 @@ class CodexRun:
         except FileNotFoundError as e:
             r.error = f"cannot start codex: {e}"
             return r
-        self.proc.stdin.write(self.prompt.encode())
-        await self.proc.stdin.drain()
-        self.proc.stdin.close()
+        try:
+            self.proc.stdin.write(self.prompt.encode())
+            await self.proc.stdin.drain()
+            self.proc.stdin.close()
+        except (OSError, RuntimeError):
+            pass        # codex already exited (bad flag, no login); its stderr below says why
         err_task = asyncio.create_task(self.proc.stderr.read())
         await self._emit("start", "Started")
         try:
