@@ -106,6 +106,7 @@ class TaskIn(BaseModel):
     project: str = ""
     after: int | None = None
     created_by: str | None = None
+    repo: str = ""
 
 
 @app.post("/api/tasks")
@@ -116,9 +117,15 @@ async def add_task(t: TaskIn, request: Request):
         if sum(1 for x in recent if x["created_by"] in ("manager", "meeting")) >= 40:
             bad("manager task limit reached (40 per hour) — ask the owner before assigning more")
     try:
-        return await office.add_task(t.agent, t.title, t.body, t.project, by, t.after)
+        return await office.add_task(t.agent, t.title, t.body, t.project, by, t.after, t.repo)
     except ValueError as e:
         bad(e)
+
+
+@app.get("/api/repos")
+async def repos():
+    """Every repo agents can read; a task may name one of them as writable."""
+    return {"enabled": office.repos.enabled, "repos": office.repos.paths, "scanned_at": office.repos.scanned_at}
 
 
 @app.get("/api/tasks")

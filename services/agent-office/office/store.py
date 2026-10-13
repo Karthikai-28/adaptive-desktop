@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   agent TEXT NOT NULL, title TEXT NOT NULL, body TEXT DEFAULT '', project TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'queued', created_by TEXT DEFAULT 'operator',
-  depends_on INTEGER, attempts INTEGER DEFAULT 0,
+  depends_on INTEGER, attempts INTEGER DEFAULT 0, repo TEXT DEFAULT '',
   created_at REAL, started_at REAL, finished_at REAL,
   result TEXT DEFAULT '', error TEXT DEFAULT '', steps INTEGER DEFAULT 0, tokens INTEGER DEFAULT 0
 );
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 
 TASK_FIELDS = ("agent", "title", "body", "project", "status", "created_by", "depends_on",
                "attempts", "created_at", "started_at", "finished_at", "result", "error",
-               "steps", "tokens")
+               "steps", "tokens", "repo")
 
 
 class Store:
@@ -41,6 +41,8 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        if "repo" not in {r[1] for r in self.db.execute("PRAGMA table_info(tasks)")}:   # older databases
+            self.db.execute("ALTER TABLE tasks ADD COLUMN repo TEXT DEFAULT ''")
 
     # ---- key/value ----
     def get(self, key, default=None):
@@ -58,10 +60,10 @@ class Store:
         self.db.execute("DELETE FROM kv WHERE key LIKE ?", (prefix.replace("%", r"\%") + "%",))
 
     # ---- tasks ----
-    def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None):
+    def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None, repo=""):
         cur = self.db.execute(
-            "INSERT INTO tasks(agent,title,body,project,created_by,depends_on,created_at) VALUES(?,?,?,?,?,?,?)",
-            (agent, title, body, project, created_by, depends_on, time.time()))
+            "INSERT INTO tasks(agent,title,body,project,created_by,depends_on,created_at,repo) VALUES(?,?,?,?,?,?,?,?)",
+            (agent, title, body, project, created_by, depends_on, time.time(), repo))
         return self.task(cur.lastrowid)
 
     def task(self, tid):

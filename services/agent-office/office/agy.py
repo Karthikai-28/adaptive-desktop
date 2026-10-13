@@ -15,6 +15,7 @@ import signal
 from pathlib import Path
 
 from .config import AGY_HOME, AGY_HOME_LOCAL, COMPANY, DATA, HOME, ROOT, STATE
+from .repos import AGENT_BIN, REMOTE_GIT, git_env
 
 # developer tools agents may use, shown read-only inside their otherwise empty home
 HOME_TOOLS = [".local/bin", ".local/lib", ".local/share/uv/python", ".local/share/uv/tools", "bin",
@@ -36,8 +37,10 @@ CODE_HOSTS = ["bitbucket.org", "api.bitbucket.org", "bitbucket.io", "192.168.1.1
 QUOTA_MARKERS = ("RESOURCE_EXHAUSTED", "quota", "rate limit", "429", "usage limit")
 
 
-def write_agy_settings():
-    """Permissions for agents: write only inside the company workspace, never read secrets.
+def write_agy_settings(repos=()):
+    """Permissions for agents: write inside the company workspace and the repos (the sandbox mounts every
+    repo read-only except a task's own, so that is where a write really lands), never read secrets, never
+    run a git command that reaches a remote.
     (Belt and braces: the sandbox already hides the secrets.) Agents that must learn code only from
     the local copies get their own agy home: the web is open for research, but the code hosts
     (Bitbucket, the internal git server) and every git network command are denied."""
@@ -49,19 +52,18 @@ def write_agy_settings():
         cfg_dir = home / ".gemini" / "antigravity-cli"
         cfg_dir.mkdir(parents=True, exist_ok=True)
         allow = ["command(*)", f"write_file({COMPANY})", "read_url(*)", "execute_url(*)", "mcp(*)"]
-        d = list(deny)
+        allow += [f"write_file({r})" for r in repos]
+        d = list(deny) + [f"command(git {c})" for c in REMOTE_GIT]
         if offline:
             for host in CODE_HOSTS:
                 for form in (host, f"https://{host}", f"http://{host}", f"*{host}*"):
                     d += [f"read_url({form})", f"execute_url({form})"]
-            d += [f"command(git {c})" for c in ("fetch", "pull", "clone", "ls-remote", "remote update",
-                                                "submodule update", "push")]
             d += [f"command({c})" for c in ("curl", "wget", "ssh", "scp", "sftp", "rsync")]
         settings = {"permissions": {"allow": allow, "deny": d}, "trustedWorkspaces": [str(COMPANY)]}
         (cfg_dir / "settings.json").write_text(json.dumps(settings, indent=1))
 
 
-def _bwrap_prefix(ro_dirs=(), home=AGY_HOME):
+def _bwrap_prefix(ro_dirs=(), home=AGY_HOME, rw_dirs=(), hidden=()):
     AGENT_TMP.mkdir(parents=True, exist_ok=True)
     args = ["bwrap", "--ro-bind", "/", "/", "--dev-bind", "/dev", "/dev", "--bind", "/proc", "/proc",
             "--tmpfs", str(HOME)]                                  # an empty home ...
@@ -72,10 +74,19 @@ def _bwrap_prefix(ro_dirs=(), home=AGY_HOME):
     for p in TOOL_SECRETS:
         if (HOME / p).is_file():
             args += ["--ro-bind", "/dev/null", str(HOME / p)]
-    for d in ro_dirs:                                              # ... the assigned repositories ...
+    for d in ro_dirs:                                              # ... the repositories, read-only ...
         d = Path(d).expanduser()
         if d.is_dir():
             args += ["--ro-bind", str(d), str(d)]
+    for d in rw_dirs:                                              # ... the one a task may change ...
+        d = Path(d).expanduser()
+        if d.is_dir():
+            args += ["--bind", str(d), str(d)]
+    for f in hidden:                                               # ... minus their secret files
+        if os.path.isfile(f) and not os.path.islink(f):
+            args += ["--ro-bind", "/dev/null", f]
+    if AGENT_BIN.is_dir():                                         # the git that refuses remotes
+        args += ["--ro-bind", str(AGENT_BIN), str(AGENT_BIN)]
     graphs = STATE / "graphs"
     if graphs.is_dir():                                            # ... the scoped knowledge graphs ...
         args += ["--ro-bind", str(graphs), str(graphs)]
@@ -94,7 +105,7 @@ def _env(agent_name, home=AGY_HOME, graph=None):
     env.update(HOME=str(home), TERM="dumb", AGENT_NAME=agent_name, NO_COLOR="1")
     if graph:
         env["OFFICE_AGENT_GRAPH"] = str(graph)       # which graph the "graph" MCP server serves
-    return env
+    return git_env(env)
 
 
 def _short(s, n=90):
@@ -165,7 +176,8 @@ class AgyResult:
 class AgyRun:
     """One agy process. `await run.wait()` returns an AgyResult; `run.cancel()` kills it."""
 
-    def __init__(self, prompt, *, agent_name, model, conv_id=None, timeout_min=30, on_event=None, ro_dirs=(), offline=False, graph=None):
+    def __init__(self, prompt, *, agent_name, model, conv_id=None, timeout_min=30, on_event=None, ro_dirs=(), offline=False, graph=None,
+                 rw_dirs=(), hidden=()):
         self.prompt = prompt[-120_000:]   # stay under the kernel's single-argument limit
         self.agent_name = agent_name
         self.model = model
@@ -175,16 +187,18 @@ class AgyRun:
         self.home = AGY_HOME_LOCAL if offline else AGY_HOME
         self.graph = graph
         self.ro_dirs = [str(Path(d).expanduser()) for d in ro_dirs if Path(d).expanduser().is_dir()]
+        self.rw_dirs = [str(Path(d).expanduser()) for d in rw_dirs if Path(d).expanduser().is_dir()]
+        self.hidden = hidden
         self.proc = None
         self.result = AgyResult()
 
     async def wait(self):
         r = self.result
-        cmd = _bwrap_prefix(self.ro_dirs, self.home) + ["agy", "-p", self.prompt, "--model", self.model, "--sandbox",
+        cmd = _bwrap_prefix(self.ro_dirs, self.home, self.rw_dirs, self.hidden) + ["agy", "-p", self.prompt, "--model", self.model, "--sandbox",
                                  "--output-format", "stream-json", "--print-timeout", f"{self.timeout}s"]
         if self.conv_id:
             cmd += ["--conversation", self.conv_id]
-        for d in self.ro_dirs:              # let agy's file tools read the assigned repositories
+        for d in dict.fromkeys(self.ro_dirs + self.rw_dirs):   # let agy's file tools reach the repositories
             cmd += ["--add-dir", d]
         try:
             self.proc = await asyncio.create_subprocess_exec(

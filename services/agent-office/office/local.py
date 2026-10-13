@@ -8,7 +8,7 @@ answers. The tools give the same reach agy has and no more:
                 system, the company workspace writable, assigned repositories read-only); agents that must
                 learn code only from local copies get no network at all (--unshare-net)
   read_file, list_dir, search_files      the workspace, the assigned repositories and the scoped graphs
-  write_file, edit_file                  the workspace only
+  write_file, edit_file                  the workspace, and the repo a task names
   fetch_url     a web page as text (not for code-local-only agents)
 
 Conversations are JSON files under data/local/<provider>/, one per thread, so a project's work thread or an
@@ -142,7 +142,8 @@ class LocalRun:
     """One local agent turn. `await run.wait()` returns an agy.AgyResult; `run.cancel()` stops it."""
 
     def __init__(self, prompt, *, agent_name, provider, cfg, agent_id, conv_id=None, timeout_min=30,
-                 on_event=None, ro_dirs=(), offline=False, graph=None, tools=True, max_steps=None):
+                 on_event=None, ro_dirs=(), offline=False, graph=None, tools=True, max_steps=None,
+                 rw_dirs=(), hidden=()):
         self.prompt = prompt
         self.agent_name, self.agent_id = agent_name, agent_id
         self.provider = provider
@@ -156,7 +157,10 @@ class LocalRun:
         self.tools = tools
         self.max_steps = max_steps or self.cfg["max_steps"]
         self.ro_dirs = [str(Path(d).expanduser()) for d in ro_dirs if Path(d).expanduser().is_dir()]
-        self.read_roots = [COMPANY.resolve(), *(Path(d).resolve() for d in self.ro_dirs)]
+        self.rw_dirs = [str(Path(d).expanduser()) for d in rw_dirs if Path(d).expanduser().is_dir()]
+        self.hidden = set(hidden)
+        self.write_roots = [COMPANY.resolve(), *(Path(d).resolve() for d in self.rw_dirs)]
+        self.read_roots = [COMPANY.resolve(), *(Path(d).resolve() for d in self.ro_dirs + self.rw_dirs)]
         if (STATE / "graphs").is_dir():
             self.read_roots.append((STATE / "graphs").resolve())
         self.result = agy.AgyResult()
@@ -236,9 +240,12 @@ class LocalRun:
 
     def _system(self):
         roots = ", ".join(str(p) for p in self.read_roots[1:]) or "none"
+        if len(self.read_roots) > 6:     # every repo on the laptop: point at the list instead of spelling it out
+            roots = "every git repository listed in REPOS.md in your working directory"
+        write = (f"Your working directory is {COMPANY}; it is the only place you can write. " if not self.rw_dirs else
+                 f"Your working directory is {COMPANY}; you can write there and in {', '.join(self.rw_dirs)}. ")
         net = ("You have no network access." if self.offline else "fetch_url reads web pages.")
-        return (f"You are running on a local model ({self.model}) on the owner's computer. "
-                f"Your working directory is {COMPANY}; it is the only place you can write. "
+        return (f"You are running on a local model ({self.model}) on the owner's computer. " + write +
                 f"Read-only folders you may also read: {roots}. {net} There is no image generation tool. "
                 "Use the tools to do real work: look before you change things, verify what you build by running it, "
                 "and keep tool output small. Only create or change files when your task or the message asks for it; "
@@ -311,14 +318,16 @@ class LocalRun:
     def _path(self, raw, write):
         p = Path(str(raw)).expanduser()
         p = (p if p.is_absolute() else COMPANY / p).resolve()
-        roots = [COMPANY.resolve()] if write else self.read_roots
+        roots = self.write_roots if write else self.read_roots
         if not any(p == r or r in p.parents for r in roots):
             raise ValueError(f"{p} is outside the folders you may {'write' if write else 'read'}")
+        if str(p) in self.hidden:
+            raise ValueError(f"{p} may hold secrets; agents can't open it")
         return p
 
     async def _sh(self, cmd):
         LOCAL_HOME.mkdir(parents=True, exist_ok=True)
-        pre = agy._bwrap_prefix(self.ro_dirs, LOCAL_HOME)
+        pre = agy._bwrap_prefix(self.ro_dirs, LOCAL_HOME, self.rw_dirs, self.hidden)
         if self.offline:
             pre.insert(1, "--unshare-net")
         proc = await asyncio.create_subprocess_exec(

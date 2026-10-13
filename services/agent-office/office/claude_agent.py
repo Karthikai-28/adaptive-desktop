@@ -27,6 +27,7 @@ import time
 
 from . import agy
 from .config import COMPANY, DATA, HOME, STATE
+from .repos import AGENT_BIN, REMOTE_GIT, git_env
 
 LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|hit your limit|resets? (at|in)|overloaded|429", re.I)
 DROP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
@@ -42,7 +43,7 @@ class ClaudeRun:
     """One claude process. `await run.wait()` returns an agy.AgyResult; `run.cancel()` kills it."""
 
     def __init__(self, prompt, *, agent_name, agent_id, provider, cfg, conv_id=None, timeout_min=30,
-                 on_event=None, tools=True, ro_dirs=(), offline=False, **_):
+                 on_event=None, tools=True, ro_dirs=(), offline=False, rw_dirs=(), hidden=(), **_):
         self.prompt = prompt[-120_000:]
         self.agent_name, self.agent_id = agent_name, agent_id
         self.provider = provider
@@ -54,25 +55,29 @@ class ClaudeRun:
         self.tools = tools
         self.offline = offline
         self.ro_dirs = [str(p) for p in (os.path.expanduser(d) for d in ro_dirs) if os.path.isdir(p)]
+        self.rw_dirs = [str(p) for p in (os.path.expanduser(d) for d in rw_dirs) if os.path.isdir(p)]
+        self.hidden = list(hidden)
         self.proc = None
         self.result = agy.AgyResult()
         self.usage_file = DATA / "usage" / f"{provider}.jsonl"
 
     def _readable(self):
-        dirs = [str(COMPANY), *self.ro_dirs]
+        dirs = [str(COMPANY), *self.ro_dirs, *self.rw_dirs]
         if (STATE / "graphs").is_dir():
             dirs.append(str(STATE / "graphs"))
         return dirs
 
     def _settings(self):
-        tools_ro = [str(HOME / p) for p in agy.HOME_TOOLS if (HOME / p).exists()]
+        tools_ro = [str(HOME / p) for p in agy.HOME_TOOLS if (HOME / p).exists()] + [str(AGENT_BIN)]
+        no_remote = [f"Bash(git {c}:*)" for c in REMOTE_GIT] + ["Bash(/usr/bin/git:*)"]
         return {
+            "permissions": {"deny": [f"Read(/{f})" for f in self.hidden] + no_remote},
             "autoMemoryEnabled": False,
             "sandbox": {
                 "enabled": True, "failIfUnavailable": True, "autoAllowBashIfSandboxed": True,
                 "allowUnsandboxedCommands": False,
-                "filesystem": {"denyRead": [str(HOME)], "allowRead": self._readable() + tools_ro,
-                               "allowWrite": [str(COMPANY), "/tmp"]},
+                "filesystem": {"denyRead": [str(HOME)] + self.hidden, "allowRead": self._readable() + tools_ro,
+                               "allowWrite": [str(COMPANY), "/tmp", *self.rw_dirs]},
             },
         }
 
@@ -80,6 +85,7 @@ class ClaudeRun:
         if not self.tools:
             return []
         allowed = ["Bash", f"Edit(/{COMPANY}/**)", f"Write(/{COMPANY}/**)"]   # "//abs/path" rules
+        allowed += [f"{t}(/{d}/**)" for d in self.rw_dirs for t in ("Edit", "Write")]
         allowed += [f"Read(/{d}/**)" for d in self._readable()]
         if not self.offline:
             allowed += ["WebSearch", "WebFetch"]
@@ -101,7 +107,7 @@ class ClaudeRun:
 
     async def wait(self):
         r = self.result
-        env = {k: v for k, v in os.environ.items() if k not in DROP_ENV}
+        env = git_env({k: v for k, v in os.environ.items() if k not in DROP_ENV})
         env["AGENT_NAME"] = self.agent_name
         turn = time.time()
         try:

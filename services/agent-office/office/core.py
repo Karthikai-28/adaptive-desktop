@@ -26,6 +26,7 @@ from .manager import Manager
 from .quota import QuotaGuard
 from .graphs import Graphs
 from .ledger import Ledger
+from .repos import Repos
 from .study import Study
 
 NAME_RE_CACHE = {}
@@ -72,6 +73,7 @@ class Office:
         self.quota = QuotaGuard(self)
         self.graphs = Graphs(self)
         self.ledger = Ledger(self)
+        self.repos = Repos(self)
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 
@@ -82,8 +84,13 @@ class Office:
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self):
-        agy.write_agy_settings()
+        try:                                # before any task runs: the repos every agent can read
+            await asyncio.get_running_loop().run_in_executor(None, self.repos.scan)
+        except Exception as e:
+            print(f"repo scan: {e}", flush=True)
+        agy.write_agy_settings(self.repos.paths)
         await asyncio.get_running_loop().run_in_executor(None, Graphs.configure_agy)
+        self._spawn(self.repos.loop(lambda: agy.write_agy_settings(self.repos.paths)))
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             self.store.update_task(t["id"], status="queued")
             self.store.add_event(t["agent"], "info", "Resuming after an office restart", t["id"])
@@ -226,24 +233,26 @@ class Office:
         """A conversation key for one provider (the main Gemini provider keeps the bare key)."""
         return key if pid == self.main_agy else f"{key}@{pid}"
 
-    def _run(self, aid, pid, prompt, conv_id, timeout_min, on_event=None, tools=True, max_steps=None):
-        """One turn for an agent on a provider: an AgyRun or a LocalRun, same interface."""
+    def _run(self, aid, pid, prompt, conv_id, timeout_min, on_event=None, tools=True, max_steps=None, repo=""):
+        """One turn for an agent on a provider: an AgyRun or a LocalRun, same interface. `repo` is the one
+        repository this turn may change (a task that names it); every other repo is read-only."""
         a, p = self.agents[aid], self.providers[pid]
+        opts = self._run_opts(aid, repo if tools else "")
         if p["engine"] == "agy":
             run = agy.AgyRun(prompt, agent_name=a["name"], model=p["model"], conv_id=conv_id,
-                             timeout_min=timeout_min, on_event=on_event, **self._run_opts(aid))
+                             timeout_min=timeout_min, on_event=on_event, **opts)
         elif p["engine"] == "ollama":
             run = local.LocalRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p, conv_id=conv_id,
                                  timeout_min=timeout_min, on_event=on_event, tools=tools, max_steps=max_steps,
-                                 **self._run_opts(aid))
+                                 **opts)
         elif p["engine"] == "codex":
             run = codex.CodexRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p, conv_id=conv_id,
                                  timeout_min=timeout_min, on_event=on_event, tools=tools,
-                                 reasoning=None if tools else p.get("meeting_reasoning"), **self._run_opts(aid))
+                                 reasoning=None if tools else p.get("meeting_reasoning"), **opts)
         elif p["engine"] == "claude":
             run = claude_agent.ClaudeRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p,
                                          conv_id=conv_id, timeout_min=timeout_min, on_event=on_event, tools=tools,
-                                         **self._run_opts(aid))
+                                         **opts)
         else:
             raise ValueError(f"provider {pid}: unknown engine {p['engine']!r}")
         run.provider = pid
@@ -338,10 +347,18 @@ class Office:
             f"{a['brief']}\n"
             f"Team: {self._team_line()}; manager: Claude.\n"
             f"Workspace: your current directory {COMPANY} is the company's shared workspace; teammates' files "
-            f"are here too. Work only inside it. Projects live in projects/<project-name>/, meeting notes in meetings/.\n"
+            f"are here too. Write only inside it. Projects live in projects/<project-name>/, meeting notes in meetings/.\n"
+            + self._repos_line()
             + self.study.persona_line(a["id"])
             + self._efficiency(a["id"])
         )
+
+    def _repos_line(self):
+        if not self.repos.enabled:
+            return ""
+        return ("Repositories: every git repo on this laptop is readable at its own path (REPOS.md in the workspace "
+                "lists them); read them, never change them unless your task names one as writable. Never push, pull, "
+                "fetch or clone - the office's git refuses it.\n")
 
     def _conv_key(self, t, pid):
         """Tasks of the same project continue one conversation per provider; anything else starts fresh.
@@ -363,11 +380,13 @@ class Office:
                 "line ranges; never cat big files, dump directory trees or print long command output (pipe through "
                 "head, tail or wc). Don't re-read what you already read in this session; write short notes instead.\n")
 
-    def _run_opts(self, aid):
-        """Sandbox options for every agy run of this agent: the repos it studies (read-only), and the
-        guarded profile for agents that must learn code only from local copies."""
-        return {"ro_dirs": self.study.repo_paths(aid), "offline": bool(self.agents[aid].get("code_local_only")),
-                "graph": self.graphs.path_for(aid)}
+    def _run_opts(self, aid, repo=""):
+        """Sandbox options for every run of this agent: every repo on the laptop and the ones it studies
+        (read-only), secret files inside them hidden, the task's own repo writable, and the guarded
+        profile for agents that must learn code only from local copies."""
+        ro = list(dict.fromkeys(self.repos.paths + self.study.repo_paths(aid)))
+        return {"ro_dirs": ro, "rw_dirs": [repo] if repo else [], "hidden": self.repos.hidden,
+                "offline": bool(self.agents[aid].get("code_local_only")), "graph": self.graphs.path_for(aid)}
 
     def _task_prompt(self, t):
         a = self.agents[t["agent"]]
@@ -380,6 +399,10 @@ class Office:
              f"Title: {t['title']}"]
         if t["project"]:
             p.append(f"Project: {t['project']} — keep its files in projects/{t['project']}/")
+        if t.get("repo"):
+            p.append(f"Writable repository: {t['repo']} — make this task's changes there, directly in its files. "
+                     "Don't commit, switch branches or rewrite history unless the task asks; never push. Say in your "
+                     "report exactly which files you changed so the owner can review the diff.")
         if t["body"]:
             p.append(f"Details:\n{t['body']}")
         if t["depends_on"]:
@@ -412,7 +435,7 @@ class Office:
         return s
 
     # ------------------------------------------------------------------ tasks
-    async def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None):
+    async def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None, repo=""):
         if agent not in self.agents:
             raise ValueError(f"unknown agent '{agent}'. Agents: {', '.join(self.agents)}")
         if not title.strip():
@@ -420,8 +443,9 @@ class Office:
         if depends_on and not self.store.task(int(depends_on)):
             raise ValueError(f"task #{depends_on} does not exist")
         project = _slug(project, 40) if project else ""
+        repo = self.repos.resolve(repo) if repo else ""
         t = self.store.add_task(agent, title.strip(), body.strip(), project, created_by,
-                                int(depends_on) if depends_on else None)
+                                int(depends_on) if depends_on else None, repo)
         await self.broadcast({"type": "task", "task": t})
         await self.activity(agent, "assign", f"New task #{t['id']}: {t['title']}", t["id"])
         self.kick()
@@ -505,7 +529,8 @@ class Office:
         study = self.study.program_of(t)
         key = self._conv_key(t, pid)
         run = self._run(aid, pid, self.study.prompt(t) if study else self._task_prompt(t),
-                        self.store.get(key) if key else None, self.cfg.get("task_timeout_min", 45), on_event)
+                        self.store.get(key) if key else None, self.cfg.get("task_timeout_min", 45), on_event,
+                        repo=t.get("repo") or "")
         if pid != self.settings()["provider"] and not self.agents[aid].get("provider"):
             self._spawn(self.activity(aid, "info", f"Working on {self._label(pid)} while "
                                                    f"{self._label(self.settings()['provider'])} is out of quota", t["id"]))

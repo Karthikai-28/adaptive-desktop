@@ -126,10 +126,21 @@ office autopilot on|off · office pause · office resume · office open
 
 - Every agent runs inside **bubblewrap**: the system is read-only and the home folder is replaced
   by an empty one holding only developer tools (read-only), agy's own home, the company workspace
-  (the only writable place) and the repos it studies (read-only). Documents, personal folders,
-  credentials and every other project simply don't exist for agents; `/tmp` is the office's own.
-  agy's own sandbox additionally confines shell commands. The environment is rebuilt from scratch, so no API key leaks in (an
+  and **every git repository on the laptop, read-only** (`office/repos.py`: config.json `"repos":
+  {"all": true, "roots": ["~"], "skip": []}`; rescanned every 15 min; hidden folders are skipped;
+  `office repos` and `REPOS.md` in the workspace list them). Files inside the repos that usually hold
+  secrets (`.env`, keys, keystores, cloud credential files, a `.git/config` with a password in a URL)
+  are hidden. Credentials, dot-folders and non-repo folders simply don't exist for agents; `/tmp` is
+  the office's own. The environment is rebuilt from scratch, so no API key or SSH agent leaks in (an
   inherited `GEMINI_API_KEY` would also switch agy to paid API billing).
+- **Writing to a repo** happens only when a task names it: `office assign ... --repo <path|name>`
+  (or the Repo field in the app). That repo is mounted writable for that task only; Codex gets it as a
+  `write` entry in its permission profile, Claude Haiku as Edit/Write rules plus a sandbox write path.
+  The task brief says not to commit or branch unless the task asks.
+- **No remotes, ever.** Agents' `git` is a wrapper (`$OFFICE_STATE/bin/git`, first on PATH) that
+  refuses push/pull/fetch/clone/ls-remote/remote/submodule; every git they run also has
+  `protocol.allow=never`, so `/usr/bin/git push` fails too; agy and Claude have matching deny rules;
+  and no credential, token or SSH agent socket is in their sandbox to push with.
 - **Claude** can only run `office` and read files (`--permission-mode dontAsk`). Its brief says
   never to publish, push, buy or send anything off the machine unless you ask.
 - The **server** listens on 127.0.0.1 only and rejects cross-site requests and foreign Host

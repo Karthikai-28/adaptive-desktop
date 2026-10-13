@@ -28,6 +28,7 @@ import time
 
 from . import agy
 from .config import COMPANY, DATA, HOME, STATE
+from .repos import AGENT_BIN, git_env
 
 # never available to an agent; talk-only turns lose the shell and exec tools as well
 NEVER = ("apps", "plugins", "browser_use", "browser_use_external", "in_app_browser", "computer_use",
@@ -56,7 +57,7 @@ class CodexRun:
     """One codex process. `await run.wait()` returns an agy.AgyResult; `run.cancel()` kills it."""
 
     def __init__(self, prompt, *, agent_name, agent_id, provider, cfg, conv_id=None, timeout_min=30,
-                 on_event=None, tools=True, reasoning=None, ro_dirs=(), offline=False, **_):
+                 on_event=None, tools=True, reasoning=None, ro_dirs=(), offline=False, rw_dirs=(), hidden=(), **_):
         self.prompt = prompt[-120_000:]
         self.agent_name, self.agent_id = agent_name, agent_id
         self.provider = provider
@@ -69,6 +70,8 @@ class CodexRun:
         self.tools = tools
         self.offline = offline
         self.ro_dirs = [str(p) for p in (os.path.expanduser(d) for d in ro_dirs) if os.path.isdir(p)]
+        self.rw_dirs = [str(p) for p in (os.path.expanduser(d) for d in rw_dirs) if os.path.isdir(p)]
+        self.hidden = hidden
         self.proc = None
         self.result = agy.AgyResult()
         self.usage_file = DATA / "usage" / f"{provider}.jsonl"
@@ -76,9 +79,11 @@ class CodexRun:
     def _profile(self):
         """The office permission profile: what a work turn's commands and edits may see and change."""
         fs = {p: "read" for p in SYSTEM_RO}
-        ro = [HOME / p for p in CODEX_PROGRAM + tuple(agy.HOME_TOOLS)] + list(self.ro_dirs) + [STATE / "graphs"]
+        ro = [HOME / p for p in CODEX_PROGRAM + tuple(agy.HOME_TOOLS)] + list(self.ro_dirs) + [STATE / "graphs", AGENT_BIN]
         fs.update({str(p): "read" for p in ro if os.path.isdir(p)})
         fs.update({str(COMPANY): "write", ":tmpdir": "write"})
+        fs.update({d: "write" for d in self.rw_dirs})                 # the repo this task may change
+        fs.update({f: "none" for f in self.hidden})                   # secret files inside the repos
         table = ",".join(f"{_toml(k)}={_toml(v)}" for k, v in fs.items())
         return ["-c", 'default_permissions="office"', "-c", f"permissions.office.filesystem={{{table}}}",
                 "-c", f"permissions.office.network.enabled={'false' if self.offline else 'true'}"]
@@ -102,7 +107,7 @@ class CodexRun:
     def _env(self):
         env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "CODEX_API_KEY")}
         env["AGENT_NAME"] = self.agent_name
-        return env
+        return git_env(env)
 
     async def wait(self):
         r = self.result

@@ -2,7 +2,8 @@
 """office - drive the Agent Office from a terminal (Claude, the manager, uses this too).
 
   office status                                   team status, queues, quota
-  office assign <agent> "<title>" [--body TEXT] [--project NAME] [--after ID]
+  office assign <agent> "<title>" [--body TEXT] [--project NAME] [--after ID] [--repo PATH|NAME]
+  office repos                              repos every agent can read (--repo makes one writable for a task)
   office tasks [--agent A] [--status queued,running,done,failed] [-n N]
   office show <task id>                           full task with its report and activity
   office cancel <task id> | office retry <task id>
@@ -101,9 +102,20 @@ def cmd_status(a):
 
 def cmd_assign(a):
     t = call("POST", "/api/tasks", {"agent": a.agent.lower(), "title": a.title, "body": a.body or "",
-                                    "project": a.project or "", "after": a.after, "created_by": ACTOR})
+                                    "project": a.project or "", "after": a.after, "created_by": ACTOR,
+                                    "repo": a.repo or ""})
     dep = f", starts after #{t['depends_on']}" if t["depends_on"] else ""
-    print(f"task #{t['id']} assigned to {t['agent']}{dep}: {t['title']}")
+    rw = f", may change {t['repo']}" if t.get("repo") else ""
+    print(f"task #{t['id']} assigned to {t['agent']}{dep}{rw}: {t['title']}")
+
+
+def cmd_repos(a):
+    r = call("GET", "/api/repos")
+    if not r["enabled"]:
+        print("repo access is off (config.json \"repos\": {\"all\": false})")
+    home = os.path.expanduser("~")
+    for p in r["repos"]:
+        print(p.replace(home, "~", 1))
 
 
 def cmd_tasks(a):
@@ -117,6 +129,8 @@ def cmd_show(a):
     t = call("GET", f"/api/tasks/{a.id}")
     print(f"#{t['id']} {t['title']}\n  agent {t['agent']}  status {t['status']}  by {t['created_by']}"
           f"  project {t['project'] or '-'}  steps {t['steps']}  tokens {t['tokens']}")
+    if t.get("repo"):
+        print(f"  writable repo {t['repo']}")
     if t["body"]:
         print(f"\nDetails:\n{t['body']}")
     if t["error"]:
@@ -283,6 +297,8 @@ def main():
     sub.add_parser("help")
     s = sub.add_parser("assign"); s.add_argument("agent"); s.add_argument("title")
     s.add_argument("--body", "-b"); s.add_argument("--project", "-p"); s.add_argument("--after", type=int)
+    s.add_argument("--repo", "-r", help="a repo this task may change (path or folder name)")
+    sub.add_parser("repos")
     s = sub.add_parser("tasks"); s.add_argument("--agent"); s.add_argument("--status"); s.add_argument("-n", type=int, default=30)
     s = sub.add_parser("show"); s.add_argument("id", type=int); s.add_argument("--events", action="store_true")
     s = sub.add_parser("cancel"); s.add_argument("id", type=int)
