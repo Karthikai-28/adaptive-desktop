@@ -82,7 +82,8 @@ class CodexRun:
         ro = [HOME / p for p in CODEX_PROGRAM + tuple(agy.HOME_TOOLS)] + list(self.ro_dirs) + [STATE / "graphs", AGENT_BIN]
         fs.update({str(p): "read" for p in ro if os.path.isdir(p)})
         fs.update({str(COMPANY): "write", ":tmpdir": "write"})
-        fs.update({d: "write" for d in self.rw_dirs})                 # the repo this task may change
+        fs.update({d: "write" for d in self.rw_dirs})                 # the repo this task may change ...
+        fs.update({f"{d}/.git": "write" for d in self.rw_dirs if os.path.exists(f"{d}/.git")})   # ... and commit to
         fs.update({f: "none" for f in self.hidden})                   # secret files inside the repos
         table = ",".join(f"{_toml(k)}={_toml(v)}" for k, v in fs.items())
         return ["-c", 'default_permissions="office"', "-c", f"permissions.office.filesystem={{{table}}}",

@@ -37,7 +37,10 @@ REMOTE_GIT = ("push", "pull", "fetch", "clone", "ls-remote", "remote", "submodul
               "send-email", "send-pack", "fetch-pack", "upload-pack", "receive-pack", "svn", "p4",
               "credential", "credential-store", "credential-cache")
 GIT_ENV = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "protocol.allow", "GIT_CONFIG_VALUE_0": "never",
-           "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false"}
+           "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false",
+           # agent commits (local branches only): a neutral identity, never the owner's work or personal one
+           "GIT_AUTHOR_NAME": "Karthi Labs", "GIT_AUTHOR_EMAIL": "office@karthi-labs.local",
+           "GIT_COMMITTER_NAME": "Karthi Labs", "GIT_COMMITTER_EMAIL": "office@karthi-labs.local"}
 AGENT_BIN = STATE / "bin"          # the agents' git wrapper; first on their PATH
 SECRET_ENV = ("SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO", "GNOME_KEYRING_CONTROL", "GH_TOKEN",
               "GITHUB_TOKEN", "GITLAB_TOKEN", "BITBUCKET_TOKEN", "HF_TOKEN", "KAGGLE_KEY")

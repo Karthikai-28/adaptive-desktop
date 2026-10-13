@@ -136,7 +136,9 @@ office autopilot on|off · office pause · office resume · office open
 - **Writing to a repo** happens only when a task names it: `office assign ... --repo <path|name>`
   (or the Repo field in the app). That repo is mounted writable for that task only; Codex gets it as a
   `write` entry in its permission profile, Claude Haiku as Edit/Write rules plus a sandbox write path.
-  The task brief says not to commit or branch unless the task asks.
+  The task brief says not to commit or branch unless the task asks. Agent commits are authored
+  `Karthi Labs <office@karthi-labs.local>` (never the owner's identities). Codex keeps `.git` read-only
+  inside a writable root, so the profile grants `<repo>/.git` write explicitly.
 - **No remotes, ever.** Agents' `git` is a wrapper (`$OFFICE_STATE/bin/git`, first on PATH) that
   refuses push/pull/fetch/clone/ls-remote/remote/submodule; every git they run also has
   `protocol.allow=never`, so `/usr/bin/git push` fails too; agy and Claude have matching deny rules;
