@@ -36,6 +36,15 @@ device before handing the computer over.
 4. Read the displayed model, serial, size, and confirmation phrase. Stop if any
    value is unexpected.
 
+### Optional phone arming
+
+A paired phone can say **Zero-State** in Adaptive Link's Ask screen. That
+requires the phone's destructive-action confirmation and records an
+authenticated arm request for the local audit trail. It is intentionally not
+an erase command: it neither reboots the computer nor invokes this script.
+Continue only by booting trusted external media and following the Prepare and
+Execute steps below.
+
 ## Execute
 
 Choose only a method supported by the actual device and its documentation:

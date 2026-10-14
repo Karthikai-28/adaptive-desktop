@@ -574,6 +574,14 @@ bluetooth", "put the sound on the headset", "what's using the memory",
 - The owner's switches apply as everywhere: an action whose switch is off is
   neither offered nor done.
 
+**Zero-State from a phone.** In Ask, say *Zero-State* (or *retire this
+computer*). It is classified as destructive-risk, so the phone requires its
+usual explicit confirmation and the phone must be allowed power actions. The
+request is authenticated and audited, then records only an arm request on the
+computer. It does not erase storage, reboot, or run a command. The operator
+must still boot trusted external media and execute the separately guarded
+procedure in `docs/ZERO_STATE_PROTOCOL.md`.
+
 `link-cli.py doctor` is the link looking at itself: each thing it depends on,
 whether it is in place, and for what is not, the one command that puts it
 right. The app shows the same under More.

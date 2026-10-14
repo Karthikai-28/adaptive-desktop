@@ -274,6 +274,7 @@ def pure_checks(check):
 
     import actions
     import scenes
+    import zero_state
     done_things = []
     toy = [actions.Action("lamp", ["lamp", "light"], lambda a: (done_things.append(("lamp", a["state"])) or True, f"lamp {a['state']}",
                                                                ("lamp", {"state": "off" if a["state"] == "on" else "on"})),
@@ -323,6 +324,22 @@ def pure_checks(check):
         check(actions.tidy("Could you switch the Wi-Fi OFF, please?") == "turn wifi off"
               and actions.closeness("put it on the emberton", "EMBERTON II") > 0.6
               and actions.closeness("note buy milk", "busy") == 0, "ask: the plain words of a request, and names said in part")
+
+        built_in = actions.Book(folder, plugins)
+        armed = built_in.ask("zero state")
+        check(armed and armed[0]["id"] == "zero-state-arm" and armed[0]["risk"] == "destroys"
+              and built_in.ask("zero state", lambda switch: switch != "allow_power") == [],
+              "zero-state: a phone must confirm an armed handoff and may be denied power actions")
+
+    with tempfile.TemporaryDirectory() as folder:
+        request_file = Path(folder) / "private" / "zero-state-request.json"
+        done, text = zero_state.arm(request_file, now=123)
+        request = json.loads(request_file.read_text())
+        check(done and "No storage was erased" in text and request == {
+                  "instruction": "Boot trusted external media and follow docs/ZERO_STATE_PROTOCOL.md.",
+                  "requested_at": 123, "state": "armed"}
+              and stat.S_IMODE(request_file.stat().st_mode) == 0o600,
+              "zero-state: arming records a private request only; it never invokes sanitization")
 
         kept = scenes.Scenes(folder)
         desk = {"wifi": "Home", "displays": 2, "power": "mains", "phone": True, "project": "x"}

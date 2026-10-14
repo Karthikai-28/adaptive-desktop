@@ -40,6 +40,7 @@ from pathlib import Path
 import desktop
 import machine
 import system
+import zero_state
 
 RISKS = ("safe", "changes", "cuts", "destroys")
 PLUGIN_DIR = Path.home() / ".config" / "adaptive-desktop" / "actions.d"
@@ -268,6 +269,9 @@ def built_in():
                "Restart the computer - unsaved work is lost", "destroys", "allow_power"),
         Action("shut-down", ["shut down", "power off", "turn off computer"], lambda a: _ok(desktop.power("poweroff")),
                "Shut the computer down - unsaved work is lost", "destroys", "allow_power"),
+        Action("zero-state-arm", ["zero state", "zero-state protocol", "retire this computer", "prepare handoff"],
+               lambda a: zero_state.arm(),
+               "Arm Zero-State - no data is erased; trusted external boot is still required", "destroys", "allow_power"),
 
         Action("play-pause", ["play", "pause", "resume", "play pause"], lambda a: _ok(desktop.media("play-pause"), "Play / pause"),
                "Play or pause what is playing"),
