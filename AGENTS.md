@@ -22,6 +22,7 @@ compatibility without keeping GNOME 42 working first.
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/`, `design/` | `docs/DESIGN_SYSTEM.md` |
 | systemd units, autostart | `services/*.service`, `*.timer` | |
 | Install/uninstall pieces | `scripts/install-*.sh`, run in order by `./install.sh` | |
+| Permanent handoff / retirement | `scripts/zero-state-protocol.sh` | Read-only plan by default; external boot, exact disk confirmation, and a supported sanitization method are required to execute. See `docs/ZERO_STATE_PROTOCOL.md`. |
 
 Untracked noise at the root (`*.log`, `*-audit.txt`, `build/`, `dist/`, `logs/`, `vendor/`) is build
 output - not source.
@@ -52,4 +53,4 @@ are recorded with `scripts/record-live-verification.py`.
 - Repo conventions (single `master` branch, commit identity, commit cadence, UI palette, Files
   inspector scope) are in this repo's memory: `memctl read`.
 
-<!-- map-check: commit=51ec4673034f time=1791968011 -->
+<!-- map-check: commit=a835879fd1ed time=1791973529 -->

@@ -92,6 +92,7 @@ step "Screen text geometry and selection" quiet node "$REPO/scripts/verify-scree
 step "Screen text contrast and enlargement" quiet /usr/bin/python3 -s "$REPO/scripts/verify-screen-text-image.py"
 step "Python parses" python_syntax
 step "Shell scripts have no errors" shell_scripts
+step "Zero-State Protocol guards" quiet "$REPO/scripts/verify-zero-state-protocol.sh"
 step "Feature logic (palette, projects, backup, power, annotate)" quiet python3 "$REPO/scripts/verify-feature-logic.py"
 step "Adaptive Settings backend" quiet python3 "$REPO/scripts/verify-adaptive-settings.py"
 step "Agent Office (syntax, roster, API guards; no quota)" quiet "$REPO/scripts/verify-agent-office.sh"

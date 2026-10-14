@@ -184,6 +184,8 @@ gnome-extensions disable adaptive-shell@local
 ```
 
 Full procedures: `docs/RECOVERY_RUNBOOK.md`, `docs/UNINSTALL_AND_RECOVERY.md`.
+For permanent transfer or retirement that leaves no operating system installed,
+see `docs/ZERO_STATE_PROTOCOL.md`.
 
 ## Documentation map
 
@@ -195,6 +197,7 @@ Full procedures: `docs/RECOVERY_RUNBOOK.md`, `docs/UNINSTALL_AND_RECOVERY.md`.
 | `docs/UBUNTU_FILES_PARITY.md` | File manager architecture rule |
 | `docs/COMMAND_PERMISSION_MODEL.md` | Command surface safety model |
 | `docs/RECOVERY_RUNBOOK.md` | Getting back to a working desktop |
+| `docs/ZERO_STATE_PROTOCOL.md` | Safely sanitize a disk and leave the computer unprovisioned |
 | `docs/GNOME_PORT.md` | What a move to GNOME 45+ and Wayland would take |
 | `docs/ADAPTIVE_LINK.md` | The computer from your phone: setup and security model |
 | `docs/AGENT_OFFICE.md` | The AI company: one-command setup, how to use it, security model |
