@@ -319,11 +319,20 @@ function renderQuota() {
   }
   if (S.settings?.paused) q.append(h('span', { class: 'q out' }, 'Work paused'));
   for (const r of S.usage?.rows || []) {
-    const pct = parseInt(r.remaining, 10);
-    const cls = isNaN(pct) ? '' : pct < 10 ? 'out' : pct < 30 ? 'low' : '';
-    const reset = r.resets ? `resets ${new Date(r.resets).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
-    q.append(h('span', { class: `q ${cls}`, title: `Gemini ${r.window === 'week' ? 'weekly' : '5-hour'} limit remaining · ${reset}` },
-      `Gemini ${r.window}`, h('span', { class: 'bar' }, h('i', { style: `width:${isNaN(pct) ? 0 : pct}%` })), r.remaining));
+    // Older servers only sent `remaining`; keep those payloads working while preferring the parsed number.
+    const parsed = Number.parseInt(r.remaining, 10);
+    const pct = Number.isFinite(r.percent) ? r.percent : Number.isNaN(parsed) ? null : parsed;
+    const disabled = pct == null && String(r.remaining).toLowerCase() === 'disabled';
+    const cls = disabled ? 'disabled' : pct == null ? '' : pct < 10 ? 'out' : pct < 30 ? 'low' : '';
+    const date = r.resets ? new Date(r.resets) : null;
+    const reset = date && !Number.isNaN(date.getTime()) ? ` · resets ${date.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
+    const label = r.label || (r.family === 'claude-gpt' ? 'Claude + GPT' : 'Gemini');
+    const limit = r.window === 'week' ? 'weekly' : r.window === '5h' ? '5-hour' : r.window;
+    const title = disabled ? `${label} ${limit} limit is disabled` : `${label} ${limit} limit remaining${reset}`;
+    q.append(h('span', { class: `q ${cls}`, title }, `${label} ${r.window}`,
+      disabled ? h('span', { class: 'limit-off' }, 'off')
+        : h('span', { class: 'bar' }, h('i', { style: `width:${pct == null ? 0 : pct}%` })),
+      disabled ? null : r.remaining));
   }
 }
 

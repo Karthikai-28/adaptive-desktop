@@ -22,6 +22,7 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
 .q .bar { width: 46px; height: 6px; background: #3a3f5f; border-radius: 3px; overflow: hidden; }
 .q .bar i { display: block; height: 100%; background: var(--ok); }
 .q.low .bar i { background: var(--warn); } .q.out .bar i { background: var(--err); }
+.q.disabled { color: #8f94b3; } .q .limit-off { font-weight: 650; color: #b6bad6; }
 nav { display: flex; gap: 8px; }
 .btn { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border-radius: 10px; border: 1px solid #3a3f61; background: var(--bar2); color: #e8eaf6; font-weight: 600; font-size: 13.5px; white-space: nowrap; }
 .btn:hover { background: #343958; }

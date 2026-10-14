@@ -54,6 +54,25 @@ used = [a["desk"] for a in cfg["agents"]]
 assert len(used) == len(set(used)), "two agents share a desk"
 print(f"roster ok: {len(ids)} agents + {cfg['manager']['name']}; providers: {', '.join(provs)}")
 PY
+PYTHONPATH="$APP" python3 - <<'PY' || fail "usage parser"
+from office.quota import QuotaGuard, parse_usage
+
+raw = """Gemini Models\tWeekly Limit Remaining\t17%\t2026-10-15T20:18:26Z
+Gemini Models\tFive Hour Limit Remaining\tdisabled\t
+Claude and GPT models\tWeekly Limit Remaining\t42%\t2026-10-15T19:15:52Z
+Claude and GPT models\tFive Hour Limit Remaining\tdisabled\t
+"""
+rows = parse_usage(raw)
+assert [(r["family"], r["window"], r["percent"]) for r in rows] == [
+    ("gemini", "week", 17), ("gemini", "5h", None),
+    ("claude-gpt", "week", 42), ("claude-gpt", "5h", None),
+], rows
+assert rows[1]["remaining"] == "disabled"
+guard = object.__new__(QuotaGuard)
+guard.usage = {"rows": [dict(rows[0], percent=0, remaining="0%"),
+                         dict(rows[2], percent=0, remaining="0%", resets="2099-01-01T00:00:00Z")]}
+assert guard.exhausted_until() == 1792095506.0, "only Gemini exhaustion may pause Gemini work"
+PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
 # 2. A throwaway server: API, guards, path traversal

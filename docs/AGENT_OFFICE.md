@@ -148,7 +148,8 @@ office autopilot on|off · office pause · office resume · office open
 - The **server** listens on 127.0.0.1 only and rejects cross-site requests and foreign Host
   headers. Agent-written pages are served in a sandboxed origin, so they can't call the office API.
 - **Quota.** Autopilot reviews are capped at 20 per hour and Claude may queue at most 40 tasks per
-  hour. A typical task uses 50-100k tokens. The top bar shows the remaining 5-hour and weekly Gemini limits.
+  hour. A typical task uses 50-100k tokens. The top bar shows the remaining 5-hour and weekly limits
+  for Gemini and Claude/GPT; a limit that the subscription disables is shown as off, not as 0%.
 
 ## Knowledge graphs and token economy (`office/graphs.py`)
 

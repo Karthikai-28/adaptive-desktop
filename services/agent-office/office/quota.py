@@ -19,6 +19,10 @@ FALLBACK_S = 5 * 60         # pause when /usage shows no exhausted window (a sho
 PROBE_S = 5 * 60            # while paused, how often to look whether the quota came back early
 TICK_S = 30
 _RESETS_IN = re.compile(r"resets? in\s*(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?!s))?\s*(?:(\d+)\s*s)?", re.I)
+_USAGE_FAMILIES = {
+    "gemini models": ("gemini", "Gemini"),
+    "claude and gpt models": ("claude-gpt", "Claude + GPT"),
+}
 
 
 def reset_from_error(err, now=None):
@@ -44,6 +48,31 @@ def _ts(iso):
         return None
 
 
+def parse_usage(text):
+    """Rows printed by ``agy -p /usage``, including every supported model family.
+
+    Antigravity reports a literal ``disabled`` for limits that are not active.  Keep that state
+    distinct from 0%: disabled is informational, while 0% means the model family is exhausted.
+    """
+    rows = []
+    for line in (text or "").splitlines():
+        parts = [part.strip() for part in line.split("\t")]
+        if len(parts) < 3:
+            continue
+        family = _USAGE_FAMILIES.get(parts[0].lower())
+        if not family:
+            continue
+        key, label = family
+        limit = parts[1].lower()
+        window = "week" if "week" in limit else "5h" if "five hour" in limit or "5 hour" in limit else parts[1]
+        remaining = parts[2]
+        match = re.fullmatch(r"(\d+)%", remaining)
+        percent = max(0, min(100, int(match.group(1)))) if match else None
+        rows.append({"family": key, "label": label, "window": window, "remaining": remaining,
+                     "percent": percent, "resets": parts[3] if len(parts) > 3 else ""})
+    return rows
+
+
 class QuotaGuard:
     def __init__(self, office):
         self.o = office
@@ -66,12 +95,7 @@ class QuotaGuard:
                 "agy", "-p", "/usage", cwd=str(COMPANY), env=agy._env("usage"),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
-            rows = []
-            for line in out.decode(errors="replace").splitlines():
-                parts = line.split("\t")
-                if len(parts) >= 3 and parts[0].startswith("Gemini"):
-                    rows.append({"window": "week" if "Weekly" in parts[1] else "5h",
-                                 "remaining": parts[2].strip(), "resets": parts[3].strip() if len(parts) > 3 else ""})
+            rows = parse_usage(out.decode(errors="replace"))
             self.usage = {"ts": time.time(), "rows": rows, "error": "" if rows else "no usage data"}
         except Exception as e:  # usage is advisory; never let it break the office
             self.usage = {"ts": time.time(), "rows": self.usage.get("rows", []), "error": str(e)[:200]}
@@ -82,7 +106,8 @@ class QuotaGuard:
 
     def exhausted_until(self):
         """The time the latest exhausted Gemini window resets, or None if none is at 0%."""
-        resets = [_ts(r["resets"]) for r in self.usage.get("rows", []) if _pct(r) == 0]
+        resets = [_ts(r["resets"]) for r in self.usage.get("rows", [])
+                  if r.get("family", "gemini") == "gemini" and _pct(r) == 0]
         resets = [x for x in resets if x]
         return max(resets) if resets else None
 
@@ -155,9 +180,10 @@ class QuotaGuard:
                     if now - self._last_probe >= PROBE_S:
                         self._last_probe = now
                         await self.refresh()                       # keeps the usage shown everywhere current
-                        rows = self.usage.get("rows", [])
+                        rows = [r for r in self.usage.get("rows", [])
+                                if r.get("family", "gemini") == "gemini" and _pct(r) is not None]
                         # with a known reset time, wait for it; otherwise resume as soon as quota is back
-                        if not self.o.store.get("quota_known", False) and rows and all((_pct(r) or 0) > 0 for r in rows):
+                        if not self.o.store.get("quota_known", False) and rows and all(_pct(r) > 0 for r in rows):
                             await self.resume(early=True)
                 else:
                     if now - last_usage >= 180:                    # keep the top bar fresh
