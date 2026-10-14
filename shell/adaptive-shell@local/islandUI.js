@@ -443,6 +443,8 @@ var IslandOverlay = class IslandOverlay {
 
         // Modular Cards
         this._quotaCard = null;
+        this._usageRefreshButton = null;
+        this._usageRefreshResetId = 0;
         this._tasksCard = null;
         this._mediaCard = null;
         this._timerCard = null;
@@ -630,7 +632,31 @@ var IslandOverlay = class IslandOverlay {
         }
         const refresh = new St.Button({ label: "Refresh usage", can_focus: true,
             style_class: "adaptive-island-btn", x_align: Clutter.ActorAlign.END });
-        refresh.connect("clicked", () => this._ui.backend.quota.refresh());
+        this._usageRefreshButton = refresh;
+        refresh.connect("clicked", () => {
+            if (!refresh.reactive)
+                return;
+            refresh.reactive = false;
+            refresh.label = "Refreshing…";
+            this._ui.backend.quota.refresh(ok => {
+                if (!this._usageRefreshButton)
+                    return;
+                refresh.label = ok ? "Updated" : "Refresh failed";
+                refresh.reactive = true;
+                if (this._usageRefreshResetId && GLib)
+                    GLib.source_remove(this._usageRefreshResetId);
+                if (GLib) {
+                    this._usageRefreshResetId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1800, () => {
+                        this._usageRefreshResetId = 0;
+                        if (this._usageRefreshButton)
+                            this._usageRefreshButton.label = "Refresh usage";
+                        return GLib.SOURCE_REMOVE;
+                    });
+                } else {
+                    refresh.label = "Refresh usage";
+                }
+            });
+        });
         this._quotaCard.add_child(refresh);
         this._cardContentBox.add_child(this._quotaCard);
     }
@@ -1068,6 +1094,11 @@ var IslandOverlay = class IslandOverlay {
     }
 
     destroy() {
+        if (this._usageRefreshResetId && GLib) {
+            GLib.source_remove(this._usageRefreshResetId);
+            this._usageRefreshResetId = 0;
+        }
+        this._usageRefreshButton = null;
         if (this._anchorAllocationId && this._anchorActor) {
             this._anchorActor.disconnect(this._anchorAllocationId);
             this._anchorAllocationId = 0;

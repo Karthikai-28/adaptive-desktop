@@ -270,6 +270,12 @@ async def usage():
     return office.quota.usage
 
 
+@app.post("/api/usage/refresh")
+async def refresh_usage():
+    """Refresh agy's plan limits now; used by the desktop usage card."""
+    return await office.quota.refresh()
+
+
 # ---------------------------------------------------------------- token ledger
 @app.get("/api/tokens")
 async def tokens(since: float = 0, provider: str | None = None):

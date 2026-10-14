@@ -69,7 +69,7 @@ async function main() {
 
     const quota = new IslandQuotaProvider({
         bus: mockBus,
-        fetcher: (cb) => cb(null, nextSnap),
+        fetcher: (cb, force) => { quota.lastFetchForced = force; cb(null, nextSnap); },
     });
 
     quota.poll();
@@ -78,6 +78,9 @@ async function main() {
     check(qData.claude.windows[0].used === 17, 'quota: Claude 5h used (17%)');
     check(qData.gemini.windows.length === 0 && qData.gemini.error.includes('not running'), 'quota: Gemini unavailable says why');
     check(quotaEvents.length === 0, 'quota: a routine reading surfaces nothing');
+    let refreshed = null;
+    quota.refresh(ok => { refreshed = ok; });
+    check(quota.lastFetchForced === true && refreshed === true, 'quota: manual refresh forces the source and reports success');
 
     // Test 1.2: Caution when a window reaches 80% used
     quotaEvents = [];

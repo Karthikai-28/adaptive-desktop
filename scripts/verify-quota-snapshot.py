@@ -84,8 +84,14 @@ class SnapshotTests(unittest.TestCase):
     # ---- Gemini: agy's /usage as the Agent Office serves it (remaining -> used)
     def test_gemini_used(self):
         data = quota.gemini_snapshot({'ts': 1791763200, 'error': '', 'rows': [
-            {'window': 'week', 'remaining': '15%', 'resets': '2026-10-15T20:18:26Z'},
-            {'window': '5h', 'remaining': '0%', 'resets': '2026-10-12T02:43:41Z'}]}, now=1791763300)
+            {'family': 'gemini', 'window': 'week', 'remaining': '15%', 'percent': 15,
+             'resets': '2026-10-15T20:18:26Z'},
+            {'family': 'gemini', 'window': '5h', 'remaining': '0%', 'percent': 0,
+             'resets': '2026-10-12T02:43:41Z'},
+            {'family': 'claude-gpt', 'window': 'week', 'remaining': '2%', 'percent': 2,
+             'resets': '2026-10-16T20:18:26Z'},
+            {'family': 'gemini', 'window': '5h', 'remaining': 'disabled', 'percent': None,
+             'resets': ''}]}, now=1791763300)
         self.assertEqual([(w['label'], w['used']) for w in data['windows']], [('5h', 100), ('Weekly', 85)])
 
     def test_gemini_office_down_or_empty(self):

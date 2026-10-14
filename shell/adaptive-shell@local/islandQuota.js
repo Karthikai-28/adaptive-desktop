@@ -129,6 +129,7 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         };
 
         this._snapshotProcess = null;
+        this._queuedRefreshCallbacks = [];
         this._transcriptMonitor = null;
         this._transcriptCancellable = null;
     }
@@ -176,41 +177,66 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         this.poll();
     }
 
-    poll() {
-        if (this._destroyed)
-            return;
-
-        if (this._customFetcher) {
-            this._customFetcher((err, data) => {
-                if (err)
-                    this.handleFailure(err.message || String(err));
-                else
-                    this.applySnapshot(data);
-            });
+    poll(force = false, done = null) {
+        if (this._destroyed) {
+            if (done) done(false);
             return;
         }
 
-        if (typeof Gio === 'undefined' || !Me || this._snapshotProcess)
+        if (this._customFetcher) {
+            this._customFetcher((err, data) => {
+                if (err) {
+                    this.handleFailure(err.message || String(err));
+                    if (done) done(false);
+                } else {
+                    this.applySnapshot(data);
+                    if (done) done(true);
+                }
+            }, force);
             return;
+        }
+
+        if (typeof Gio === 'undefined' || !Me) {
+            if (done) done(false);
+            return;
+        }
+        if (this._snapshotProcess) {
+            // A manual click must not disappear behind a scheduled background poll.
+            if (force)
+                this._queuedRefreshCallbacks.push(done);
+            else if (done)
+                done(false);
+            return;
+        }
         try {
-            const proc = Gio.Subprocess.new(['python3', `${Me.path}/quotaSnapshot.py`],
+            const args = ['python3', `${Me.path}/quotaSnapshot.py`];
+            if (force)
+                args.push('--refresh');
+            const proc = Gio.Subprocess.new(args,
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
             this._snapshotProcess = proc;
             proc.communicate_utf8_async(null, null, (source, res) => {
                 this._snapshotProcess = null;
                 if (this._destroyed)
                     return;
+                let ok = false;
                 try {
                     const [, output] = source.communicate_utf8_finish(res);
                     if (!source.get_successful())
                         throw new Error('Usage snapshot unavailable');
                     this.applySnapshot(JSON.parse(output));
+                    ok = true;
                 } catch (e) {
                     this.handleFailure(e.message || 'Usage snapshot unavailable');
                 }
+                if (done) done(ok);
+                const queued = this._queuedRefreshCallbacks.splice(0);
+                if (queued.length)
+                    this.poll(true, result => queued.forEach(cb => { if (cb) cb(result); }));
             });
         } catch (e) {
             this.handleFailure(e.message || 'Usage snapshot unavailable');
+            if (done) done(false);
         }
     }
 
@@ -382,8 +408,8 @@ var IslandQuotaProvider = class IslandQuotaProvider {
             this._bus._notifyStateChange();
     }
 
-    refresh() {
-        this.poll();
+    refresh(done = null) {
+        this.poll(true, done);
         if (this._transcriptPath)
             this._readAgyTranscript(this._transcriptPath);
     }
@@ -407,6 +433,8 @@ var IslandQuotaProvider = class IslandQuotaProvider {
             this._snapshotProcess.force_exit();
             this._snapshotProcess = null;
         }
+        for (const cb of this._queuedRefreshCallbacks.splice(0))
+            if (cb) cb(false);
         if (this._pollTimerId && typeof GLib !== 'undefined' && GLib.source_remove) {
             GLib.source_remove(this._pollTimerId);
             this._pollTimerId = 0;

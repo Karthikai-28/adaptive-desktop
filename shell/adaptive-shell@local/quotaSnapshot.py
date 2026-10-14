@@ -17,6 +17,7 @@ import json
 import math
 import re
 from pathlib import Path
+import sys
 import time
 import urllib.request
 
@@ -131,8 +132,14 @@ def gemini_snapshot(data, now=None):
     result = {'ts': stamp, 'stale': not stamp or now - stamp > STALE_S['gemini'],
               'error': 'Waiting for the first usage report' if not data['rows'] else '', 'windows': []}
     for row in data['rows']:
+        # Newer Office responses also carry the shared Claude/GPT subscription limits.
+        # Rows from older servers had no family and were all Gemini.
+        if row.get('family', 'gemini') != 'gemini':
+            continue
         try:
-            left = float(str(row.get('remaining', '')).rstrip('%'))
+            left = row.get('percent')
+            if not _num(left):
+                left = float(str(row.get('remaining', '')).rstrip('%'))
         except (ValueError, AttributeError):
             continue
         w = _window('Weekly' if row.get('window') == 'week' else str(row.get('window', '')), 100 - left,
@@ -143,11 +150,14 @@ def gemini_snapshot(data, now=None):
     return result
 
 
-def snapshot():
+def snapshot(refresh=False):
     try:
         # Bypass proxy settings: this is strictly a loopback service.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(OFFICE_USAGE, timeout=3) as response:
+        request = urllib.request.Request(OFFICE_USAGE + ('/refresh' if refresh else ''),
+                                         method='POST' if refresh else 'GET',
+                                         headers={'X-Office': '1'} if refresh else {})
+        with opener.open(request, timeout=65 if refresh else 3) as response:
             office = json.loads(response.read(65536))
     except (OSError, ValueError):
         office = None
@@ -157,4 +167,4 @@ def snapshot():
 
 
 if __name__ == '__main__':
-    print(json.dumps(snapshot()))
+    print(json.dumps(snapshot('--refresh' in sys.argv[1:])))
