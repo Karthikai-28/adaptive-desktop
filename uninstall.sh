@@ -57,6 +57,7 @@ echo "Autostart and app-grid entries"
 # logged into, it is what puts the laptop to sleep when the lid closes
 # (docs/POWER_POLICY.md). It goes with the session, below.
 for file in "$AUTOSTART/adaptive-project-context.desktop" "$AUTOSTART/adaptive-gestures.desktop" \
+    "$AUTOSTART/adaptive-first-login.desktop" \
     "$APPS/adaptive-project-context.desktop" "$APPS/com.karthi.AdaptiveSettings.desktop" \
     "$APPS/com.karthi.AdaptiveGestures.desktop" \
     "$HOME/.local/share/gnome-shell/search-providers/org.adaptive.ProjectContext.search-provider.ini"; do

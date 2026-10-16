@@ -54,6 +54,18 @@ if a rollback is ever needed.
 
 ## Install
 
+On a new machine with nothing of Adaptive on it (Ubuntu 22.04), one command
+does everything - packages, the Files build, the login session, the phone
+link, the Agent Office - and a terminal at the first Adaptive login finishes
+the sign-ins and pairs the phone. See `docs/NEW_MACHINE.md`.
+
+```sh
+git clone https://github.com/Karthikai-28/adaptive-desktop.git ~/adaptive-desktop
+~/adaptive-desktop/bootstrap.sh            # --restore FILE brings your old settings
+```
+
+On a machine that has it:
+
 ```sh
 ./install.sh --status     # what is installed and what is out of date
 ./install.sh              # everything that needs no sudo
@@ -197,6 +209,7 @@ see `docs/ZERO_STATE_PROTOCOL.md`.
 | `docs/UBUNTU_FILES_PARITY.md` | File manager architecture rule |
 | `docs/COMMAND_PERMISSION_MODEL.md` | Command surface safety model |
 | `docs/RECOVERY_RUNBOOK.md` | Getting back to a working desktop |
+| `docs/NEW_MACHINE.md` | Setting up a new machine from nothing: `bootstrap.sh` |
 | `docs/ZERO_STATE_PROTOCOL.md` | Safely sanitize a disk and leave the computer unprovisioned |
 | `docs/GNOME_PORT.md` | What a move to GNOME 45+ and Wayland would take |
 | `docs/ADAPTIVE_LINK.md` | The computer from your phone: setup and security model |
