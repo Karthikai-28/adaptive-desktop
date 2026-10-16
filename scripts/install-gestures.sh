@@ -12,7 +12,9 @@ APPS="$HOME/.local/share/applications"
 AUTOSTART="$HOME/.config/autostart"
 
 mkdir -p "$APPS" "$AUTOSTART"
-install -m 0644 "$REPO/apps/adaptive-gestures/com.karthi.AdaptiveGestures.desktop" "$APPS/"
+sed "s|/home/karthi/adaptive-desktop|$REPO|g" "$REPO/apps/adaptive-gestures/com.karthi.AdaptiveGestures.desktop" \
+    > "$APPS/com.karthi.AdaptiveGestures.desktop"
+chmod 0644 "$APPS/com.karthi.AdaptiveGestures.desktop"
 update-desktop-database "$APPS" 2>/dev/null || true
 
 cat > "$AUTOSTART/adaptive-gestures.desktop" <<DESKTOP

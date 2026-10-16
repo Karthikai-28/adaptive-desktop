@@ -22,6 +22,7 @@ SYSTEM_EXT_DIR="/usr/lib/x86_64-linux-gnu/nautilus/extensions-3.0"
 # fork deliberately does not inherit everything apt happens to have installed.
 WANTED=(
     libterminal-nautilus.so   # nautilus-extension-gnome-terminal: Open in Terminal
+    libnautilus-python.so     # python3-nautilus: loads the Adaptive inspector (extension/)
 )
 
 test -d "$FORK_EXT_DIR" || {
@@ -60,7 +61,7 @@ ls -1 "$FORK_EXT_DIR"
 if (( missing )); then
     echo
     echo "Some extensions were not found. Install them with:" >&2
-    echo "  sudo apt install nautilus-extension-gnome-terminal" >&2
+    echo "  sudo apt install nautilus-extension-gnome-terminal python3-nautilus" >&2
     exit 1
 fi
 

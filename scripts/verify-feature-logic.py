@@ -456,6 +456,14 @@ def settings_backup():
         (notes / "Alpha" / "Inbox.md").write_text("- note\n")
         check([str(f) for f in B.config_files(config)] == ["commands/go.sh", "projects.json"],
               "backup: settings are carried, machine history and parked windows are not")
+        (config / "link").mkdir()
+        for name in ("cloud.json", "server.key", "phones.json", "session.json"):
+            (config / "link" / name).write_text("{}")
+        check([str(f) for f in B.config_files(config)] == ["commands/go.sh", "link/cloud.json", "projects.json"],
+              "backup: the link's Google project travels, this computer's key and paired phones do not")
+        for name in ("cloud.json", "server.key", "phones.json", "session.json"):
+            (config / "link" / name).unlink()
+        (config / "link").rmdir()
 
         fake = {"/org/gnome/shell/": "[/]\nfavorite-apps=['a.desktop']\nenabled-extensions=['x']\n",
                 B.CUSTOM_KEYS_DIR: shortcuts}

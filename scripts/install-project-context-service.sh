@@ -12,13 +12,14 @@ mkdir -p \
   "$APPLICATIONS_DIR" \
   "$SEARCH_PROVIDER_DIR"
 
-install -m 644 \
-  "${SERVICE_DIR}/adaptive-project-context.desktop" \
-  "${AUTOSTART_DIR}/adaptive-project-context.desktop"
-
-install -m 644 \
-  "${SERVICE_DIR}/adaptive-project-context.desktop" \
-  "${APPLICATIONS_DIR}/adaptive-project-context.desktop"
+# The entry in the repo names the original machine's checkout; point it at
+# this one, so the service starts for any user name.
+for target in "${AUTOSTART_DIR}" "${APPLICATIONS_DIR}"; do
+  sed "s|/home/karthi/adaptive-desktop|${REPO}|g" \
+    "${SERVICE_DIR}/adaptive-project-context.desktop" \
+    > "${target}/adaptive-project-context.desktop"
+  chmod 644 "${target}/adaptive-project-context.desktop"
+done
 
 install -m 644 \
   "${SERVICE_DIR}/org.adaptive.ProjectContext.search-provider.ini" \

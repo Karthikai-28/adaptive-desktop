@@ -41,6 +41,12 @@ FORMAT = 1
 # Files in the config folder that are this machine's history, not settings.
 SKIP_CONFIG = re.compile(r"^(last-.*-backup|.*-relogin-required|session-state\.json|.*\.tmp)$")
 SKIP_CONFIG_DIRS = {"snapshots"}
+# Adaptive Link's folder is this computer's identity: its private key, the
+# phones that trust that key, its signed-in session. Carried to another
+# computer it would make two machines one to every phone, so only the Google
+# project's identifiers (cloud.json, the same for every computer) travel.
+LINK_DIR_NAME = "link"
+LINK_PORTABLE = {"cloud.json"}
 
 # dconf directory -> the keys to carry (None for all of them).
 DCONF_KEYS = {
@@ -154,6 +160,9 @@ def config_files(config_dir=None):
         relative = path.relative_to(config_dir)
         if (path.is_symlink() or not path.is_file() or SKIP_CONFIG.match(path.name)
                 or relative.parts[0] in SKIP_CONFIG_DIRS):
+            continue
+        if relative.parts[0] == LINK_DIR_NAME and relative.as_posix() not in {
+                f"{LINK_DIR_NAME}/{name}" for name in LINK_PORTABLE}:
             continue
         found.append(relative)
     return found
