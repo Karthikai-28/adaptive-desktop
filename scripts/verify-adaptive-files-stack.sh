@@ -10,7 +10,8 @@ set -Eeuo pipefail
 # activation files that point at it.
 #
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 PREFIX="${REPO}/.local/adaptive-nautilus"
 BIN="${PREFIX}/bin/nautilus"
 DISPATCH="${REPO}/scripts/adaptive-files-dispatch.sh"

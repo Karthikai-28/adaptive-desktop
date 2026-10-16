@@ -24,6 +24,7 @@ const { Gio, GLib, Meta, Shell } = imports.gi;
 const Main = imports.ui.main;
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const Util = Me.imports.adaptiveUtil;
+const AdaptivePaths = Me.imports.adaptivePaths;
 
 const SNAPSHOT_DIR = GLib.build_filenamev(
     [GLib.get_user_config_dir(), 'adaptive-desktop', 'snapshots']);
@@ -218,11 +219,7 @@ var ProjectSnapshots = class ProjectSnapshots {
         const startup = project.metadata && project.metadata.startup;
         if (launched && Array.isArray(startup) && startup.length) {
             try {
-                const baseDir = Util.resolveAdaptiveDir(
-                    GLib.get_home_dir(),
-                    GLib.getenv('ADAPTIVE_DESKTOP_DIR'),
-                    Me.dir ? Me.dir.get_path() : null
-                );
+                const baseDir = AdaptivePaths.adaptiveDir();
                 GLib.spawn_async(null, [
                     GLib.build_filenamev([baseDir, 'scripts', 'project-cli.py']),
                     'startup', 'run', '--target', project.id,

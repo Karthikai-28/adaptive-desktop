@@ -17,7 +17,8 @@
 # Undo with ./uninstall.sh (your office data stays). See docs/AGENT_OFFICE.md.
 set -Eeuo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 APP="$REPO/services/agent-office"
 PYDEPS="$REPO/.local/office-pydeps"
 UNIT="adaptive-agent-office.service"
@@ -136,9 +137,8 @@ echo "   ok ($BIN/office)"
 
 echo "== user service"
 mkdir -p "$UNIT_DIR"
-# the unit names the repo by its usual place; point it at wherever this checkout really is
-sed "s|%h/adaptive-desktop|$REPO|g" "$REPO/services/$UNIT" > "$UNIT_DIR/$UNIT"
-chmod 0644 "$UNIT_DIR/$UNIT"
+# the unit is a template: this checkout's path goes in as it is installed
+adaptive_render "$REPO/services/$UNIT" "$UNIT_DIR/$UNIT"
 systemctl --user daemon-reload
 if [ "$AUTOSTART" = 1 ]; then systemctl --user enable "$UNIT" >/dev/null 2>&1; echo "   starts at login"; fi
 systemctl --user restart "$UNIT"

@@ -39,10 +39,21 @@ first.
 | AI company (Agent Office) | `services/agent-office/`: Gemini agents through `agy`, managed by Claude, in a pixel office at 127.0.0.1:8790 |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/` |
 
+### Where it lives
+
+The checkout can be anywhere, for any user; nothing names a home folder.
+Scripts find it from their own location (`scripts/adaptive-paths.sh`), the
+Python from `__file__`. The systemd units and desktop entries in `services/`
+and `apps/` are templates holding `@ADAPTIVE_REPO@`, filled in as they are
+installed. Two things cannot see the checkout - the login session's wrapper
+and the shell's live copy - so `install.sh` records its path in
+`~/.config/adaptive-desktop/repo`, and `ADAPTIVE_REPO` overrides all of it.
+Move the checkout, then run `./install.sh` again from its new place.
+
 ### Canonical paths
 
 ```text
-shell source   shell/adaptive-shell@local/
+shell source   shell/adaptive-shell@local/          (all relative to the checkout)
 shell live     ~/.local/share/gnome-shell/extensions/adaptive-shell@local/
 files fork     .local/adaptive-nautilus/bin/nautilus
 files routing  scripts/adaptive-files-dispatch.sh
@@ -60,8 +71,8 @@ link, the Agent Office - and a terminal at the first Adaptive login finishes
 the sign-ins and pairs the phone. See `docs/NEW_MACHINE.md`.
 
 ```sh
-git clone https://github.com/Karthikai-28/adaptive-desktop.git ~/adaptive-desktop
-~/adaptive-desktop/bootstrap.sh            # --restore FILE brings your old settings
+git clone https://github.com/Karthikai-28/adaptive-desktop.git   # anywhere, any user
+adaptive-desktop/bootstrap.sh            # --restore FILE brings your old settings
 ```
 
 On a machine that has it:

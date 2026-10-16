@@ -4,7 +4,7 @@ After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-ExecStart=%h/adaptive-desktop/scripts/adaptive-power-auto.py
+ExecStart=@ADAPTIVE_REPO@/scripts/adaptive-power-auto.py
 Restart=on-failure
 RestartSec=10
 

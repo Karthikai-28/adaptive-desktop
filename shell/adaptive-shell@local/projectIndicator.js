@@ -20,12 +20,13 @@ const PopupMenu = imports.ui.popupMenu;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const Util = Me.imports.adaptiveUtil;
+const AdaptivePaths = Me.imports.adaptivePaths;
 
 const BUS_NAME = 'org.adaptive.ProjectContext';
 const OBJECT_PATH = '/org/adaptive/ProjectContext';
 const GIT_REFRESH_S = 60;
 const SCRIPTS = GLib.build_filenamev([
-    Util.resolveAdaptiveDir(GLib.get_home_dir(), GLib.getenv('ADAPTIVE_DESKTOP_DIR'), Me.dir ? Me.dir.get_path() : null),
+    AdaptivePaths.adaptiveDir(),
     'scripts',
 ]);
 

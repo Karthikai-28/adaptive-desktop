@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 STATE_FILE="$HOME/.config/adaptive-desktop/last-bottom-dock-backup"
 [[ -f "$STATE_FILE" ]] || { echo "No bottom-dock backup pointer." >&2; exit 2; }
 BACKUP="$(cat "$STATE_FILE")"

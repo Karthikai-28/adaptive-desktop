@@ -5,4 +5,4 @@ PartOf=graphical-session.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/adaptive-desktop/scripts/adaptive-wallpaper.sh
+ExecStart=@ADAPTIVE_REPO@/scripts/adaptive-wallpaper.sh

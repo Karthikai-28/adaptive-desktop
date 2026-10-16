@@ -10,7 +10,8 @@ set -Eeuo pipefail
 #
 # The next Files window starts a fresh process with the new code.
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 PREFIX="$REPO/.local/adaptive-nautilus"
 EXT_DIR="$PREFIX/share/nautilus-python/extensions"
 CSS_DIR="$PREFIX/share/adaptive-files"

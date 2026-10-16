@@ -8,7 +8,8 @@ unset AMENT_PREFIX_PATH || true
 unset COLCON_PREFIX_PATH || true
 unset LD_LIBRARY_PATH || true
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 BUILD="${REPO}/build/adaptive-nautilus"
 
 if [ ! -f "${BUILD}/build.ninja" ]; then

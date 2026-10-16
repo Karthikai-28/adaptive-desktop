@@ -33,7 +33,7 @@ free_gb=$((free_kb / 1024 / 1024))
 (( free_gb >= 10 )) || fail "less than 10 GB free on /"
 pass "root filesystem has approximately ${free_gb} GB free"
 
-test -d "${HOME}/adaptive-desktop/.git" || fail "repo git directory missing"
+test -d "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.git" || fail "repo git directory missing"
 pass "Adaptive Desktop repo exists"
 
 echo "Environment verification complete."

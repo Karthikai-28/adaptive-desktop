@@ -5,8 +5,10 @@
 # installed machine current; this is the step before it, for a computer that
 # has never had any of it.
 #
-#   git clone https://github.com/Karthikai-28/adaptive-desktop.git ~/adaptive-desktop
-#   ~/adaptive-desktop/bootstrap.sh
+#   git clone https://github.com/Karthikai-28/adaptive-desktop.git
+#   adaptive-desktop/bootstrap.sh
+#
+# Clone it wherever you like; everything finds this checkout from where it is.
 #
 #   ./bootstrap.sh                    run every stage (asks for sudo once)
 #   ./bootstrap.sh --restore FILE     also bring settings from the old machine
@@ -28,8 +30,8 @@
 # Log: ~/.local/state/adaptive-desktop/bootstrap.log. Guide: docs/NEW_MACHINE.md.
 set -Euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$HOME/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/scripts/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 S="$REPO/scripts"
 STATE="$HOME/.local/state/adaptive-desktop/bootstrap"
 LOG="$HOME/.local/state/adaptive-desktop/bootstrap.log"
@@ -172,18 +174,11 @@ stage_preflight() {
         die "Cannot reach archive.ubuntu.com; connect to the internet first."
     note "network ok"
 
-    # Every script finds the repo at ~/adaptive-desktop (the systemd units say
-    # %h/adaptive-desktop), so a checkout elsewhere gets that name as a link.
-    if [ "$HERE" != "$REPO" ]; then
-        if [ -L "$REPO" ] && [ "$(readlink -f "$REPO")" = "$HERE" ]; then
-            note "$REPO -> $HERE"
-        elif [ -e "$REPO" ]; then
-            die "$REPO exists and is not this checkout ($HERE). Move one of them."
-        else
-            ln -s "$HERE" "$REPO"
-            note "linked $REPO -> $HERE"
-        fi
-    fi
+    note "checkout: $REPO"
+    case "$REPO" in
+        *[[:space:]]*) die "The checkout's path has a space in it ($REPO); systemd units and desktop entries cannot use it. Clone it somewhere without spaces." ;;
+    esac
+    adaptive_record_repo
     note "Secure Boot: $(secure_boot_on && echo on || echo 'off or unknown')"
 }
 
@@ -304,9 +299,7 @@ stage_desktop() {
 
     # The lid watcher (docs/POWER_POLICY.md): lock, then sleep, when the lid
     # closes - GNOME does neither while an external display is attached.
-    mkdir -p "$HOME/.config/autostart"
-    sed "s|/home/karthi/adaptive-desktop|$REPO|g" "$REPO/services/adaptive-lid-watch.desktop" \
-        > "$HOME/.config/autostart/adaptive-lid-watch.desktop"
+    adaptive_render "$REPO/services/adaptive-lid-watch.desktop" "$HOME/.config/autostart/adaptive-lid-watch.desktop"
     note "lid watcher set to start at login"
     unset DCONF_PROFILE
     return "$failed"

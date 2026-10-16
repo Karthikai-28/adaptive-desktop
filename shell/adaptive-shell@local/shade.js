@@ -29,10 +29,11 @@ const Telemetry = Me.imports.telemetry;
 const Sparkline = Me.imports.sparkline;
 const Notifications = Me.imports.notifications;
 const AdaptiveUtil = Me.imports.adaptiveUtil;
+const AdaptivePaths = Me.imports.adaptivePaths;
 
 // Written by scripts/record-live-verification.py (and Adaptive Settings).
 const VERIFICATION_PATH = GLib.build_filenamev([
-    AdaptiveUtil.resolveAdaptiveDir(GLib.get_home_dir(), GLib.getenv('ADAPTIVE_DESKTOP_DIR'), Me.dir ? Me.dir.get_path() : null),
+    AdaptivePaths.adaptiveDir(),
     'verification',
     'live-verification-latest.json',
 ]);

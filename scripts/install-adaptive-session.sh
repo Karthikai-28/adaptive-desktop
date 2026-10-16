@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROJECT="$HOME/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+PROJECT="$ADAPTIVE_REPO"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="$PROJECT/backups/session-$STAMP"
 
@@ -147,7 +148,12 @@ export XDG_CURRENT_DESKTOP=ubuntu:GNOME
 # scripts/install-files-session-integration.sh, because the session bus fixes
 # its service directories before this wrapper ever runs.
 #
-ADAPTIVE_FILES_SHARE="$HOME/adaptive-desktop/.local/adaptive-nautilus/share"
+# Wherever the user's checkout is (install.sh records it); this wrapper is
+# shared by every account on the machine, so it names no folder itself.
+ADAPTIVE_REPO="$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/adaptive-desktop/repo" 2>/dev/null || true)"
+ADAPTIVE_REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+export ADAPTIVE_REPO
+ADAPTIVE_FILES_SHARE="$ADAPTIVE_REPO/.local/adaptive-nautilus/share"
 
 if [ -d "$ADAPTIVE_FILES_SHARE" ]; then
     export XDG_DATA_DIRS="${ADAPTIVE_FILES_SHARE}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 
+# This checkout, wherever it was cloned.
+REPO = Path(__file__).resolve().parent.parent
 STATE_DIR = Path(os.environ.get("ADAPTIVE_STATE_DIR", Path.home() / ".config" / "adaptive-desktop"))
 SESSION_STATE = STATE_DIR / "session-state.json"
 
@@ -43,7 +46,7 @@ def save(_args):
 
 RECOVERY_STEPS = [
     "gnome-extensions disable adaptive-shell@local",
-    "cd ~/adaptive-desktop && ./scripts/remove-adaptive-session.sh",
+    f"cd {shlex.quote(str(REPO))} && ./scripts/remove-adaptive-session.sh",
     "Choose Ubuntu from the GDM gear menu",
 ]
 

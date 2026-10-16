@@ -49,6 +49,9 @@ are recorded with `scripts/record-live-verification.py`.
 ## Rules that bite
 
 - One shell extension only (`adaptive-shell@local`). Do not recreate the retired v16 duplicate.
+- No fixed paths to the checkout or a home folder. Scripts source `scripts/adaptive-paths.sh` and use
+  `$ADAPTIVE_REPO`; Python uses `Path(__file__)`; the shell uses `adaptivePaths.adaptiveDir()`; units and
+  desktop entries hold `@ADAPTIVE_REPO@` and are installed with `adaptive_render`.
 - Normal Ubuntu must stay selectable in GDM and stock Nautilus stays installed. Recovery:
   `gnome-extensions disable adaptive-shell@local`; `docs/RECOVERY_RUNBOOK.md`.
 - Never restart the user's shell from a script unless asked; `install.sh` never does.

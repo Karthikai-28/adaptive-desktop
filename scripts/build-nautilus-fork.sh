@@ -8,7 +8,8 @@ unset AMENT_PREFIX_PATH || true
 unset COLCON_PREFIX_PATH || true
 unset LD_LIBRARY_PATH || true
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 PATH_FILE="${REPO}/vendor/NAUTILUS_SOURCE_PATH"
 PREFIX="${REPO}/.local/adaptive-nautilus"
 

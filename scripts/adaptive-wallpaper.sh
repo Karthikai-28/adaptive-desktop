@@ -15,7 +15,8 @@
 # profile only, so the normal Ubuntu session is untouched.
 set -Eeuo pipefail
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 DIRS=("$REPO/design/backgrounds/astro")
 STATE_DIR="$HOME/.local/state/adaptive-desktop"
 INDEX_FILE="$STATE_DIR/wallpaper-index"

@@ -5,7 +5,8 @@
 #   scripts/link-cli.py pair
 # Undo with: systemctl --user disable --now adaptive-link.service
 set -Eeuo pipefail
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 UNIT_DIR="$HOME/.config/systemd/user"
 
 missing=()
@@ -30,7 +31,7 @@ for pair in Xvfb:xvfb xfwm4:xfwm4 dbus-daemon:dbus xauth:xauth xprop:x11-utils; 
 done
 
 mkdir -p "$UNIT_DIR"
-install -m 0644 "$REPO/services/adaptive-link.service" "$UNIT_DIR/"
+adaptive_render "$REPO/services/adaptive-link.service" "$UNIT_DIR/adaptive-link.service"
 systemctl --user daemon-reload
 # The service needs the session's display to show the screen and move the
 # pointer; a unit started outside the graphical session has neither.

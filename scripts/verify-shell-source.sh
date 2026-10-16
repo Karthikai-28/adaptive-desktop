@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 SOURCE="${REPO}/shell/adaptive-shell@local"
 LIVE="${HOME}/.local/share/gnome-shell/extensions/adaptive-shell@local"
 

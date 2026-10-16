@@ -3,7 +3,7 @@ Description=Rebuild the Adaptive Command palette's index of the home folder
 
 [Service]
 Type=oneshot
-ExecStart=%h/adaptive-desktop/scripts/adaptive-index.sh
+ExecStart=@ADAPTIVE_REPO@/scripts/adaptive-index.sh
 # A background chore: never compete with what you are doing.
 Nice=19
 IOSchedulingClass=idle

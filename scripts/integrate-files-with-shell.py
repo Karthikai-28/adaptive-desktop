@@ -3,7 +3,9 @@ from pathlib import Path
 import re
 import shutil
 
-path = Path.home() / "adaptive-desktop/shell/adaptive-shell@local/extension.js"
+# This checkout, wherever it was cloned.
+REPO = Path(__file__).resolve().parent.parent
+path = REPO / "shell/adaptive-shell@local/extension.js"
 if not path.exists():
     raise SystemExit(f"Adaptive Shell not found: {path}")
 
@@ -58,8 +60,7 @@ function makeRailAssetButton(assetName, name, action) {
     });
 
     const assetPath = GLib.build_filenamev([
-        GLib.get_home_dir(),
-        'adaptive-desktop',
+        Me.imports.adaptivePaths.adaptiveDir(),
         'apps',
         'adaptive-files',
         'assets',

@@ -3,7 +3,10 @@ set -Eeuo pipefail
 
 UUID="adaptive-shell@local"
 
-SOURCE="$HOME/adaptive-desktop/shell/$UUID"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+SOURCE="$ADAPTIVE_REPO/shell/$UUID"
+# The live copy cannot see where it came from; the shell reads this.
+adaptive_record_repo
 TARGET="$HOME/.local/share/gnome-shell/extensions/$UUID"
 
 mkdir -p "$TARGET"

@@ -46,7 +46,5 @@ jobs:
           pip install --user aiohttp cryptography pillow
           # The direct connection, kept apart as on the machine it runs on.
           pip install --target "$GITHUB_WORKSPACE/.local/link-pydeps" aiortc
-      - name: The scripts live in ~/adaptive-desktop
-        run: ln -s "$GITHUB_WORKSPACE" "$HOME/adaptive-desktop"
       - name: All checks, including the sandboxes
         run: scripts/verify-all.sh

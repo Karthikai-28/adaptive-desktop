@@ -39,7 +39,8 @@ NOTES_DIR = Path.home() / ".local" / "share" / "adaptive-desktop" / "notes"
 FORMAT = 1
 
 # Files in the config folder that are this machine's history, not settings.
-SKIP_CONFIG = re.compile(r"^(last-.*-backup|.*-relogin-required|session-state\.json|.*\.tmp)$")
+# "repo" is where this machine's checkout is (install.sh records it).
+SKIP_CONFIG = re.compile(r"^(last-.*-backup|.*-relogin-required|session-state\.json|.*\.tmp|repo)$")
 SKIP_CONFIG_DIRS = {"snapshots"}
 # Adaptive Link's folder is this computer's identity: its private key, the
 # phones that trust that key, its signed-in session. Carried to another

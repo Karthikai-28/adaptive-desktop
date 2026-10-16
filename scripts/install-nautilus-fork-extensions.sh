@@ -13,7 +13,8 @@ set -Eeuo pipefail
 # Symlinks (not copies) so apt updates to the system extensions carry over.
 # ninja install does not clear this directory, so the links survive a rebuild.
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 PREFIX="$REPO/.local/adaptive-nautilus"
 FORK_EXT_DIR="$PREFIX/lib/x86_64-linux-gnu/nautilus/extensions-3.0"
 SYSTEM_EXT_DIR="/usr/lib/x86_64-linux-gnu/nautilus/extensions-3.0"

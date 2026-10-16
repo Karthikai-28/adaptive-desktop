@@ -2,9 +2,13 @@
 set -Eeuo pipefail
 
 BASE="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 
-python3 - "$BASE" <<'PY' >/tmp/adaptive-keybindings.txt
+# A private scratch file: a fixed name in /tmp belongs to whichever user made it first.
+LIST="$(mktemp)"
+trap 'rm -f "$LIST"' EXIT
+python3 - "$BASE" <<'PY' >"$LIST"
 import ast
 import sys
 
@@ -44,7 +48,7 @@ for name in [
 print(repr(values))
 PY
 
-gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$(cat /tmp/adaptive-keybindings.txt)"
+gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$(cat "$LIST")"
 
 set_binding() {
     local name="$1"

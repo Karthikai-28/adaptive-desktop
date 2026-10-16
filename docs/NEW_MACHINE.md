@@ -20,7 +20,7 @@ Take your settings with you - projects, dock, snippets, commands, templates,
 workspace names, notes, and the link's Google project:
 
 ```sh
-~/adaptive-desktop/scripts/adaptive-backup.py export --notes ~/adaptive-settings.tar.gz
+<your checkout>/scripts/adaptive-backup.py export --notes ~/adaptive-settings.tar.gz
 ```
 
 Copy that file to the new laptop. The export never carries the old computer's
@@ -32,9 +32,13 @@ to bring it too, copy `~/.local/share/adaptive-desktop/agent-office/` across.
 
 ## 1. Clone and run
 
+Clone it wherever you like, under any user name: nothing assumes a home
+folder or a path (see *Where it lives* in the README). The only rule is no
+spaces in the path, which systemd units and desktop entries cannot hold.
+
 ```sh
 sudo apt install -y git
-git clone https://github.com/Karthikai-28/adaptive-desktop.git ~/adaptive-desktop
+git clone https://github.com/Karthikai-28/adaptive-desktop.git ~/adaptive-desktop   # or anywhere
 cd ~/adaptive-desktop
 ./bootstrap.sh --restore ~/adaptive-settings.tar.gz    # or just ./bootstrap.sh
 ```
@@ -44,7 +48,7 @@ building Files and downloading. Leave it alone; it says what it is doing.
 
 | Stage | What it does |
 | --- | --- |
-| preflight | Checks Ubuntu 22.04, GNOME 42, disk, network; links `~/adaptive-desktop` if you cloned elsewhere |
+| preflight | Checks Ubuntu 22.04, GNOME 42, disk, network; records where the checkout is |
 | packages | Every apt package the shell, apps, link and office use (and GNOME itself if missing) |
 | groups | Adds you to `plugdev` (USB switches from the phone) and `input` (touchpad gestures) |
 | python | `aiortc` into `.local/link-pydeps` (screen as video, away access) |
@@ -98,7 +102,7 @@ through what only you can do:
    password still works).
 6. The checks: `install.sh --status` and the live readiness check.
 
-It removes itself when done. Run `~/adaptive-desktop/bootstrap.sh --finish`
+It removes itself when done. Run `bootstrap.sh --finish` from the checkout
 any time to go through it again.
 
 ## After

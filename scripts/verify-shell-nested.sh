@@ -388,10 +388,12 @@ mkdir -p "$SANDBOX/home/.local/share/gnome-shell/extensions" "$SANDBOX/home/.con
 chmod 700 "$SANDBOX/run"
 cp -r "$REPO/shell/$UUID" "$SANDBOX/home/.local/share/gnome-shell/extensions/"
 cp -r "$REPO/scripts/nested-probe/$PROBE" "$SANDBOX/home/.local/share/gnome-shell/extensions/"
-# The shell modules find their scripts under ~/adaptive-desktop.
-ln -s "$REPO" "$SANDBOX/home/adaptive-desktop"
+# The extension is a copy, as in a real install, so it finds the checkout's
+# scripts the way a real install does: from what install.sh records.
+mkdir -p "$SANDBOX/home/.config/adaptive-desktop"
+printf '%s\n' "$REPO" > "$SANDBOX/home/.config/adaptive-desktop/repo"
 
-env -u DCONF_PROFILE -u WAYLAND_DISPLAY -u GNOME_SHELL_SESSION_MODE \
+env -u DCONF_PROFILE -u ADAPTIVE_REPO -u ADAPTIVE_DESKTOP_DIR -u WAYLAND_DISPLAY -u GNOME_SHELL_SESSION_MODE \
     -u XDG_CURRENT_DESKTOP -u DESKTOP_SESSION -u XDG_CONFIG_HOME -u XDG_DATA_HOME \
     -u XDG_CACHE_HOME \
     HOME="$SANDBOX/home" SANDBOX="$SANDBOX" ADAPTIVE_NESTED_SANDBOX="$SANDBOX" INNER=1 \

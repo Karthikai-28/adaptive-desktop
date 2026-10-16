@@ -8,7 +8,8 @@ then
   exit 0
 fi
 
-cat <<'EOF'
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+cat <<EOF
 deb-src entries: MISSING
 
 To build the exact Ubuntu-patched Nautilus source, enable Ubuntu source
@@ -18,7 +19,7 @@ repositories first and run:
 
 Then run:
 
-  cd ~/adaptive-desktop
+  cd $ADAPTIVE_REPO
   ./scripts/prepare-nautilus-fork.sh
 
 Do not remove the installed system Nautilus package.

@@ -452,6 +452,7 @@ def settings_backup():
         (config / "snapshots" / "p.json").write_text("{}")
         (config / "last-v1.6-backup").write_text("x")
         (config / "session-state.json").write_text("{}")
+        (config / "repo").write_text("/home/old/adaptive-desktop\n")
         (notes / "Alpha").mkdir(parents=True)
         (notes / "Alpha" / "Inbox.md").write_text("- note\n")
         check([str(f) for f in B.config_files(config)] == ["commands/go.sh", "projects.json"],

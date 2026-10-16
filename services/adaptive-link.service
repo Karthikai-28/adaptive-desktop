@@ -4,7 +4,7 @@ After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/python3 %h/adaptive-desktop/services/adaptive-link/server.py
+ExecStart=/usr/bin/python3 @ADAPTIVE_REPO@/services/adaptive-link/server.py
 Restart=on-failure
 RestartSec=5
 

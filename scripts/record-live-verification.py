@@ -6,7 +6,8 @@ import time
 from pathlib import Path
 
 
-REPO = Path.home() / "adaptive-desktop"
+# This checkout, wherever it was cloned.
+REPO = Path(__file__).resolve().parent.parent
 REPORT_DIR = REPO / "verification"
 
 CHECKS = [

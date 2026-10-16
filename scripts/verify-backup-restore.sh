@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 STATE_DIR="$(mktemp -d -t adaptive-session-state-XXXXXX)"
 STATE="${STATE_DIR}/session-state.json"
 trap 'rm -rf "$STATE_DIR"' EXIT

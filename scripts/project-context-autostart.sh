@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 LOG_DIR="${HOME}/.local/state/adaptive-desktop"
 LOG_FILE="${LOG_DIR}/project-context-autostart.log"
 

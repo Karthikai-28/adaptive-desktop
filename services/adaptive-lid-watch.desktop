@@ -2,7 +2,7 @@
 Type=Application
 Name=Adaptive Lid Watch
 Comment=Locks the session when the lid closes on a docked machine
-Exec=/home/karthi/adaptive-desktop/scripts/adaptive-lid-watch.sh
+Exec=@ADAPTIVE_REPO@/scripts/adaptive-lid-watch.sh
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

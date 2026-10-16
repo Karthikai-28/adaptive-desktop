@@ -7,14 +7,13 @@ set -Eeuo pipefail
 #   service   scripts/adaptive-gestures.py --daemon   (autostarted at login)
 #   settings  apps/adaptive-gestures                  ("Touchpad Gestures")
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 APPS="$HOME/.local/share/applications"
 AUTOSTART="$HOME/.config/autostart"
 
 mkdir -p "$APPS" "$AUTOSTART"
-sed "s|/home/karthi/adaptive-desktop|$REPO|g" "$REPO/apps/adaptive-gestures/com.karthi.AdaptiveGestures.desktop" \
-    > "$APPS/com.karthi.AdaptiveGestures.desktop"
-chmod 0644 "$APPS/com.karthi.AdaptiveGestures.desktop"
+adaptive_render "$REPO/apps/adaptive-gestures/com.karthi.AdaptiveGestures.desktop" "$APPS/com.karthi.AdaptiveGestures.desktop"
 update-desktop-database "$APPS" 2>/dev/null || true
 
 cat > "$AUTOSTART/adaptive-gestures.desktop" <<DESKTOP

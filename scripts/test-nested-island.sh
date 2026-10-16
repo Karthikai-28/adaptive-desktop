@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="/home/karthi/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 UUID="adaptive-shell@local"
 PROBE="adaptive-probe@local"
-SCREEN_DIR="/home/karthi/.local/share/adaptive-desktop/agent-office/company/projects/dynamic-island/build-screens"
+SCREEN_DIR="$HOME/.local/share/adaptive-desktop/agent-office/company/projects/dynamic-island/build-screens"
 mkdir -p "$SCREEN_DIR"
 
 SANDBOX="$(mktemp -d /tmp/island-nested-XXXXXX)"
@@ -24,10 +25,11 @@ cp -r "$REPO/scripts/nested-probe/adaptive-probe@local" "$XDG_DATA_HOME/gnome-sh
 xvfb-run -a --server-args="-screen 0 1920x1080x24" dbus-run-session bash << 'INNER_EOF'
 set -Eeuo pipefail
 SANDBOX="$HOME"
-REPO="/home/karthi/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 UUID="adaptive-shell@local"
 PROBE="adaptive-probe@local"
-SCREEN_DIR="/home/karthi/.local/share/adaptive-desktop/agent-office/company/projects/dynamic-island/build-screens"
+SCREEN_DIR="$HOME/.local/share/adaptive-desktop/agent-office/company/projects/dynamic-island/build-screens"
 
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell disable-extension-version-validation true

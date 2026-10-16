@@ -8,14 +8,13 @@ set -Eeuo pipefail
 #   app       apps/adaptive-settings   ("Adaptive Settings")
 #   launcher  scripts/adaptive-settings-launch.sh [--section projects|search|system]
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 APPS="$HOME/.local/share/applications"
 DESKTOP="com.karthi.AdaptiveSettings.desktop"
 
 mkdir -p "$APPS"
-sed "s|/home/karthi/adaptive-desktop|$REPO|g" \
-    "$REPO/apps/adaptive-settings/$DESKTOP" > "$APPS/$DESKTOP"
-chmod 0644 "$APPS/$DESKTOP"
+adaptive_render "$REPO/apps/adaptive-settings/$DESKTOP" "$APPS/$DESKTOP"
 chmod +x "$REPO/scripts/adaptive-settings-launch.sh" "$REPO/apps/adaptive-settings/main.py"
 update-desktop-database "$APPS" 2>/dev/null || true
 

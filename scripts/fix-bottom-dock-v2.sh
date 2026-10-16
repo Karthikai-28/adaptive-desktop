@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 UUID="adaptive-shell@local"
 SOURCE="$REPO/shell/$UUID"
 EXT="$SOURCE/extension.js"
@@ -748,7 +749,8 @@ cat > "$REPO/scripts/verify-bottom-dock-v2.sh" <<'VERIFY'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 EXT="$REPO/shell/adaptive-shell@local/extension.js"
 CSS="$REPO/shell/adaptive-shell@local/stylesheet.css"
 
@@ -796,7 +798,8 @@ cat > "$REPO/scripts/rollback-bottom-dock-v2.sh" <<'ROLLBACK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 STATE_FILE="$HOME/.config/adaptive-desktop/last-bottom-dock-v2-backup"
 
 [[ -f "$STATE_FILE" ]] || {

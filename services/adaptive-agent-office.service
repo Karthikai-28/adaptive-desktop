@@ -3,12 +3,12 @@ Description=Agent Office: an AI company of Gemini agents managed by Claude (http
 After=default.target
 
 [Service]
-# scripts/install-agent-office.sh rewrites %h/adaptive-desktop when the repo lives elsewhere
-WorkingDirectory=%h/adaptive-desktop/services/agent-office
-ExecStart=/usr/bin/python3 %h/adaptive-desktop/services/agent-office/server.py
+# A template: scripts/install-agent-office.sh puts this checkout's path in place of @ADAPTIVE_REPO@
+WorkingDirectory=@ADAPTIVE_REPO@/services/agent-office
+ExecStart=/usr/bin/python3 @ADAPTIVE_REPO@/services/agent-office/server.py
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=%h/adaptive-desktop/.local/office-pydeps
-Environment=PATH=%h/adaptive-desktop/services/agent-office/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=@ADAPTIVE_REPO@/.local/office-pydeps
+Environment=PATH=@ADAPTIVE_REPO@/services/agent-office/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
 # agy finds its Google sign-in in the OS keyring over the session bus
 Environment=XDG_RUNTIME_DIR=%t
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus

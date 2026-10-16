@@ -368,19 +368,26 @@ function dropdownRect(area, fraction) {
     };
 }
 
-// Resolves the adaptive-desktop root directory:
-// 1. ADAPTIVE_DESKTOP_DIR environment variable if provided
-// 2. Extension directory parent structure if running inside repo (<root>/shell/adaptive-shell@local)
-// 3. Fallback to ~/adaptive-desktop
-function resolveAdaptiveDir(homeDir, envDir = null, extDir = null) {
+// Resolves the checkout of adaptive-desktop the shell runs scripts from. It
+// can be cloned anywhere, by any user:
+// 1. ADAPTIVE_REPO (or the older ADAPTIVE_DESKTOP_DIR) from the environment;
+//    the Adaptive session's wrapper sets it
+// 2. the extension's own folder, when it runs from inside a checkout
+//    (<checkout>/shell/adaptive-shell@local)
+// 3. the path install.sh recorded in ~/.config/adaptive-desktop/repo - the
+//    live copy in ~/.local/share/gnome-shell/extensions cannot tell otherwise
+// 4. ~/adaptive-desktop, where older installs put it
+function resolveAdaptiveDir(homeDir, envDir = null, extDir = null, recorded = null) {
     if (envDir && typeof envDir === "string" && envDir.trim())
-        return envDir.trim();
+        return envDir.trim().replace(/\/+$/, "");
     if (extDir && typeof extDir === "string") {
         const marker = "/shell/adaptive-shell@local";
         const idx = extDir.indexOf(marker);
         if (idx !== -1)
             return extDir.slice(0, idx);
     }
+    if (recorded && typeof recorded === "string" && recorded.trim().startsWith("/"))
+        return recorded.trim().split("\n")[0].replace(/\/+$/, "");
     const home = homeDir || "";
     return home ? (home + "/adaptive-desktop") : "adaptive-desktop";
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 EXT="$REPO/shell/adaptive-shell@local/extension.js"
 CSS="$REPO/shell/adaptive-shell@local/stylesheet.css"
 TOKENS="$REPO/tokens/adaptive.tokens.json"

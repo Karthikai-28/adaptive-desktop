@@ -28,6 +28,7 @@ const DockExtras = Me.imports.dockExtras;
 const ControlCenter = Me.imports.controlCenter;
 const UsbDevices = Me.imports.usbDevices;
 const AdaptiveUtil = Me.imports.adaptiveUtil;
+const AdaptivePaths = Me.imports.adaptivePaths;
 const ShellActions = Me.imports.shellActions;
 const TaskManager = Me.imports.taskManager;
 const NetworkPanel = Me.imports.networkPanel;
@@ -140,11 +141,7 @@ class AdaptiveShellV16 {
         this._aodTime = null;
         this._aodDate = null;
 
-        const baseDir = AdaptiveUtil.resolveAdaptiveDir(
-            GLib.get_home_dir(),
-            GLib.getenv('ADAPTIVE_DESKTOP_DIR'),
-            Me.dir ? Me.dir.get_path() : null
-        );
+        const baseDir = AdaptivePaths.adaptiveDir();
         this._commandLauncher = GLib.build_filenamev([
             baseDir,
             'scripts',

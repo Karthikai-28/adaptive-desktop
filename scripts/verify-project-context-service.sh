@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 CLI="${REPO}/scripts/project-cli.py"
 AUTOSTART_SCRIPT="${REPO}/scripts/project-context-autostart.sh"
 AUTOSTART="${HOME}/.config/autostart/adaptive-project-context.desktop"

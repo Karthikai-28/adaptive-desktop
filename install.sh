@@ -17,7 +17,8 @@
 # touched by either.
 set -Euo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/scripts/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 S="$REPO/scripts"
 UUID="adaptive-shell@local"
 LIVE="$HOME/.local/share/gnome-shell/extensions/$UUID"
@@ -92,6 +93,9 @@ status_gestures() {
 
 status_files() {
     [ -x "$REPO/.local/adaptive-nautilus/bin/nautilus" ] || { echo "skipped: the Nautilus fork is not built"; return; }
+    # The build has its folder compiled in, so a checkout that moved needs it rebuilt.
+    grep -qaF "$REPO/.local/adaptive-nautilus" "$REPO/.local/adaptive-nautilus/bin/nautilus" ||
+        { echo "the Files fork was built in another folder: ./bootstrap.sh --only files-fork --redo"; return; }
     local installed="$REPO/.local/adaptive-nautilus/share/nautilus-python/extensions"
     [ -f "$installed/adaptive_preview.py" ] || { echo "inspector not installed in the fork"; return; }
     # The inspector is adaptive_preview.py and the package beside it.
@@ -138,7 +142,7 @@ install_power() {
         return 0
     fi
     mkdir -p "$UNITS"
-    install -m 0644 "$REPO/services/adaptive-power-auto.service" "$UNITS/"
+    adaptive_render "$REPO/services/adaptive-power-auto.service" "$UNITS/adaptive-power-auto.service"
     systemctl --user daemon-reload
     systemctl --user enable --now adaptive-power-auto.service
 }
@@ -157,6 +161,17 @@ if [ -n "$ONLY" ]; then
         [ "${part%%|*}" = "$ONLY" ] && found=1
     done
     [ "$found" = 1 ] || { echo "no part called '$ONLY' (see --list)" >&2; exit 2; }
+fi
+
+if [ "$MODE" = status ]; then
+    recorded="$(cat "$ADAPTIVE_LOCATOR" 2>/dev/null || true)"
+    if [ "$recorded" != "$REPO" ]; then
+        printf '  needed   %-16s %s\n' "checkout" "the shell and session look for ${recorded:-nothing}, this checkout is $REPO"
+    fi
+else
+    # The shell's live copy and the login session cannot see where this
+    # checkout is; they read it from here.
+    adaptive_record_repo
 fi
 
 pending=0

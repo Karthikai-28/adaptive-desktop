@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROJECT="$HOME/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+PROJECT="$ADAPTIVE_REPO"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="$PROJECT/backups/remove-$STAMP"
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 # The shell's one class lives in extension.js and the shell*.js files beside it.
 EXT=("$REPO/shell/adaptive-shell@local/extension.js" "$REPO/shell/adaptive-shell@local/"shell[A-Z]*.js)
 CSS="$REPO/shell/adaptive-shell@local/stylesheet.css"

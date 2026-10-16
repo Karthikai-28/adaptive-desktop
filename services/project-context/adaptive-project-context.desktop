@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Adaptive Project Context Service
-Exec=/home/karthi/adaptive-desktop/scripts/project-context-autostart.sh
+Exec=@ADAPTIVE_REPO@/scripts/project-context-autostart.sh
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true

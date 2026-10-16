@@ -18,7 +18,8 @@ set -Eeuo pipefail
 # Ubuntu type family.
 #
 
-REPO="${HOME}/adaptive-desktop"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/adaptive-paths.sh"
+REPO="$ADAPTIVE_REPO"
 THEME_SRC="${REPO}/theme/Adaptive"
 ICONS_SRC="${REPO}/icons/AdaptiveFilesIcons"
 THEME_DST="${HOME}/.local/share/themes/Adaptive"
