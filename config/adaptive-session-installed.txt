@@ -1,4 +1,4 @@
-Installed: 2026-08-16T20:13:29+05:30
+Installed: 2026-10-18T15:57:07+05:30
 
 [Session Entry]
 [Desktop Entry]
@@ -37,7 +37,12 @@ export XDG_CURRENT_DESKTOP=ubuntu:GNOME
 # scripts/install-files-session-integration.sh, because the session bus fixes
 # its service directories before this wrapper ever runs.
 #
-ADAPTIVE_FILES_SHARE="$HOME/adaptive-desktop/.local/adaptive-nautilus/share"
+# Wherever the user's checkout is (install.sh records it); this wrapper is
+# shared by every account on the machine, so it names no folder itself.
+ADAPTIVE_REPO="$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/adaptive-desktop/repo" 2>/dev/null || true)"
+ADAPTIVE_REPO="${ADAPTIVE_REPO:-$HOME/adaptive-desktop}"
+export ADAPTIVE_REPO
+ADAPTIVE_FILES_SHARE="$ADAPTIVE_REPO/.local/adaptive-nautilus/share"
 
 if [ -d "$ADAPTIVE_FILES_SHARE" ]; then
     export XDG_DATA_DIRS="${ADAPTIVE_FILES_SHARE}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
@@ -48,4 +53,4 @@ exec /usr/bin/gnome-session --session=ubuntu
 [Checksums]
 075d05a03b539abdd2eed2dba7733497e8cba047387611f66adc9f1b55ab86ca  /usr/share/xsessions/adaptive-desktop.desktop
 bb8f059015843875d40c3b3b3821d9e431bc31567f0803e77fee11f40f17a447  /etc/dconf/profile/adaptive
-2d5bade930286cbc79e8d72cf5356d11f6a7ddd6d4b29df871aa4abea5785006  /usr/local/bin/adaptive-desktop-session
+3a2044d8593f49a70be5994426e1c27f1a83cec17541301848212460e2fc77f4  /usr/local/bin/adaptive-desktop-session
