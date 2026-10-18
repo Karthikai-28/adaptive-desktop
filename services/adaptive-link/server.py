@@ -32,6 +32,8 @@ import socket
 import time
 from pathlib import Path
 
+import pydeps  # noqa: F401 - before anything imports cryptography
+
 import aiohttp
 from aiohttp import WSMsgType, web
 
@@ -126,6 +128,26 @@ async def read_json(request):
     except (ValueError, UnicodeDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+# A short shutdown: a link being closed must not stay half-open for the minute
+# aiohttp would otherwise give lingering connections. aiohttp 3.9 takes the
+# timeout on the runner; 3.8 (Ubuntu 22.04's python3-aiohttp) takes it on each
+# site and hands an unknown runner argument to every connection, which then
+# fails before it is read - every request reset, nothing logged.
+def _aiohttp_at_least(major, minor):
+    try:
+        return tuple(int(part) for part in aiohttp.__version__.split(".")[:2]) >= (major, minor)
+    except ValueError:
+        return True
+
+
+_RUNNER_SHUTDOWN = {"shutdown_timeout": 1.0} if _aiohttp_at_least(3, 9) else {}
+_SITE_SHUTDOWN = {} if _RUNNER_SHUTDOWN else {"shutdown_timeout": 1.0}
+
+
+def make_runner(app):
+    return web.AppRunner(app, access_log=None, **_RUNNER_SHUTDOWN)
 
 
 class Link:
@@ -267,8 +289,11 @@ class Link:
             await self._phone_screen.close()
         if self._link_runner is not None:
             for ws in list(self._sockets):
+                # A phone that has stopped reading (a screen it no longer
+                # takes in) leaves the close frame queued behind the frames it
+                # has not read; the runner's short shutdown drops it instead.
                 try:
-                    await ws.close(code=1001, message=b"link closed")
+                    await asyncio.wait_for(ws.close(code=1001, message=b"link closed"), 1.0)
                 except Exception:  # noqa: BLE001 - it is going away either way
                     pass
             self._sockets.clear()
@@ -279,13 +304,11 @@ class Link:
 
         app = web.Application(middlewares=[self._guard], client_max_size=1024 ** 2)
         self._routes(app)
-        # A short shutdown: a link being closed must not stay half-open for
-        # the minute aiohttp would otherwise give lingering connections.
-        runner = web.AppRunner(app, access_log=None, shutdown_timeout=1.0)
+        runner = make_runner(app)
         await runner.setup()
         context = identity.link_context(self.key_path, self.cert_path, [phone["cert_pem"] for phone in self.phones])
         try:
-            await web.TCPSite(runner, host="0.0.0.0", port=self.port, ssl_context=context).start()
+            await web.TCPSite(runner, host="0.0.0.0", port=self.port, ssl_context=context, **_SITE_SHUTDOWN).start()
         except OSError as error:
             # Something else has the port (a second copy of this daemon,
             # usually). Say so and stay up: the control socket still works.
@@ -472,7 +495,9 @@ class Link:
                     message = await ws.receive(timeout=0.5)
                 except asyncio.TimeoutError:
                     continue
-                if message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                # CLOSING too: while a close is under way aiohttp 3.8 returns it at once,
+                # and reading on would spin without ever yielding.
+                if message.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED, WSMsgType.ERROR):
                     break
                 if message.type != WSMsgType.TEXT or not permitted or self.workspace.input_lock.locked():
                     continue
@@ -1496,7 +1521,7 @@ class Link:
         app = web.Application(client_max_size=64 * 1024)
         app.router.add_post("/pair", self.h_pair)
         app.router.add_get("/pair/wait", self.h_pair_wait)
-        runner = web.AppRunner(app, access_log=None, shutdown_timeout=1.0)
+        runner = make_runner(app)
         await runner.setup()
         context = identity.pairing_context(self.key_path, self.cert_path)
         # A phone that cannot pair shows up here first: whether anything
@@ -1514,7 +1539,7 @@ class Link:
         if hasattr(context, "_msg_callback"):
             context._msg_callback = tls_event
         try:
-            await web.TCPSite(runner, host="0.0.0.0", port=self.pairing_port, ssl_context=context).start()
+            await web.TCPSite(runner, host="0.0.0.0", port=self.pairing_port, ssl_context=context, **_SITE_SHUTDOWN).start()
         except OSError as error:
             await runner.cleanup()
             self.problem = f"cannot listen on port {self.pairing_port}: {error.strerror or error}"
@@ -2174,11 +2199,11 @@ class Link:
             path.unlink()
         except OSError:
             pass
-        runner = web.AppRunner(app, access_log=None, shutdown_timeout=1.0)
+        runner = make_runner(app)
         await runner.setup()
         old_mask = os.umask(0o177)  # the socket is created 0600
         try:
-            await web.UnixSite(runner, str(path)).start()
+            await web.UnixSite(runner, str(path), **_SITE_SHUTDOWN).start()
         finally:
             os.umask(old_mask)
         self._control_runner = runner

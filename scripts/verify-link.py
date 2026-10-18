@@ -28,6 +28,7 @@ REPO = Path(__file__).resolve().parent.parent
 LINK = REPO / "services" / "adaptive-link"
 sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(LINK))
+import pydeps  # noqa: E402,F401 - the daemon's package order, before cryptography loads
 import sandbox_display  # noqa: E402
 
 PORT, PAIRING_PORT, CLOUD_PORT, OFFICE_PORT = 47923, 47924, 47950, 47951
@@ -705,6 +706,9 @@ async def daemon_checks(sandbox, check):
     google = subprocess.Popen([sys.executable, str(REPO / "scripts/fake_cloud.py"), str(CLOUD_PORT)],
                               stdout=subprocess.DEVNULL, stderr=open(sandbox / "cloud.log", "w"))
     cloud_url = f"http://127.0.0.1:{CLOUD_PORT}"
+    # Something to own the notification name, as the shell does on a desktop (scripts/fake_notifications.py).
+    notifications = subprocess.Popen([sys.executable, str(REPO / "scripts/fake_notifications.py")],
+                                     stdout=subprocess.DEVNULL, stderr=open(sandbox / "notifications.log", "w"))
     log = open(sandbox / "daemon.log", "w")
     daemon = subprocess.Popen([sys.executable, str(LINK / "server.py")], env=env, stdout=log, stderr=subprocess.STDOUT)
     sys.path.insert(0, str(LINK))
@@ -1887,6 +1891,7 @@ async def daemon_checks(sandbox, check):
               "pair window: cancelling closes the pairing port")
     finally:
         google.terminate()
+        notifications.terminate()
         daemon.terminate()
         try:
             daemon.wait(timeout=10)

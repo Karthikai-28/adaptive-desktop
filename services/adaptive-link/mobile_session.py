@@ -552,7 +552,8 @@ class MobileDesktop:
                     msg = await ws.receive(timeout=.5)
                 except asyncio.TimeoutError:
                     continue
-                if msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                # CLOSING too (see server.Link._read_input).
+                if msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED, WSMsgType.ERROR):
                     break
                 if msg.type != WSMsgType.TEXT or not permitted or s.lock.locked():
                     continue

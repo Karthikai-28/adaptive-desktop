@@ -24,16 +24,8 @@ none of them: it is the same tunnel, and the same mutual TLS inside it.
 """
 
 import asyncio
-import os
-import sys
-from pathlib import Path
 
-# The peer-to-peer library lives beside the repository's other local tools.
-# It goes last on the path, so the system's own packages keep precedence.
-_PYDEPS = os.environ.get("ADAPTIVE_LINK_PYDEPS") or str(
-    Path(__file__).resolve().parent.parent.parent / ".local" / "link-pydeps")
-if _PYDEPS not in sys.path:
-    sys.path.append(_PYDEPS)
+import pydeps  # noqa: F401 - the peer-to-peer library and what it needs, first on the path
 
 from identity import TUNNEL_SOURCE  # noqa: E402
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription  # noqa: E402
