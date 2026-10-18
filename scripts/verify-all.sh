@@ -112,7 +112,8 @@ step "Files inspector: every method the controller calls is defined" quiet inspe
 if [ "$QUICK" = 0 ]; then
     step "Command palette window (virtual display)" quiet python3 "$REPO/scripts/verify-palette.py"
     step "Annotate window (virtual display)" quiet python3 "$REPO/scripts/verify-annotate.py"
-    step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh" --extra "$REPO/scripts/verify-screen-text-nested.sh"
+    step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh" --extra "$REPO/scripts/verify-screen-text-nested.sh" --extra "$REPO/scripts/verify-ros-nested.sh"
+    step "ROS 2 panel helper against real nodes (private domain; skips without ROS 2)" quiet python3 "$REPO/scripts/verify-ros-panel.py"
     step "Files with the inspector (the Nautilus fork, sandboxed)" quiet python3 "$REPO/scripts/verify-files-inspector.py"
     step "Adaptive Link: the daemon against a phone and three intruders" quiet python3 "$REPO/scripts/verify-link.py"
     step "Adaptive Link: the Android app on a device (skips with none attached)" quiet python3 "$REPO/scripts/verify-link-android.py"

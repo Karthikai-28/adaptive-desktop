@@ -10,7 +10,7 @@
 #
 #   scripts/verify-shell-nested.sh            run the checks
 #   scripts/verify-shell-nested.sh --keep     keep the sandbox and its log
-#   scripts/verify-shell-nested.sh --extra F  also source F inside the sandbox
+#   scripts/verify-shell-nested.sh --extra F  also source F inside the sandbox (repeatable)
 #                                             (it can use check/call/shell_log)
 #
 # Needs xvfb-run, dbus-run-session and gnome-shell 42 (nested mode).
@@ -20,12 +20,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UUID="adaptive-shell@local"
 PROBE="adaptive-probe@local"
 KEEP=0
-EXTRA=""
+EXTRAS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --keep) KEEP=1 ;;
-        --extra) EXTRA="$(readlink -f "$2")"; shift ;;
+        --extra) EXTRAS+=("$(readlink -f "$2")"); shift ;;
         --inner) INNER=1 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -318,10 +318,10 @@ print(",".join(str(b) for b in png))')"
     WATCHDOG="$HOME/.cache/adaptive-desktop/shell-watchdog.json"
     grep -q '"tripped":false' "$WATCHDOG"; check $? "watchdog recorded this start"
 
-    if [ -n "$EXTRA" ]; then
+    for extra in "${EXTRAS[@]}"; do
         # shellcheck disable=SC1090
-        . "$EXTRA"
-    fi
+        . "$extra"
+    done
 
     # Disable and enable again: detach() has to undo everything attach() did,
     # and a module that leaves something behind fails on the second enable.
@@ -393,13 +393,15 @@ cp -r "$REPO/scripts/nested-probe/$PROBE" "$SANDBOX/home/.local/share/gnome-shel
 mkdir -p "$SANDBOX/home/.config/adaptive-desktop"
 printf '%s\n' "$REPO" > "$SANDBOX/home/.config/adaptive-desktop/repo"
 
+EXTRA_ARGS=()
+for extra in "${EXTRAS[@]}"; do EXTRA_ARGS+=(--extra "$extra"); done
 env -u DCONF_PROFILE -u ADAPTIVE_REPO -u ADAPTIVE_DESKTOP_DIR -u WAYLAND_DISPLAY -u GNOME_SHELL_SESSION_MODE \
     -u XDG_CURRENT_DESKTOP -u DESKTOP_SESSION -u XDG_CONFIG_HOME -u XDG_DATA_HOME \
     -u XDG_CACHE_HOME \
     HOME="$SANDBOX/home" SANDBOX="$SANDBOX" ADAPTIVE_NESTED_SANDBOX="$SANDBOX" INNER=1 \
     XDG_SESSION_TYPE=wayland XDG_RUNTIME_DIR="$SANDBOX/run" \
     timeout 180 xvfb-run -a -s "-screen 0 1600x1000x24" \
-    dbus-run-session -- "$0" --inner ${EXTRA:+--extra "$EXTRA"} >"$SANDBOX/session.log" 2>&1
+    dbus-run-session -- "$0" --inner "${EXTRA_ARGS[@]}" >"$SANDBOX/session.log" 2>&1
 status=$?
 cat "$SANDBOX/results.txt" 2>/dev/null || echo "FAIL the sandbox session did not start (see session.log with --keep)"
 
