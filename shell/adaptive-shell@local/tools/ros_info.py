@@ -646,10 +646,16 @@ class Watcher:
             if hidden(name):
                 hidden_topics += 1
                 continue
-            topics.append({"name": name, "types": types,
-                           "publishers": ends["publishers"].get(name, []),
-                           "subscribers": ends["subscribers"].get(name, []),
-                           "system": name in ("/rosout", "/parameter_events")})
+            publishers = ends["publishers"].get(name, [])
+            subscribers = ends["subscribers"].get(name, [])
+            system = name in ("/rosout", "/parameter_events")
+            # Every node has these two, the panel's own included; with only
+            # hidden nodes on them they say nothing.
+            if system and not publishers and not subscribers:
+                hidden_topics += 1
+                continue
+            topics.append({"name": name, "types": types, "publishers": publishers,
+                           "subscribers": subscribers, "system": system})
         services, parameter_services = [], 0
         for name, types in self.node.get_service_names_and_types():
             if hidden(name):

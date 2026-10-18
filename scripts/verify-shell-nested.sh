@@ -112,7 +112,7 @@ if [ "${INNER:-0}" = 1 ]; then
     SLEEP='const sleep = ms => new Promise(r => imports.gi.GLib.timeout_add(0, ms, () => { r(); return false; }));'
     LABELS='const labels = a => { const out = []; (function walk(x) { if (x.get_text) out.push(x.get_text()); x.get_children().forEach(walk); })(a); return out; };'
 
-    for name in adaptive-usb adaptive-tasks adaptive-network adaptive-project; do
+    for name in adaptive-usb adaptive-tasks adaptive-network adaptive-ros adaptive-project; do
         [ "$(probe "return !!Main.panel.statusArea['$name']")" = true ]
         check $? "top bar has $name"
     done
@@ -189,13 +189,13 @@ print(",".join(str(b) for b in png))')"
     # A menu handler that calls a missing method fails the first time the
     # popup opens, so open every one of them.
     opened="$(probe "$SLEEP return (async () => { const out = {};
-        for (const name of ['adaptive-project', 'adaptive-usb', 'adaptive-tasks', 'adaptive-network', 'dateMenu', 'aggregateMenu']) {
+        for (const name of ['adaptive-project', 'adaptive-usb', 'adaptive-tasks', 'adaptive-network', 'adaptive-ros', 'dateMenu', 'aggregateMenu']) {
             const menu = Main.panel.statusArea[name].menu;
             menu.open(); await sleep(900);
             out[name] = menu.isOpen; menu.close(); await sleep(300);
         }
         return out; })();")"
-    for name in adaptive-project adaptive-usb adaptive-tasks adaptive-network dateMenu aggregateMenu; do
+    for name in adaptive-project adaptive-usb adaptive-tasks adaptive-network adaptive-ros dateMenu aggregateMenu; do
         [[ "$opened" == *"\"$name\":true"* ]]; check $? "menu opens: $name"
     done
     # The Control Center's dropdowns (Wi-Fi, Bluetooth, power, ...) are built

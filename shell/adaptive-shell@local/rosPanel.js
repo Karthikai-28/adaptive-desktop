@@ -87,6 +87,7 @@ var RosPanel = class RosPanel {
         this._graph = null;
         // The running `watch`: { proc, stdin, lines, cancellable }.
         this._watch = null;
+        this._watchSetup = '';
         this._watchError = '';
         this._nextId = 1;
         this._pending = new Map();
@@ -217,6 +218,9 @@ var RosPanel = class RosPanel {
         this._helper(['status'], data => {
             if (data && data.installed !== undefined)
                 this._status = data;
+            // ~/.bashrc or ros2.json changed while the watcher kept running.
+            if (this._watch && this._setupKey() !== this._watchSetup)
+                this._restartWatch();
             if (then)
                 then();
             this._render();
@@ -300,9 +304,16 @@ var RosPanel = class RosPanel {
             cancellable: new Gio.Cancellable(),
         };
         this._watch = watch;
+        this._watchSetup = this._setupKey();
         this._watchError = '';
         this._graph = null;
         this._readLine(watch);
+    }
+
+    // What the watcher's view depends on; a change means starting it again.
+    _setupKey() {
+        const s = this._status || {};
+        return JSON.stringify([s.distro, s.domain, s.localhost, s.rmw, s.workspace]);
     }
 
     _readLine(watch) {
@@ -687,11 +698,12 @@ var RosPanel = class RosPanel {
             subtitle: note ? note.text : running ? 'Running' : idle,
             alert: !!(note && note.error),
             active: running,
+            // The plain pill is the red one, for what ends something.
             actions: running ? [
-                { label: 'Show', onClick: () => this._show(tool) },
-                { label: 'Stop', quiet: true, onClick: () => this._stop(tool) },
+                { label: 'Show', quiet: true, onClick: () => this._show(tool) },
+                { label: 'Stop', onClick: () => this._stop(tool) },
             ] : [
-                { label: 'Open', onClick: () => this._launch(tool) },
+                { label: 'Open', quiet: true, onClick: () => this._launch(tool) },
             ],
         });
     }
