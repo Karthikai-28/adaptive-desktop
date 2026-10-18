@@ -2543,6 +2543,166 @@
     font-size: 11px;
 }
 
+/* ===== ROS 2 panel =====
+ *
+ * Same popup, rows, headings and facts grid as the Network panel; adds
+ * folding sections, expanded node details, type definitions and file chips.
+ */
+
+.adaptive-ros {
+    width: 500px;
+    spacing: 8px;
+}
+
+.adaptive-ros-value-box {
+    spacing: 8px;
+}
+
+.adaptive-ros-hint {
+    color: #8E8E93;
+    font-size: 11px;
+}
+
+.adaptive-ros-setup-footer {
+    padding: 6px 6px 0 6px;
+    spacing: 6px;
+}
+
+.adaptive-ros-domain-entry {
+    min-width: 0;
+}
+
+.adaptive-ros-chips {
+    padding: 0 12px 4px 44px;
+}
+
+.adaptive-ros-chip-label {
+    padding-top: 3px;
+}
+
+.adaptive-ros-chip {
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #F5F5F7;
+    font-size: 11px;
+}
+
+.adaptive-ros-chip:hover,
+.adaptive-ros-chip:focus {
+    border-color: rgba(10, 132, 255, 0.42);
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.adaptive-ros-section-toggle {
+    border-radius: 6px;
+}
+
+.adaptive-ros-section-toggle:hover,
+.adaptive-ros-section-toggle:focus {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.adaptive-ros-section-box {
+    spacing: 0;
+}
+
+.adaptive-ros-section .adaptive-cc-list-heading {
+    margin-left: 4px;
+}
+
+.adaptive-ros-chevron {
+    icon-size: 12px;
+    margin: 6px 0 0 6px;
+    color: #98989D;
+}
+
+.adaptive-ros-expand {
+    width: 26px;
+    height: 26px;
+    margin-left: 6px;
+}
+
+.adaptive-ros-expand StIcon {
+    icon-size: 12px;
+}
+
+.adaptive-ros-detail {
+    margin: 0 4px 6px 44px;
+    padding: 4px 0 6px 10px;
+    border-left: 2px solid rgba(255, 255, 255, 0.10);
+    spacing: 2px;
+}
+
+.adaptive-ros-group {
+    margin-top: 6px;
+    color: #98989D;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-ros-entry {
+    padding: 2px 0;
+    spacing: 1px;
+}
+
+.adaptive-ros-entry-meta {
+    spacing: 6px;
+}
+
+.adaptive-ros-name {
+    padding: 1px 4px;
+    border-radius: 5px;
+    color: #F5F5F7;
+    font-size: 12px;
+}
+
+.adaptive-ros-name:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.adaptive-ros-type {
+    padding: 0 4px;
+    border-radius: 5px;
+    color: #0A84FF;
+    font-size: 11px;
+}
+
+.adaptive-ros-type:hover,
+.adaptive-ros-type-open {
+    background-color: rgba(10, 132, 255, 0.14);
+}
+
+.adaptive-ros-meta {
+    color: #98989D;
+    font-size: 11px;
+}
+
+.adaptive-ros-rate {
+    font-feature-settings: "tnum";
+}
+
+.adaptive-ros-definition {
+    margin: 2px 0 4px 4px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.28);
+    color: #D1D1D6;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.adaptive-ros-param-key {
+    color: #98989D;
+    font-size: 11px;
+}
+
+.adaptive-ros-param {
+    color: #F5F5F7;
+    font-size: 11px;
+    font-feature-settings: "tnum";
+}
+
 /* ------------------------------------------------------------------
  * Project indicator (projectIndicator.js): the active project, left of
  * the top bar, with its branch and uncommitted count.

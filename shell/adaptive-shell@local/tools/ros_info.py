@@ -3,6 +3,7 @@
 
     ros_info.py status                 distro, setup, workspaces, tools (loads no ROS)
     ros_info.py set <key> <value>      domain | localhost | rmw | workspace; "" follows ~/.bashrc
+                                       (`set all ""` for all four)
     ros_info.py launch <tool> [file]   rviz2 | gazebo | rqt | rqt_graph | demo; file is a
                                        .rviz config or a world
     ros_info.py stop <tool>            ask every running copy of it to quit
@@ -472,7 +473,9 @@ def install_gazebo():
 
 def set_value(key, value):
     config = read_config()
-    if value == "":
+    if key == "all" and value == "":
+        config = {}
+    elif value == "":
         config.pop(key, None)
     elif key == "domain":
         domain = int(value)

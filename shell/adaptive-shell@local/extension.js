@@ -32,6 +32,7 @@ const AdaptivePaths = Me.imports.adaptivePaths;
 const ShellActions = Me.imports.shellActions;
 const TaskManager = Me.imports.taskManager;
 const NetworkPanel = Me.imports.networkPanel;
+const RosPanel = Me.imports.rosPanel;
 const MinimizeEffect = Me.imports.minimizeEffect;
 const ClipboardHistory = Me.imports.clipboardHistory;
 const ProjectSnapshots = Me.imports.projectSnapshots;
@@ -101,6 +102,7 @@ class AdaptiveShellV16 {
         this._healthyId = 0;
         this._taskPanel = null;
         this._networkPanel = null;
+        this._rosPanel = null;
         this._projectProxy = null;
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
@@ -301,6 +303,7 @@ class AdaptiveShellV16 {
         this._installUsbPanel();
         this._installTaskPanel();
         this._installNetworkPanel();
+        this._installRosPanel();
         this._installPaletteServices();
         this._installShellActions();
         this._installProjectIndicator();
@@ -596,6 +599,11 @@ class AdaptiveShellV16 {
             this._networkPanel = null;
         }
 
+        if (this._rosPanel) {
+            this._rosPanel.detach();
+            this._rosPanel = null;
+        }
+
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
@@ -867,6 +875,18 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the Network panel');
             this._networkPanel = null;
+        }
+    }
+
+    // The ROS 2 graph and its tools (RViz2, Gazebo, rqt); just left of
+    // Network. See rosPanel.js and tools/ros_info.py.
+    _installRosPanel() {
+        try {
+            this._rosPanel = new RosPanel.RosPanel();
+            this._rosPanel.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the ROS 2 panel');
+            this._rosPanel = null;
         }
     }
 
