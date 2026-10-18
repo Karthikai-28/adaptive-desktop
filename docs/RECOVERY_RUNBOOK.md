@@ -12,6 +12,13 @@ gnome-extensions disable adaptive-shell@local
 
 Then log out and choose the standard Ubuntu session from GDM.
 
+If the GDM gear menu does not open, set the session your account logs in to
+instead (no password needed; `login` with no argument shows the current one):
+
+```bash
+./scripts/session-cli.py login ubuntu      # or: login adaptive
+```
+
 ## TTY Recovery
 
 If the graphical session is not usable:
@@ -37,7 +44,8 @@ cd ~/adaptive-desktop
 sudo systemctl restart gdm3
 ```
 
-6. At GDM, choose the standard `Ubuntu` session.
+6. At GDM, choose the standard `Ubuntu` session (or run
+   `./scripts/session-cli.py login ubuntu` before restarting GDM).
 
 ## Full User-Level Rollback
 

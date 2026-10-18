@@ -47,8 +47,40 @@ def save(_args):
 RECOVERY_STEPS = [
     "gnome-extensions disable adaptive-shell@local",
     f"cd {shlex.quote(str(REPO))} && ./scripts/remove-adaptive-session.sh",
-    "Choose Ubuntu from the GDM gear menu",
+    f"{shlex.quote(str(REPO / 'scripts/session-cli.py'))} login ubuntu",
 ]
+
+# Session id and display server GDM starts for each choice. GDM logs a user in
+# to the session AccountsService remembers for them, so setting it here picks
+# the session without the login screen's gear menu. Changing your own account
+# needs no password.
+LOGIN_SESSIONS = {
+    "adaptive": ("adaptive-desktop", "x11"),
+    "ubuntu": ("ubuntu", "wayland"),
+    "ubuntu-xorg": ("ubuntu-xorg", "x11"),
+}
+
+
+def _accounts_user(method, *args):
+    path = f"/org/freedesktop/Accounts/User{os.getuid()}"
+    return subprocess.run(
+        ["gdbus", "call", "--system", "--dest", "org.freedesktop.Accounts",
+         "--object-path", path, "--method", method, *args],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def login(args):
+    if args.session:
+        session, session_type = LOGIN_SESSIONS[args.session]
+        _accounts_user("org.freedesktop.Accounts.User.SetSession", session)
+        _accounts_user("org.freedesktop.Accounts.User.SetXSession", session)
+        _accounts_user("org.freedesktop.Accounts.User.SetSessionType", session_type)
+    current = _accounts_user("org.freedesktop.DBus.Properties.Get",
+                             "org.freedesktop.Accounts.User", "Session")
+    current = current.strip("(<'>,)")
+    print(f"Next login: {current or 'GDM default (ubuntu)'}")
+    return 0
 
 
 def recover(_args):
@@ -71,6 +103,9 @@ def main():
     sub.add_parser("save").set_defaults(func=save)
     sub.add_parser("recover").set_defaults(func=recover)
     sub.add_parser("logout").set_defaults(func=logout)
+    login_parser = sub.add_parser("login", help="show or set the session GDM logs you in to")
+    login_parser.add_argument("session", nargs="?", choices=sorted(LOGIN_SESSIONS))
+    login_parser.set_defaults(func=login)
     args = parser.parse_args()
 
     try:
