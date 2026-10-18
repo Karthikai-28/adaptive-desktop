@@ -694,8 +694,35 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   and finding each other with no network at all (Apple's Bluetooth and
   peer-to-peer Wi-Fi).
 
+## Milestone 18 — ROS 2 in the top bar
+
+`rosPanel.js` and `tools/ros_info.py`; `docs/ROS2_PANEL.md`.
+
+- ✅ **ROS 2 dropdown** just left of Network, with the ROS logo. Follows
+  `~/.bashrc` (distro, `ROS_DOMAIN_ID`, `ROS_LOCALHOST_ONLY`,
+  `RMW_IMPLEMENTATION`, a sourced workspace); domain, discovery, middleware
+  and workspace can be changed in the panel. Checked in the nested shell
+  against real demo nodes (`verify-ros-nested.sh`) and the helper on its own
+  (`verify-ros-panel.py`).
+- ✅ **Live graph**: nodes, topics, services, actions; expanding a node shows
+  its topics with types, peers and QoS, services and clients, actions,
+  parameters, lifecycle state; any type opens its definition; Hz measures a
+  topic for two seconds.
+- ✅ **Launch** RViz2 (and recent `.rviz` configs), rqt, rqt_graph, a terminal
+  on the same setup, the demo talker and listener; Show and Stop for running
+  ones. RViz2 opened and stopped on a virtual display.
+- 🔬 **Live in the session**: needs `sync-shell.sh` and a shell restart.
+- 🔬 **Gazebo**: not installed here; the row offers
+  `sudo apt install ros-humble-ros-gz`. Launching it (`ros_gz_sim`, Gazebo
+  Classic's `gazebo_ros`, or plain `gz sim` / `ign gazebo`) is untested.
+- 🔬 **ros2_control controllers**: listed when a controller_manager runs;
+  untested, `controller_manager_msgs` is not installed here.
+
 ## Immediate next work
 
+0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the
+   nine-dot button left of Network, Start demo, expand `/talker`, open RViz2.
+   Then the Gazebo install button.
 0. `./install.sh --status`, then `./install.sh`, then
    `./scripts/reload-adaptive-shell.sh --restart-shell`. As of Milestone 16
    the live extension is two milestones behind the repository, four

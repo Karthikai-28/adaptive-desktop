@@ -19,9 +19,11 @@ compatibility without keeping GNOME 42 working first.
 | Phone link | daemon `services/adaptive-link/` (`server.py` + one module per feature; `zero_state.py` records a phone arm request only), Android app `apps/adaptive-link-android/` (Kotlin, Gradle) | `docs/ADAPTIVE_LINK.md` |
 | Device retirement | `scripts/zero-state-protocol.sh`, with guard test `scripts/verify-zero-state-protocol.sh` | `docs/ZERO_STATE_PROTOCOL.md`; external boot only, never remotely erases storage |
 | Agent Office (AI company, :8790) | `services/agent-office/`: `server.py`, `office/*.py` (`manager.py`, `agy.py` Gemini, `local.py` Ollama, `codex.py` Codex (meetings, first backup), `claude_agent.py` Claude Haiku backup, `quota.py`, `ledger.py`, `graphs.py`, `study.py`), UI in `static/` | `docs/AGENT_OFFICE.md` (sections: setup, safety, providers, ledger, gotchas). All Agent Office work happens here and nowhere else |
+| ROS 2 panel (top bar, left of Network) | `shell/adaptive-shell@local/rosPanel.js`, helper `tools/ros_info.py` (setup from `~/.bashrc`, launch, live `watch` over stdin/stdout) | `docs/ROS2_PANEL.md`; checks `scripts/verify-ros-panel.py`, `scripts/verify-ros-nested.sh` |
 | Screenshot annotate / screen text | `apps/adaptive-annotate/`, `shell/.../screenText*.js` | |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/`, `design/` | `docs/DESIGN_SYSTEM.md` |
 | systemd units, autostart | `services/*.service`, `*.timer` | |
+| Machine repairs | `scripts/fix-antigravity-login.py` (Antigravity IDE 2.5.5 keeps its login; checks by default, `--apply` / `--restore`) | |
 | Install/uninstall pieces | `scripts/install-*.sh`, run in order by `./install.sh` | |
 | New machine from nothing | `bootstrap.sh` (apt, Files fork build, session, `install.sh`, link extras, first-login `--finish`) | `docs/NEW_MACHINE.md`. Writes GNOME settings with `DCONF_PROFILE=adaptive` only |
 | Permanent handoff / retirement | `scripts/zero-state-protocol.sh` | Read-only plan by default; external boot, exact disk confirmation, and a supported sanitization method are required to execute. See `docs/ZERO_STATE_PROTOCOL.md`. |

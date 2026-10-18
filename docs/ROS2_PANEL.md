@@ -57,7 +57,7 @@ shell never loads ROS itself.
 `shell/adaptive-shell@local/rosPanel.js` is the dropdown: it starts and stops
 the watcher, keeps which rows are expanded, and renders.
 
-## Plan
+## Plan (done)
 
 1. Helper, environment and status: distro, `~/.bashrc` settings, config,
    workspaces, installed and running tools, RViz configs, Gazebo worlds.
@@ -83,3 +83,17 @@ scripts/verify-shell-nested.sh --extra scripts/verify-ros-nested.sh
 
 Both skip when ROS 2 is not installed. They use a private domain with
 localhost-only discovery, so they never see or disturb a real robot.
+
+## Gotchas
+
+- The watcher outlives a closed dropdown by a minute. A setup change made
+  elsewhere (`~/.bashrc`, `ros2.json`) restarts it the next time the panel
+  opens; otherwise it would keep watching the old domain.
+- Every node has `/rosout` and `/parameter_events`, the panel's own too; with
+  only hidden nodes on them they are left out.
+- Discovery carries reliability and durability but not depth or history, so
+  QoS shows only those two.
+- ROS's `setup.bash` reads unset variables: source it after `set +u` in any
+  script that runs with `set -u` (the nested sandbox does).
+- The sandbox has its own HOME, so no `~/.bashrc`: the nested check writes
+  `ros2.json` for its private domain.
