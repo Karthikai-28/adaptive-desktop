@@ -45,6 +45,7 @@ STAGES=(
     "packages|System packages (apt), including GNOME if it is missing|no"
     "groups|plugdev and input groups (USB switches, touchpad gestures)|no"
     "python|Python packages the link needs for video and away access|no"
+    "node|Node.js 22 in ~/.local (the checks parse the shell and office JavaScript)|yes"
     "terminal|KTERM: Terminator, Zsh and the Nerd Font|yes"
     "files-fork|Build the Adaptive Files fork of Nautilus 42.6 (10-20 min)|yes"
     "session|The Adaptive Desktop login session (GDM entry, own dconf profile)|no"
@@ -243,6 +244,30 @@ stage_python() {
         note "aiortc (screen as video, away access) in $pydeps"
     fi
     python3 -c "import aiohttp, cryptography" || die "aiohttp and cryptography are missing (packages stage)"
+}
+
+stage_node() {
+    # Jammy's nodejs is 12, too old to parse the shell's JavaScript (?. and ??); CI uses 22 too.
+    local have
+    have="$(node --version 2>/dev/null || true)"
+    have="$(sed -E 's/^v([0-9]+).*/\1/' <<<"$have")"
+    if [ "${have:-0}" -ge 22 ] && [ "$REDO" = 0 ]; then
+        note "node $(node --version) already installed"
+        return 0
+    fi
+    local base="https://nodejs.org/dist/latest-v22.x" dest="$HOME/.local/opt/node" tmp line file
+    tmp="$(mktemp -d)"
+    line="$(curl -fsSL "$base/SHASUMS256.txt" | grep -E ' node-v22\.[0-9.]+-linux-x64\.tar\.xz$')" ||
+        die "could not read the Node.js 22 release list"
+    file="${line##* }"
+    curl -fsSL -o "$tmp/$file" "$base/$file"
+    (cd "$tmp" && printf '%s\n' "$line" | sha256sum -c --quiet -) || die "the Node.js download failed its checksum"
+    rm -rf "$dest" && mkdir -p "$dest" "$HOME/.local/bin"
+    tar -xJf "$tmp/$file" -C "$dest" --strip-components=1
+    rm -rf "$tmp"
+    local tool
+    for tool in node npm npx; do ln -sfn "$dest/bin/$tool" "$HOME/.local/bin/$tool"; done
+    note "node $("$dest/bin/node" --version) in $dest, linked into ~/.local/bin"
 }
 
 stage_terminal() {
@@ -515,12 +540,17 @@ mkdir -p "$(dirname "$LOG")" "$STATE"
 
 bold "Adaptive Desktop bootstrap"
 note "log: $LOG"
-note "sudo is needed for packages, the login session and the link's kernel modules"
-sudo -v || die "sudo is needed"
-# Keep sudo's ticket fresh through the long stages (the Files build).
-( while kill -0 "$$" 2>/dev/null; do sudo -n true 2>/dev/null; sleep 50; done ) &
-KEEPALIVE=$!
-trap 'kill "$KEEPALIVE" 2>/dev/null' EXIT
+case ",$ONLY," in
+    ,node,|,python,|,restore,|,link-cloud,|,first-login,) ;;   # stages that never use sudo
+    *)
+        note "sudo is needed for packages, the login session and the link's kernel modules"
+        sudo -v || die "sudo is needed"
+        # Keep sudo's ticket fresh through the long stages (the Files build).
+        ( while kill -0 "$$" 2>/dev/null; do sudo -n true 2>/dev/null; sleep 50; done ) &
+        KEEPALIVE=$!
+        trap 'kill "$KEEPALIVE" 2>/dev/null' EXIT
+        ;;
+esac
 echo
 
 failed=()

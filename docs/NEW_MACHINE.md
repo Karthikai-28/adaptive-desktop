@@ -52,6 +52,7 @@ building Files and downloading. Leave it alone; it says what it is doing.
 | packages | Every apt package the shell, apps, link and office use (and GNOME itself if missing) |
 | groups | Adds you to `plugdev` (USB switches from the phone) and `input` (touchpad gestures) |
 | python | `aiortc` into `.local/link-pydeps` (screen as video, away access) |
+| node | Node.js 22 into `~/.local/opt/node` (Jammy's is 12, too old for the checks to parse the shell's JavaScript) |
 | terminal | KTERM: Terminator, Zsh, the JetBrainsMono Nerd Font (`--skip terminal` to keep bash) |
 | files-fork | Enables source repositories, builds Nautilus 42.6 into `.local/adaptive-nautilus`, links Open in Terminal and nautilus-python into it, routes Files to it inside Adaptive only |
 | session | The **Adaptive Desktop** entry on the login screen, with its own dconf database |
