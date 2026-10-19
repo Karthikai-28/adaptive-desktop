@@ -6,9 +6,8 @@ set -Eeuo pipefail
 # The fork only scans NAUTILUS_EXTENSIONDIR (its own prefix) and the legacy
 # /usr/lib/nautilus/extensions-3.0 path - see src/nautilus-module.c. Ubuntu
 # ships its extensions in the multiarch directory instead, so anything
-# installed by apt is invisible to the fork. That is why "Open in Terminal"
-# was missing from the right-click menu: the gnome-terminal extension was
-# installed, just never loaded.
+# installed by apt is invisible to the fork. Terminal actions come from the
+# KTERM Python provider installed by install-files-extension.sh.
 #
 # Symlinks (not copies) so apt updates to the system extensions carry over.
 # ninja install does not clear this directory, so the links survive a rebuild.
@@ -22,7 +21,6 @@ SYSTEM_EXT_DIR="/usr/lib/x86_64-linux-gnu/nautilus/extensions-3.0"
 # Extensions to adopt from the system install. Keep this list explicit: the
 # fork deliberately does not inherit everything apt happens to have installed.
 WANTED=(
-    libterminal-nautilus.so   # nautilus-extension-gnome-terminal: Open in Terminal
     libnautilus-python.so     # python3-nautilus: loads the Adaptive inspector (extension/)
 )
 
@@ -33,6 +31,14 @@ test -d "$FORK_EXT_DIR" || {
 }
 
 missing=0
+
+# Retire only the system link made by earlier versions of this installer.
+# The GNOME Terminal provider calls its D-Bus service directly, bypassing the
+# configured default terminal and duplicating the KTERM context-menu action.
+if [[ -L "$FORK_EXT_DIR/libterminal-nautilus.so" ]] &&
+   [[ "$(readlink "$FORK_EXT_DIR/libterminal-nautilus.so")" == "$SYSTEM_EXT_DIR/libterminal-nautilus.so" ]]; then
+    rm "$FORK_EXT_DIR/libterminal-nautilus.so"
+fi
 
 for ext in "${WANTED[@]}"; do
     src="$SYSTEM_EXT_DIR/$ext"
@@ -62,7 +68,7 @@ ls -1 "$FORK_EXT_DIR"
 if (( missing )); then
     echo
     echo "Some extensions were not found. Install them with:" >&2
-    echo "  sudo apt install nautilus-extension-gnome-terminal python3-nautilus" >&2
+    echo "  sudo apt install python3-nautilus" >&2
     exit 1
 fi
 

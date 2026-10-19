@@ -1088,7 +1088,7 @@ class Palette(Gtk.ApplicationWindow):
             ("Open Files", "Browse your files", "folder-symbolic", "R",
              lambda: self._open_path(Path.home())),
             ("Open Terminal Here", "New terminal in home", "utilities-terminal-symbolic", "T",
-             lambda: self._run(["gnome-terminal"])),
+             lambda: self._run(["kterm-terminal"])),
             ("Enter Focus Mode", "Hold notifications", "weather-clear-night-symbolic", "F",
              lambda: self._run(["./scripts/focus-cli.py", "on"])),
             ("Exit Focus Mode", "Show notifications again", "weather-clear-symbolic", "",

@@ -452,7 +452,7 @@ PROGRAM_TYPES = ("application/x-executable", "application/x-sharedlib", "applica
                  "application/vnd.appimage", "application/x-shellscript", "application/x-executable-script")
 RUNNERS = {"mono", "wine", "wine64", "java", "javaws", "sh", "bash", "dash", "zsh", "fish", "env",
            "python", "python3", "perl", "ruby", "node", "nodejs", "php", "lua", "tclsh", "wish",
-           "gnome-terminal", "terminator", "xterm", "x-terminal-emulator", "kitty", "alacritty", "konsole"}
+           "kterm-terminal", "gnome-terminal", "terminator", "xterm", "x-terminal-emulator", "kitty", "alacritty", "konsole"}
 UPLOAD_MIN_FREE = 1024 ** 3
 
 

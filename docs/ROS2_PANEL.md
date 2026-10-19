@@ -14,6 +14,9 @@ computer can see and the tools used with it.
   `~/.config/adaptive-desktop/ros2.json` and wins over `~/.bashrc`.
 - **Launch**: RViz2 (and recent `.rviz` configs), Gazebo (and the worlds in
   your workspaces), rqt, rqt_graph, and a terminal with the same ROS setup.
+  Terminal uses the KTERM modern Zsh profile, sources the user's `.zshrc`,
+  then applies the selected distro and workspace `setup.zsh` files and panel
+  domain/middleware settings. These selections override shell startup defaults.
   A running app shows Show (switch to its window) and Stop. If Gazebo is not
   installed, the row says so and Install opens a terminal on the apt command.
 - **Nodes**: every visible node with what it has: publishers, subscribers,

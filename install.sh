@@ -47,6 +47,7 @@ PARTS=(
     "theme|Adaptive theme, icons, fonts and backgrounds|status_theme|$S/install-adaptive-theme.sh"
     "shell|Shell extension copied to its live folder|status_shell|$S/sync-shell.sh"
     "keybindings|Adaptive keyboard shortcuts|status_keybindings|$S/install-keybindings.sh"
+    "terminal|Terminal defaults and KTERM integration|status_terminal|install_terminal"
     "settings|Adaptive Settings app|status_settings|$S/install-adaptive-settings.sh"
     "gestures|Touchpad gesture service|status_gestures|$S/install-gestures.sh"
     "files|Files inspector for the Nautilus fork|status_files|install_files"
@@ -85,6 +86,20 @@ status_keybindings() {
 
 status_settings() {
     [ -f "$APPS/com.karthi.AdaptiveSettings.desktop" ] || echo "not in the app grid"
+}
+
+status_terminal() {
+    [ -f "$HOME/.config/karthi-shell/terminator-modern.conf" ] || { echo "KTERM is not installed"; return; }
+    cmp -s "$REPO/terminal/launcher.py" "$HOME/.local/bin/kterm-terminal" || echo "terminal routes need updating"
+    grep -qx 'Name=Terminal' "$APPS/kterm-terminal.desktop" 2>/dev/null || echo "terminal name needs updating"
+}
+
+install_terminal() {
+    if [ ! -f "$HOME/.config/karthi-shell/terminator-modern.conf" ]; then
+        echo "KTERM is not installed; run terminal/install-kterm-ubuntu.sh first."
+        return 0
+    fi
+    python3 "$S/install-terminal.py" --apply
 }
 
 status_gestures() {

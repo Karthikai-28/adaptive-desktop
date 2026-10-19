@@ -147,9 +147,12 @@ check(U.formatBytes(912) === '912 B' && U.formatBytes(348160) === '340 KB' && U.
     'clipboard: sizes read naturally');
 
 // drop-down terminal
+check(U.dropdownTerminalKind(undefined, () => true) === 'kterm-terminal', 'dropdown: KTERM is the default');
+check(U.dropdownArgv('kterm-terminal', '/space dir').includes('--working-directory=/space dir'), 'dropdown: KTERM preserves folder boundaries');
+check(U.isDropdownWindow('kterm-terminal', 'Terminator', null), 'dropdown: KTERM uses the Terminator window class');
 check(U.dropdownTerminalKind('gnome-terminal', () => true) === 'gnome-terminal', 'dropdown: the terminal asked for, if installed');
 check(U.dropdownTerminalKind('gnome-terminal', n => n === 'terminator') === 'terminator', 'dropdown: falls back to what is installed');
-check(U.dropdownTerminalKind('xterm; rm -rf', () => true) === 'terminator', 'dropdown: an unknown terminal name is never run');
+check(U.dropdownTerminalKind('xterm; rm -rf', () => true) === 'kterm-terminal', 'dropdown: an unknown terminal name is never run');
 check(U.dropdownTerminalKind(undefined, () => false) === '', 'dropdown: no terminal installed gives none');
 check(same(U.dropdownArgv('gnome-terminal', '/p'), ['gnome-terminal', '--role=adaptive-dropdown', '--working-directory=/p']),
     'dropdown: GNOME Terminal command');

@@ -1852,7 +1852,7 @@ class Projects(Gtk.ApplicationWindow):
 
     def _open_terminal(self, project):
         try:
-            subprocess.Popen(["gnome-terminal", "--working-directory",
+            subprocess.Popen(["kterm-terminal", "--working-directory",
                               project["path"]], start_new_session=True)
         except Exception:
             pass

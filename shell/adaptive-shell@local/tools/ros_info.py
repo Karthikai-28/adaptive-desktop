@@ -425,24 +425,30 @@ def stop(tool):
 
 
 def terminal_rc(setup):
-    """An rcfile: ~/.bashrc, then the panel's setup on top of it."""
-    lines = ['[ -f ~/.bashrc ] && . ~/.bashrc',
-             f"source {shlex.quote(str(ROS_ROOT / setup['distro'] / 'setup.bash'))}"]
+    """Load the normal KTERM Zsh startup, then apply the panel's ROS setup."""
+    user_dotdir = os.environ.get("ZDOTDIR")
+    user_rc = Path(user_dotdir or HOME) / ".zshrc"
+    lines = [f"export ZDOTDIR={shlex.quote(user_dotdir)}" if user_dotdir else "unset ZDOTDIR",
+             f"[[ -f {shlex.quote(str(user_rc))} ]] && source {shlex.quote(str(user_rc))}",
+             f"source {shlex.quote(str(ROS_ROOT / setup['distro'] / 'setup.zsh'))}"]
     if setup["workspace"]:
         ws = Path(setup["workspace"])
-        lines += [f"source {shlex.quote(str(ws / 'install' / 'setup.bash'))}", f"cd {shlex.quote(str(ws))}"]
+        lines += [f"source {shlex.quote(str(ws / 'install' / 'setup.zsh'))}", f"cd {shlex.quote(str(ws))}"]
     lines.append(f"export ROS_DOMAIN_ID={int(setup['domain'])}")
     lines.append("export ROS_LOCALHOST_ONLY=1" if setup["localhost"] else "unset ROS_LOCALHOST_ONLY")
     if setup["rmw_set"]:
         lines.append(f"export RMW_IMPLEMENTATION={shlex.quote(setup['rmw'])}")
-    CACHE.mkdir(parents=True, exist_ok=True)
-    rc = CACHE / "terminal.bashrc"
+    dotdir = CACHE / "terminal-zsh"
+    dotdir.mkdir(parents=True, exist_ok=True)
+    rc = dotdir / ".zshrc"
     rc.write_text("\n".join(lines) + "\n")
     return rc
 
 
 def open_terminal(title, command):
-    if shutil.which("terminator"):
+    if shutil.which("kterm-terminal"):
+        argv = ["kterm-terminal", "-T", title, "-x", *command]
+    elif shutil.which("terminator"):
         argv = ["terminator", "-T", title, "-x", *command]
     elif shutil.which("gnome-terminal"):
         argv = ["gnome-terminal", "--title", title, "--", *command]
@@ -459,7 +465,8 @@ def terminal():
         return {"ok": False, "error": "ROS 2 is not installed"}
     rc = terminal_rc(setup)
     return open_terminal(f"ROS 2 {setup['distro']} · domain {setup['domain']}",
-                         ["bash", "--rcfile", str(rc), "-i"])
+                         ["env", "-u", "KARTHI_MODERN_LOADED", "-u", "KARTHI_HUD_SHOWN",
+                          "KARTHI_SHELL_MODE=modern", f"ZDOTDIR={rc.parent}", "zsh", "-i"])
 
 
 def install_gazebo():

@@ -158,34 +158,29 @@ class HostMixin:
         terminal.set_scrollback_lines(5000)
         terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.OFF)
         terminal.set_audible_bell(False)
-        try:
-            interface = Gio.Settings.new("org.gnome.desktop.interface")
-            terminal.set_font(Pango.FontDescription.from_string(interface.get_string("monospace-font-name")))
-        except Exception:
-            pass
+        terminal.set_font(Pango.FontDescription.from_string("JetBrainsMono Nerd Font 11"))
 
         def rgba(value):
             color = Gdk.RGBA()
             color.parse(value)
             return color
 
-        # Graphite canvas and label white from the palette; ANSI colours are
-        # left to VTE so command output keeps its usual meaning.
-        terminal.set_color_background(rgba("#141416"))
-        terminal.set_color_foreground(rgba("#F5F5F7"))
-        terminal.set_color_cursor(rgba("#0A84FF"))
-        terminal.set_color_highlight(rgba("#0058D0"))
-        terminal.set_color_highlight_foreground(rgba("#FFFFFF"))
+        # Match Terminal's KTERM profile in the embedded VTE view.
+        palette = "#45475a:#f38ba8:#a6e3a1:#f9e2af:#89b4fa:#f5c2e7:#94e2d5:#bac2de:#585b70:#f38ba8:#a6e3a1:#f9e2af:#89b4fa:#f5c2e7:#94e2d5:#a6adc8"
+        terminal.set_colors(rgba("#cdd6f4"), rgba("#11111b"), [rgba(c) for c in palette.split(":")])
+        terminal.set_color_cursor(rgba("#f5e0dc"))
+        terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.ON)
+        terminal.set_cursor_shape(Vte.CursorShape.IBEAM)
         terminal.set_hexpand(True)
         terminal.set_vexpand(True)
         terminal.connect("child-exited", self._on_terminal_exited)
 
-        shell = os.environ.get("SHELL") or "/bin/bash"
         directory = self._location_path() or str(Path.home())
         terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             directory,
-            [shell],
+            ["/usr/bin/env", "-u", "KARTHI_MODERN_LOADED", "-u", "KARTHI_HUD_SHOWN",
+             "KARTHI_SHELL_MODE=modern", "zsh", "-l"],
             None,
             GLib.SpawnFlags.DEFAULT,
             None,

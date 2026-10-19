@@ -1,5 +1,15 @@
 # KTERM Futureproof 3.0.0
 
+On this Adaptive Desktop workstation the application is named **Terminal**.
+After KTERM is installed, `./install.sh --only terminal` applies the modern
+profile to GNOME defaults, Ctrl+Alt+T, XDG terminal selection, legacy launcher
+names, and Antigravity. The embedded Antigravity and Files terminals use the
+same Zsh setup, Nerd Font and colors; external actions open the KTERM window.
+ROS 2 terminals retain the panel's selected environment on top of Zsh startup.
+Existing shell sessions keep their state; these settings apply to new terminals.
+`python3 scripts/install-terminal.py` previews configuration changes;
+`python3 scripts/verify-terminal.py` checks command routing and ROS setup.
+
 KTERM turns a freshly installed Ubuntu workstation or Raspberry Pi into a reversible, visual, keyboard-efficient terminal environment built around **Terminator + Zsh**.
 
 This bundle contains two self-contained installers:

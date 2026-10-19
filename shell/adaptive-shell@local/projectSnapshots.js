@@ -243,7 +243,7 @@ var ProjectSnapshots = class ProjectSnapshots {
 
         if (kind === 'terminal') {
             const argv = entry.appId === 'org.gnome.Terminal.desktop'
-                ? ['gnome-terminal', `--working-directory=${folder}`]
+                ? ['kterm-terminal', `--working-directory=${folder}`]
                 : [info.get_executable()];
             GLib.spawn_async(folder, argv, null, GLib.SpawnFlags.SEARCH_PATH, null);
         } else if (kind === 'folder' && (info.supports_uris() || info.supports_files())) {

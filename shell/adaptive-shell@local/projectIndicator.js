@@ -260,7 +260,7 @@ var ProjectIndicator = class ProjectIndicator {
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         menu.addAction('Open in Terminal', () =>
-            spawn(['gnome-terminal', `--working-directory=${project.path}`], project.path));
+            spawn(['kterm-terminal', `--working-directory=${project.path}`], project.path));
         menu.addAction('Open in Files', () => {
             try {
                 Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(project.path).get_uri(), null);

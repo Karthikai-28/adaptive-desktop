@@ -13,13 +13,14 @@ compatibility without keeping GNOME 42 working first.
 | --- | --- | --- |
 | Shell extension (rail, top bar, dock, control center, dynamic island) | `shell/adaptive-shell@local/` | `extension.js` wires modules; `shell*.js` dock/displays/lock, `cc*.js` control center, `island*.js` dynamic island, `shellActions.js` = bridge the command palette calls. Live copy: `~/.local/share/gnome-shell/extensions/adaptive-shell@local/` |
 | Command palette (Alt+Space) | `apps/adaptive-command/` | answers in `providers.py`, prefix modes (`snip`, `todo`, `git`, ...) in `modes.py` |
+| Terminal (KTERM modern profile) | `terminal/launcher.py`, `scripts/install-terminal.py` | `./install.sh --only terminal`; user defaults, legacy command aliases and Antigravity profiles; `scripts/verify-terminal.py` |
 | Files (forked Nautilus 42.6) | `extension/adaptive_files/` (inspector side panel, Python), fork build in `.local/adaptive-nautilus*` | routing: `scripts/adaptive-files-dispatch.sh`; architecture rule: `docs/UBUNTU_FILES_PARITY.md` |
 | Settings | `apps/adaptive-settings/` (Adaptive-only sections); rest is skinned gnome-control-center 41.7 | |
 | Project context (D-Bus) | `services/project-context/main.py` | |
 | Phone link | daemon `services/adaptive-link/` (`server.py` + one module per feature; `zero_state.py` records a phone arm request only), Android app `apps/adaptive-link-android/` (Kotlin, Gradle) | `docs/ADAPTIVE_LINK.md` |
 | Device retirement | `scripts/zero-state-protocol.sh`, with guard test `scripts/verify-zero-state-protocol.sh` | `docs/ZERO_STATE_PROTOCOL.md`; external boot only, never remotely erases storage |
 | Agent Office (AI company, :8790) | `services/agent-office/`: `server.py`, `office/*.py` (`manager.py`, `agy.py` Gemini, `local.py` Ollama, `codex.py` Codex (meetings, first backup), `claude_agent.py` Claude Haiku backup, `quota.py`, `ledger.py`, `graphs.py`, `study.py`), UI in `static/` | `docs/AGENT_OFFICE.md` (sections: setup, safety, providers, ledger, gotchas). All Agent Office work happens here and nowhere else |
-| ROS 2 panel (top bar, left of Network) | `shell/adaptive-shell@local/rosPanel.js`, helper `tools/ros_info.py` (setup from `~/.bashrc`, launch, live `watch` over stdin/stdout) | `docs/ROS2_PANEL.md`; checks `scripts/verify-ros-panel.py`, `scripts/verify-ros-nested.sh` |
+| ROS 2 panel (top bar, left of Network) | `shell/adaptive-shell@local/rosPanel.js`, helper `shell/adaptive-shell@local/tools/ros_info.py` (setup from `~/.bashrc`, launch, live `watch` over stdin/stdout) | `docs/ROS2_PANEL.md`; checks `scripts/verify-ros-panel.py`, `scripts/verify-ros-nested.sh` |
 | Screenshot annotate / screen text | `apps/adaptive-annotate/`, `shell/.../screenText*.js` | |
 | Design system | `tokens/adaptive.tokens.json`, `theme/`, `icons/`, `design/` | `docs/DESIGN_SYSTEM.md` |
 | systemd units, autostart | `services/*.service`, `*.timer` | |

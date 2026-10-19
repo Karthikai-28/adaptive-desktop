@@ -216,8 +216,8 @@ def startup_argv(entry, folder):
     """
     command = entry["command"]
     if entry.get("terminal", True):
-        return ["gnome-terminal", f"--working-directory={folder}", "--",
-                "bash", "-lc", f"{command}; exec bash"]
+        return ["kterm-terminal", f"--working-directory={folder}", "-x",
+                "bash", "-lc", f"{command}; exec zsh -l"]
     return ["bash", "-lc", command]
 
 

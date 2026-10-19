@@ -224,8 +224,8 @@ def main():
     check(helper(env, "launch", "nonsense").get("ok") is False, "launch: an unknown tool is refused")
     rc = ros_info.terminal_rc(ros_info.settings()).read_text()
     check(f"export ROS_DOMAIN_ID={DOMAIN}" in rc and "export ROS_LOCALHOST_ONLY=1" in rc and str(ws) in rc
-          and rc.index(".bashrc") < rc.index("ROS_DOMAIN_ID"),
-          "terminal: ~/.bashrc first, then the panel's setup")
+          and rc.index(".zshrc") < rc.index("ROS_DOMAIN_ID"),
+          "terminal: KTERM Zsh first, then the panel's setup")
 
     subprocess.run(["rm", "-rf", str(home)])
     print(f"\n{failures} check(s) failed" if failures else "\nAll ROS panel checks passed.")

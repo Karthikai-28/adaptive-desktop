@@ -169,6 +169,22 @@ def inner(sandbox, check):
     xdo("key", "alt+Up")
     time.sleep(1.5)
 
+    # Exercise the embedded terminal: renderer settings and Zsh spawning
+    # otherwise remain untested by browsing the inspector alone.
+    terminal_state = sandbox / "terminal-state.txt"
+    xdo("key", "F4")
+    time.sleep(1)
+    xdo("type", "--clearmodifiers", "--delay", "1",
+        f"printf '%s\\n' \"${{ZSH_VERSION:+zsh}}|$KARTHI_SHELL_MODE\" > '{terminal_state}'")
+    xdo("key", "Return")
+    for _ in range(20):
+        if terminal_state.exists():
+            break
+        time.sleep(0.25)
+    check(terminal_state.exists() and terminal_state.read_text().strip() == "zsh|modern",
+          "the embedded Terminal starts Zsh in KTERM modern mode")
+    xdo("key", "F4")
+
     check(nautilus.poll() is None, "Files is still running after browsing")
     text = log.read_text(errors="replace") if log.exists() else ""
     # A dead inspector logs no exceptions either; these lines only appear

@@ -128,7 +128,9 @@ def probe(host, user, password):
 
 def open_terminal(host, user):
     ssh = ["ssh", *SSH_OPTS, "--", f"{user}@{host}"]
-    if shutil.which("terminator"):
+    if shutil.which("kterm-terminal"):
+        argv = ["kterm-terminal", "-T", f"{user}@{host}", "-x", *ssh]
+    elif shutil.which("terminator"):
         argv = ["terminator", "-T", f"{user}@{host}", "-x", *ssh]
     elif shutil.which("gnome-terminal"):
         argv = ["gnome-terminal", "--title", f"{user}@{host}", "--", *ssh]

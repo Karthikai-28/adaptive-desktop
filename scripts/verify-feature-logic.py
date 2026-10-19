@@ -197,7 +197,7 @@ def project_extras():
           [{"command": "x", "terminal": False}], "startup: junk and blanks dropped")
     check(len(E.normalize_startup(["c"] * 30)) == E.STARTUP_LIMIT, "startup: bounded")
     argv = E.startup_argv({"command": "npm run dev", "terminal": True}, "/p")
-    check(argv[:2] == ["gnome-terminal", "--working-directory=/p"] and argv[-1] == "npm run dev; exec bash",
+    check(argv[:2] == ["kterm-terminal", "--working-directory=/p"] and argv[-1] == "npm run dev; exec zsh -l",
           "startup: terminal commands stay open in the project folder")
     check(E.startup_argv({"command": "x", "terminal": False}, "/p") == ["bash", "-lc", "x"],
           "startup: background commands get no window")
@@ -320,7 +320,7 @@ def palette_modes():
 
     hosts = M.parse_ssh_hosts("Host web db-1\n  HostName 10.0.0.1\nHost *\nHost -oProxyCommand=x\nhost Pi\n")
     check(hosts == ["web", "db-1", "Pi"], "ssh: aliases only, no patterns, nothing option-like")
-    check(M.ssh_rows("pi", hosts)[0]["action"] == ("run", ["gnome-terminal", "--", "ssh", "Pi"], None), "ssh: opens a terminal")
+    check(M.ssh_rows("pi", hosts)[0]["action"] == ("run", ["kterm-terminal", "-x", "ssh", "Pi"], None), "ssh: opens a terminal")
 
     rows = M.branch_rows("fe", "/p", ["main", "feature/x"], "main")
     check(rows[0]["action"][2] == ["git", "-C", "/p", "switch", "--", "feature/x"], "branch: switch, never a shell string")

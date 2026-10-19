@@ -102,7 +102,7 @@ def main():
     else:
         argv = independent(argv, app_id, env["ADAPTIVE_MOBILE_ROOT"])
     if info.get_boolean("Terminal"):
-        argv = ["x-terminal-emulator", "-e", *argv]
+        argv = ["kterm-terminal", "-x", *argv]
     cwd = info.get_string("Path")
     os.chdir(cwd if cwd and Path(cwd).is_dir() else str(Path.home()))
     os.execvpe(argv[0], argv, env)

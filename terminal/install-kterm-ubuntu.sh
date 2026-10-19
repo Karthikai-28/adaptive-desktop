@@ -1663,7 +1663,7 @@ write_desktop_launchers() {
   cat > "$XDG_DATA_HOME/applications/kterm-terminal.desktop" <<EOF_KTERM_DESKTOP
 [Desktop Entry]
 Type=Application
-Name=KTERM Futuristic Terminal
+Name=Terminal
 Comment=Terminator and Zsh visual developer console
 Exec=$BIN_DIR/kterm-terminal
 Icon=utilities-terminal
@@ -1696,7 +1696,7 @@ configure_xdg_terminal_file() {
   temp="$(mktemp)"
   {
     printf '%s\n' "$XDG_BEGIN"
-    printf 'terminator.desktop\n'
+    printf 'kterm-terminal.desktop\n'
     printf '%s\n' "$XDG_END"
     cat "$file"
   } > "$temp"
@@ -1728,7 +1728,7 @@ PY_GSET_ADD
 )"
   gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$updated" 2>/dev/null || return 0
   schema="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$path"
-  gsettings set "$schema" name 'KTERM Futuristic Terminal' 2>/dev/null || true
+  gsettings set "$schema" name 'Terminal' 2>/dev/null || true
   gsettings set "$schema" command "$BIN_DIR/kterm-terminal" 2>/dev/null || true
   gsettings set "$schema" binding '<Primary><Alt>t' 2>/dev/null || true
   if gsettings_has_key org.gnome.settings-daemon.plugins.media-keys terminal; then
@@ -1742,7 +1742,7 @@ configure_old_gnome_default() {
     if [[ ! -e "$STATE_DIR/gnome-default-terminal-exec.gvariant" ]]; then
       gsettings get org.gnome.desktop.default-applications.terminal exec > "$STATE_DIR/gnome-default-terminal-exec.gvariant" 2>/dev/null || true
     fi
-    gsettings set org.gnome.desktop.default-applications.terminal exec 'terminator' 2>/dev/null || true
+    gsettings set org.gnome.desktop.default-applications.terminal exec "$BIN_DIR/kterm-terminal" 2>/dev/null || true
   fi
   if gsettings_has_key org.gnome.desktop.default-applications.terminal exec-arg; then
     if [[ ! -e "$STATE_DIR/gnome-default-terminal-exec-arg.gvariant" ]]; then

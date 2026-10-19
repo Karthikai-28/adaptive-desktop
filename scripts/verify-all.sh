@@ -95,6 +95,7 @@ step "Shell scripts have no errors" shell_scripts
 step "Zero-State Protocol guards" quiet "$REPO/scripts/verify-zero-state-protocol.sh"
 step "The checkout works from any folder, for any user" quiet "$REPO/scripts/verify-portable-paths.sh"
 step "Feature logic (palette, projects, backup, power, annotate)" quiet python3 "$REPO/scripts/verify-feature-logic.py"
+step "Terminal routes and ROS shell setup" quiet python3 "$REPO/scripts/verify-terminal.py"
 step "Adaptive Settings backend" quiet python3 "$REPO/scripts/verify-adaptive-settings.py"
 step "Agent Office (syntax, roster, API guards; no quota)" quiet "$REPO/scripts/verify-agent-office.sh"
 

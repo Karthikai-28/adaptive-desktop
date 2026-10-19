@@ -2,8 +2,8 @@
 //
 // One terminal that drops from the top of the screen on a shortcut and goes
 // away on the same shortcut, in the active project's folder the first time it
-// opens. It is an ordinary terminal window (Terminator if it is installed,
-// otherwise GNOME Terminal); the shell only starts it, places it and toggles
+// opens. It is an ordinary terminal window (KTERM if it is installed,
+// otherwise Terminator or GNOME Terminal); the shell only starts it, places it and toggles
 // it, which is the part an outside script cannot do reliably.
 //
 //   gdbus call --session -d org.gnome.Shell -o /org/adaptive/Shell \
@@ -12,7 +12,7 @@
 // Toggle: not there -> start it; there but hidden, behind or on another
 // workspace -> bring it here and focus it; focused -> hide it.
 //
-// ~/.config/adaptive-desktop/dropdown.json may set {"terminal": "terminator" |
+// ~/.config/adaptive-desktop/dropdown.json may set {"terminal": "kterm-terminal" | "terminator" |
 // "gnome-terminal", "height": 0.2 - 1.0}. The placement and the command line
 // are adaptiveUtil's and checked under Node.
 
@@ -94,7 +94,7 @@ var DropdownTerminal = class DropdownTerminal {
         this._kind = Util.dropdownTerminalKind(config.terminal,
             name => !!GLib.find_program_in_path(name));
         if (!this._kind) {
-            Main.notify('Drop-down terminal', 'Neither Terminator nor GNOME Terminal is installed.');
+            Main.notify('Drop-down terminal', 'No supported terminal is installed.');
             return;
         }
 

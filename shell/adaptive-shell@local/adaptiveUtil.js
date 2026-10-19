@@ -324,9 +324,9 @@ var DROPDOWN_ROLE = 'adaptive-dropdown';
 const DROPDOWN_DEFAULT_HEIGHT = 0.45;
 
 // Which terminal to use: the one asked for if it is installed, otherwise
-// Terminator, otherwise GNOME Terminal. '' if there is none.
+// KTERM, Terminator, then GNOME Terminal. '' if there is none.
 function dropdownTerminalKind(wanted, isInstalled) {
-    const known = ['terminator', 'gnome-terminal'];
+    const known = ['kterm-terminal', 'terminator', 'gnome-terminal'];
     if (known.includes(wanted) && isInstalled(wanted))
         return wanted;
     return known.find(isInstalled) || '';
@@ -335,8 +335,8 @@ function dropdownTerminalKind(wanted, isInstalled) {
 // The command that opens the terminal in folder, carrying our window role
 // (X11) so it can be found again after the shell restarts.
 function dropdownArgv(kind, folder) {
-    if (kind === 'terminator') {
-        return ['terminator', '--borderless', `--role=${DROPDOWN_ROLE}`,
+    if (kind === 'kterm-terminal' || kind === 'terminator') {
+        return [kind, '--borderless', `--role=${DROPDOWN_ROLE}`,
             `--working-directory=${folder}`];
     }
     return ['gnome-terminal', `--role=${DROPDOWN_ROLE}`, `--working-directory=${folder}`];
@@ -352,7 +352,7 @@ function isDropdownWindow(kind, wmClass, role, winPid = 0, targetPid = 0) {
     if (targetPid && winPid)
         return winPid === targetPid;
     const name = String(wmClass || '').toLowerCase();
-    return kind === 'terminator' ? name.includes('terminator') : name.includes('gnome-terminal');
+    return ['kterm-terminal', 'terminator'].includes(kind) ? name.includes('terminator') : name.includes('gnome-terminal');
 }
 
 // Across the top of the work area: full width, a fraction of its height.

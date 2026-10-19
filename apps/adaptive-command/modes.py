@@ -218,7 +218,7 @@ def git_rows(projects, status_of=extras.git_status):
             item["name"], f"{item['text']}  ·  {item['path'].replace(str(Path.home()), '~')}",
             "Git", "emblem-important-symbolic" if item["attention"] else "emblem-ok-symbolic",
             "Terminal",
-            ("run", ["gnome-terminal", f"--working-directory={item['path']}"], item["path"]),
+            ("run", ["kterm-terminal", f"--working-directory={item['path']}"], item["path"]),
             300 - rank))
     return rows or [row("No projects registered", "Add one in Projects", "Git",
                         "folder-symbolic", score=300)]
@@ -401,7 +401,7 @@ def ssh_rows(rest, hosts):
                     "Hosts come from the Host lines of ~/.ssh/config", "SSH",
                     "network-server-symbolic", score=300)]
     return [row(f"ssh {host}", "Opens in a terminal", "SSH", "network-server-symbolic", "Connect",
-                ("run", ["gnome-terminal", "--", "ssh", host], None), 300 - rank)
+                ("run", ["kterm-terminal", "-x", "ssh", host], None), 300 - rank)
             for rank, host in enumerate(hits[:12])]
 
 

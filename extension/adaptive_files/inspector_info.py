@@ -549,7 +549,7 @@ class InfoMixin:
         except Exception:
             pass
 
-        for candidate in (command, "x-terminal-emulator", "gnome-terminal"):
+        for candidate in ("kterm-terminal", command, "x-terminal-emulator", "gnome-terminal"):
             if candidate and shutil.which(candidate):
                 try:
                     subprocess.Popen(
