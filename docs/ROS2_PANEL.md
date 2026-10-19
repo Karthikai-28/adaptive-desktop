@@ -8,10 +8,15 @@ computer can see and the tools used with it.
 - **Header**: distro, domain, node count.
 - **Setup**: domain ID (click to change), discovery range (localhost only or
   the LAN), middleware, and the workspace overlay (click to choose). By default
-  these follow `~/.bashrc` (`export ROS_DOMAIN_ID=…`, `ROS_LOCALHOST_ONLY`,
-  `RMW_IMPLEMENTATION`), so the panel sees the same graph as your terminals.
-  A change made in the panel is saved in
-  `~/.config/adaptive-desktop/ros2.json` and wins over `~/.bashrc`.
+  these follow the login shell's startup files (`~/.zshenv`, `~/.zprofile`,
+  `~/.zshrc` for Zsh; `~/.profile`, `~/.bash_profile`, `~/.bashrc` for bash):
+  `export ROS_DOMAIN_ID=…`, `ROS_LOCALHOST_ONLY`, `RMW_IMPLEMENTATION`, and
+  the workspace whose `install/(local_)setup.*` they source, also through a
+  variable (`x="$HOME/…/local_setup.zsh"; [[ -r "$x" ]] && source "$x"`). So
+  the panel sees the same graph as your terminals. A change made in the panel
+  is saved in `~/.config/adaptive-desktop/ros2.json` and wins over them.
+  If ROS processes started outside the panel run on another domain or
+  discovery range, the setup card says so and **Watch them** switches to it.
 - **Launch**: RViz2 (and recent `.rviz` configs), Gazebo (and the worlds in
   your workspaces), rqt, rqt_graph, and a terminal with the same ROS setup.
   Terminal uses the KTERM modern Zsh profile, sources the user's `.zshrc`,
@@ -62,7 +67,7 @@ the watcher, keeps which rows are expanded, and renders.
 
 ## Plan (done)
 
-1. Helper, environment and status: distro, `~/.bashrc` settings, config,
+1. Helper, environment and status: distro, shell startup settings, config,
    workspaces, installed and running tools, RViz configs, Gazebo worlds.
 2. Helper, launching: launch and stop RViz2, Gazebo (Classic, Fortress or
    newer, through their ROS launch files when present), rqt, rqt_graph, the
@@ -90,7 +95,7 @@ localhost-only discovery, so they never see or disturb a real robot.
 ## Gotchas
 
 - The watcher outlives a closed dropdown by a minute. A setup change made
-  elsewhere (`~/.bashrc`, `ros2.json`) restarts it the next time the panel
+  elsewhere (`~/.zshrc`, `~/.bashrc`, `ros2.json`) restarts it the next time the panel
   opens; otherwise it would keep watching the old domain.
 - Every node has `/rosout` and `/parameter_events`, the panel's own too; with
   only hidden nodes on them they are left out.
@@ -100,3 +105,8 @@ localhost-only discovery, so they never see or disturb a real robot.
   script that runs with `set -u` (the nested sandbox does).
 - The sandbox has its own HOME, so no `~/.bashrc`: the nested check writes
   `ros2.json` for its private domain.
+- Which files are read depends on `$SHELL` (else the passwd entry). When the
+  terminal moved to Zsh the panel kept reading `~/.bashrc` (domain 42,
+  localhost only) while nodes ran on domain 0 from `~/.zshrc`, and showed an
+  empty graph. A workspace inside a dot-folder (`proj/.build/humble`) is not
+  in the two-level scan; the one in use is added to the list, named `proj`.

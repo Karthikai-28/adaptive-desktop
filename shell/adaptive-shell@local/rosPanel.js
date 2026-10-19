@@ -26,7 +26,7 @@ const LIST_MAX_HEIGHT = 680;
 const KEEP_WATCHING_S = 60;
 const STOP_GRACE_MS = 2000;
 const COPIED_MS = 1100;
-const SOURCE_HINTS = { bashrc: 'from ~/.bashrc', panel: 'set here', default: 'default' };
+const SOURCE_HINTS = { panel: 'set here', default: 'default' };
 const LIFECYCLE_CLASSES = {
     active: 'adaptive-network-good',
     inactive: 'adaptive-network-warn',
@@ -218,7 +218,7 @@ var RosPanel = class RosPanel {
         this._helper(['status'], data => {
             if (data && data.installed !== undefined)
                 this._status = data;
-            // ~/.bashrc or ros2.json changed while the watcher kept running.
+            // ~/.zshrc, ~/.bashrc or ros2.json changed while the watcher kept running.
             if (this._watch && this._setupKey() !== this._watchSetup)
                 this._restartWatch();
             if (then)
@@ -228,7 +228,11 @@ var RosPanel = class RosPanel {
     }
 
     _set(key, value) {
-        this._helper(['set', key, value], reply => {
+        this._setMany([key, value]);
+    }
+
+    _setMany(pairs) {
+        this._helper(['set', ...pairs], reply => {
             if (reply.ok) {
                 this._status = reply;
                 this._restartWatch();
@@ -556,6 +560,7 @@ var RosPanel = class RosPanel {
             row++;
         };
         const from = status.from;
+        const hint = key => from[key] === 'shell' ? `from ${status.shell_rc}` : SOURCE_HINTS[from[key]];
 
         if (this._domainDraft !== null) {
             grid.layout_manager.attach(new St.Label({
@@ -597,17 +602,17 @@ var RosPanel = class RosPanel {
                 return GLib.SOURCE_REMOVE;
             });
         } else {
-            line('Domain', String(status.domain), SOURCE_HINTS[from.domain], () => {
+            line('Domain', String(status.domain), hint('domain'), () => {
                 this._domainDraft = String(status.domain);
                 this._render();
             });
         }
 
         line('Discovery', status.localhost ? 'This computer only' : 'Whole network',
-            SOURCE_HINTS[from.localhost], () => this._set('localhost', status.localhost ? '0' : '1'));
+            hint('localhost'), () => this._set('localhost', status.localhost ? '0' : '1'));
 
         const middlewares = status.middlewares.map(m => m.id);
-        line('Middleware', status.rmw_name, SOURCE_HINTS[from.rmw], middlewares.length > 1 ? () => {
+        line('Middleware', status.rmw_name, hint('rmw'), middlewares.length > 1 ? () => {
             const next = middlewares[(middlewares.indexOf(status.rmw) + 1) % middlewares.length];
             this._set('rmw', next);
         } : null);
@@ -615,17 +620,38 @@ var RosPanel = class RosPanel {
         const choices = ['none', ...status.workspaces.map(w => w.path)];
         const current = status.workspace || 'none';
         const named = status.workspaces.find(w => w.path === status.workspace);
-        line('Workspace', named ? named.name : 'None', SOURCE_HINTS[from.workspace],
+        line('Workspace', named ? named.name : 'None', hint('workspace'),
             choices.length > 1 ? () => {
                 this._set('workspace', choices[(choices.indexOf(current) + 1) % choices.length]);
             } : null);
+
+        const other = (status.elsewhere || [])[0];
+        if (other && !this._notes.setup) {
+            const footer = new St.BoxLayout({ style_class: 'adaptive-ros-setup-footer', x_expand: true });
+            footer.add_child(new St.Label({
+                text: `${other.count} ROS ${other.count === 1 ? 'process runs' : 'processes run'} on domain ` +
+                    `${other.domain}${other.localhost ? ', this computer only' : ''}`,
+                style_class: 'adaptive-ros-hint',
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            const follow = new St.Button({
+                style_class: 'adaptive-tasks-sort',
+                label: 'Watch them',
+                can_focus: true,
+            });
+            follow.connect('clicked', () => this._setMany([
+                'domain', String(other.domain), 'localhost', other.localhost ? '1' : '0']));
+            footer.add_child(follow);
+            box.add_child(footer);
+        }
 
         const note = this._notes.setup;
         const changed = Object.values(from).includes('panel');
         if (note || changed) {
             const footer = new St.BoxLayout({ style_class: 'adaptive-ros-setup-footer', x_expand: true });
             footer.add_child(new St.Label({
-                text: note ? note.text : 'Changed here; your terminals still use ~/.bashrc',
+                text: note ? note.text : `Changed here; your terminals still use ${status.shell_rc}`,
                 style_class: note ? 'adaptive-network-ssh-error' : 'adaptive-ros-hint',
                 x_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
@@ -633,7 +659,7 @@ var RosPanel = class RosPanel {
             if (changed) {
                 const reset = new St.Button({
                     style_class: 'adaptive-tasks-sort',
-                    label: 'Follow ~/.bashrc',
+                    label: `Follow ${status.shell_rc}`,
                     can_focus: true,
                 });
                 reset.connect('clicked', () => {

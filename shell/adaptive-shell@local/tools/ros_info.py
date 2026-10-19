@@ -2,8 +2,8 @@
 """ROS 2 for the shell's ROS panel, as JSON.
 
     ros_info.py status                 distro, setup, workspaces, tools (loads no ROS)
-    ros_info.py set <key> <value>      domain | localhost | rmw | workspace; "" follows ~/.bashrc
-                                       (`set all ""` for all four)
+    ros_info.py set <key> <value>...   domain | localhost | rmw | workspace; "" follows the shell
+                                       (`set all ""` for all four); several pairs at once
     ros_info.py launch <tool> [file]   rviz2 | gazebo | rqt | rqt_graph | demo; file is a
                                        .rviz config or a world
     ros_info.py stop <tool>            ask every running copy of it to quit
@@ -11,9 +11,12 @@
     ros_info.py install-gazebo         a terminal on the apt command (the password is typed there)
     ros_info.py watch                  the live graph; see below
 
-The setup follows ~/.bashrc unless the panel changed it: the distro it sources,
+The setup follows the login shell's startup files (~/.zshrc for Zsh, ~/.bashrc
+for bash) unless the panel changed it: the distro and workspace they source,
 `export ROS_DOMAIN_ID=`, `ROS_LOCALHOST_ONLY`, `RMW_IMPLEMENTATION`. A change
-made in the panel is kept in ~/.config/adaptive-desktop/ros2.json. Everything
+made in the panel is kept in ~/.config/adaptive-desktop/ros2.json. `status`
+also reports ROS processes started outside the panel on another domain or
+discovery range ("elsewhere"), so the panel can offer to follow them. Everything
 that needs ROS runs in an environment made by sourcing the distro's setup.bash
 (and the workspace's install/setup.bash) in bash, never ~/.bashrc itself.
 
@@ -32,6 +35,7 @@ It exits when stdin closes, so it cannot outlive the shell that started it.
 
 import json
 import os
+import pwd
 import queue
 import re
 import shlex
@@ -47,7 +51,8 @@ HOME = Path.home()
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "adaptive-desktop" / "ros2.json"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "adaptive-desktop" / "ros"
 ROS_ROOT = Path(os.environ.get("ADAPTIVE_ROS_ROOT", "/opt/ros"))
-SHELL_FILES = (".bashrc", ".bash_profile", ".profile")
+SHELL_FILES = {"zsh": (".zshenv", ".zprofile", ".zshrc"),
+               "bash": (".profile", ".bash_profile", ".bashrc")}
 ENV_MARK = "ADAPTIVE_ROS_ENV"
 
 # The middleware each distro uses when RMW_IMPLEMENTATION is not set.
@@ -90,13 +95,36 @@ def write_config(data):
     tmp.replace(CONFIG)
 
 
+def login_shell():
+    """zsh or bash: whose startup files hold the user's ROS setup."""
+    shell = os.environ.get("SHELL")
+    if not shell:
+        try:
+            shell = pwd.getpwuid(os.getuid()).pw_shell
+        except KeyError:
+            shell = ""
+    return "zsh" if os.path.basename(shell) == "zsh" else "bash"
+
+
+def shell_rc():
+    return "~/" + SHELL_FILES[login_shell()][-1]
+
+
 def from_shell_files():
-    """What ~/.bashrc and friends set at top level: the last value of each wins."""
+    """What the login shell's startup files set at top level: the last value of each wins."""
     found = {}
     export = re.compile(r"^\s*export\s+(ROS_DOMAIN_ID|ROS_LOCALHOST_ONLY|RMW_IMPLEMENTATION)="
                         r"(['\"]?)([^'\"\s#;]*)\2")
-    source = re.compile(r"^\s*(?:\[[^]]*\]\s*&&\s*)?(?:source|\.)\s+(['\"]?)([^'\"\s;]+)\1")
-    for name in SHELL_FILES:
+    assign = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=(['\"]?)([^'\"\s;]*)\2\s*(?:#.*)?$")
+    source = re.compile(r"^\s*(?:\[\[?[^]]*\]\]?\s*&&\s*)?(?:source|\.)\s+(['\"]?)([^'\"\s;]+)\1")
+    variables = {}
+
+    def expand(text):
+        text = re.sub(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?",
+                      lambda m: variables.get(m.group(1), os.environ.get(m.group(1), m.group(0))), text)
+        return os.path.expanduser(text)
+
+    for name in SHELL_FILES[login_shell()]:
         try:
             lines = (HOME / name).read_text(errors="replace").splitlines()
         except OSError:
@@ -106,10 +134,14 @@ def from_shell_files():
             if m:
                 found[m.group(1)] = m.group(3)
                 continue
+            m = assign.match(line)
+            if m:
+                variables[m.group(1)] = expand(m.group(3))
+                continue
             m = source.match(line)
             if not m:
                 continue
-            path = os.path.expanduser(os.path.expandvars(m.group(2)))
+            path = expand(m.group(2))
             distro = re.match(rf"^{re.escape(str(ROS_ROOT))}/([^/]+)/setup\.(?:bash|sh|zsh)$", path)
             if distro:
                 found["distro"] = distro.group(1)
@@ -145,6 +177,19 @@ def workspaces():
     return found
 
 
+def workspace_name(path):
+    """A short name: a build tree like proj/.build/humble is called proj."""
+    path = Path(path)
+    try:
+        parts = path.relative_to(HOME).parts
+    except ValueError:
+        parts = path.parts[1:]
+    for i, part in enumerate(parts):
+        if part.startswith(".") and i:
+            return parts[i - 1]
+    return "/".join(parts) or str(path)
+
+
 def settings():
     """The setup the panel uses, and where each part came from."""
     shell = from_shell_files()
@@ -159,7 +204,7 @@ def settings():
             return parse(config[key]), "panel"
         if shell_key in shell:
             try:
-                return parse(shell[shell_key]), "bashrc"
+                return parse(shell[shell_key]), "shell"
             except ValueError:
                 pass
         return default, "default"
@@ -276,6 +321,34 @@ def running():
     return found
 
 
+def elsewhere(setup):
+    """ROS processes started outside the panel on a domain or range the panel does not see."""
+    groups = {}
+    for pid, argv in processes():
+        if any(a.endswith("_ros2_daemon") for a in argv[:3]):
+            continue
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                env = dict(item.split(b"=", 1) for item in f.read().split(b"\0") if b"=" in item)
+        except OSError:
+            continue
+        if b"ROS_DISTRO" not in env or ENV_MARK.encode() in env:
+            continue
+        roots = [r.decode(errors="replace") + "/" for r in env.get(b"AMENT_PREFIX_PATH", b"").split(b":") if r]
+        if not ("--ros-args" in argv or tool_of(argv)
+                or any(w.startswith(r) for w in argv[:2] for r in roots)):
+            continue
+        try:
+            domain = int(env.get(b"ROS_DOMAIN_ID", b"0") or 0)
+        except ValueError:
+            continue
+        localhost = env.get(b"ROS_LOCALHOST_ONLY", b"").lower() in (b"1", b"true")
+        if (domain, localhost) != (setup["domain"], setup["localhost"]):
+            groups[(domain, localhost)] = groups.get((domain, localhost), 0) + 1
+    return [{"domain": d, "localhost": l, "count": n}
+            for (d, l), n in sorted(groups.items(), key=lambda kv: -kv[1])]
+
+
 def gazebo_flavour(distro, env_path=None):
     """How Gazebo is started here: (flavour, argv for a world or None), or (None, None)."""
     share = ROS_ROOT / (distro or "") / "share"
@@ -348,13 +421,18 @@ def status():
         "rqt_graph": (base / "bin" / "rqt_graph").is_file(),
         "demo": (base / "lib" / "demo_nodes_cpp" / "talker").is_file(),
     }
+    spaces = workspaces()
+    if setup["workspace"] and all(w["path"] != setup["workspace"] for w in spaces):
+        spaces.append({"name": workspace_name(setup["workspace"]), "path": setup["workspace"]})
     return {
         "installed": True,
         "distros": distros(),
         **setup,
+        "shell_rc": shell_rc(),
+        "elsewhere": elsewhere(setup),
         "rmw_name": RMW_NAMES.get(setup["rmw"], setup["rmw"]),
         "middlewares": [{"id": m, "name": RMW_NAMES[m]} for m in middlewares(distro)],
-        "workspaces": workspaces(),
+        "workspaces": spaces,
         "tools": {name: {"installed": ok, "pids": procs.get(name, [])} for name, ok in tools.items()},
         "gazebo_flavour": flavour,
         "gazebo_install": f"sudo apt install ros-{distro}-ros-gz",
@@ -433,7 +511,9 @@ def terminal_rc(setup):
              f"source {shlex.quote(str(ROS_ROOT / setup['distro'] / 'setup.zsh'))}"]
     if setup["workspace"]:
         ws = Path(setup["workspace"])
-        lines += [f"source {shlex.quote(str(ws / 'install' / 'setup.zsh'))}", f"cd {shlex.quote(str(ws))}"]
+        # A build tree like proj/.build/humble opens in proj.
+        top = next((p.parent for p in (ws, *ws.parents) if p.name.startswith(".")), ws)
+        lines += [f"source {shlex.quote(str(ws / 'install' / 'setup.zsh'))}", f"cd {shlex.quote(str(top))}"]
     lines.append(f"export ROS_DOMAIN_ID={int(setup['domain'])}")
     lines.append("export ROS_LOCALHOST_ONLY=1" if setup["localhost"] else "unset ROS_LOCALHOST_ONLY")
     if setup["rmw_set"]:
@@ -964,8 +1044,11 @@ def main(argv):
     try:
         if command == "status":
             result = status()
-        elif command == "set" and len(args) == 2:
-            result = set_value(*args)
+        elif command == "set" and args and len(args) % 2 == 0:
+            for key, value in zip(args[::2], args[1::2]):
+                result = set_value(key, value)
+                if not result.get("ok"):
+                    break
         elif command == "launch" and args:
             result = launch(args[0], args[1] if len(args) > 1 else None)
         elif command == "stop" and args:

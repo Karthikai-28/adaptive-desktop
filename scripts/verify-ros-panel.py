@@ -104,12 +104,14 @@ def main():
         f"source {ws}/install/setup.bash\n"
         "alias other='export ROS_DOMAIN_ID=5'\n")
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ROS_", "AMENT_", "RMW_"))}
-    env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), XDG_CACHE_HOME=str(home / ".cache"))
+    env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), XDG_CACHE_HOME=str(home / ".cache"),
+               SHELL="/bin/bash")
 
     # ---------------------------------------------------------- setup
     status = helper(env, "status")
     check(status.get("installed") is True, "status: ROS 2 is found")
-    check(status.get("domain") == DOMAIN and status["from"]["domain"] == "bashrc",
+    check(status.get("domain") == DOMAIN and status["from"]["domain"] == "shell"
+          and status.get("shell_rc") == "~/.bashrc",
           "status: the domain comes from ~/.bashrc, not from an alias", status.get("domain"))
     check(status.get("localhost") is True, "status: localhost-only comes from ~/.bashrc")
     check(status.get("workspace") == str(ws), "status: the workspace ~/.bashrc sources is used",
@@ -126,10 +128,30 @@ def main():
     changed = helper(env, "set", "domain", str(DOMAIN + 1))
     check(changed.get("domain") == DOMAIN + 1 and changed["from"]["domain"] == "panel", "set: the panel's domain wins")
     reset = helper(env, "set", "all", "")
-    check(reset.get("domain") == DOMAIN and reset["from"]["domain"] == "bashrc", "set: all '' follows ~/.bashrc again")
+    check(reset.get("domain") == DOMAIN and reset["from"]["domain"] == "shell", "set: all '' follows ~/.bashrc again")
+    both = helper(env, "set", "domain", "7", "localhost", "0")
+    check(both.get("domain") == 7 and both.get("localhost") is False, "set: several pairs at once", both)
+    helper(env, "set", "all", "")
+
+    # A Zsh login reads ~/.zshrc, and a workspace sourced through a variable from a
+    # build tree inside a dot-folder is still found and named.
+    lab = home / "lab" / ".build" / "humble"
+    (lab / "install").mkdir(parents=True)
+    (lab / "install" / "setup.bash").write_text("# an empty overlay\n")
+    (home / ".zshrc").write_text(
+        f"source {setup[:-len('bash')]}zsh\n"
+        '_lab="$HOME/lab/.build/humble/install/local_setup.zsh"\n'
+        '[[ -r "$_lab" ]] && source "$_lab"\n')
+    zsh = helper(env | {"SHELL": "/usr/bin/zsh"}, "status")
+    check(zsh.get("domain") == 0 and zsh.get("localhost") is False and zsh.get("shell_rc") == "~/.zshrc",
+          "status: a Zsh login follows ~/.zshrc, not ~/.bashrc", zsh.get("domain"))
+    check(zsh.get("workspace") == str(lab) and zsh["from"]["workspace"] == "shell"
+          and {"name": "lab", "path": str(lab)} in zsh.get("workspaces", []),
+          "status: a workspace ~/.zshrc sources through a variable is used and named", zsh.get("workspace"))
+    (home / ".zshrc").unlink()
 
     # Imported here, after HOME points at the throwaway home: it reads HOME once.
-    os.environ.update(HOME=env["HOME"], XDG_CONFIG_HOME=env["XDG_CONFIG_HOME"], XDG_CACHE_HOME=env["XDG_CACHE_HOME"])
+    os.environ.update(SHELL="/bin/bash", HOME=env["HOME"], XDG_CONFIG_HOME=env["XDG_CONFIG_HOME"], XDG_CACHE_HOME=env["XDG_CACHE_HOME"])
     sys.path.insert(0, str(HELPER.parent))
     import ros_info
     samples = {
@@ -153,6 +175,13 @@ def main():
              for argv in ([str(lib / "demo_nodes_cpp" / "talker")],
                           [str(lib / "lifecycle" / "lifecycle_talker")],
                           [sys.executable, str(lib / "action_tutorials_py" / "fibonacci_action_server")])]
+    # Started like from a terminal (no panel mark) on another domain: the panel offers to follow it.
+    stray_env = {k: v for k, v in node_env.items() if k != ros_info.ENV_MARK} | {"ROS_DOMAIN_ID": str(DOMAIN + 3)}
+    nodes.append(subprocess.Popen([str(lib / "demo_nodes_cpp" / "listener")], env=stray_env,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    time.sleep(0.5)
+    check({"domain": DOMAIN + 3, "localhost": True, "count": 1} in helper(env, "status").get("elsewhere", []),
+          "status: a ROS process on another domain is reported", helper(env, "status").get("elsewhere"))
     watch = Watch(env)
     try:
         want = {"/talker", "/lc_talker", "/fibonacci_action_server"}
