@@ -2554,6 +2554,11 @@
     spacing: 8px;
 }
 
+.adaptive-system-menu {
+    width: 440px;
+    spacing: 8px;
+}
+
 .adaptive-ros-value-box {
     spacing: 8px;
 }

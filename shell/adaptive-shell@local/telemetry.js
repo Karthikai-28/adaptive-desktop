@@ -167,7 +167,11 @@ var Telemetry = class Telemetry {
         // Walking /proc is only worth it when something is showing the result.
         this._detailed = true;
         this._samplerHelper = Me.dir.get_child('tools').get_child('process_sampler.py').get_path();
+        this._gpuSamplerHelper = Me.dir.get_child('tools').get_child('gpu_sampler.py').get_path();
         this._samplingProcesses = false;
+        this._hasNvidia = false;
+        this._gpuProc = null;
+        this._gpuCancellable = null;
 
         this._discover();
 
@@ -179,11 +183,20 @@ var Telemetry = class Telemetry {
             cpu: { percent: NaN, cores: [], freqMhz: NaN, tempC: NaN },
             gpu: {
                 percent: NaN, freqMhz: NaN, requestedMhz: NaN,
-                maxFreqMhz: NaN, available: false,
+                maxFreqMhz: NaN, available: false, name: '',
+                vramUsedBytes: NaN, vramTotalBytes: NaN, vramFreeBytes: NaN,
+                vramPercent: NaN, tempC: NaN, driver: '',
+            },
+            igpu: {
+                percent: NaN, freqMhz: NaN, requestedMhz: NaN,
+                maxFreqMhz: NaN, available: false, name: '',
             },
             memory: {
                 usedBytes: NaN, totalBytes: NaN, percent: NaN,
-                swapUsedBytes: NaN, swapTotalBytes: NaN,
+                freeBytes: NaN, availableBytes: NaN,
+                buffersBytes: NaN, cachedBytes: NaN,
+                swapUsedBytes: NaN, swapTotalBytes: NaN, swapFreeBytes: NaN,
+                swapPercent: NaN,
             },
             thermal: [],
             battery: { percent: NaN, state: '', timeRemaining: 0, present: false },
@@ -328,10 +341,12 @@ var Telemetry = class Telemetry {
     }
 
     _discoverGpu() {
-        // Intel exposes GT frequency per DRM card; the card number depends on
-        // probe order, so find the card that actually has the attribute.
-        this._gpu = null;
+        // Check for NVIDIA GPU presence via sysfs/procfs or nvidia-smi
+        this._hasNvidia = GLib.file_test('/proc/driver/nvidia/gpus', GLib.FileTest.IS_DIR) ||
+            GLib.find_program_in_path('nvidia-smi') !== null;
 
+        // Discover Intel DRM card
+        this._igpu = null;
         for (const name of listDir('/sys/class/drm')) {
             if (!/^card\d+$/.test(name))
                 continue;
@@ -342,7 +357,7 @@ var Telemetry = class Telemetry {
                 continue;
 
             const rc6Path = `${base}/power/rc6_residency_ms`;
-            this._gpu = {
+            this._igpu = {
                 actPath,
                 curPath: `${base}/gt_cur_freq_mhz`,
                 maxPath: `${base}/gt_max_freq_mhz`,
@@ -351,12 +366,8 @@ var Telemetry = class Telemetry {
             break;
         }
 
-        if (this._gpu)
-            return;
-
-        // AMD (amdgpu) publishes how busy the GPU is directly, and no clock.
-        // NVIDIA's driver publishes neither in sysfs - it needs nvidia-smi -
-        // so an NVIDIA-only machine shows the GPU row as unavailable.
+        // Discover AMD DRM card
+        this._amdGpu = null;
         for (const name of listDir('/sys/class/drm')) {
             if (!/^card\d+$/.test(name))
                 continue;
@@ -365,8 +376,87 @@ var Telemetry = class Telemetry {
             if (Number.isNaN(readNumber(busyPath)))
                 continue;
 
-            this._gpu = { busyPath };
+            this._amdGpu = { busyPath };
             break;
+        }
+    }
+
+    _startGpuStream() {
+        if (this._gpuProc || !this._hasNvidia)
+            return;
+
+        try {
+            this._gpuCancellable = new Gio.Cancellable();
+            this._gpuProc = new Gio.Subprocess({
+                argv: ['/usr/bin/python3', this._gpuSamplerHelper, 'stream'],
+                flags: Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
+            });
+            this._gpuProc.init(this._gpuCancellable);
+
+            const stdoutPipe = this._gpuProc.get_stdout_pipe();
+            const dataStream = new Gio.DataInputStream({ base_stream: stdoutPipe });
+
+            const readLine = () => {
+                if (!this._gpuProc || !this._gpuCancellable || this._gpuCancellable.is_cancelled())
+                    return;
+
+                dataStream.read_line_async(
+                    GLib.PRIORITY_DEFAULT,
+                    this._gpuCancellable,
+                    (stream, result) => {
+                        try {
+                            const [line] = stream.read_line_finish_utf8(result);
+                            if (line !== null) {
+                                try {
+                                    const data = JSON.parse(line);
+                                    if (data && data.available) {
+                                        this.snapshot.gpu.available = true;
+                                        this.snapshot.gpu.name = data.name || 'NVIDIA GPU';
+                                        this.snapshot.gpu.driver = data.driver || '';
+                                        this.snapshot.gpu.percent = data.percent;
+                                        this.snapshot.gpu.freqMhz = data.freqMhz;
+                                        this.snapshot.gpu.tempC = data.tempC;
+                                        this.snapshot.gpu.vramUsedBytes = data.vramUsedBytes;
+                                        this.snapshot.gpu.vramTotalBytes = data.vramTotalBytes;
+                                        this.snapshot.gpu.vramFreeBytes = data.vramFreeBytes;
+                                        this.snapshot.gpu.vramPercent = data.vramTotalBytes > 0
+                                            ? (data.vramUsedBytes / data.vramTotalBytes) * 100 : NaN;
+                                    }
+                                } catch (err) {}
+                                readLine();
+                            }
+                        } catch (e) {
+                            // Cancelled or stream ended
+                        }
+                    }
+                );
+            };
+
+            readLine();
+        } catch (e) {
+            logError(e, '[Adaptive Telemetry] launching GPU stream');
+            this._stopGpuStream();
+        }
+    }
+
+    _stopGpuStream() {
+        if (this._gpuCancellable) {
+            this._gpuCancellable.cancel();
+            this._gpuCancellable = null;
+        }
+        if (this._gpuProc) {
+            try {
+                const stdinPipe = this._gpuProc.get_stdin_pipe();
+                if (stdinPipe) {
+                    const stream = new Gio.DataOutputStream({ base_stream: stdinPipe });
+                    stream.put_string('quit\n', null);
+                    stream.close(null);
+                }
+            } catch (e) {}
+            try {
+                this._gpuProc.force_exit();
+            } catch (e) {}
+            this._gpuProc = null;
         }
     }
 
@@ -412,6 +502,7 @@ var Telemetry = class Telemetry {
         this._nextProcessTick = 1;
         this._nextSlowZoneTick = 2;
 
+        this._startGpuStream();
         this._refreshDisks();
         this._sample();
 
@@ -431,6 +522,7 @@ var Telemetry = class Telemetry {
             GLib.Source.remove(this._timerId);
             this._timerId = 0;
         }
+        this._stopGpuStream();
     }
 
     destroy() {
@@ -563,55 +655,54 @@ var Telemetry = class Telemetry {
     // ------------------------------------------------------------------ gpu
 
     _sampleGpu() {
-        if (!this._gpu) {
-            this.snapshot.gpu.available = false;
-            return;
-        }
+        // If Intel iGPU is present, sample its load and frequency
+        if (this._igpu) {
+            this.snapshot.igpu.available = true;
+            this.snapshot.igpu.name = 'Intel HD Graphics';
+            this.snapshot.igpu.freqMhz = readNumber(this._igpu.actPath);
+            this.snapshot.igpu.requestedMhz = readNumber(this._igpu.curPath);
+            this.snapshot.igpu.maxFreqMhz = readNumber(this._igpu.maxPath);
 
-        this.snapshot.gpu.available = true;
-
-        if (this._gpu.busyPath) {
-            const busy = readNumber(this._gpu.busyPath);
-            this.snapshot.gpu.percent = Number.isNaN(busy) ? NaN : Math.max(0, Math.min(100, busy));
-            return;
-        }
-
-        // Actual clock, which is 0 whenever the engine is asleep, and the clock
-        // the driver is asking for, which stays meaningful either way.
-        this.snapshot.gpu.freqMhz = readNumber(this._gpu.actPath);
-        this.snapshot.gpu.requestedMhz = readNumber(this._gpu.curPath);
-        this.snapshot.gpu.maxFreqMhz = readNumber(this._gpu.maxPath);
-
-        if (!this._gpu.rc6Path) {
-            this.snapshot.gpu.percent = NaN;
-            return;
-        }
-
-        // RC6 is the render engine's sleep state, so the time it did not spend
-        // asleep is the time it was busy. This is what intel_gpu_top reports
-        // without needing perf access.
-        const rc6 = readNumber(this._gpu.rc6Path);
-        const now = GLib.get_monotonic_time() / 1000;
-
-        if (Number.isNaN(rc6)) {
-            this.snapshot.gpu.percent = NaN;
-            this._prevGpu = null;
-            return;
-        }
-
-        if (this._prevGpu) {
-            const wallDelta = now - this._prevGpu.now;
-            const rc6Delta = rc6 - this._prevGpu.rc6;
-
-            if (wallDelta > 0 && rc6Delta >= 0) {
-                const busy = (wallDelta - rc6Delta) / wallDelta * 100;
-                this.snapshot.gpu.percent = Math.max(0, Math.min(100, busy));
-            } else {
-                this.snapshot.gpu.percent = NaN;
+            let rc6Busy = NaN;
+            if (this._igpu.rc6Path) {
+                const rc6 = readNumber(this._igpu.rc6Path);
+                const now = GLib.get_monotonic_time() / 1000;
+                if (!Number.isNaN(rc6) && this._prevGpu) {
+                    const wallDelta = now - this._prevGpu.now;
+                    const rc6Delta = rc6 - this._prevGpu.rc6;
+                    if (wallDelta > 0 && rc6Delta >= 0)
+                        rc6Busy = Math.max(0, Math.min(100, (wallDelta - rc6Delta) / wallDelta * 100));
+                }
+                if (!Number.isNaN(rc6))
+                    this._prevGpu = { rc6, now };
             }
+            this.snapshot.igpu.percent = rc6Busy;
+
+            // If no NVIDIA GPU is present or active, Intel iGPU acts as the primary GPU
+            if (!this._hasNvidia || !this.snapshot.gpu.available) {
+                this.snapshot.gpu.available = true;
+                this.snapshot.gpu.name = 'Intel HD Graphics';
+                this.snapshot.gpu.percent = rc6Busy;
+                this.snapshot.gpu.freqMhz = this.snapshot.igpu.freqMhz;
+                this.snapshot.gpu.requestedMhz = this.snapshot.igpu.requestedMhz;
+                this.snapshot.gpu.maxFreqMhz = this.snapshot.igpu.maxFreqMhz;
+            }
+            return;
         }
 
-        this._prevGpu = { rc6, now };
+        if (this._amdGpu) {
+            const busy = readNumber(this._amdGpu.busyPath);
+            const percent = Number.isNaN(busy) ? NaN : Math.max(0, Math.min(100, busy));
+            if (!this._hasNvidia || !this.snapshot.gpu.available) {
+                this.snapshot.gpu.available = true;
+                this.snapshot.gpu.name = 'AMD Radeon';
+                this.snapshot.gpu.percent = percent;
+            }
+            return;
+        }
+
+        if (!this._hasNvidia)
+            this.snapshot.gpu.available = false;
     }
 
     // --------------------------------------------------------------- memory
@@ -629,15 +720,22 @@ var Telemetry = class Telemetry {
         }
 
         const total = values.MemTotal;
+        const free = values.MemFree;
         // MemAvailable is the kernel's own estimate of what a new allocation
         // could actually get, which is a truer "free" than MemFree.
         const available = values.MemAvailable !== undefined
             ? values.MemAvailable
             : values.MemFree;
+        const buffers = values.Buffers || 0;
+        const cached = (values.Cached || 0) + (values.SReclaimable || 0);
 
         if (Number.isFinite(total) && Number.isFinite(available)) {
             this.snapshot.memory.totalBytes = total;
             this.snapshot.memory.usedBytes = total - available;
+            this.snapshot.memory.freeBytes = free;
+            this.snapshot.memory.availableBytes = available;
+            this.snapshot.memory.buffersBytes = buffers;
+            this.snapshot.memory.cachedBytes = cached;
             this.snapshot.memory.percent = (total - available) / total * 100;
         }
 
@@ -646,6 +744,10 @@ var Telemetry = class Telemetry {
         if (Number.isFinite(swapTotal) && Number.isFinite(swapFree)) {
             this.snapshot.memory.swapTotalBytes = swapTotal;
             this.snapshot.memory.swapUsedBytes = swapTotal - swapFree;
+            this.snapshot.memory.swapFreeBytes = swapFree;
+            this.snapshot.memory.swapPercent = swapTotal > 0
+                ? ((swapTotal - swapFree) / swapTotal) * 100
+                : 0;
         }
     }
 

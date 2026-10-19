@@ -33,6 +33,7 @@ const ShellActions = Me.imports.shellActions;
 const TaskManager = Me.imports.taskManager;
 const NetworkPanel = Me.imports.networkPanel;
 const RosPanel = Me.imports.rosPanel;
+const SystemPanel = Me.imports.systemPanel;
 const MinimizeEffect = Me.imports.minimizeEffect;
 const ClipboardHistory = Me.imports.clipboardHistory;
 const ProjectSnapshots = Me.imports.projectSnapshots;
@@ -103,6 +104,7 @@ class AdaptiveShellV16 {
         this._taskPanel = null;
         this._networkPanel = null;
         this._rosPanel = null;
+        this._systemPanel = null;
         this._projectProxy = null;
         this._tooltip = null;
         this._tooltipTimeoutId = 0;
@@ -304,6 +306,7 @@ class AdaptiveShellV16 {
         this._installTaskPanel();
         this._installNetworkPanel();
         this._installRosPanel();
+        this._installSystemPanel();
         this._installPaletteServices();
         this._installShellActions();
         this._installProjectIndicator();
@@ -604,6 +607,11 @@ class AdaptiveShellV16 {
             this._rosPanel = null;
         }
 
+        if (this._systemPanel) {
+            this._systemPanel.detach();
+            this._systemPanel = null;
+        }
+
         if (this._monitorChangedId) {
             Main.layoutManager.disconnect(this._monitorChangedId);
             this._monitorChangedId = 0;
@@ -887,6 +895,18 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the ROS 2 panel');
             this._rosPanel = null;
+        }
+    }
+
+    // System vitals: CPU, GPU (Nvidia/Intel), RAM, Swap, Disks, Net, Thermals;
+    // next to ROS 2 panel. See systemPanel.js.
+    _installSystemPanel() {
+        try {
+            this._systemPanel = new SystemPanel.SystemPanel();
+            this._systemPanel.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing the System panel');
+            this._systemPanel = null;
         }
     }
 

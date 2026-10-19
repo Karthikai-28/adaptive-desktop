@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <g fill="#bebebe">
+    <path d="M4 3C3.448 3 3 3.448 3 4v8c0 .552.448 1 1 1h8c.552 0 1-.448 1-1V4c0-.552-.448-1-1-1H4zm1 2h6v6H5V5z"/>
+    <rect x="6.5" y="6.5" width="3" height="3" rx="0.5"/>
+    <rect x="5.25" y="1" width="1.5" height="1.5" rx="0.4"/>
+    <rect x="9.25" y="1" width="1.5" height="1.5" rx="0.4"/>
+    <rect x="5.25" y="13.5" width="1.5" height="1.5" rx="0.4"/>
+    <rect x="9.25" y="13.5" width="1.5" height="1.5" rx="0.4"/>
+    <rect x="1" y="5.25" width="1.5" height="1.5" rx="0.4"/>
+    <rect x="1" y="9.25" width="1.5" height="1.5" rx="0.4"/>
+    <rect x="13.5" y="5.25" width="1.5" height="1.5" rx="0.4"/>
+    <rect x="13.5" y="9.25" width="1.5" height="1.5" rx="0.4"/>
+  </g>
+</svg>
