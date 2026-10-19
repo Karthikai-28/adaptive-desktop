@@ -445,15 +445,16 @@ def terminal_rc(setup):
     return rc
 
 
-def open_terminal(title, command):
+def open_terminal(title, command=None):
+    cmd = command or []
     if shutil.which("kterm-terminal"):
-        argv = ["kterm-terminal", "-T", title, "-x", *command]
+        argv = ["kterm-terminal", "-T", title, "-x", *cmd] if cmd else ["kterm-terminal", "-T", title]
     elif shutil.which("terminator"):
-        argv = ["terminator", "-T", title, "-x", *command]
+        argv = ["terminator", "-T", title, "-x", *cmd] if cmd else ["terminator", "-T", title]
     elif shutil.which("gnome-terminal"):
-        argv = ["gnome-terminal", "--title", title, "--", *command]
+        argv = ["gnome-terminal", "--title", title, "--", *cmd] if cmd else ["gnome-terminal", "--title", title]
     else:
-        argv = ["x-terminal-emulator", "-e", *command]
+        argv = ["x-terminal-emulator", "-e", *cmd] if cmd else ["x-terminal-emulator"]
     subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"ok": True}
@@ -461,8 +462,8 @@ def open_terminal(title, command):
 
 def terminal():
     setup = settings()
-    if not setup["distro"]:
-        return {"ok": False, "error": "ROS 2 is not installed"}
+    if not setup.get("distro"):
+        return open_terminal("Terminal", [])
     rc = terminal_rc(setup)
     return open_terminal(f"ROS 2 {setup['distro']} · domain {setup['domain']}",
                          ["env", "-u", "KARTHI_MODERN_LOADED", "-u", "KARTHI_HUD_SHOWN",

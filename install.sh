@@ -70,8 +70,8 @@ status_theme() {
 
 status_shell() {
     [ -d "$LIVE" ] || { echo "extension not installed"; return; }
-    if ! diff -rq "$REPO/shell/$UUID" "$LIVE" >/dev/null 2>&1; then
-        echo "live extension differs from the repo ($(diff -rq "$REPO/shell/$UUID" "$LIVE" 2>/dev/null | wc -l) file(s))"
+    if ! diff -rq -x __pycache__ "$REPO/shell/$UUID" "$LIVE" >/dev/null 2>&1; then
+        echo "live extension differs from the repo ($(diff -rq -x __pycache__ "$REPO/shell/$UUID" "$LIVE" 2>/dev/null | wc -l) file(s))"
     fi
 }
 

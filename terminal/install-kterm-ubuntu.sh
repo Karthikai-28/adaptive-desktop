@@ -1941,6 +1941,12 @@ configure_desktop_integration() {
   configure_pcmanfm_action
   configure_labwc
   configure_openbox
+
+  local script_dir
+  script_dir="$(dirname "$SCRIPT_SOURCE")"
+  if [[ -f "$script_dir/../scripts/install-terminal.py" ]]; then
+    python3 "$script_dir/../scripts/install-terminal.py" --apply || true
+  fi
 }
 
 configure_desktop_integration

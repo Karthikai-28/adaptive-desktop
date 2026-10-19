@@ -46,7 +46,7 @@ def main():
         path.chmod(mode)
 
     launcher = (REPO / "terminal/launcher.py").read_bytes()
-    for name in ("kterm-terminal", "x-terminal-emulator", "gnome-terminal"):
+    for name in ("kterm-terminal", "x-terminal-emulator", "gnome-terminal", "terminal"):
         write(BIN / name, launcher, 0o755)
     write(CONFIG / "karthi-shell/state/default-mode", "modern\n")
     write(CONFIG / "terminator/config", profile.read_bytes())
@@ -75,6 +75,7 @@ Exec="{BIN / 'kterm-terminal'}"
 Icon=kterm-terminal
 '''
     write(DATA / "applications/kterm-terminal.desktop", desktop)
+    write(DATA / "applications/terminal.desktop", desktop)
     # Keep legacy desktop IDs launchable, but show only one Terminal in the app grid.
     for name in ("org.gnome.Terminal.desktop", "terminator.desktop", "kterm-classic-terminal.desktop"):
         alias = desktop.replace("StartupWMClass=terminator\n", "NoDisplay=true\n")
@@ -82,17 +83,18 @@ Icon=kterm-terminal
     for name in ("xdg-terminals.list", "gnome-xdg-terminals.list", "ubuntu-xdg-terminals.list"):
         path = CONFIG / name
         previous = path.read_text().splitlines() if path.exists() else []
-        previous = [line for line in previous if line not in ("kterm-terminal.desktop", "terminator.desktop", "org.gnome.Terminal.desktop")]
-        write(path, "\n".join(["kterm-terminal.desktop", *previous]) + "\n")
+        previous = [line for line in previous if line not in ("terminal.desktop", "kterm-terminal.desktop", "terminator.desktop", "org.gnome.Terminal.desktop")]
+        write(path, "\n".join(["terminal.desktop", "kterm-terminal.desktop", *previous]) + "\n")
 
     dropdown = CONFIG / "adaptive-desktop/dropdown.json"
     options = json.loads(dropdown.read_text()) if dropdown.exists() else {}
     options["terminal"] = "kterm-terminal"
     write(dropdown, json.dumps(options, indent=2) + "\n")
 
-    settings_file = CONFIG / "Antigravity IDE/User/settings.json"
-    if settings_file.exists():
-        settings = json.loads(settings_file.read_text())
+    for ide_dir in ("Antigravity IDE", "Antigravity"):
+        settings_file = CONFIG / ide_dir / "User/settings.json"
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        settings = json.loads(settings_file.read_text()) if settings_file.exists() else {}
         profiles = settings.setdefault("terminal.integrated.profiles.linux", {})
         profiles["Terminal"] = {"path": "/usr/bin/zsh", "args": ["-l"], "overrideName": True,
                                 "icon": "terminal", "env": {"KARTHI_SHELL_MODE": "modern",
@@ -119,8 +121,12 @@ Icon=kterm-terminal
     if args.apply:
         subprocess.run(["update-desktop-database", str(DATA / "applications")], check=True)
         # Apply to both this Adaptive session and the normal Ubuntu user profile.
-        for profile_name in ("adaptive", "user"):
-            env = dict(os.environ, DCONF_PROFILE=profile_name)
+        for profile_name in ("adaptive", None):
+            env = dict(os.environ)
+            if profile_name:
+                env["DCONF_PROFILE"] = profile_name
+            else:
+                env.pop("DCONF_PROFILE", None)
             def setting(schema, key, value):
                 subprocess.run(["gsettings", "set", schema, key, value], env=env, check=True)
             setting("org.gnome.desktop.default-applications.terminal", "exec", str(BIN / "kterm-terminal"))

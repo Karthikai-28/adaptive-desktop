@@ -272,6 +272,7 @@ stage_node() {
 
 stage_terminal() {
     bash "$REPO/terminal/install-kterm-ubuntu.sh"
+    python3 "$S/install-terminal.py" --apply
 }
 
 stage_files_fork() {
@@ -412,6 +413,12 @@ DESKTOP
 first_login() {
     # Autostart entries run in every GNOME session; this one acts only in Adaptive.
     in_adaptive_session || exit 0
+    local term_bin
+    term_bin="$(command -v kterm-terminal || echo "$HOME/.local/bin/kterm-terminal")"
+    if [ -x "$term_bin" ]; then
+        exec "$term_bin" -T "Finish Adaptive Desktop setup" -x \
+            bash -c "'$REPO/bootstrap.sh' --finish; echo; read -r -p 'Press Enter to close. ' _"
+    fi
     exec gnome-terminal --title="Finish Adaptive Desktop setup" --wait -- \
         bash -c "'$REPO/bootstrap.sh' --finish; echo; read -r -p 'Press Enter to close. ' _"
 }
