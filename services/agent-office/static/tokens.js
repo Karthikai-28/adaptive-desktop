@@ -45,9 +45,9 @@ export function createTokens(ctx) {
   const provQuery = () => T.prov ? `&provider=${encodeURIComponent(T.prov)}` : '';
   const provSplit = (m) => { const e = Object.entries(m || {}).filter(([, v]) => v).sort((a, b) => b[1] - a[1]); return e.length > 1 || (e.length === 1 && !T.prov) ? e.map(([k, v]) => `${provName(k)} ${fmt(v)}`).join(' · ') : ''; };
   const since = () => { const w = WINDOWS.find(x => x[0] === T.win); return w && w[2] ? Date.now() / 1000 - w[2] : 0; };
-  const nameOf = (id) => id === 'other' ? 'Setup & tests' : (S.roster[id]?.name || id);
-  const colorOf = (id) => id === 'other' ? '#b9bdd0' : (S.roster[id]?.look?.shirt || '#8b90a8');
-  const roleOf = (id) => id === MGR ? 'Manager · Claude' : id === 'other' ? 'Office test runs, not tied to an agent' : (S.roster[id]?.role || '');
+  const nameOf = (id) => id === 'planner' ? 'Codex Planner' : id === 'other' ? 'Setup & tests' : (S.roster[id]?.name || id);
+  const colorOf = (id) => id === 'planner' ? '#5e9cff' : id === 'other' ? '#b9bdd0' : (S.roster[id]?.look?.shirt || '#8b90a8');
+  const roleOf = (id) => id === MGR ? 'Manager · Claude' : id === 'planner' ? 'Planner · Codex' : id === 'other' ? 'Office test runs, not tied to an agent' : (S.roster[id]?.role || '');
   const windowLabel = () => (WINDOWS.find(x => x[0] === T.win) || WINDOWS[4])[1];
 
   // ---------------------------------------------------------------- small pieces
@@ -185,7 +185,7 @@ export function createTokens(ctx) {
       card('Who uses the most', 'All tokens, split by the kind of work. Click a person for the full breakdown.',
         legend(kindsUsed.map(k => [kindName(k), kindColor(k)])),
         h('div', { class: 'tk-team' }, ...agents.map(a => h('button', { class: 'tk-row', onclick: () => openAgent(a.id) },
-          a.id === 'other' ? h('span', { class: 'tk-face blank' }) : face(a.id, 32),
+          a.id === 'other' || a.id === 'planner' ? h('span', { class: 'tk-face blank' }) : face(a.id, 32),
           h('span', { class: 'tk-name' }, h('b', null, nameOf(a.id)), h('small', null, roleOf(a.id))),
           stack(Object.keys(KIND).map(k => [k, a.kinds[k] || 0, kindColor(k), kindName(k)]), max, a.total),
           h('span', { class: 'nums' }, h('b', null, fmt(a.total)), h('small', null, `${fmt(a.new)} new · ${num(a.calls)} calls`), provSplit(a.providers) ? h('small', null, provSplit(a.providers)) : null),
@@ -272,7 +272,8 @@ export function createTokens(ctx) {
       ...provs().map(p => h('button', { class: T.prov === p.id ? 'on' : '', title: p.model || '', onclick: () => setProv(p.id) }, p.label)));
     const back = T.view === 'agent' ? h('button', { class: 'act', style: 'flex:none;padding:0 10px', onclick: () => { T.view = 'team'; refresh(true); } }, iconEl('back'), 'Team') : null;
     const live = h('span', { class: 'tk-live', title: 'Updates by itself as agents work' }, h('i'), 'Live');
-    const title = T.view === 'agent' ? h('div', { class: 'tk-title' }, face(T.agent, 28), h('span', null, `${nameOf(T.agent)} · token usage`)) : 'Token usage';
+    const avatar = T.agent === 'other' || T.agent === 'planner' ? h('span', { class: 'tk-face blank' }) : face(T.agent, 28);
+    const title = T.view === 'agent' ? h('div', { class: 'tk-title' }, avatar, h('span', null, `${nameOf(T.agent)} · token usage`)) : 'Token usage';
     return { title, tools: h('div', { class: 'toolbar tk-tools' }, back, pseg, seg, live), body };
   }
   function render() {

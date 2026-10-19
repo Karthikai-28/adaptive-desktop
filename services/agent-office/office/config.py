@@ -44,6 +44,9 @@ def load() -> dict:
     for pid, p in cfg["providers"].items():
         if p.get("fallback") and p["fallback"] not in cfg["providers"]:
             raise SystemExit(f"config.json: provider {pid}: fallback {p['fallback']!r} is not one of the providers")
+    planner = cfg["manager"].get("planner_provider", "codex")
+    if planner not in cfg["providers"] or cfg["providers"][planner]["engine"] != "codex":
+        raise SystemExit("config.json: manager planner_provider must name a Codex provider")
     for a in cfg["agents"]:
         if a.get("provider") and a["provider"] not in cfg["providers"]:
             raise SystemExit(f"config.json: {a['id']}: provider {a['provider']!r} is not one of the providers")

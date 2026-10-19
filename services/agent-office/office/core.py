@@ -17,6 +17,7 @@ Meetings can have their own: "meeting_provider" (e.g. Codex) answers every agent
 import asyncio
 import datetime as dt
 import json
+import os
 import re
 import time
 
@@ -84,13 +85,16 @@ class Office:
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self):
-        try:                                # before any task runs: the repos every agent can read
-            await asyncio.get_running_loop().run_in_executor(None, self.repos.scan)
-        except Exception as e:
-            print(f"repo scan: {e}", flush=True)
+        if not os.environ.get("OFFICE_NO_REPO_SCAN"):
+            try:                            # before any task runs: the repos every agent can read
+                await asyncio.get_running_loop().run_in_executor(None, self.repos.scan)
+            except Exception as e:
+                print(f"repo scan: {e}", flush=True)
         agy.write_agy_settings(self.repos.paths)
-        await asyncio.get_running_loop().run_in_executor(None, Graphs.configure_agy)
-        self._spawn(self.repos.loop(lambda: agy.write_agy_settings(self.repos.paths)))
+        if not os.environ.get("OFFICE_NO_STUDY"):   # throwaway test servers never alter agy's MCP settings
+            await asyncio.get_running_loop().run_in_executor(None, Graphs.configure_agy)
+        if not os.environ.get("OFFICE_NO_REPO_SCAN"):
+            self._spawn(self.repos.loop(lambda: agy.write_agy_settings(self.repos.paths)))
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             self.store.update_task(t["id"], status="queued")
             self.store.add_event(t["agent"], "info", "Resuming after an office restart", t["id"])

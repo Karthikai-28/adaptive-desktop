@@ -46,6 +46,9 @@ for pid, pv in provs.items():
     assert pv.get("engine") in ("agy", "ollama", "codex", "claude") and pv.get("model"), f"provider {pid}: needs engine agy|ollama|codex|claude and a model"
     assert "@" not in pid and pid != "claude", f"provider id {pid!r} is reserved or invalid"
 assert any(pv["engine"] == "agy" for pv in provs.values()), "keep one agy (Gemini) provider"
+planner = m.get("planner_provider", "codex")
+assert planner in provs and provs[planner]["engine"] == "codex", "manager planner_provider must be Codex"
+assert m.get("planner_reasoning", "medium") in ("low", "medium", "high"), "invalid planner_reasoning"
 for k in ("provider", "fallback"):
     assert not cfg.get(k) or cfg[k] in provs, f"{k} {cfg.get(k)!r} is not a provider"
 for a in cfg["agents"]:
@@ -53,6 +56,21 @@ for a in cfg["agents"]:
 used = [a["desk"] for a in cfg["agents"]]
 assert len(used) == len(set(used)), "two agents share a desk"
 print(f"roster ok: {len(ids)} agents + {cfg['manager']['name']}; providers: {', '.join(provs)}")
+PY
+OFFICE_STATE="$TMP/plan-gate" PYTHONPATH="$APP" python3 - <<'PY' || fail "manager plan gate"
+from office.codex import CodexRun, TALK_ONLY
+from office.manager import NO_WORK_PLAN, PLAN_GATE, WORK_PLAN, _plan_marker
+
+assert _plan_marker(f"{WORK_PLAN}\n- task") == WORK_PLAN
+assert _plan_marker(f"\n{NO_WORK_PLAN}\nanswer") == NO_WORK_PLAN
+assert not _plan_marker("Here is a plan without the required gate")
+assert PLAN_GATE.startswith("[office")
+run = CodexRun("plan", agent_name="Codex Planner", agent_id="planner", provider="codex",
+               cfg={"model": "test", "web_search": False}, tools=False, reasoning="medium")
+cmd = run._cmd()
+assert all(any(x == f or x.endswith(f"={f}") for x in cmd) for f in TALK_ONLY), cmd
+assert 'sandbox_mode="read-only"' in cmd and 'web_search="disabled"' in cmd, cmd
+assert not any("permissions.office.filesystem" in x for x in cmd), cmd
 PY
 PYTHONPATH="$APP" python3 - <<'PY' || fail "usage parser"
 from office.quota import QuotaGuard, parse_usage
@@ -79,7 +97,8 @@ PY
 PYTHONPATH="$REPO/.local/office-pydeps" python3 -c "import fastapi, uvicorn" 2>/dev/null ||
     { echo "skipped server checks: run scripts/install-agent-office.sh first"; exit 0; }
 PORT=8799
-OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 PYTHONPATH="$REPO/.local/office-pydeps" \
+OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 \
+    PYTHONPATH="$REPO/.local/office-pydeps" \
     python3 "$APP/server.py" >"$TMP/server.log" 2>&1 &
 SERVER=$!
 for _ in $(seq 1 40); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/state" 2>/dev/null && break; sleep 0.25; done
@@ -101,6 +120,7 @@ curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' ||
 # providers: switching is validated, the token ledger keeps every provider apart
 [ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"provider":"nope"}' "$B/api/settings")" = 400 ] || fail "unknown provider was accepted"
 curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["providers"] and d["settings"]["provider"] in [p["id"] for p in d["providers"]]' || fail "providers in state"
+curl -fsS "$B/api/tokens/agent/planner" | python3 -c 'import json,sys; assert json.load(sys.stdin)["total"] == 0' || fail "planner token view"
 mkdir -p "$TMP/state/data/usage"
 echo '{"ts": 1700000000, "turn": 1700000000, "agent": "maya", "provider": "local", "model": "test", "kind": "chat", "fresh": 100, "cached": 0, "out": 20, "step": "answer"}' > "$TMP/state/data/usage/local.jsonl"
 sleep 11   # one ledger scan

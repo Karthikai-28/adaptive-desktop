@@ -284,7 +284,7 @@ async def tokens(since: float = 0, provider: str | None = None):
 
 @app.get("/api/tokens/agent/{aid}")
 async def tokens_agent(aid: str, since: float = 0, provider: str | None = None):
-    if aid not in office.rt:
+    if aid not in office.rt and aid not in ("planner", "other"):
         raise HTTPException(404, "no such agent")
     return office.ledger.agent(aid, since, provider or None)
 

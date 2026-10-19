@@ -1,7 +1,8 @@
 # Agent Office
 
-A pixel-art office where an AI company works for you. **Claude** is the manager and your single
-point of contact. The staff are **Gemini 3.8 Flash (High)** agents running through the Antigravity
+A pixel-art office where an AI company works for you. **Codex plans** each work request, then
+**Claude verifies and corrects the plan** as the manager and your single point of contact. Only after
+that gate does Claude dispatch the staff. The staff are **Gemini 3.8 Flash (High)** agents running through the Antigravity
 CLI (`agy`) on your Google AI Pro subscription, so there is no API billing. When the Gemini quota runs
 out they carry on with a **local model** through Ollama ([Model providers](#model-providers-gemini-and-local-models-officelocalpy)).
 
@@ -45,7 +46,7 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 |---|---|
 | **Watch the team** | Each agent sits at a desk. The name-tag dot shows their state: green free, amber working, violet replying, blue in a meeting, red out of quota. The bubble shows what they are doing now (typing, running a command, browsing, generating an image). Hover over someone for details, or click them for their card. Free agents wander to the kitchen and lounge. |
 | **Talk to anyone** | Click an agent, or walk up to them (WASD / arrows / click) and press **E**. They reply right away, even mid-task. Click the mic to speak; it sends when you pause. Replies are read aloud in each agent's own voice (🔊). |
-| **Ask Claude** | Tell Claude what you want. It plans the work, assigns the right people (chaining dependent work), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
+| **Ask Claude** | Tell Claude what you want. A tool-free Codex turn drafts the plan; Claude verifies and corrects it, then assigns useful work across the whole available team (chaining dependencies), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
 | **Meetings and calls** | **Call meeting** → pick people → everyone walks to the meeting room. Type or talk; agents answer out loud. Say a name ("Arjun, …") to ask one person. **Hands-free** keeps listening and pauses while agents speak. With Claude in the room, it chairs the meeting, writes minutes at the end and assigns the agreed action items. **Call** on an agent's card starts a 1:1 call. |
 | **Tasks** | Kanban board of every task with live activity, full reports, cancel and retry. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
@@ -106,8 +107,16 @@ office autopilot on|off · office pause · office resume · office open
   --output-format stream-json`. The tool-call events are the live activity you see. Each agent
   keeps separate agy conversations for its tasks, its direct messages and each meeting, so it can
   chat while it works.
+- **Plan gate.** Owner work requests, autopilot follow-ups and meeting action items first go to a
+  fresh Codex planning turn (`manager.planner_provider`, medium reasoning by default). That turn is
+  tool-free: it cannot run commands, edit files or assign tasks. It must mark the input `WORK_PLAN`
+  or `NO_WORK_PLAN` and account for every staff member. Claude then verifies and corrects the draft.
+  Only Claude can dispatch it. Afterward the manager checks that every agent without an active study
+  has running or queued work and asks Claude for an immediate correction pass if somebody was missed.
+  Planner usage appears separately as **Codex Planner** in the Tokens view.
 - **Manager.** One long-lived Claude Code session (`claude -p --resume`) with a brief describing
-  the team. It works only through the `office` command.
+  the team. It works only through the `office` command. Existing running/queued work and active study
+  programs count as occupied; the scheduler's parallel-work setting still controls how many run at once.
 - **Manager models** (`config.json` → `manager`). Every turn runs on **Sonnet 5.5** (`model`). A turn
   goes to **Opus 5** (`complex_model`, never higher) only when it is complex: you ask for it (start a
   message with `opus:` or say "think hard" / "deep dive"), or Sonnet replies `ESCALATE_TO_OPUS` for a

@@ -517,7 +517,7 @@ async function renderBody() {
     V.chat = h('div', { class: 'chat' });
     const msgs = S.threads[th];
     if (!msgs.length) V.chat.append(h('div', { class: 'empty' }, id === MGR
-      ? `Claude runs the company for you. Tell it what you want built, researched or written — it plans the work, assigns the team and reports back.`
+      ? `Tell Claude what you want built, researched or written. Codex drafts the plan; Claude verifies and corrects it, then puts the whole team to work and reports back.`
       : `Say hi to ${S.roster[id].name}. Messages are answered right away, even while they work on tasks.`));
     for (const m of msgs) V.chat.append(msgEl(m, false));
     V.typing = h('div', { class: 'typing hidden' }, h('i'), h('i'), h('i'));
@@ -852,7 +852,7 @@ function openAssign(agent) {
     h('label', { class: 'f' }, 'Project'), project, h('datalist', { id: 'projlist' }, ...projects.map(p => h('option', { value: p }))),
     h('label', { class: 'f' }, 'Writable repo'), repo, repolist,
     h('label', { class: 'f' }, 'When'), after,
-    h('div', { class: 'hintline' }, 'Every agent can read every repo on the laptop; only the repo named here can be changed, and nobody pushes. Tip: you can also just tell Claude what you want — it splits the work and assigns the right people.')),
+    h('div', { class: 'hintline' }, 'Every agent can read every repo on the laptop; only the repo named here can be changed, and nobody pushes. Tip: tell Claude what you want — Codex drafts the plan, then Claude verifies and dispatches it.')),
   [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: closeModal }, 'Cancel'), go]);
 }
 
@@ -1016,7 +1016,7 @@ function openSettings() {
   lang.onchange = () => { prefs.lang = lang.value; savePrefs(); mic?.stop(); mic = null; micOwner = null; };
   const body = h('div', null,
     h('div', { class: 'section' }, 'Company'),
-    sw('Autopilot', 'Claude reviews finished work by itself, assigns follow-ups and reports back.', S.settings.autopilot, v => api('POST', '/api/settings', { autopilot: v }).then(s => { S.settings = s; })),
+    sw('Autopilot', 'Codex plans follow-ups; Claude verifies them, dispatches corrections and reports back.', S.settings.autopilot, v => api('POST', '/api/settings', { autopilot: v }).then(s => { S.settings = s; })),
     sw('Pause all work', 'Queued tasks and study sessions wait; running tasks finish. Chats and meetings still work.', S.settings.paused, v => api('POST', '/api/settings', { paused: v }).then(s => { S.settings = s; renderQuota(); })),
     h('label', { class: 'switch' }, h('div', null, 'Agents working at the same time', h('small', null, 'More is faster but spends Gemini quota quicker.')), par),
     h('label', { class: 'switch' }, h('div', null, 'Agents run on', h('small', null, 'Gemini on your AI Pro plan, or a local model through Ollama (private, free, much slower and weaker).')), prov),
