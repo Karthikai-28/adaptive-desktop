@@ -18,6 +18,8 @@ if [ ! -d "$SDK/platforms" ] || [ -z "$GRADLE" ]; then
     echo "The Android SDK (.local/android-sdk) or Gradle is missing; see docs/ADAPTIVE_LINK.md." >&2
     exit 1
 fi
+# JDK 17 or newer; a private one in .local/jdk-17 wins over the system's.
+[ -x "$REPO/.local/jdk-17/bin/java" ] && export JAVA_HOME="$REPO/.local/jdk-17"
 
 printf 'sdk.dir=%s\n' "$SDK" >"$APP/local.properties"
 (cd "$APP" && ANDROID_HOME="$SDK" "$GRADLE" --no-daemon -q clean assembleDebug testDebugUnitTest -Pabi=arm64-v8a,x86_64)

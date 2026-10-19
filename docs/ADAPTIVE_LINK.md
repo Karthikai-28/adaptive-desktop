@@ -838,4 +838,5 @@ cmdline-tools/latest/bin/sdkmanager --sdk_root=$PWD \
     "emulator" "system-images;android-34;default;x86_64"
 ```
 
-Gradle 8.13 and JDK 17 or newer build it (`scripts/build-link-app.sh`).
+Gradle 8.13 and JDK 17 or newer build it (`scripts/build-link-app.sh`). Where the system
+Java is older, unpack a JDK 17 into `.local/jdk-17` (not tracked) and the script uses it.

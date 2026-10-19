@@ -37,6 +37,7 @@ codebase_digest.md
 
 # Android SDK and build output for apps/adaptive-link-android
 .local/android-sdk/
+.local/jdk-17/
 apps/adaptive-link-android/.gradle/
 apps/adaptive-link-android/build/
 apps/adaptive-link-android/app/build/
