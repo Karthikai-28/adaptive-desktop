@@ -432,24 +432,31 @@ var GroupedNotificationSection = GObject.registerClass({
         // A source with no notifications keeps its group object - the app is
         // still registered and may speak again - but shows nothing.
         const empty = groups.every(g => g.empty);
+        const canClear = groups.some(g => g.canClear);
+        const count = groups.reduce((n, g) => n + g.messages.length, 0);
+
+        // Set visibility BEFORE notifying property changes. GNOME's
+        // CalendarMessageList._sync() fires synchronously from notify::empty
+        // and checks both `s.empty` and `s.visible` on each section. If
+        // visible is still stale when that handler runs, GNOME miscalculates
+        // the placeholder and clear-button state — showing "all caught up"
+        // over a live notification and hiding the Clear button.
+        this.visible = this.allowed && !empty;
+
         if (this._empty !== empty) {
             this._empty = empty;
             this.notify('empty');
         }
 
-        const canClear = groups.some(g => g.canClear);
         if (this._canClear !== canClear) {
             this._canClear = canClear;
             this.notify('can-clear');
         }
 
-        const count = groups.reduce((n, g) => n + g.messages.length, 0);
         if (this._count !== count) {
             this._count = count;
             this.notify('count');
         }
-
-        this.visible = this.allowed && !empty;
     }
 
     destroy() {

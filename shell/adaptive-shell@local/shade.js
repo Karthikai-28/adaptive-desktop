@@ -828,7 +828,7 @@ var Shade = class Shade {
         // which is why this wraps the system section rather than everything -
         // nesting a scroll view inside a scroll view gives neither a sane size.
         this._systemScroll = new St.ScrollView({
-            style_class: 'adaptive-shade-scroll vfade',
+            style_class: 'adaptive-shade-scroll',
             overlay_scrollbars: true,
             x_expand: true,
         });
