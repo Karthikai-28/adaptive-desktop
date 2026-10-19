@@ -1202,6 +1202,7 @@ var IslandUI = class IslandUI {
                     }
                     this.contract();
                     this._backend.pauseDwell();
+                    this._updateUI();
                 } else {
                     this._backend.resumeDwell();
                 }

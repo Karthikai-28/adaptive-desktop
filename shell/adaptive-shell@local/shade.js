@@ -32,6 +32,9 @@ const VERIFICATION_PATH = GLib.build_filenamev([
     'live-verification-latest.json',
 ]);
 
+const NOTIFICATION_MIN_HEIGHT = 220;
+const MIN_SYSTEM_HEIGHT = 120;
+
 const CONFIG_PATH = GLib.build_filenamev(
     [GLib.get_user_config_dir(), 'adaptive-desktop', 'shade.json']);
 
@@ -77,6 +80,9 @@ var Shade = class Shade {
         this._origYExpand = true;
 
         this._container = null;
+        this._systemScroll = null;
+        this._systemSection = null;
+        this._systemHeight = -1;
         this._grouped = null;
         this._placeholder = null;
         this._placeholderParent = null;
@@ -124,6 +130,22 @@ var Shade = class Shade {
 
             this._buildHeader();
 
+            this._systemScroll = new St.ScrollView({
+                style_class: 'adaptive-shade-scroll',
+                overlay_scrollbars: true,
+                x_expand: true,
+            });
+            this._systemScroll.set_policy(
+                St.PolicyType.NEVER, St.PolicyType.AUTOMATIC);
+            this._container.add_child(this._systemScroll);
+
+            this._systemSection = new St.BoxLayout({
+                vertical: true,
+                style_class: 'adaptive-shade-system',
+                x_expand: true,
+            });
+            this._systemScroll.add_actor(this._systemSection);
+
             parent.remove_child(messageList);
             messageList.y_expand = true;
             this._container.add_child(messageList);
@@ -149,12 +171,14 @@ var Shade = class Shade {
         if (isOpen) {
             this._updateClock();
             this._updateChecks();
+            this._fitToMonitor();
             if (!this._clockTimerId) {
                 this._clockTimerId = GLib.timeout_add_seconds(
                     GLib.PRIORITY_DEFAULT,
                     1,
                     () => {
                         this._updateClock();
+                        this._fitToMonitor();
                         return GLib.SOURCE_CONTINUE;
                     }
                 );
@@ -164,6 +188,28 @@ var Shade = class Shade {
                 GLib.Source.remove(this._clockTimerId);
                 this._clockTimerId = 0;
             }
+        }
+    }
+
+    _fitToMonitor() {
+        if (!this._systemScroll || !this._systemSection)
+            return;
+
+        const monitor = Main.layoutManager.findMonitorForActor(this._dateMenu) || Main.layoutManager.primaryMonitor;
+        if (!monitor)
+            return;
+
+        const [, natural] = this._systemSection.get_preferred_height(-1);
+        if (!(natural > 0))
+            return;
+
+        const reserved = 260 + NOTIFICATION_MIN_HEIGHT;
+        const cap = Math.max(MIN_SYSTEM_HEIGHT, monitor.height - reserved);
+        const height = Math.min(natural, cap);
+
+        if (this._systemHeight !== height) {
+            this._systemHeight = height;
+            this._systemScroll.set_height(height);
         }
     }
 
@@ -448,6 +494,9 @@ var Shade = class Shade {
         }
 
         this._messageList = null;
+        this._systemSection = null;
+        this._systemScroll = null;
+        this._systemHeight = -1;
         this._origParent = null;
         this._origIndex = -1;
         this._origYExpand = true;
