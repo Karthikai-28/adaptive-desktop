@@ -615,6 +615,8 @@ def status(refresh=False):
         "setups": read_json(SETUPS, list),
         "project": {"name": project[0], "path": project[1], "workspace": project_ws} if project else None,
         "history": read_json(HISTORY, list)[-8:][::-1],
+        "runs": {name: [{"pgid": e["pgid"], "meta": e.get("meta", {}), "started": e.get("started")}
+                        for e in entries] for name, entries in owned.items()},
         "recording": recording(owned.get("bag", [])),
         "bags": recent_bags(),
         "bag_dir": str(BAGS),
@@ -737,7 +739,7 @@ def launch(tool, file=None, args=(), saved=None):
     setup = settings()
     env = ros_env(setup)
     base = ROS_ROOT / setup["distro"]
-    meta = {}
+    meta = {"file": str(file), "name": Path(file).name} if file else {}
     if tool == "rviz2":
         argv = [["rviz2", *(["-d", file] if file else [])]]
     elif tool in ("rqt", "rqt_graph"):
@@ -959,7 +961,7 @@ def bag_summary(path):
         info["duration_s"] = meta["duration"]["nanoseconds"] / 1e9
         info["messages"] = meta["message_count"]
         info["topics"] = len(meta.get("topics_with_message_count") or [])
-    except (ImportError, OSError, KeyError, TypeError, ValueError, AttributeError):
+    except Exception:  # Missing, or half written while the recording stops.
         pass
     return info
 
@@ -2235,6 +2237,8 @@ def main(argv):
             result = {"ok": False, "error": f"usage: see the top of {argv[0]}"}
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as e:
         result = {"ok": False, "error": str(e)}
+    except Exception as e:  # The shell reads stdout as JSON, whatever happened.
+        result = {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
     emit(result)
     return 1 if result.get("ok") is False else 0
 

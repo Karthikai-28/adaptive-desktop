@@ -366,6 +366,20 @@ async function main() {
     check(hiddenEvent.payload.title === 'AI Task in Progress' &&
         !JSON.stringify(hiddenEvent).includes('Secret project'),
     'bus: sharing also sanitizes an event that was already surfaced');
+    island._surfacedEvent = {
+        type: Types.IslandEvents.ROS_RUN_FAILED, priority: 1, dwellMs: -1,
+        payload: { provider: 'ros', title: 'ROS 2', message: 'secret_bringup exited with code 3', icon: '⚠',
+            data: { count: 1, level: 2, node: '/secret_arm' } },
+    };
+    const rosHidden = island.getState().surfacedEvent;
+    check(rosHidden.payload.message === 'ROS 2 needs attention' &&
+        !JSON.stringify(rosHidden).includes('secret'),
+    'bus: sharing hides which ROS launch or node an alert is about');
+    island._surfacedEvent = {
+        type: 'TASK_STARTED', priority: 3, dwellMs: 3000,
+        payload: { provider: 'task', title: 'Secret project', project: 'private',
+            data: { id: 9, title: 'Secret project', body: 'sensitive prompt' } },
+    };
     island.setScreenSharing(false);
     check(island.getState().surfacedEvent.payload.title === 'Secret project',
         'bus: ending sharing restores the original event without losing it');

@@ -73,6 +73,61 @@ ros_text "ros._toggle('section:topics'); ros._toggle('section:actions'); return 
 seen="$(ros_wait_for "'Topics · ', '1 publisher', '/fibonacci', 'action_tutorials_interfaces/action/Fibonacci', 'served by /fibonacci_action_server'")"
 [ "$seen" = true ]; check $? "ros: the topic and action sections list the graph$([ "$seen" = true ] || echo " ($seen)")"
 
+# A render with nothing changed keeps every block's actors.
+[ "$(ros_text "const before = [...ros._blocks.values()].map(b => b.actor); ros._renderNow();
+    const after = [...ros._blocks.values()].map(b => b.actor);
+    return before.length > 3 && before.every((a, i) => a === after[i] && a.get_parent() === ros._list);")" = true ]
+check $? "ros: a render with nothing new keeps the built rows"
+
+ros_text "ros._search.set_text('fibonacci'); return true;" >/dev/null
+seen="$(ros_wait_for "'Nodes · 1 of 3', '/fibonacci_action_server'")"
+[ "$seen" = true ]; check $? "ros: the search narrows the graph$([ "$seen" = true ] || echo " ($seen)")"
+ros_text "ros._search.set_text(''); return true;" >/dev/null
+
+ros_text "ros._toggle('section:health', () => ros._fetchHealth()); return true;" >/dev/null
+seen="$(ros_wait_for "'Health · OK', 'Nothing looks wrong'")"
+[ "$seen" = true ]; check $? "ros: Health finds nothing wrong with the demo graph$([ "$seen" = true ] || echo " ($seen)")"
+
+# A write takes two clicks: the first arms it and says so.
+ros_text "const n = ros._graph.nodes.find(x => x.name === '/lc_talker'); ros._lifecycle(n, 'configure'); return true;" >/dev/null
+seen="$(ros_wait_for "'Confirm configure'")"
+[ "$seen" = true ]; check $? "ros: a lifecycle transition asks for a confirming click"
+ros_text "const n = ros._graph.nodes.find(x => x.name === '/lc_talker'); ros._lifecycle(n, 'configure'); return true;" >/dev/null
+seen="$(ros_wait_for "'Inactive', 'Activate'")"
+[ "$seen" = true ]; check $? "ros: the confirmed transition configures the node$([ "$seen" = true ] || echo " ($seen)")"
+
+ros_text "ros._toggle('action:/fibonacci');
+    ros._toggleComposer('goal:/fibonacci', 'action', 'action_tutorials_interfaces/action/Fibonacci'); return true;" >/dev/null
+seen="$(ros_wait_for "'order', 'Send goal'")"
+[ "$seen" = true ]; check $? "ros: a goal starts from an empty one of its type$([ "$seen" = true ] || echo " ($seen)")"
+ros_text "ros._composers.get('goal:/fibonacci').text = '{order: 2}';
+    const send = () => ros._send('goal:/fibonacci', 'goal', '/fibonacci', 'action_tutorials_interfaces/action/Fibonacci');
+    send(); send(); return true;" >/dev/null
+seen="$(ros_wait_for "'Succeeded', 'sequence'")"
+[ "$seen" = true ]; check $? "ros: the confirmed goal runs to its result$([ "$seen" = true ] || echo " ($seen)")"
+
+seen="$(ros_text "const n = ros._graph.nodes.find(x => x.name === '/talker');
+    const p = ros._details.get('node:/talker').data.parameters.find(x => x.name === 'use_sim_time');
+    ros._setParameter(n, p, 'true'); ros._setParameter(n, p, 'true');
+    for (let i = 0; i < 40; i++) { const d = ros._details.get('node:/talker');
+        const now = d && d.data && d.data.parameters.find(x => x.name === 'use_sim_time');
+        if (now && now.value === true) return true; await sleep(250); }
+    return JSON.stringify(ros._notes);")"
+[ "$seen" = true ]; check $? "ros: a parameter is set in its own type$([ "$seen" = true ] || echo " ($seen)")"
+
+# Recording lights the top-bar icon until it is stopped and listed.
+seen="$(ros_text "ros._recordTopics(); ros._recordTopics();
+    for (let i = 0; i < 40; i++) { if (ros._runs && ros._runs.recording &&
+        ros._icon.has_style_class_name('adaptive-ros-recording')) return true; await sleep(250); }
+    return JSON.stringify(ros._notes.bag);")"
+[ "$seen" = true ]; check $? "ros: Record starts a bag and the icon shows it$([ "$seen" = true ] || echo " ($seen)")"
+sleep 2
+seen="$(ros_text "ros._stop('bag');
+    for (let i = 0; i < 40; i++) { if (!(ros._runs && ros._runs.recording) && ros._status.bags.length === 1 &&
+        !ros._icon.has_style_class_name('adaptive-ros-recording')) return true; await sleep(250); }
+    return JSON.stringify(ros._status.bags);")"
+[ "$seen" = true ]; check $? "ros: Stop saves the bag, lists it and clears the icon$([ "$seen" = true ] || echo " ($seen)")"
+
 if [ -n "${ADAPTIVE_ROS_SHOT:-}" ]; then
     probe "const { Gio, Shell } = imports.gi; return new Promise(resolve => {
         const stream = Gio.File.new_for_path('$ADAPTIVE_ROS_SHOT').replace(null, false, Gio.FileCreateFlags.NONE, null);
@@ -86,7 +141,7 @@ seen="$(ros_text "for (let i = 0; i < 60; i++) { if (ros._graph && ros._graph.no
     return ros._summary.text;")"
 [ "$seen" = true ]; check $? "ros: nodes that stop leave the list$([ "$seen" = true ] || echo " ($seen)")"
 seen="$(ros_wait_for "'No nodes on domain $ROS_TEST_DOMAIN', 'Start demo'")"
-[ "$seen" = true ]; check $? "ros: the empty graph offers the demo"
+[ "$seen" = true ]; check $? "ros: the empty graph offers the demo$([ "$seen" = true ] || echo " ($seen)")"
 
 # Closing keeps the watcher a while; stopping it ends the process.
 watcher="$(ros_text "Main.panel.statusArea['adaptive-ros'].menu.close(); await sleep(300);

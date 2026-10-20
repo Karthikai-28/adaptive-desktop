@@ -11,13 +11,17 @@ var IslandEvents = {
     QUOTA_CRITICAL_BREACH: 'QUOTA_CRITICAL_BREACH', // Claude quota <= 5%
     TASK_FAILED_ERROR:     'TASK_FAILED_ERROR',     // Agent task exited with error
     TIMER_EXPIRED:         'TIMER_EXPIRED',         // Focus timer reached 00:00
+    ROS_DIAGNOSTIC_ERROR:  'ROS_DIAGNOSTIC_ERROR',  // ROS /diagnostics reported error or stale
+    ROS_RUN_FAILED:        'ROS_RUN_FAILED',        // A launch or tool the ROS panel started crashed
 
     // Tier 2: High (P2)
     QUOTA_CAUTION_BREACH:  'QUOTA_CAUTION_BREACH',  // Claude quota <= 20%
     TASK_COMPLETED_SUCCESS:'TASK_COMPLETED_SUCCESS',// Agent task completed successfully
     TIMER_DIGEST:          'TIMER_DIGEST',          // Focus stopped early: what arrived meanwhile
+    ROS_NODE_LOST:         'ROS_NODE_LOST',         // A starred ROS node left the graph
 
     // Tier 3: Normal (P3)
+    ROS_RECORDING:         'ROS_RECORDING',         // A rosbag recording started or was saved
     TRACK_CHANGED:         'TRACK_CHANGED',         // Media track changed
     TASK_STARTED:          'TASK_STARTED',          // New background AI task launched
     TIMER_STARTED:         'TIMER_STARTED',         // Focus countdown initialized

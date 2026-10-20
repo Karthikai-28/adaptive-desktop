@@ -334,6 +334,14 @@ var DynamicIslandBackend = class DynamicIslandBackend {
             copy.artUrl = '';
             copy.message = 'Media playing';
             copy.data = { privacyHidden: true };
+        } else if (copy.provider === 'ros') {
+            copy.title = 'ROS 2 alert';
+            copy.message = 'ROS 2 needs attention';
+            copy.data = copy.data ? {
+                count: copy.data.count,
+                level: copy.data.level,
+                privacyHidden: true,
+            } : { privacyHidden: true };
         }
         return copy;
     }

@@ -498,7 +498,8 @@ var IslandAnchor = class IslandAnchor {
                 : p.formatted || (p.data && p.data.formatted) || "Focus";
             this._compactSecondaryLabel.text = "";
         } else {
-            this._compactIconLabel.text = "✦";
+            // Other providers (ROS 2) name their own glyph.
+            this._compactIconLabel.text = p.icon || "✦";
             this._compactTextLabel.text = p.message || event.type;
             this._compactSecondaryLabel.text = "";
         }

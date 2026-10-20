@@ -2758,6 +2758,97 @@
     font-feature-settings: "tnum";
 }
 
+/* The top-bar icon while recording, and while /diagnostics reports errors. */
+.adaptive-ros-recording {
+    color: #FF453A;
+}
+
+.adaptive-ros-attention {
+    color: #FF9F0A;
+}
+
+.adaptive-ros-search {
+    margin: 0 4px;
+}
+
+.adaptive-ros-buttons {
+    spacing: 4px;
+    padding-top: 2px;
+}
+
+/* A write waiting for its confirming click. */
+.adaptive-ros-armed,
+.adaptive-ros-armed:hover {
+    background-color: rgba(255, 159, 10, 0.18);
+    color: #FF9F0A;
+}
+
+.adaptive-ros-armed-entry,
+.adaptive-ros-armed-entry:focus {
+    border-color: #FF9F0A;
+}
+
+.adaptive-ros-chip-active {
+    border-color: rgba(10, 132, 255, 0.70);
+    background-color: rgba(10, 132, 255, 0.18);
+}
+
+.adaptive-ros-setups {
+    padding: 6px 6px 0 6px;
+}
+
+.adaptive-ros-launch-heading {
+    padding-right: 6px;
+}
+
+.adaptive-ros-more {
+    padding: 2px 12px 4px 44px;
+}
+
+.adaptive-ros-group-row {
+    padding: 4px 12px 0 12px;
+}
+
+.adaptive-ros-param-edit {
+    padding: 0 4px;
+    border-radius: 5px;
+}
+
+.adaptive-ros-param-edit:hover,
+.adaptive-ros-param-edit:focus {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.adaptive-ros-parameter-entry {
+    padding: 2px 6px;
+    font-size: 11px;
+}
+
+.adaptive-ros-composer {
+    margin-top: 4px;
+    spacing: 3px;
+}
+
+.adaptive-ros-composer-entry {
+    min-height: 54px;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.adaptive-ros-thumbnail {
+    margin: 2px 0 2px 4px;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.28);
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+.adaptive-ros-tf-row {
+    spacing: 6px;
+    padding-right: 12px;
+}
+
 /* ------------------------------------------------------------------
  * Project indicator (projectIndicator.js): the active project, left of
  * the top bar, with its branch and uncommitted count.
