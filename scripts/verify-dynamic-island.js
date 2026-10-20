@@ -8,6 +8,7 @@
 // 3. Now-Playing Media Provider (mock MPRIS signals, track change, controls)
 // 4. Focus Timer Provider (0% idle CPU, Pomodoro presets, expiration sticky alert)
 // 5. Dynamic Island Bus (priority preemption, queue capacity 8, hover pause, privacy sanitization, multi-activity)
+// 6-8. Focus deadline/persistence/DND/digest, task cancel and log, MPRIS variants/position/seek/players
 //
 
 const path = require('path');
@@ -363,6 +364,184 @@ async function main() {
     // Clean teardown
     island.destroy();
     check(island._destroyed === true, 'bus: clean destroy with zero lingering resources');
+
+    // =========================================================================
+    // 6. Behaviour the first suite missed (Shade v3.1 repair pass)
+    // =========================================================================
+    console.log('\n-- Provider 6: Focus deadline, persistence, DND and digest --');
+    {
+        let now = 1_000_000;
+        let saved = null;
+        const storage = { read: () => saved && JSON.parse(JSON.stringify(saved)), write: d => { saved = d; } };
+        let dndOn = false;
+        const dnd = { get: () => dndOn, set: v => { dndOn = v; } };
+        let notified = 0;
+        const events = [];
+        const bus = { emitEvent: (type, payload) => events.push({ type, payload }), notifyStateChange: () => notified++ };
+        let mark = 0;
+        const digestSource = { mark: () => mark, summary: m => (m === 5 ? '3 notifications from 2 apps' : '') };
+
+        const t = new IslandTimerProvider({ bus, storage, dnd, now: () => now });
+        t.init();
+        t.setDigestSource(digestSource);
+        mark = 5;
+        t.startPomodoro();
+        t._stopTimerTicker(); // drive the clock by hand
+        check(dndOn === true, 'timer: a focus session turns Do Not Disturb on');
+        check(saved && saved.status === 'RUNNING' && saved.deadline === now + 1500 * 1000,
+            'timer: the deadline is saved when focus starts');
+
+        now += 600 * 1000; // ten minutes pass, e.g. across a suspend
+        check(t.getState().remainingSeconds === 900, 'timer: remaining time follows the wall clock, not ticks');
+
+        // A shell restart: a new provider restores the running session.
+        const t2 = new IslandTimerProvider({ bus, storage, dnd, now: () => now });
+        t2.init();
+        t2._stopTimerTicker();
+        check(t2.getState().status === 'RUNNING' && t2.getState().remainingSeconds === 900,
+            'timer: a running session survives a shell restart');
+        check(t2.getState().dndHeld === true, 'timer: the restored session still owns Do Not Disturb');
+
+        notified = 0;
+        t2.extend(300);
+        check(t2.getState().remainingSeconds === 1200, 'timer: +5m moves the deadline');
+        check(notified > 0, 'timer: extend refreshes the UI at once');
+
+        // Expiry after a long suspend: one recompute ends it, gives DND back
+        // and reports what arrived.
+        t2.setDigestSource(digestSource);
+        t2._digestMark = 5;
+        events.length = 0;
+        now += 3600 * 1000;
+        t2._syncRemaining();
+        if (t2.getState().remainingSeconds <= 0)
+            t2._expire();
+        const expired = events.find(e => e.type === 'TIMER_EXPIRED');
+        check(t2.getState().status === 'EXPIRED', 'timer: a deadline passed during suspend expires');
+        check(dndOn === false, 'timer: Do Not Disturb is given back when focus ends');
+        check(expired && expired.payload.message.includes('3 notifications from 2 apps'),
+            'timer: the expiry carries the focus digest');
+
+        // DND that was already on before focus stays on afterwards.
+        dndOn = true;
+        const t3 = new IslandTimerProvider({ bus, storage: null, dnd, now: () => now });
+        t3.startPomodoro();
+        t3._stopTimerTicker();
+        t3.reset();
+        check(dndOn === true, 'timer: a DND the user had on is left on');
+
+        // The user turning DND off mid-session wins.
+        dndOn = false;
+        const t4 = new IslandTimerProvider({ bus, storage: null, dnd, now: () => now });
+        t4.startPomodoro();
+        t4._stopTimerTicker();
+        dndOn = false;
+        t4.reset();
+        check(dndOn === false, 'timer: a DND the user turned off mid-session stays off');
+
+        // Breaks do not silence notifications.
+        const t5 = new IslandTimerProvider({ bus, storage: null, dnd, now: () => now });
+        t5.startBreak(5);
+        t5._stopTimerTicker();
+        check(dndOn === false, 'timer: a break does not turn DND on');
+        notified = 0;
+        t5.reset();
+        check(notified > 0, 'timer: reset refreshes the UI at once');
+
+        // Stopping focus early still reports the digest.
+        events.length = 0;
+        const t6 = new IslandTimerProvider({ bus, storage: null, dnd, now: () => now });
+        t6.setDigestSource(digestSource);
+        mark = 5;
+        t6.startPomodoro();
+        t6._stopTimerTicker();
+        t6.reset();
+        check(events.some(e => e.type === 'TIMER_DIGEST'), 'timer: stopping focus early emits the digest');
+        check(t6.getState().lastDigest === '3 notifications from 2 apps', 'timer: the digest stays on the card');
+        [t, t2, t3, t4, t5, t6].forEach(x => x.destroy());
+    }
+
+    console.log('\n-- Provider 7: Task cancel, log, live list --');
+    {
+        const posted = [];
+        let notified = 0;
+        const bus = { emitEvent() {}, notifyStateChange: () => notified++ };
+        const tasks = new IslandTaskProvider({
+            bus,
+            poster: (url, done) => { posted.push(url); done(null, true); },
+            fetcher: cb => cb(null, []),
+            logFetcher: (id, cb) => cb(null, [
+                { ts: 1, kind: 'step', text: 'one' }, { ts: 2, kind: 'step', text: 'two' },
+                { ts: 3, kind: 'tool', text: 'run  tests\n' }, { ts: 4, kind: 'step', text: 'four' },
+                { ts: 5, kind: 'step', text: 'five' }]),
+        });
+        tasks._processTasks([{ id: 7, title: 'A', agent: 'x', status: 'running', steps: 1 },
+            { id: 8, title: 'B', agent: 'y', status: 'running', steps: 2 }]);
+        check(tasks.getActiveTasks().length === 2, 'task: every running task is listed, not just the first');
+        let cbOk = null;
+        tasks.cancelTask(8, (err, ok) => { cbOk = ok; });
+        check(posted[0] === 'http://127.0.0.1:8790/api/tasks/8/cancel', 'task: cancel POSTs to the task\'s cancel action');
+        check(cbOk === true, 'task: cancel reports success');
+        notified = 0;
+        tasks._processTasks([{ id: 7, title: 'A', agent: 'x', status: 'running', steps: 1 },
+            { id: 8, title: 'B', agent: 'y', status: 'cancelled', steps: 2 }]);
+        check(tasks.getActiveTasks().length === 1 && notified > 0, 'task: a cancelled task leaves the list and the UI redraws');
+        let lines = null;
+        tasks.fetchTaskLog(7, l => { lines = l; });
+        check(lines && lines.length === 4 && lines[0].text === 'step: two', 'task: the log keeps the last four events');
+        check(lines && lines[1].text === 'tool: run tests', 'task: log lines are one line each');
+        let fetches = 0;
+        tasks._logFetcher = (id, cb) => { fetches++; cb(null, []); };
+        tasks.fetchTaskLog(7, () => {});
+        check(fetches === 0, 'task: the log is cached for a few seconds');
+        tasks.destroy();
+
+        const real = fs.readFileSync(path.join(shellDir, 'islandTasks.js'), 'utf8');
+        check(real.includes("'-X', 'POST'") && real.includes("'X-Office: 1'"),
+            'task: the real client sends POST with the header Agent Office requires');
+    }
+
+    console.log('\n-- Provider 8: Media variants, position, seek, players --');
+    {
+        let now = 50_000;
+        const variant = v => ({ recursiveUnpack: () => v });
+        const dbusMock = {};
+        const media = new IslandMediaProvider({ bus: { emitEvent() {}, notifyStateChange() {} }, dbus: dbusMock, now: () => now });
+        media.init();
+        // What GLib hands over: a{sv} whose values are still variants.
+        dbusMock.onPlayerChanged('org.mpris.MediaPlayer2.spotify', {
+            PlaybackStatus: variant('Playing'),
+            CanSeek: variant(true),
+            Position: variant(30e6),
+            Metadata: variant({ 'xesam:title': 'Teardrop', 'xesam:artist': ['Massive Attack'],
+                'mpris:length': 330e6, 'mpris:trackid': '/t/1', 'mpris:artUrl': 'file:///tmp/a.jpg' }),
+        });
+        let tr = media.getCurrentTrack();
+        check(tr.title === 'Teardrop' && tr.isPlaying, 'media: variant-wrapped MPRIS properties are unpacked');
+        check(tr.lengthUs === 330e6 && tr.artUrl === 'file:///tmp/a.jpg', 'media: length and artwork are read');
+        now += 10_000;
+        tr = media.getCurrentTrack();
+        check(Math.round(tr.positionUs / 1e6) === 40, 'media: position advances while playing');
+        dbusMock.onPlayerChanged('org.mpris.MediaPlayer2.spotify', { PlaybackStatus: 'Paused' });
+        now += 10_000;
+        check(Math.round(media.getCurrentTrack().positionUs / 1e6) === 40, 'media: position holds while paused');
+        media.seekToFraction(0.5);
+        check(media.getCurrentTrack().positionUs === 165e6, 'media: seeking moves the position at once');
+        media.seekBy(1000);
+        check(media.getCurrentTrack().positionUs === 330e6, 'media: seeking is clamped to the track');
+
+        dbusMock.onPlayerChanged('org.mpris.MediaPlayer2.vlc', {
+            PlaybackStatus: 'Playing', Metadata: { 'xesam:title': 'Film' },
+        });
+        check(media.getCurrentTrack().title === 'Film', 'media: the player that starts playing becomes current');
+        check(media.getPlayers().length === 2, 'media: every player is listed');
+        media.selectPlayer('org.mpris.MediaPlayer2.spotify');
+        dbusMock.onPlayerChanged('org.mpris.MediaPlayer2.vlc', { PlaybackStatus: 'Playing' });
+        check(media.getCurrentTrack().title === 'Teardrop', 'media: a player the user chose stays chosen');
+        media._removePlayer('org.mpris.MediaPlayer2.spotify');
+        check(media.getCurrentTrack().title === 'Film', 'media: closing the chosen player falls back to another');
+        media.destroy();
+    }
 
     // Summary
     console.log(`\n========================================`);

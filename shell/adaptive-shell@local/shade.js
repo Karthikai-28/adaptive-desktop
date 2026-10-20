@@ -1,9 +1,11 @@
-// Adaptive Shade v2 - an information center
+// Adaptive Shade v3 - an information center
 //
-// The date menu, rebuilt as somewhere to LOOK at things rather than change them.
-// It carries a clock, date, physical verification status, and notifications
-// grouped per application. All system monitor vitals have moved to their own
-// dedicated indicator next to ROS 2.
+// The date menu, rebuilt as somewhere to LOOK at things. It carries a clock,
+// date, physical verification status, the Activity Center (AI usage, tasks,
+// music, focus - mounted by islandUI.js through mountActivityCenter()), and
+// notifications grouped per application. The rule is "no duplicated system
+// controls": quick settings stay in the Control Center, hardware telemetry in
+// the System panel next to ROS 2.
 //
 // The calendar column is GNOME's, untouched.
 // The popup stays GNOME's. This takes the native CalendarMessageList out of
@@ -17,7 +19,7 @@
 
 /* exported Shade */
 
-const { St, Clutter, GLib } = imports.gi;
+const { St, Clutter, Gio, GLib } = imports.gi;
 const Main = imports.ui.main;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
@@ -33,7 +35,7 @@ const VERIFICATION_PATH = GLib.build_filenamev([
 ]);
 
 const NOTIFICATION_MIN_HEIGHT = 220;
-const MIN_SYSTEM_HEIGHT = 120;
+const MIN_ACTIVITY_HEIGHT = 120;
 
 const CONFIG_PATH = GLib.build_filenamev(
     [GLib.get_user_config_dir(), 'adaptive-desktop', 'shade.json']);
@@ -70,9 +72,7 @@ function readUptime() {
 }
 
 var Shade = class Shade {
-    constructor(callbacks) {
-        this._callbacks = callbacks || {};
-
+    constructor() {
         this._dateMenu = null;
         this._messageList = null;
         this._origParent = null;
@@ -80,16 +80,23 @@ var Shade = class Shade {
         this._origYExpand = true;
 
         this._container = null;
-        this._systemScroll = null;
-        this._systemSection = null;
-        this._systemHeight = -1;
+        this._activityScroll = null;
+        this._activityHost = null;
+        this._activityHeight = -1;
+        this._activityActor = null;
+        this._activityLayoutId = 0;
         this._grouped = null;
         this._placeholder = null;
         this._placeholderParent = null;
+        this._placeholderIndex = -1;
         this._stockSection = null;
         this._stockIndex = -1;
         this._openStateId = 0;
         this._clockTimerId = 0;
+        this._clockSettings = null;
+        this._lastUptimeMinute = -1;
+        this._monitorChangedId = 0;
+        this._notificationGroupsExpanded = false;
         this._attached = false;
     }
 
@@ -130,21 +137,22 @@ var Shade = class Shade {
 
             this._buildHeader();
 
-            this._systemScroll = new St.ScrollView({
+            this._activityScroll = new St.ScrollView({
                 style_class: 'adaptive-shade-scroll',
                 overlay_scrollbars: true,
                 x_expand: true,
+                visible: false,
             });
-            this._systemScroll.set_policy(
+            this._activityScroll.set_policy(
                 St.PolicyType.NEVER, St.PolicyType.AUTOMATIC);
-            this._container.add_child(this._systemScroll);
+            this._container.add_child(this._activityScroll);
 
-            this._systemSection = new St.BoxLayout({
+            this._activityHost = new St.BoxLayout({
                 vertical: true,
-                style_class: 'adaptive-shade-system',
+                style_class: 'adaptive-shade-activity',
                 x_expand: true,
             });
-            this._systemScroll.add_actor(this._systemSection);
+            this._activityScroll.add_actor(this._activityHost);
 
             parent.remove_child(messageList);
             messageList.y_expand = true;
@@ -158,6 +166,8 @@ var Shade = class Shade {
             this._openStateId = dateMenu.menu.connect(
                 'open-state-changed',
                 (menu, isOpen) => this._onOpenStateChanged(isOpen));
+            this._monitorChangedId = Main.layoutManager.connect(
+                'monitors-changed', () => this._queueActivityLayout());
 
             this._attached = true;
             log('[Adaptive Shade] attached to the GNOME date menu');
@@ -171,18 +181,8 @@ var Shade = class Shade {
         if (isOpen) {
             this._updateClock();
             this._updateChecks();
-            this._fitToMonitor();
-            if (!this._clockTimerId) {
-                this._clockTimerId = GLib.timeout_add_seconds(
-                    GLib.PRIORITY_DEFAULT,
-                    1,
-                    () => {
-                        this._updateClock();
-                        this._fitToMonitor();
-                        return GLib.SOURCE_CONTINUE;
-                    }
-                );
-            }
+            this._fitActivityToMonitor();
+            this._scheduleClockTick();
         } else {
             if (this._clockTimerId) {
                 GLib.Source.remove(this._clockTimerId);
@@ -191,26 +191,74 @@ var Shade = class Shade {
         }
     }
 
-    _fitToMonitor() {
-        if (!this._systemScroll || !this._systemSection)
+    _fitActivityToMonitor() {
+        if (!this._activityScroll || !this._activityHost || !this._activityActor)
             return;
 
         const monitor = Main.layoutManager.findMonitorForActor(this._dateMenu) || Main.layoutManager.primaryMonitor;
         if (!monitor)
             return;
 
-        const [, natural] = this._systemSection.get_preferred_height(-1);
+        const [, natural] = this._activityHost.get_preferred_height(-1);
         if (!(natural > 0))
             return;
 
         const reserved = 260 + NOTIFICATION_MIN_HEIGHT;
-        const cap = Math.max(MIN_SYSTEM_HEIGHT, monitor.height - reserved);
+        const cap = Math.max(MIN_ACTIVITY_HEIGHT, monitor.height - reserved);
         const height = Math.min(natural, cap);
 
-        if (this._systemHeight !== height) {
-            this._systemHeight = height;
-            this._systemScroll.set_height(height);
+        if (this._activityHeight !== height) {
+            this._activityHeight = height;
+            this._activityScroll.set_height(height);
         }
+    }
+
+    _queueActivityLayout() {
+        if (this._activityLayoutId)
+            return;
+        this._activityLayoutId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._activityLayoutId = 0;
+            this._fitActivityToMonitor();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    mountActivityCenter(actor) {
+        if (!actor || !this._activityHost || this._activityActor)
+            return false;
+        this._activityActor = actor;
+        this._activityHost.add_child(actor);
+        this._activityScroll.visible = true;
+        actor.connectObject('notify::height', () => this._queueActivityLayout(), this);
+        this._queueActivityLayout();
+        return true;
+    }
+
+    unmountActivityCenter(actor) {
+        if (!actor || actor !== this._activityActor)
+            return;
+        actor.disconnectObject(this);
+        const parent = actor.get_parent();
+        if (parent)
+            parent.remove_child(actor);
+        this._activityActor = null;
+        this._activityHeight = -1;
+        if (this._activityScroll)
+            this._activityScroll.visible = false;
+    }
+
+    get notificationCount() {
+        return this._grouped ? this._grouped.count : 0;
+    }
+
+    // For the Focus timer's end-of-session digest: a mark now, and what is
+    // still in the list from after it. Null when GNOME's flat list is in use.
+    notificationMark() {
+        return this._grouped ? this._grouped.sequence : null;
+    }
+
+    notificationsSince(mark) {
+        return this._grouped && mark !== null ? this._grouped.summarySince(mark) : null;
     }
 
     // Swap GNOME's flat notification list for the per-app grouped one.
@@ -283,6 +331,7 @@ var Shade = class Shade {
         try {
             this._placeholder = placeholder;
             this._placeholderParent = list;
+            this._placeholderIndex = list.get_children().indexOf(placeholder);
             this._placeholderExpand = placeholder.y_expand;
             this._placeholderAlign = placeholder.y_align;
 
@@ -330,13 +379,16 @@ var Shade = class Shade {
             if (this._placeholder._icon &&
                 this._placeholderIconAlign !== undefined)
                 this._placeholder._icon.x_align = this._placeholderIconAlign;
-            this._placeholderParent.add_child(this._placeholder);
+            const index = Math.max(0, Math.min(
+                this._placeholderIndex, this._placeholderParent.get_children().length));
+            this._placeholderParent.insert_child_at_index(this._placeholder, index);
         } catch (e) {
             logError(e, '[Adaptive Shade] restoring the empty-state placeholder');
         }
 
         this._placeholder = null;
         this._placeholderParent = null;
+        this._placeholderIndex = -1;
     }
 
     _installNotificationHeader() {
@@ -372,6 +424,22 @@ var Shade = class Shade {
                 visible: false,
             });
             heading.add_child(this._notifCount);
+            this._groupToggle = new St.Button({
+                label: 'Expand all',
+                style_class: 'adaptive-notif-heading-action',
+                can_focus: true,
+                accessible_name: 'Expand all notification groups',
+            });
+            this._groupToggle.connect('clicked', () => {
+                this._notificationGroupsExpanded = !this._notificationGroupsExpanded;
+                this._grouped?.setAllExpanded(this._notificationGroupsExpanded);
+                this._groupToggle.label = this._notificationGroupsExpanded
+                    ? 'Collapse all' : 'Expand all';
+                this._groupToggle.accessible_name = this._groupToggle.label +
+                    ' notification groups';
+            });
+            this._groupToggle.visible = !!this._grouped;
+            heading.add_child(this._groupToggle);
             controls.insert_child_at_index(heading, 0);
             this._notifHeading = heading;
 
@@ -413,6 +481,7 @@ var Shade = class Shade {
             this._notifHeading.destroy();
             this._notifHeading = null;
             this._notifCount = null;
+            this._groupToggle = null;
         }
 
         const clear = this._messageList && this._messageList._clearButton;
@@ -445,10 +514,24 @@ var Shade = class Shade {
             GLib.Source.remove(this._clockTimerId);
             this._clockTimerId = 0;
         }
+        if (this._activityLayoutId) {
+            GLib.Source.remove(this._activityLayoutId);
+            this._activityLayoutId = 0;
+        }
+        if (this._monitorChangedId) {
+            Main.layoutManager.disconnect(this._monitorChangedId);
+            this._monitorChangedId = 0;
+        }
+        if (this._clockSettings) {
+            this._clockSettings.disconnectObject(this);
+            this._clockSettings = null;
+        }
 
         this._removeNotificationHeader();
         this._restoreStockNotifications();
         this._restackPlaceholder();
+        if (this._activityActor)
+            this.unmountActivityCenter(this._activityActor);
 
         if (this._dateMenu) {
             try {
@@ -494,9 +577,9 @@ var Shade = class Shade {
         }
 
         this._messageList = null;
-        this._systemSection = null;
-        this._systemScroll = null;
-        this._systemHeight = -1;
+        this._activityHost = null;
+        this._activityScroll = null;
+        this._activityHeight = -1;
         this._origParent = null;
         this._origIndex = -1;
         this._origYExpand = true;
@@ -570,7 +653,56 @@ var Shade = class Shade {
         });
         this._container.add_child(this._checksLabel);
 
+        try {
+            this._clockSettings = new Gio.Settings({
+                schema_id: 'org.gnome.desktop.interface',
+            });
+            this._clockSettings.connectObject(
+                'changed::clock-format', () => this._clockPreferencesChanged(),
+                'changed::clock-show-seconds', () => this._clockPreferencesChanged(),
+                this);
+        } catch (e) {
+            this._clockSettings = null;
+        }
+
         this._updateClock();
+    }
+
+    _clockPreferencesChanged() {
+        this._updateClock();
+        if (this._dateMenu && this._dateMenu.menu.isOpen)
+            this._scheduleClockTick();
+    }
+
+    _showSeconds() {
+        try {
+            return !this._clockSettings ||
+                this._clockSettings.get_boolean('clock-show-seconds');
+        } catch (e) {
+            return true;
+        }
+    }
+
+    _scheduleClockTick() {
+        if (this._clockTimerId) {
+            GLib.Source.remove(this._clockTimerId);
+            this._clockTimerId = 0;
+        }
+
+        const now = GLib.DateTime.new_now_local();
+        const seconds = this._showSeconds();
+        const delay = seconds
+            ? Math.max(100, 1000 - Math.floor(now.get_microsecond() / 1000))
+            : Math.max(1000, (60 - now.get_second()) * 1000 -
+                Math.floor(now.get_microsecond() / 1000));
+        this._clockTimerId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT, delay, () => {
+                this._clockTimerId = 0;
+                this._updateClock();
+                if (this._dateMenu && this._dateMenu.menu.isOpen)
+                    this._scheduleClockTick();
+                return GLib.SOURCE_REMOVE;
+            });
     }
 
     _updateChecks() {
@@ -592,12 +724,22 @@ var Shade = class Shade {
 
     _updateClock() {
         const now = GLib.DateTime.new_now_local();
-        this._timeLabel.text = now.format('%H:%M');
+        let twelveHour = false;
+        try {
+            twelveHour = this._clockSettings &&
+                this._clockSettings.get_string('clock-format') === '12h';
+        } catch (e) {}
+        this._timeLabel.text = now.format(twelveHour ? '%l:%M' : '%H:%M').trim();
         this._secondsLabel.text = now.format(':%S');
+        this._secondsLabel.visible = this._showSeconds();
         this._dateLabel.text = now.format('%A, %-d %B %Y');
 
-        const uptime = readUptime();
-        this._uptimeLabel.text = uptime;
-        this._uptimeChip.visible = !!uptime;
+        const minute = Math.floor(now.to_unix() / 60);
+        if (minute !== this._lastUptimeMinute) {
+            this._lastUptimeMinute = minute;
+            const uptime = readUptime();
+            this._uptimeLabel.text = uptime;
+            this._uptimeChip.visible = !!uptime;
+        }
     }
 };

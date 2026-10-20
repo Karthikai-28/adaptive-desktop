@@ -18,19 +18,27 @@ dismissed has changed.
 ## The Adaptive Shade
 
 The shade (`shell/adaptive-shell@local/shade.js`) rebuilds the *interior* of the
-date menu popup as an **information center**: a clock, notifications grouped per
-application, and full system telemetry, beside GNOME's own calendar.
+date menu popup as an **information center**: a clock, the Activity Center, and
+notifications grouped per application, beside GNOME's own calendar. Hardware
+telemetry is not here any more; it has its own System panel next to ROS 2.
 
-The system block has no natural bound - sixteen cores, eleven sensors and five
-process rows run past the bottom of a laptop panel - so it lives in a scroll view
-whose height is set from the monitor when the popup opens. It wraps only that
-block, not the whole column: GNOME's message list does its own scrolling, and a
-scroll view inside a scroll view gives neither a sane size.
+The Activity Center is the Dynamic Island's cards (Overview, AI usage, Tasks,
+Music, Focus), built by `islandUI.js` and mounted with
+`Shade.mountActivityCenter()`. It has no natural bound, so it lives in a scroll
+view whose height is set from the monitor, re-measured only when it changes size
+or the monitors change. The scroll view wraps only that block, not the whole
+column: GNOME's message list does its own scrolling, and a scroll view inside a
+scroll view gives neither a sane size.
 
-It contains **no controls at all**. GNOME's aggregate menu in the top-right owns
-network, bluetooth, audio, brightness and power, and a second place to change
-them was a second thing to keep in sync. `verify-live-readiness.sh` fails if a
-control reappears.
+It contains **no duplicated system controls**. GNOME's aggregate menu in the
+top-right (and the Control Center over it) owns network, bluetooth, audio,
+brightness and power, and a second place to change them was a second thing to
+keep in sync. `verify-live-readiness.sh` fails if one reappears. What the shade
+does act on is what only it shows: clear one app's notifications, cancel an
+Agent Office task, seek a track, start or stop a focus session.
+
+Notifications are ordered urgent first, then newest first, both inside an app's
+group and between groups, so a collapsed group never hides the newest message.
 
 It does not replace the notification list. GNOME's `CalendarMessageList` actor is
 taken out of `#calendarArea` and reparented into the shade column, so message
@@ -43,15 +51,21 @@ message list's original parent, index and `y_expand` at attach time and restores
 all three. Disabling the extension must leave a working stock date menu; that is
 the invariant to check after any change to this file.
 
-Telemetry polls only while the popup is open, and every device path it reads is
-discovered at runtime rather than hardcoded.
+Nothing in the shade polls while the popup is closed. The cards draw only while
+on screen, and the music scrubber's one-second redraw runs only while it is
+visible and a track is playing.
 
 ## Normal Notifications
 
 - Normal notification banners follow `org.gnome.desktop.notifications show-banners`.
 - Adaptive Focus turns banners off.
 - Focus Off restores banners.
-- Focus timers temporarily turn banners off, then restore them.
+- Focus timers temporarily turn banners off, then restore them. The island's
+  Focus timer does this for focus sessions (not breaks) and gives back the
+  previous value, unless the user changed it during the session. Its deadline
+  is saved in `~/.local/state/adaptive-desktop/focus-timer.json`, so the session
+  and the DND it holds survive suspend and a shell restart. When it ends, the
+  card shows how many notifications from how many apps arrived meanwhile.
 - The shade's Focus tile writes that same key, so `scripts/focus-cli.py` and the
   tile are two views of one setting rather than two ideas of focus.
 

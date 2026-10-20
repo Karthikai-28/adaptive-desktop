@@ -89,6 +89,9 @@ step "What one shell module takes from another is exported" quiet python3 "$REPO
 step "No undefined names in the shell" undefined_names
 step "Shell helpers (git, watchdog, battery, clipboard, drop-down)" quiet node "$REPO/scripts/verify-shell-helpers.js"
 step "Screen text geometry and selection" quiet node "$REPO/scripts/verify-screen-text.js"
+step "Notification order (urgent, then newest)" quiet node "$REPO/scripts/verify-notification-order.js"
+step "Dynamic Island providers (usage, tasks, music, focus)" quiet node "$REPO/scripts/verify-dynamic-island.js"
+step "Dynamic Island cards and Activity Center" quiet node "$REPO/scripts/verify-island-frontend.js"
 step "Screen text contrast and enlargement" quiet /usr/bin/python3 -s "$REPO/scripts/verify-screen-text-image.py"
 step "Python parses" python_syntax
 step "Shell scripts have no errors" shell_scripts

@@ -295,6 +295,62 @@ so the marks are restated against what is actually true.
 - ✅ More metrics: top processes aggregated by command name, load average,
   uptime, disk read/write throughput, and per-interface network.
 
+### Shade v3.1 — finish and harden (2026-10-20)
+
+Telemetry moved to the System panel next to ROS 2; the Shade now holds the
+Activity Center (the Dynamic Island's cards) above the grouped notifications.
+The rule changed from "no controls" to "no duplicated system controls". All of
+the items below pass in the nested-shell sandbox and the headless suites (now
+part of `verify-all.sh --quick`). **None is verified live yet.**
+
+- ✅ Notification order. Inside a group, urgent first and then newest first, so
+  a collapsed group can no longer hide the message that just arrived behind
+  three older ones. Groups move up when their app speaks again. The rule is in
+  `notificationOrder.js`; `scripts/verify-notification-order.js` tests it.
+- ✅ Per-app triage: Clear for one app, Expand all / Collapse all, a red dot on
+  any group holding a critical notification, and a link to Settings →
+  Notifications (GNOME 42 cannot open one app's page directly).
+- ✅ Tasks card shows every running Agent Office task with its agent, step and
+  age, the selected task's last four office events, and Cancel. The old card
+  showed hard-coded sample output and a Pause button that did nothing; Agent
+  Office has no per-task pause, so that button is gone. Cancel used GET and
+  sent no `X-Office` header; Agent Office rejects both, so it now POSTs through
+  curl with the header.
+- ✅ Music card: cover art, elapsed and length, a scrubber sized to its track,
+  click or ←/→ to seek, and a player switcher when more than one MPRIS player is
+  open. It also fixes a live-only bug. GLib hands over MPRIS properties as
+  variants and signals come from a player's unique bus name, so in the real
+  shell the play state and title never updated (the headless mock passed plain
+  values and hid this).
+- ✅ Focus timer counts down to a wall-clock deadline that is saved to
+  `~/.local/state/adaptive-desktop/focus-timer.json`, so suspend and a shell
+  restart no longer lose or stretch a session. A focus session (not a break)
+  turns Do Not Disturb on through `show-banners`, the key the Control Center
+  tile and `focus-cli.py` use, and gives back the previous value afterwards
+  unless the user changed it meanwhile. +5m and Stop redraw at once.
+- ✅ Focus digest: when a session ends, "N notifications from M apps" that
+  arrived during it, on the expiry alert and the Focus card.
+- ✅ Overview tab (tightest AI limit, running tasks, current track, focus time
+  left) and live tab badges (task count, ▶, countdown, ! on a tight limit).
+- ✅ Accessibility: every card control takes keyboard focus and shows a focus
+  ring, and icon buttons have accessible names. Nothing in the Shade or island
+  blocks is below 11px; the readiness check now actually covers both blocks.
+  Its old range began at a "Shade v2" heading that no longer existed, so it
+  matched nothing and always passed.
+- ✅ Less background work: the Shade clock ticks at the next second (or minute,
+  when seconds are hidden) and reads uptime once a minute. The Activity Center
+  is re-measured only when it changes size or the monitors change, not every
+  second. Cards draw only while on screen, AI-usage rows rebuild only when they
+  change, and the music scrubber's 1 s redraw runs only while it is visible and
+  playing.
+- ✅ The island mounts its cards with `Shade.mountActivityCenter()` /
+  `unmountActivityCenter()` instead of writing into the Shade's private
+  `_systemSection`.
+- ⬜ Live check: notifications from two apps plus one critical; cancel a real
+  Agent Office task; Spotify/Firefox art, seek and switch; a focus session
+  across suspend and across `--restart-shell`. Record each one with
+  `scripts/record-live-verification.py`.
+
 ## Milestone 10 — Window management
 
 - ✅ Smart tiling.

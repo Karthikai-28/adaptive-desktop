@@ -120,7 +120,7 @@ curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' ||
 # providers: switching is validated, the token ledger keeps every provider apart
 [ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"provider":"nope"}' "$B/api/settings")" = 400 ] || fail "unknown provider was accepted"
 curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["providers"] and d["settings"]["provider"] in [p["id"] for p in d["providers"]]' || fail "providers in state"
-curl -fsS "$B/api/tokens/agent/planner" | python3 -c 'import json,sys; assert json.load(sys.stdin)["total"] == 0' || fail "planner token view"
+curl -fsS "$B/api/tokens/agent/planner" | python3 -c 'import json,sys; assert json.load(sys.stdin)["summary"]["total"] == 0' || fail "planner token view"
 mkdir -p "$TMP/state/data/usage"
 echo '{"ts": 1700000000, "turn": 1700000000, "agent": "maya", "provider": "local", "model": "test", "kind": "chat", "fresh": 100, "cached": 0, "out": 20, "step": "answer"}' > "$TMP/state/data/usage/local.jsonl"
 sleep 11   # one ledger scan

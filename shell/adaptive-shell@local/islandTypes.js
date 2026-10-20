@@ -15,6 +15,7 @@ var IslandEvents = {
     // Tier 2: High (P2)
     QUOTA_CAUTION_BREACH:  'QUOTA_CAUTION_BREACH',  // Claude quota <= 20%
     TASK_COMPLETED_SUCCESS:'TASK_COMPLETED_SUCCESS',// Agent task completed successfully
+    TIMER_DIGEST:          'TIMER_DIGEST',          // Focus stopped early: what arrived meanwhile
 
     // Tier 3: Normal (P3)
     TRACK_CHANGED:         'TRACK_CHANGED',         // Media track changed

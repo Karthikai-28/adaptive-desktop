@@ -168,14 +168,14 @@ PY
   "${REPO}/scripts/focus-cli.py" status || true
   rg -q "Adaptive Calendar Center" "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
     || fail "Adaptive calendar/notification styling missing"
-  rg -q "Adaptive Shade v2" "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
+  rg -q "Adaptive Shade v3" "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
     || fail "Adaptive Shade styling missing"
   pass "Focus controls and Adaptive calendar/notification styling are present"
 
   # The shade modules load at gnome-shell start, so a syntax error is a broken
   # desktop rather than a failed test. Parse them here instead of finding out
   # at the next login.
-  for module in shade telemetry notifications sparkline; do
+  for module in shade telemetry notifications notificationOrder sparkline islandUI; do
     node --check "${REPO}/shell/adaptive-shell@local/${module}.js" \
       || fail "shade module does not parse: ${module}.js"
   done
@@ -201,9 +201,11 @@ PY
   fi
   pass "The shade reparents GNOME's message list and records how to put it back"
 
-  # v2 is an information center. GNOME's aggregate menu owns every control, so
-  # the shade must contain none - not even delegating ones. This is a stronger
-  # and simpler property than v1.7's "delegate, don't reimplement".
+  # The shade is an information center with no DUPLICATED system controls.
+  # GNOME's aggregate menu (and the Control Center over it) owns network,
+  # audio, brightness and power, so the shade must hold none of those - not
+  # even delegating ones. Acting on what only the shade shows (clear an app's
+  # notifications, cancel a task, seek a track) is not a system control.
   test ! -f "${REPO}/shell/adaptive-shell@local/tiles.js" \
     || fail "tiles.js is back; the shade is meant to hold no controls"
   for control in \
@@ -219,7 +221,7 @@ PY
       fail "the shade grew a control GNOME's aggregate menu already owns: ${control}"
     fi
   done
-  pass "The shade holds no controls; GNOME's aggregate menu keeps them"
+  pass "The shade duplicates no system control; GNOME's aggregate menu keeps them"
 
   # Notification grouping must stay a change of arrangement. The moment the
   # shade builds its own notification objects instead of GNOME's, delivery and
@@ -254,20 +256,26 @@ PY
   has_source "_restackPlaceholder" "${REPO}/shell/adaptive-shell@local/shade.js"
   pass "The empty-state placeholder is unstacked from the controls and restored on detach"
 
-  # The system block has no natural bound - sixteen cores, eleven sensors and
-  # five processes ran past the bottom of the screen before it could scroll.
+  # The Activity Center has no natural bound, so it is sized against the
+  # monitor and scrolls. It is mounted through the Shade's public API; the
+  # island reaching into a private field is what broke when the field moved.
   has_source "St.ScrollView" "${REPO}/shell/adaptive-shell@local/shade.js"
-  has_source "_fitToMonitor" "${REPO}/shell/adaptive-shell@local/shade.js"
-  pass "The shade sizes itself against the monitor and scrolls rather than overflowing"
+  has_source "_fitActivityToMonitor" "${REPO}/shell/adaptive-shell@local/shade.js"
+  has_source "mountActivityCenter" "${REPO}/shell/adaptive-shell@local/islandUI.js"
+  if rg -q "shade\._[a-zA-Z]" "${REPO}/shell/adaptive-shell@local/islandUI.js"; then
+    fail "islandUI.js reaches into a private Shade field"
+  fi
+  pass "The Activity Center is mounted through the Shade API and scrolls rather than overflowing"
 
   # The clarity fix was a type scale, and it regresses the moment one 9px rule
-  # gets pasted back in.
-  if awk '/Adaptive Shade v2/,0' \
+  # gets pasted back in. Two blocks: the Shade, and the Dynamic Island whose
+  # cards the Shade embeds.
+  if awk '/Adaptive Shade v3/,/Adaptive Control Center v1/; /Dynamic Island \(islandUI.js\)/,0' \
       "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
-      | rg -q "font-size: ([0-9]|10)px"; then
+      | rg -q "font-size: ([0-9]|10)(\.[0-9]+)?px"; then
     fail "the shade has font sizes below 11px again"
   fi
-  pass "No shade text is smaller than 11px"
+  pass "No shade or island text is smaller than 11px"
 
   # Sensors are found by reading what each device says it is. Hardcoded indices
   # survive exactly until the next boot reorders probing.

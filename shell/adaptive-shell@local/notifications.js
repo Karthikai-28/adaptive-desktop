@@ -1,4 +1,4 @@
-// Adaptive Shade notifications v2
+// Adaptive Shade notifications v3
 //
 // Android-style grouping: one collapsible card per application instead of the
 // flat chronological list GNOME 42 ships. Slack with six messages is one Slack
@@ -16,13 +16,22 @@
 // logic. Implementing the small contract CalendarMessageList actually consumes
 // - allowed, empty, canClear, clear(), and the matching notifications - is both
 // safer and less code than fighting those assumptions.
+//
+// Order: urgent first, then newest first - inside a group and between groups
+// (notificationOrder.js holds the rule, so it can be tested headless). Each
+// card is stamped with an arrival sequence; the Focus timer's end-of-session
+// digest is "what arrived after sequence N" (summarySince()).
 
 /* exported GroupedNotificationSection */
 
 const { St, Clutter, GObject } = imports.gi;
 const Main = imports.ui.main;
+const Util = imports.misc.util;
 const Calendar = imports.ui.calendar;
 const MessageTray = imports.ui.messageTray;
+
+const Me = imports.misc.extensionUtils.getCurrentExtension();
+const NotificationOrder = Me.imports.notificationOrder;
 
 // Groups larger than this collapse to a summary until clicked.
 const COLLAPSE_AFTER = 3;
@@ -43,6 +52,7 @@ var NotificationGroup = GObject.registerClass({
 
         this.source = null;
         this._messages = [];
+        this._metadata = new Map();
         this._expanded = false;
 
         this._header = new St.Button({
@@ -61,18 +71,51 @@ var NotificationGroup = GObject.registerClass({
         });
         headerBox.add_child(this._iconBin);
 
+        // Something in here is critical: a red dot beside the name.
+        this._urgentDot = new St.Widget({
+            style_class: 'adaptive-notif-group-urgent',
+            y_align: Clutter.ActorAlign.CENTER,
+            visible: false,
+        });
+
         this._titleLabel = new St.Label({
             style_class: 'adaptive-notif-group-title',
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
         headerBox.add_child(this._titleLabel);
+        headerBox.add_child(this._urgentDot);
 
         this._countLabel = new St.Label({
             style_class: 'adaptive-notif-group-count',
             y_align: Clutter.ActorAlign.CENTER,
         });
         headerBox.add_child(this._countLabel);
+
+        this._clearButton = new St.Button({
+            label: 'Clear',
+            style_class: 'adaptive-notif-group-clear',
+            can_focus: true,
+            accessible_name: 'Clear notifications from this application',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._clearButton.connect('clicked', () => this.clear());
+        headerBox.add_child(this._clearButton);
+
+        // GNOME 42's Settings cannot open on one application's page, so this
+        // opens the Notifications panel; the app is one click away there.
+        this._settingsButton = new St.Button({
+            style_class: 'adaptive-notif-group-settings',
+            can_focus: true,
+            accessible_name: 'Notification settings',
+            y_align: Clutter.ActorAlign.CENTER,
+            child: new St.Icon({ icon_name: 'emblem-system-symbolic', icon_size: 14 }),
+        });
+        this._settingsButton.connect('clicked', () => {
+            Main.panel.closeCalendar();
+            Util.spawn(['gnome-control-center', 'notifications']);
+        });
+        headerBox.add_child(this._settingsButton);
 
         this._chevron = new St.Icon({
             icon_name: 'pan-down-symbolic',
@@ -111,13 +154,21 @@ var NotificationGroup = GObject.registerClass({
         this.source?.disconnectObject(this);
         this.source = source;
 
-        this._titleLabel.text = source.title || '';
+        this._syncTitle();
         this._updateIcon();
 
         source.connectObject(
-            'notify::title', () => (this._titleLabel.text = source.title || ''),
+            'notify::title', () => this._syncTitle(),
             'icon-updated', () => this._updateIcon(),
             this);
+    }
+
+    _syncTitle() {
+        const title = this.source.title || '';
+        this._titleLabel.text = title;
+        this._header.accessible_name = `${title} notifications`;
+        this._clearButton.accessible_name = `Clear notifications from ${title || 'this application'}`;
+        this._settingsButton.accessible_name = `Notification settings for ${title || 'this application'}`;
     }
 
     _updateIcon() {
@@ -144,12 +195,39 @@ var NotificationGroup = GObject.registerClass({
         return this._messages.some(m => m.canClose());
     }
 
-    addMessage(message, urgent) {
-        // Urgent notifications go to the top of their group for the same reason
-        // GNOME puts them at the top of the flat list.
-        const index = urgent ? 0 : this._messages.length;
-        this._messages.splice(index, 0, message);
-        this._list.insert_child_at_index(message, index);
+    get urgent() {
+        return this._messages.some(message => {
+            const meta = this._metadata.get(message);
+            return meta && meta.urgent;
+        });
+    }
+
+    get latestSequence() {
+        return this._messages.reduce((latest, message) => {
+            const meta = this._metadata.get(message);
+            return Math.max(latest, meta ? meta.sequence : 0);
+        }, 0);
+    }
+
+    countSince(sequence) {
+        return this._messages.filter(message => {
+            const meta = this._metadata.get(message);
+            return meta && meta.sequence > sequence;
+        }).length;
+    }
+
+    addMessage(message, urgent, sequence) {
+        // Urgent messages come first; within each urgency band the newest card
+        // comes first. A collapsed group must never hide the message that just
+        // arrived behind three older cards.
+        const meta = { urgent: !!urgent, sequence };
+        const index = this._messages.findIndex(existing =>
+            NotificationOrder.compareMessages(
+                meta, this._metadata.get(existing) || {}) < 0);
+        const target = index < 0 ? this._messages.length : index;
+        this._messages.splice(target, 0, message);
+        this._metadata.set(message, meta);
+        this._list.insert_child_at_index(message, target);
 
         message.connectObject(
             'close', () => this._removeMessage(message),
@@ -174,12 +252,18 @@ var NotificationGroup = GObject.registerClass({
             return;
 
         this._messages.splice(index, 1);
+        this._metadata.delete(message);
         this._sync();
         this.emit('group-changed');
     }
 
     _toggle() {
         this._expanded = !this._expanded;
+        this._sync();
+    }
+
+    setExpanded(expanded) {
+        this._expanded = !!expanded;
         this._sync();
     }
 
@@ -209,6 +293,13 @@ var NotificationGroup = GObject.registerClass({
             : `${hidden} more`;
 
         this.visible = total > 0;
+        this._clearButton.visible = this.canClear;
+        const urgent = this.urgent;
+        this._urgentDot.visible = urgent;
+        if (urgent)
+            this.add_style_class_name('urgent');
+        else
+            this.remove_style_class_name('urgent');
     }
 
     clear() {
@@ -223,6 +314,7 @@ var NotificationGroup = GObject.registerClass({
         for (const message of this._messages)
             message.disconnectObject(this);
         this._messages = [];
+        this._metadata.clear();
         super.destroy();
     }
 });
@@ -259,6 +351,7 @@ var GroupedNotificationSection = GObject.registerClass({
         this._empty = true;
         this._canClear = false;
         this._count = 0;
+        this._sequence = 0;
 
         Main.messageTray.connectObject(
             'source-added', (_tray, source) => this._addSource(source),
@@ -322,7 +415,10 @@ var GroupedNotificationSection = GObject.registerClass({
         if (!this._groups.has(key)) {
             const group = new NotificationGroup(source);
             group.connectObject(
-                'group-changed', () => this._sync(),
+                'group-changed', () => {
+                    this._reorder();
+                    this._sync();
+                },
                 'message-focused', (_g, actor) => this.emit('message-focused', actor),
                 this);
 
@@ -387,27 +483,51 @@ var GroupedNotificationSection = GObject.registerClass({
         if (!urgent && this.mapped)
             notification.acknowledged = true;
 
-        group.addMessage(message, urgent);
+        group.addMessage(message, urgent, ++this._sequence);
         this._reorder();
         this._sync();
     }
 
-    // Groups holding an urgent notification float to the top; the rest keep
-    // tray order, which is the order their applications last spoke.
+    // Urgent groups float to the top. The rest follow the application that
+    // spoke most recently. Re-running this when a message closes also demotes a
+    // group after its final critical notification is dismissed.
     _reorder() {
-        const groups = [...this._groups.values()];
-        const urgent = groups.filter(g => this._isUrgent(g));
+        const groups = [...this._groups.values()].sort((a, b) =>
+            NotificationOrder.compareGroups({
+                urgent: a.urgent,
+                latestSequence: a.latestSequence,
+            }, {
+                urgent: b.urgent,
+                latestSequence: b.latestSequence,
+            }));
 
-        urgent.forEach((group, i) => {
+        groups.forEach((group, i) => {
             if (this.get_children().indexOf(group) !== i)
                 this.set_child_at_index(group, i);
         });
     }
 
-    _isUrgent(group) {
-        return group.messages.some(m =>
-            m.notification &&
-            m.notification.urgency === MessageTray.Urgency.CRITICAL);
+    // The arrival stamp of the newest notification so far.
+    get sequence() {
+        return this._sequence;
+    }
+
+    // What arrived after `sequence` and is still unread in the list.
+    summarySince(sequence) {
+        let count = 0;
+        let apps = 0;
+        for (const group of this._groups.values()) {
+            const n = group.countSince(sequence);
+            count += n;
+            if (n > 0)
+                apps++;
+        }
+        return { count, apps };
+    }
+
+    setAllExpanded(expanded) {
+        for (const group of this._groups.values())
+            group.setExpanded(expanded);
     }
 
     vfunc_map() {

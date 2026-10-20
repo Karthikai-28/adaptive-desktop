@@ -440,6 +440,13 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         }
     }
 
+    // For providers whose state changed without anything worth surfacing
+    // (a task cancelled, a timer reset, a seek): redraw what is on screen.
+    notifyStateChange() {
+        if (!this._destroyed)
+            this._notifyStateChange();
+    }
+
     _notifyStateChange() {
         const state = this.getState();
         for (const cb of this._stateChangeListeners) {
