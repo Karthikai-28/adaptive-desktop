@@ -203,8 +203,22 @@ var Shade = class Shade {
         if (!(natural > 0))
             return;
 
-        const reserved = 260 + NOTIFICATION_MIN_HEIGHT;
-        const cap = Math.max(MIN_ACTIVITY_HEIGHT, monitor.height - reserved);
+        let fixedHeight = 48; // popup padding and section spacing from the theme
+        for (const child of this._container.get_children()) {
+            if (child === this._activityScroll || child === this._messageList || !child.visible)
+                continue;
+            const [, childNatural] = child.get_preferred_height(-1);
+            fixedHeight += Math.max(0, childNatural);
+        }
+        const monitorIndex = Main.layoutManager.monitors.indexOf(monitor);
+        let availableHeight = monitor.height;
+        if (monitorIndex >= 0 && Main.layoutManager.getWorkAreaForMonitor) {
+            try {
+                availableHeight = Main.layoutManager.getWorkAreaForMonitor(monitorIndex).height;
+            } catch (e) {}
+        }
+        const reserved = fixedHeight + NOTIFICATION_MIN_HEIGHT;
+        const cap = Math.max(MIN_ACTIVITY_HEIGHT, availableHeight - reserved);
         const height = Math.min(natural, cap);
 
         if (this._activityHeight !== height) {

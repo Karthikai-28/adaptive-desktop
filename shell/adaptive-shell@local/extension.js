@@ -953,6 +953,13 @@ class AdaptiveShellV16 {
             this._dynamicIsland.attach();
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the dynamic island');
+            if (this._dynamicIsland) {
+                try {
+                    this._dynamicIsland.detach();
+                } catch (cleanupError) {
+                    logError(cleanupError, '[Adaptive Shell] cleaning up the dynamic island');
+                }
+            }
             this._dynamicIsland = null;
         }
     }

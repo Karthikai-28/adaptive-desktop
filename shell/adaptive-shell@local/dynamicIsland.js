@@ -101,11 +101,6 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         }
         this._lastEventHash = hash;
 
-        // 2. Sanitize payload if screen sharing is active
-        const sanitizedPayload = this._isScreenSharing
-            ? this._sanitizeForPrivacy(eventType, payload)
-            : payload;
-
         const eventItem = {
             id: `${now}-${Math.random().toString(36).substr(2, 6)}`,
             type: eventType,
@@ -113,7 +108,10 @@ var DynamicIslandBackend = class DynamicIslandBackend {
             dwellMs,
             remainingDwellMs: dwellMs,
             createdTs: now,
-            payload: sanitizedPayload,
+            // Keep the source payload so ending screen sharing restores the
+            // real card. Projection happens every time state leaves the bus,
+            // which also protects events that were already surfaced or queued.
+            payload,
         };
 
         // 3. Evaluate preemption or queue insertion
@@ -304,7 +302,10 @@ var DynamicIslandBackend = class DynamicIslandBackend {
     }
 
     setScreenSharing(active) {
-        this._isScreenSharing = Boolean(active);
+        const sharing = Boolean(active);
+        if (this._isScreenSharing === sharing)
+            return;
+        this._isScreenSharing = sharing;
         this._notifyStateChange();
     }
 
@@ -313,14 +314,37 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         if (copy.provider === 'quota') {
             copy.message = '✦ Active';
             copy.remaining = '✦ Active';
+            copy.data = { privacyHidden: true };
         } else if (copy.provider === 'task') {
             copy.title = 'AI Task in Progress';
             copy.message = 'Agent: Task in Progress';
-            if (copy.data) {
-                copy.data = { ...copy.data, title: 'AI Task', lastStdout: '***' };
-            }
+            copy.agent = 'Agent';
+            copy.project = '';
+            copy.error = '';
+            copy.data = copy.data ? {
+                id: copy.data.id,
+                status: copy.data.status,
+                steps: copy.data.steps,
+                title: 'AI Task',
+            } : { title: 'AI Task' };
+        } else if (copy.provider === 'media') {
+            copy.title = 'Media playing';
+            copy.artist = '';
+            copy.album = '';
+            copy.artUrl = '';
+            copy.message = 'Media playing';
+            copy.data = { privacyHidden: true };
         }
         return copy;
+    }
+
+    _projectEvent(eventItem) {
+        if (!eventItem || !this._isScreenSharing)
+            return eventItem;
+        return {
+            ...eventItem,
+            payload: this._sanitizeForPrivacy(eventItem.type, eventItem.payload || {}),
+        };
     }
 
     // ----------------------------------------------------------------- Multi-Activity Decoupling
@@ -338,9 +362,11 @@ var DynamicIslandBackend = class DynamicIslandBackend {
             candidates.push({
                 type: 'task',
                 rank: ActivityPrecedence.TASK,
-                title: activeTasks[0].title,
-                agent: activeTasks[0].agent,
-                data: activeTasks[0],
+                title: this._isScreenSharing ? 'AI task in progress' : activeTasks[0].title,
+                agent: this._isScreenSharing ? '' : activeTasks[0].agent,
+                data: this._isScreenSharing
+                    ? { id: activeTasks[0].id, status: activeTasks[0].status, title: 'AI task' }
+                    : activeTasks[0],
             });
         }
         if (timer.status === 'RUNNING') {
@@ -356,9 +382,9 @@ var DynamicIslandBackend = class DynamicIslandBackend {
             candidates.push({
                 type: 'media',
                 rank: ActivityPrecedence.MEDIA,
-                title: media.title,
-                artist: media.artist,
-                data: media,
+                title: this._isScreenSharing ? 'Media playing' : media.title,
+                artist: this._isScreenSharing ? '' : media.artist,
+                data: this._isScreenSharing ? { isPlaying: true, privacyHidden: true } : media,
             });
         }
 
@@ -375,15 +401,40 @@ var DynamicIslandBackend = class DynamicIslandBackend {
 
     // ----------------------------------------------------------------- UI State Accessor
     getState() {
+        const rawQuota = this.quota.getData();
+        const rawTasks = this.tasks.getActiveTasks();
+        const rawMedia = this.media.getCurrentTrack();
+        const quota = this._isScreenSharing ? {
+            privacyHidden: true,
+            criticalBreach: rawQuota.criticalBreach,
+            cautionBreach: rawQuota.cautionBreach,
+        } : rawQuota;
+        const tasks = this._isScreenSharing ? rawTasks.map(task => ({
+            id: task.id,
+            status: task.status,
+            steps: task.steps,
+            started_at: task.started_at,
+            title: 'AI task in progress',
+            agent: 'Agent',
+        })) : rawTasks;
+        const media = this._isScreenSharing ? {
+            ...rawMedia,
+            title: rawMedia.title ? 'Media playing' : '',
+            artist: '',
+            album: '',
+            artUrl: '',
+            identity: rawMedia.playerBusName ? 'Media player' : '',
+            privacyHidden: true,
+        } : rawMedia;
         return {
-            surfacedEvent: this._surfacedEvent,
+            surfacedEvent: this._projectEvent(this._surfacedEvent),
             queueLength: this._queue.length,
             isPinned: this._isPinned,
             isScreenSharing: this._isScreenSharing,
             multiActivity: this.getMultiActivitySlots(),
-            quota: this.quota.getData(),
-            tasks: this.tasks.getActiveTasks(),
-            media: this.media.getCurrentTrack(),
+            quota,
+            tasks,
+            media,
             timer: this.timers.getState(),
         };
     }
@@ -429,14 +480,16 @@ var DynamicIslandBackend = class DynamicIslandBackend {
     }
 
     _notifySurfaced(eventItem) {
+        const projected = this._projectEvent(eventItem);
         for (const cb of this._surfacedListeners) {
-            try { cb(this, eventItem); } catch (e) { /* ignore listener exception */ }
+            try { cb(this, projected); } catch (e) { /* ignore listener exception */ }
         }
     }
 
     _notifyTucked(eventItem) {
+        const projected = this._projectEvent(eventItem);
         for (const cb of this._tuckedListeners) {
-            try { cb(this, eventItem); } catch (e) { /* ignore listener exception */ }
+            try { cb(this, projected); } catch (e) { /* ignore listener exception */ }
         }
     }
 

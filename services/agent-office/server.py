@@ -158,8 +158,8 @@ async def retry(tid: int):
 
 
 @app.get("/api/events")
-async def events(agent: str | None = None, limit: int = 100):
-    return store.events(agent=agent, limit=min(limit, 1000))
+async def events(agent: str | None = None, task_id: int | None = None, limit: int = 100):
+    return store.events(agent=agent, task_id=task_id, limit=min(limit, 1000))
 
 
 # ---------------------------------------------------------------- agents

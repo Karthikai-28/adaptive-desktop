@@ -54,7 +54,6 @@ const Types = _loadModule("islandTypes");
 const DynamicIsland = _loadModule("dynamicIsland");
 const { describeUsage = () => [] } = _loadModule("islandQuota");
 const USAGE_TRACK_PX = 132;
-const MAX_TASK_ROWS = 4;
 const { DynamicIslandBackend } = DynamicIsland;
 const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {} } = Types;
 
@@ -119,7 +118,8 @@ function describeOverview(state, now = Date.now() / 1000) {
     const tasks = state.tasks || [];
     const media = state.media || {};
     const timer = state.timer || {};
-    const tight = _tightestUsage(state.quota, now);
+    const hidden = !!state.isScreenSharing;
+    const tight = hidden ? null : _tightestUsage(state.quota, now);
 
     let timerText = "Off";
     if (timer.status === "RUNNING")
@@ -130,7 +130,7 @@ function describeOverview(state, now = Date.now() / 1000) {
         timerText = "Finished";
 
     return {
-        quota: tight
+        quota: hidden ? { text: "Hidden while sharing", level: "normal" } : tight
             ? { text: `${tight.provider} ${tight.label} · ${tight.text}`, level: tight.level }
             : { text: "No limits read yet", level: "normal" },
         tasks: {
@@ -140,7 +140,7 @@ function describeOverview(state, now = Date.now() / 1000) {
             level: "normal",
         },
         media: {
-            text: media.title
+            text: hidden && media.title ? "Media playing" : media.title
                 ? `${media.isPlaying ? "" : "Paused · "}${media.title}${media.artist ? ` · ${media.artist}` : ""}`
                 : "Nothing playing",
             level: "normal",
@@ -1123,9 +1123,16 @@ var IslandOverlay = class IslandOverlay {
     _renderQuotaData(state) {
         this._titleIcon.text = "✦";
         this._titleLabel.text = "AI usage";
-        this._badgeLabel.text = "USED";
+        const hidden = !!state.isScreenSharing;
+        this._badgeLabel.text = hidden ? "HIDDEN" : "USED";
         const now = Date.now() / 1000;
-        this._usageModel = describeUsage(state.quota || {}, now);
+        this._usageModel = describeUsage(hidden ? {} : state.quota || {}, now);
+        if (hidden) {
+            this._usageModel = this._usageModel.map(provider => ({
+                ...provider,
+                unavailable: "Hidden while screen sharing",
+            }));
+        }
         if (!this._usageViews || typeof St === "undefined")
             return;
         // Rebuilding the rows is the costliest thing a card does; skip it when
@@ -1196,14 +1203,8 @@ var IslandOverlay = class IslandOverlay {
         if (signature !== this._taskSignature) {
             this._taskSignature = signature;
             this._taskList.destroy_all_children();
-            for (const t of tasks.slice(0, MAX_TASK_ROWS))
+            for (const t of tasks)
                 this._taskList.add_child(this._buildTaskRow(t, hidden, now, tasksApi.isCancelling(t.id)));
-            if (tasks.length > MAX_TASK_ROWS) {
-                this._taskList.add_child(new St.Label({
-                    text: `${tasks.length - MAX_TASK_ROWS} more in Agent Office`,
-                    style_class: "adaptive-island-subtext",
-                }));
-            }
         }
         this._taskEmpty.visible = tasks.length === 0;
 
@@ -1537,6 +1538,8 @@ var IslandUI = class IslandUI {
         this._centerTabs = new Map(); // feature -> { button, badge, label }
         this._menuOpenId = 0;
         this._progressTimerId = 0;
+        this._screencastNotifyId = 0;
+        this._screencastSource = null;
     }
 
     get backend() {
@@ -1550,6 +1553,8 @@ var IslandUI = class IslandUI {
     attach() {
         if (this._attached) return;
         this._attached = true;
+
+        try {
 
         // 1. Build UI elements
         this._anchor.build();
@@ -1592,6 +1597,7 @@ var IslandUI = class IslandUI {
         if (dateMenu && dateMenu.menu) {
             this._menuOpenId = dateMenu.menu.connect("open-state-changed", (menu, open) => {
                 if (open) {
+                    this._syncScreenSharingFromShell();
                     this._anchor._clearGraceExitTimer();
                     if (this._anchor._hoverDwellTimerId) {
                         GLib.source_remove(this._anchor._hoverDwellTimerId);
@@ -1614,12 +1620,9 @@ var IslandUI = class IslandUI {
         this._tuckedUnsub = this._backend.onTucked((bus, event) => this._onTucked(event));
         this._stateUnsub = this._backend.onStateChange((bus, state) => this._onStateChange(state));
 
-        // 5. Initialize backend
-        if (this._ownsBackend) {
-            this._backend.init();
-        }
-
-        // 6. The Focus timer's end-of-session digest reads the Shade's list.
+        // 5. The Focus timer's end-of-session digest reads the Shade's list.
+        // Install this before init(): a restored deadline may already have
+        // elapsed, in which case restore emits its digest immediately.
         if (this._shade && this._backend.timers.setDigestSource) {
             const shade = this._shade;
             this._backend.timers.setDigestSource({
@@ -1634,11 +1637,60 @@ var IslandUI = class IslandUI {
             });
         }
 
+        // 6. Initialize backend
+        if (this._ownsBackend) {
+            this._backend.init();
+        }
+
+        this._watchScreenSharing();
+
         if (typeof Main !== "undefined" && Main) {
             Main._dynamicIsland = this;
         }
 
         this._updateUI();
+        } catch (e) {
+            // attach() changes Shell-owned actors. Always put them back before
+            // the extension drops this object after a failed installation.
+            try {
+                this.detach();
+            } catch (cleanupError) {
+                logError(cleanupError, "[Adaptive Island] cleaning up failed attach");
+            }
+            throw e;
+        }
+    }
+
+    _watchScreenSharing() {
+        const ui = Main && Main.screenshotUI;
+        this._screencastSource = ui || null;
+        this._syncScreenSharingFromShell();
+        if (!ui || !ui.connect)
+            return;
+        try {
+            this._screencastNotifyId = ui.connect("notify::screencast-in-progress",
+                () => this._syncScreenSharingFromShell());
+        } catch (e) {
+            this._screencastNotifyId = 0;
+        }
+    }
+
+    _syncScreenSharingFromShell() {
+        const ui = this._screencastSource || (Main && Main.screenshotUI);
+        this._backend.setScreenSharing(!!(ui && ui.screencast_in_progress));
+    }
+
+    _syncProviderActivity(state = null) {
+        if (!this._backend.quota || !this._backend.quota.setDormant)
+            return;
+        state = state || this._backend.getState();
+        const eventIsQuota = !!(state.surfacedEvent &&
+            (state.surfacedEvent.payload || {}).provider === "quota");
+        const centerShowsQuota = this.isCenterOpen() &&
+            (this._centerFeature === "overview" || this._centerFeature === "quota");
+        const overlayShowsQuota = this._overlay && this._overlay._isExpanded &&
+            this._overlay._activeCardType === "quota";
+        this._backend.quota.setDormant(!(eventIsQuota || centerShowsQuota || overlayShowsQuota));
     }
 
     // The Activity Center: tabs over an embedded card stack, mounted into the
@@ -1714,6 +1766,14 @@ var IslandUI = class IslandUI {
         if (this._tuckedUnsub) { this._tuckedUnsub(); this._tuckedUnsub = null; }
         if (this._stateUnsub) { this._stateUnsub(); this._stateUnsub = null; }
         this._stopProgressTicker();
+
+        if (this._screencastNotifyId && this._screencastSource) {
+            try {
+                this._screencastSource.disconnect(this._screencastNotifyId);
+            } catch (e) {}
+        }
+        this._screencastNotifyId = 0;
+        this._screencastSource = null;
 
         if (this._backend.timers.setDigestSource)
             this._backend.timers.setDigestSource(null);
@@ -1813,6 +1873,7 @@ var IslandUI = class IslandUI {
                 tab.button.accessible_name = badge.text ? `${tab.label}, ${badge.text}` : tab.label;
             }
         }
+        this._syncProviderActivity(state);
         this._syncProgressTicker();
     }
 

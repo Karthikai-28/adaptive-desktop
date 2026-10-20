@@ -9,10 +9,12 @@
 /* exported IslandTaskProvider */
 /* global module, setTimeout, clearTimeout */
 
-let Gio, GLib;
+let Gio, GLib, Soup, ByteArray;
 try {
     Gio = imports.gi.Gio;
     GLib = imports.gi.GLib;
+    Soup = imports.gi.Soup;
+    ByteArray = imports.byteArray;
 } catch (e) {
     // Headless test harness
 }
@@ -23,76 +25,208 @@ var IslandTaskProvider = class IslandTaskProvider {
         this._officeUrl = options.officeUrl || 'http://127.0.0.1:8790/';
         this._tasksUrl = options.tasksUrl || 'http://127.0.0.1:8790/api/tasks';
         this._eventsUrl = options.eventsUrl || 'http://127.0.0.1:8790/api/events';
-        // Enough recent tasks to see each running one leave the running state.
-        this._listLimit = options.listLimit || 40;
+        this._listLimit = options.listLimit || 1000;
         this._poster = options.poster || null;             // for tests/mocking
         this._logFetcher = options.logFetcher || null;     // for tests/mocking
         this._activePollMs = options.activePollMs || 3000;  // 3s while tasks are actively running
         this._idlePollMs = options.idlePollMs || 15000;    // 15s while no tasks are active
+        this._livePollMs = options.livePollMs || 60000;    // consistency check while WebSocket is healthy
         this._debounceMs = options.debounceMs || 1000;    // 1000ms sliding debounce for progress updates
         this._customFetcher = options.fetcher || null;     // for tests/mocking
 
         this._pollTimerId = 0;
+        this._pollInFlight = false;
         this._debounceTimers = new Map(); // taskId -> timerId
         this._destroyed = false;
 
         this._knownTasks = new Map(); // taskId -> taskObject
         this._runningTasks = new Map(); // taskId -> taskObject
         this._logs = new Map(); // taskId -> { ts, lines }
+        this._logInFlight = new Map(); // taskId -> callbacks
         this._cancelling = new Set();
+        this._wsSession = null;
+        this._wsConnection = null;
+        this._wsReconnectId = 0;
+        this._wsPingId = 0;
+        this._liveUpdates = options.liveUpdates !== false;
     }
 
     init() {
         this._destroyed = false;
-        this.pollTasks();
-        this._scheduleNextPoll();
+        this._connectLiveUpdates();
+        this.pollTasks(() => this._scheduleNextPoll());
     }
 
     _scheduleNextPoll() {
         if (this._destroyed)
             return;
-        const interval = this._runningTasks.size > 0 ? this._activePollMs : this._idlePollMs;
+        const interval = this._wsConnection ? this._livePollMs
+            : this._runningTasks.size > 0 ? this._activePollMs : this._idlePollMs;
         if (typeof GLib !== 'undefined' && GLib.timeout_add) {
             this._pollTimerId = GLib.timeout_add(GLib.PRIORITY_LOW, interval, () => {
-                this.pollTasks();
-                return GLib.SOURCE_CONTINUE;
+                this._pollTimerId = 0;
+                this.pollTasks(() => this._scheduleNextPoll());
+                return GLib.SOURCE_REMOVE;
             });
         } else if (typeof setTimeout !== 'undefined') {
             this._pollTimerId = setTimeout(() => {
-                this.pollTasks();
-                this._scheduleNextPoll();
+                this._pollTimerId = 0;
+                this.pollTasks(() => this._scheduleNextPoll());
             }, interval);
         }
     }
 
-    pollTasks() {
-        if (this._destroyed)
+    _connectLiveUpdates() {
+        if (!this._liveUpdates || this._destroyed || this._wsConnection ||
+            typeof Soup === 'undefined' || !Soup.Session || !Soup.Message)
             return;
+        try {
+            this._wsSession = this._wsSession || new Soup.Session();
+            const wsUrl = this._officeUrl.replace(/^http/, 'ws').replace(/\/?$/, '/ws');
+            const origin = this._officeUrl.replace(/\/$/, '');
+            const message = Soup.Message.new('GET', wsUrl);
+            this._wsSession.websocket_connect_async(
+                message, origin, null, null, (session, res) => {
+                    if (this._destroyed)
+                        return;
+                    try {
+                        const connection = session.websocket_connect_finish(res);
+                        this._wsConnection = connection;
+                        connection.connect('message', (_conn, type, bytes) => {
+                            if (type !== Soup.WebsocketDataType.TEXT)
+                                return;
+                            try {
+                                const text = ByteArray.toString(bytes.get_data());
+                                this._handleLiveMessage(JSON.parse(text));
+                            } catch (e) {}
+                        });
+                        connection.connect('closed', () => {
+                            this._wsConnection = null;
+                            this._stopLivePing();
+                            this._scheduleLiveReconnect();
+                        });
+                        this._startLivePing();
+                    } catch (e) {
+                        this._scheduleLiveReconnect();
+                    }
+                });
+        } catch (e) {
+            this._scheduleLiveReconnect();
+        }
+    }
+
+    _handleLiveMessage(message) {
+        if (!message || this._destroyed)
+            return;
+        if (message.type === 'state' && Array.isArray(message.tasks)) {
+            // The Office snapshot intentionally caps history. Preserve a
+            // running task learned from the exhaustive status query when it is
+            // older than that snapshot window.
+            const ids = new Set(message.tasks.map(task => task.id));
+            const merged = [...this._runningTasks.values()]
+                .filter(task => !ids.has(task.id));
+            merged.push(...message.tasks);
+            this._processTasks(merged);
+        } else if (message.type === 'task' && message.task) {
+            const tasks = [...this._runningTasks.values()]
+                .filter(task => task.id !== message.task.id);
+            tasks.push(message.task);
+            this._processTasks(tasks);
+        } else if (message.type === 'event' && message.event && message.event.task_id) {
+            const id = message.event.task_id;
+            const cached = this._logs.get(id);
+            const events = cached ? cached.events.slice() : [];
+            events.push(message.event);
+            const recent = events.slice(-4);
+            const lines = recent.map(event => ({
+                ts: Number(event.ts) || 0,
+                text: `${event.kind ? `${event.kind}: ` : ''}${String(event.text || '').replace(/\s+/g, ' ').trim()}`,
+            }));
+            this._logs.set(id, { ts: Date.now(), events: recent, lines });
+            if (this._runningTasks.has(id) && this._bus && this._bus.notifyStateChange)
+                this._bus.notifyStateChange();
+        }
+    }
+
+    _startLivePing() {
+        this._stopLivePing();
+        if (typeof GLib === 'undefined' || !GLib.timeout_add_seconds)
+            return;
+        this._wsPingId = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, 25, () => {
+            if (!this._wsConnection)
+                return GLib.SOURCE_REMOVE;
+            try {
+                this._wsConnection.send_text('ping');
+            } catch (e) {
+                return GLib.SOURCE_REMOVE;
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopLivePing() {
+        if (this._wsPingId && typeof GLib !== 'undefined') {
+            GLib.source_remove(this._wsPingId);
+            this._wsPingId = 0;
+        }
+    }
+
+    _scheduleLiveReconnect() {
+        if (this._destroyed || this._wsReconnectId || typeof GLib === 'undefined')
+            return;
+        this._wsReconnectId = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, 5, () => {
+            this._wsReconnectId = 0;
+            this._connectLiveUpdates();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    pollTasks(done = null) {
+        if (this._destroyed) {
+            if (done) done();
+            return;
+        }
+        if (this._pollInFlight) {
+            if (done) done();
+            return;
+        }
+        this._pollInFlight = true;
+        const finish = (err, tasks) => {
+            this._pollInFlight = false;
+            if (!this._destroyed && !err && tasks)
+                this._processTasks(tasks);
+            if (done) done();
+        };
 
         if (this._customFetcher) {
-            this._customFetcher((err, tasks) => {
-                if (!err && tasks)
-                    this._processTasks(tasks);
-            });
+            try {
+                this._customFetcher(finish);
+            } catch (e) {
+                finish(e, null);
+            }
             return;
         }
 
         if (typeof Gio !== 'undefined' && Gio.File) {
             try {
-                const file = Gio.File.new_for_uri(`${this._tasksUrl}?limit=${this._listLimit}`);
+                // Status filtering is what guarantees an old, long-running task
+                // cannot fall behind a page of recently completed work.
+                const file = Gio.File.new_for_uri(
+                    `${this._tasksUrl}?status=running&limit=${this._listLimit}`);
                 file.load_contents_async(null, (source, res) => {
                     try {
                         const [, contents] = source.load_contents_finish(res);
                         const raw = new TextDecoder('utf-8').decode(contents);
-                        const tasks = JSON.parse(raw);
-                        this._processTasks(tasks);
+                        finish(null, JSON.parse(raw));
                     } catch (e) {
-                        // Ignore transient network/daemon hiccups
+                        finish(e, null);
                     }
                 });
             } catch (e) {
-                // Ignore
+                finish(e, null);
             }
+        } else {
+            finish(new Error('no HTTP client'), null);
         }
     }
 
@@ -131,29 +265,48 @@ var IslandTaskProvider = class IslandTaskProvider {
                 } else if (t.status === 'failed' || t.status === 'error') {
                     this._emitTaskFailed(t);
                 }
+                this._knownTasks.delete(id);
             }
         }
 
-        const prevCount = this._runningTasks.size;
-        for (const id of this._runningTasks.keys()) {
-            if (!currentActive.has(id))
+        for (const [id, previous] of this._runningTasks) {
+            if (!currentActive.has(id)) {
                 changed = true;
+                if (!taskList.some(task => task.id === id))
+                    this._resolveTaskOutcome(id, previous);
+            }
         }
         this._runningTasks = currentActive;
-        if (changed && this._bus && this._bus.notifyStateChange)
+        // A light state heartbeat keeps the visible age and selected log fresh;
+        // closed cards still skip their expensive rendering.
+        if ((changed || currentActive.size > 0) && this._bus && this._bus.notifyStateChange)
             this._bus.notifyStateChange();
+    }
 
-        // If running count transitioned to/from 0, adjust poll rate
-        if ((prevCount === 0 && currentActive.size > 0) || (prevCount > 0 && currentActive.size === 0)) {
-            if (this._pollTimerId) {
-                if (typeof GLib !== 'undefined' && GLib.source_remove)
-                    GLib.source_remove(this._pollTimerId);
-                else if (typeof clearTimeout !== 'undefined')
-                    clearTimeout(this._pollTimerId);
-                this._pollTimerId = 0;
-            }
-            this._scheduleNextPoll();
-        }
+    _resolveTaskOutcome(taskId, previous) {
+        if (typeof Gio === 'undefined' || !Gio.File)
+            return;
+        try {
+            const file = Gio.File.new_for_uri(`${this._tasksUrl}/${encodeURIComponent(taskId)}`);
+            file.load_contents_async(null, (source, res) => {
+                if (this._destroyed)
+                    return;
+                try {
+                    const [, contents] = source.load_contents_finish(res);
+                    const task = JSON.parse(new TextDecoder('utf-8').decode(contents));
+                    this._knownTasks.set(taskId, { ...task });
+                    this._cancelling.delete(taskId);
+                    this._logs.delete(taskId);
+                    if (task.status === 'completed' || task.status === 'done')
+                        this._emitTaskCompleted(task);
+                    else if (task.status === 'failed' || task.status === 'error')
+                        this._emitTaskFailed(task);
+                    this._knownTasks.delete(taskId);
+                } catch (e) {
+                    this._knownTasks.set(taskId, { ...previous, status: 'unknown' });
+                }
+            });
+        } catch (e) {}
     }
 
     _emitTaskStarted(task) {
@@ -302,33 +455,43 @@ var IslandTaskProvider = class IslandTaskProvider {
             callback(cached.lines);
             return;
         }
+        if (this._logInFlight.has(taskId)) {
+            this._logInFlight.get(taskId).push(callback);
+            return;
+        }
+        this._logInFlight.set(taskId, [callback]);
         const finish = (events) => {
             const lines = (Array.isArray(events) ? events : []).slice(-4).map(e => ({
                 ts: Number(e.ts) || 0,
                 text: `${e.kind ? `${e.kind}: ` : ''}${String(e.text || '').replace(/\s+/g, ' ').trim()}`,
             }));
-            this._logs.set(taskId, { ts: Date.now(), lines });
-            callback(lines);
+            this._logs.set(taskId, { ts: Date.now(), events: Array.isArray(events) ? events.slice(-4) : [], lines });
+            const callbacks = this._logInFlight.get(taskId) || [];
+            this._logInFlight.delete(taskId);
+            for (const cb of callbacks)
+                cb(lines);
         };
         if (this._logFetcher) {
             this._logFetcher(taskId, (err, events) => finish(err ? [] : events));
             return;
         }
-        if (typeof Gio === 'undefined' || !Gio.File)
+        if (typeof Gio === 'undefined' || !Gio.File) {
+            finish([]);
             return;
+        }
         try {
-            const file = Gio.File.new_for_uri(`${this._tasksUrl}/${encodeURIComponent(taskId)}`);
+            const file = Gio.File.new_for_uri(
+                `${this._eventsUrl}?task_id=${encodeURIComponent(taskId)}&limit=4`);
             file.load_contents_async(null, (source, res) => {
                 try {
                     const [, contents] = source.load_contents_finish(res);
-                    const task = JSON.parse(new TextDecoder('utf-8').decode(contents));
-                    finish(task && task.events);
+                    finish(JSON.parse(new TextDecoder('utf-8').decode(contents)));
                 } catch (e) {
                     finish([]);
                 }
             });
         } catch (e) {
-            // Ignore
+            finish([]);
         }
     }
 
@@ -352,6 +515,20 @@ var IslandTaskProvider = class IslandTaskProvider {
 
     destroy() {
         this._destroyed = true;
+        this._stopLivePing();
+        if (this._wsReconnectId && typeof GLib !== 'undefined') {
+            GLib.source_remove(this._wsReconnectId);
+            this._wsReconnectId = 0;
+        }
+        if (this._wsConnection) {
+            try {
+                this._wsConnection.close(Soup.WebsocketCloseCode.NORMAL, 'extension disabled');
+            } catch (e) {}
+            this._wsConnection = null;
+        }
+        if (this._wsSession && this._wsSession.abort)
+            this._wsSession.abort();
+        this._wsSession = null;
         if (this._pollTimerId) {
             if (typeof GLib !== 'undefined' && GLib.source_remove)
                 GLib.source_remove(this._pollTimerId);
@@ -367,6 +544,7 @@ var IslandTaskProvider = class IslandTaskProvider {
         }
         this._debounceTimers.clear();
         this._logs.clear();
+        this._logInFlight.clear();
         this._cancelling.clear();
         this._runningTasks.clear();
         this._knownTasks.clear();

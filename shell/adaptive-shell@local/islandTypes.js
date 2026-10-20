@@ -26,7 +26,7 @@ var IslandEvents = {
     // Tier 4: Ambient (P4)
     PLAYBACK_STATE_CHANGED:'PLAYBACK_STATE_CHANGED',// Play/pause toggle
     TASK_PROGRESS_UPDATE:  'TASK_PROGRESS_UPDATE',  // Milestone step / stdout update
-    TIMER_TICK:            'TIMER_TICK',            // 1s countdown tick while running
+    TIMER_TICK:            'TIMER_TICK',            // legacy name; ticks now update state directly
     TIMER_PAUSED:          'TIMER_PAUSED',          // Timer paused
     TIMER_RESUMED:         'TIMER_RESUMED',         // Timer resumed
     QUOTA_UPDATED:         'QUOTA_UPDATED',         // Routine quota / token count update

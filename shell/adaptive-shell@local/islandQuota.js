@@ -132,6 +132,11 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         this._queuedRefreshCallbacks = [];
         this._transcriptMonitor = null;
         this._transcriptCancellable = null;
+        this._transcriptOffset = 0;
+        this._transcriptRemainder = '';
+        this._transcriptReadInFlight = false;
+        this._transcriptReadPending = false;
+        this._transcriptDebounceId = 0;
     }
 
     init() {
@@ -142,6 +147,7 @@ var IslandQuotaProvider = class IslandQuotaProvider {
     }
 
     setDormant(dormant) {
+        dormant = Boolean(dormant);
         if (this._isDormant === dormant)
             return;
         this._isDormant = dormant;
@@ -315,14 +321,24 @@ var IslandQuotaProvider = class IslandQuotaProvider {
                     if (gDir.query_exists(null)) {
                         const enumerator = gDir.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
                         let info;
+                        let newest = null;
                         while ((info = enumerator.next_file(null)) !== null) {
                             const name = info.get_name();
                             const candidate = `${brainDir}/${name}/.system_generated/logs/transcript.jsonl`;
-                            if (Gio.File.new_for_path(candidate).query_exists(null)) {
-                                this._transcriptPath = candidate;
-                                break;
-                            }
+                            const file = Gio.File.new_for_path(candidate);
+                            if (!file.query_exists(null))
+                                continue;
+                            let modified = 0;
+                            try {
+                                modified = file.query_info('time::modified',
+                                    Gio.FileQueryInfoFlags.NONE, null)
+                                    .get_attribute_uint64('time::modified');
+                            } catch (e) {}
+                            if (!newest || modified > newest.modified)
+                                newest = { path: candidate, modified };
                         }
+                        if (newest)
+                            this._transcriptPath = newest.path;
                     }
                 } catch (e) {
                     // Sandbox / not found
@@ -345,7 +361,14 @@ var IslandQuotaProvider = class IslandQuotaProvider {
             this._transcriptMonitor = file.monitor_file(Gio.FileMonitorFlags.NONE, this._transcriptCancellable);
             this._transcriptMonitor.connect('changed', (_mon, _file, _other, eventType) => {
                 if (eventType === Gio.FileMonitorEvent.CHANGED || eventType === Gio.FileMonitorEvent.CHANGES_DONE_HINT) {
-                    this._readAgyTranscript(filePath);
+                    if (this._transcriptDebounceId)
+                        GLib.source_remove(this._transcriptDebounceId);
+                    this._transcriptDebounceId = GLib.timeout_add(
+                        GLib.PRIORITY_LOW, 250, () => {
+                            this._transcriptDebounceId = 0;
+                            this._readAgyTranscript(filePath);
+                            return GLib.SOURCE_REMOVE;
+                        });
                 }
             });
         } catch (e) {
@@ -356,52 +379,80 @@ var IslandQuotaProvider = class IslandQuotaProvider {
     _readAgyTranscript(filePath) {
         if (typeof Gio === 'undefined' || !Gio.File)
             return;
+        if (this._transcriptReadInFlight) {
+            this._transcriptReadPending = true;
+            return;
+        }
+        this._transcriptReadInFlight = true;
         try {
             const file = Gio.File.new_for_path(filePath);
-            file.load_contents_async(null, (source, res) => {
+            file.load_contents_async(this._transcriptCancellable, (source, res) => {
                 try {
                     const [, contents] = source.load_contents_finish(res);
-                    const text = new TextDecoder('utf-8').decode(contents);
-                    this.parseTranscriptText(text);
+                    if (this._destroyed)
+                        return;
+                    if (contents.length < this._transcriptOffset) {
+                        this._transcriptOffset = 0;
+                        this._transcriptRemainder = '';
+                        this._resetTranscriptTotals();
+                    }
+                    const chunk = contents.slice(this._transcriptOffset);
+                    this._transcriptOffset = contents.length;
+                    if (chunk.length)
+                        this._parseTranscriptChunk(new TextDecoder('utf-8').decode(chunk));
                 } catch (e) {
                     // Ignore transient read errors during append
+                } finally {
+                    this._transcriptReadInFlight = false;
+                    if (this._transcriptReadPending && !this._destroyed) {
+                        this._transcriptReadPending = false;
+                        this._readAgyTranscript(filePath);
+                    }
                 }
             });
         } catch (e) {
-            // Ignore
+            this._transcriptReadInFlight = false;
         }
     }
 
     parseTranscriptText(text) {
-        if (!text) return;
-        const lines = text.trim().split('\n');
-        let totalIn = 0;
-        let totalOut = 0;
-        let totalCache = 0;
-        let lastTimestamp = '';
+        this._resetTranscriptTotals();
+        this._transcriptRemainder = '';
+        this._consumeTranscriptLines(String(text || '').split('\n'));
+    }
 
+    _resetTranscriptTotals() {
+        this._agyData.sessionTokens = { input: 0, output: 0, cache: 0, total: 0 };
+        this._agyData.lastTurnAt = '';
+    }
+
+    _parseTranscriptChunk(chunk) {
+        const text = this._transcriptRemainder + chunk;
+        const lines = text.split('\n');
+        this._transcriptRemainder = lines.pop() || '';
+        this._consumeTranscriptLines(lines);
+    }
+
+    _consumeTranscriptLines(lines) {
+        const totals = this._agyData.sessionTokens;
         for (const line of lines) {
+            if (!line.trim())
+                continue;
             try {
                 const rec = JSON.parse(line);
                 if (rec.input_tokens !== null && rec.input_tokens !== undefined) {
-                    totalIn += Number(rec.input_tokens) || 0;
-                    totalOut += Number(rec.output_tokens) || 0;
-                    totalCache += Number(rec.cache_read_tokens) || 0;
+                    totals.input += Number(rec.input_tokens) || 0;
+                    totals.output += Number(rec.output_tokens) || 0;
+                    totals.cache += Number(rec.cache_read_tokens) || 0;
                     if (rec.created_at)
-                        lastTimestamp = rec.created_at;
+                        this._agyData.lastTurnAt = rec.created_at;
                 }
             } catch (e) {
                 // Ignore corrupt line
             }
         }
 
-        this._agyData.sessionTokens = {
-            input: totalIn,
-            output: totalOut,
-            cache: totalCache,
-            total: totalIn + totalOut,
-        };
-        this._agyData.lastTurnAt = lastTimestamp;
+        totals.total = totals.input + totals.output;
         this._agyData.status = 'healthy';
 
         if (this._bus && this._bus._notifyStateChange)
@@ -449,6 +500,10 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         if (this._transcriptMonitor) {
             this._transcriptMonitor.cancel();
             this._transcriptMonitor = null;
+        }
+        if (this._transcriptDebounceId && typeof GLib !== 'undefined') {
+            GLib.source_remove(this._transcriptDebounceId);
+            this._transcriptDebounceId = 0;
         }
     }
 };

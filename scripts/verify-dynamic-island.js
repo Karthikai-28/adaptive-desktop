@@ -137,6 +137,14 @@ async function main() {
     check(agyData.sessionTokens.cache === 13000, 'quota: agy summed session cache tokens (13000)');
     check(agyData.remainingPercent === null, 'quota: agy percentage explicitly null (server-enforced gap)');
     check(agyData.unavailableReason.includes('Server-enforced'), 'quota: agy gap reason documented correctly');
+    quota._resetTranscriptTotals();
+    quota._transcriptRemainder = '';
+    quota._parseTranscriptChunk(sampleLogLines.split('\n')[0] + '\n');
+    quota._parseTranscriptChunk(sampleLogLines.split('\n')[1] + '\n');
+    check(quota.getData().agy.sessionTokens.total === 3000,
+        'quota: appended transcript chunks are accumulated without reparsing old lines');
+    quota.setDormant(true);
+    check(quota._isDormant === true, 'quota: dormant polling can be selected while its cards are hidden');
     quota.destroy();
 
     // =========================================================================
@@ -349,7 +357,18 @@ async function main() {
     });
     const lastSurfaced = island.getState().surfacedEvent;
     check(lastSurfaced.payload.message === '✦ Active', 'bus: ScreenCast privacy sanitized numeric quota to ✦ Active');
+    island._surfacedEvent = {
+        type: 'TASK_STARTED', priority: 3, dwellMs: 3000,
+        payload: { provider: 'task', title: 'Secret project', project: 'private',
+            data: { id: 9, title: 'Secret project', body: 'sensitive prompt' } },
+    };
+    const hiddenEvent = island.getState().surfacedEvent;
+    check(hiddenEvent.payload.title === 'AI Task in Progress' &&
+        !JSON.stringify(hiddenEvent).includes('Secret project'),
+    'bus: sharing also sanitizes an event that was already surfaced');
     island.setScreenSharing(false);
+    check(island.getState().surfacedEvent.payload.title === 'Secret project',
+        'bus: ending sharing restores the original event without losing it');
 
     // Test 5.7: Multi-Activity Decoupling
     island.tasks._runningTasks.set(42, { id: 42, title: 'Compile ROS', agent: 'arjun' });
@@ -390,6 +409,7 @@ async function main() {
         check(dndOn === true, 'timer: a focus session turns Do Not Disturb on');
         check(saved && saved.status === 'RUNNING' && saved.deadline === now + 1500 * 1000,
             'timer: the deadline is saved when focus starts');
+        check(saved.digestMark === 5, 'timer: the focus digest marker is saved with the deadline');
 
         now += 600 * 1000; // ten minutes pass, e.g. across a suspend
         check(t.getState().remainingSeconds === 900, 'timer: remaining time follows the wall clock, not ticks');
@@ -401,6 +421,7 @@ async function main() {
         check(t2.getState().status === 'RUNNING' && t2.getState().remainingSeconds === 900,
             'timer: a running session survives a shell restart');
         check(t2.getState().dndHeld === true, 'timer: the restored session still owns Do Not Disturb');
+        check(t2._digestMark === 5, 'timer: the digest marker survives a shell restart');
 
         notified = 0;
         t2.extend(300);
@@ -410,7 +431,6 @@ async function main() {
         // Expiry after a long suspend: one recompute ends it, gives DND back
         // and reports what arrived.
         t2.setDigestSource(digestSource);
-        t2._digestMark = 5;
         events.length = 0;
         now += 3600 * 1000;
         t2._syncRemaining();
@@ -458,7 +478,23 @@ async function main() {
         t6.reset();
         check(events.some(e => e.type === 'TIMER_DIGEST'), 'timer: stopping focus early emits the digest');
         check(t6.getState().lastDigest === '3 notifications from 2 apps', 'timer: the digest stays on the card');
-        [t, t2, t3, t4, t5, t6].forEach(x => x.destroy());
+
+        // If the restored deadline elapsed while Shell was down, init() must
+        // still have the digest source before it expires the session.
+        saved = { status: 'RUNNING', label: 'Pomodoro', preset: 'pomodoro',
+            totalSeconds: 60, remainingSeconds: 60, deadline: now - 1,
+            dndHeld: false, digestMark: 5 };
+        dndOn = true;
+        events.length = 0;
+        const t7 = new IslandTimerProvider({ bus, storage, dnd, now: () => now });
+        t7.setDigestSource(digestSource);
+        t7.init();
+        check(events.some(e => e.type === 'TIMER_EXPIRED' && e.payload.digest),
+            'timer: a restored expired session keeps its digest');
+        const timerSource = fs.readFileSync(path.join(shellDir, 'islandTimers.js'), 'utf8');
+        check(!timerSource.includes("this._emit('TIMER_TICK'"),
+            'timer: one-second ticks update state without filling the event queue');
+        [t, t2, t3, t4, t5, t6, t7].forEach(x => x.destroy());
     }
 
     console.log('\n-- Provider 7: Task cancel, log, live list --');
@@ -499,6 +535,31 @@ async function main() {
         const real = fs.readFileSync(path.join(shellDir, 'islandTasks.js'), 'utf8');
         check(real.includes("'-X', 'POST'") && real.includes("'X-Office: 1'"),
             'task: the real client sends POST with the header Agent Office requires');
+        check(real.includes('?status=running&limit='),
+            'task: polling asks for running tasks directly instead of a mixed recent page');
+
+        let fetchCalls = 0;
+        let finishFetch = null;
+        const guarded = new IslandTaskProvider({ fetcher: cb => { fetchCalls++; finishFetch = cb; } });
+        guarded.pollTasks();
+        guarded.pollTasks();
+        check(fetchCalls === 1, 'task: a slow request cannot overlap the next poll');
+        finishFetch(null, []);
+        guarded.destroy();
+
+        const live = new IslandTaskProvider({ bus, liveUpdates: false });
+        live._handleLiveMessage({ type: 'task', task: {
+            id: 19, title: 'Live task', agent: 'x', status: 'running', steps: 1,
+        } });
+        live._handleLiveMessage({ type: 'event', event: {
+            task_id: 19, ts: 9, kind: 'step', text: 'streamed update',
+        } });
+        check(live.getActiveTasks().length === 1 &&
+            live._logs.get(19).lines[0].text === 'step: streamed update',
+        'task: Agent Office live updates refresh tasks and logs without waiting for a poll');
+        check(real.includes('websocket_connect_async'),
+            'task: the provider uses Agent Office live updates with polling as fallback');
+        live.destroy();
     }
 
     console.log('\n-- Provider 8: Media variants, position, seek, players --');

@@ -342,6 +342,8 @@ var IslandTimerProvider = class IslandTimerProvider {
             remainingSeconds: s.remainingSeconds,
             deadline: s.deadline,
             dndHeld: this._dndHeld,
+            digestMark: this._digestMark,
+            lastDigest: s.lastDigest,
         });
     }
 
@@ -351,10 +353,12 @@ var IslandTimerProvider = class IslandTimerProvider {
             return;
 
         this._dndHeld = typeof saved.dndHeld === 'boolean' ? saved.dndHeld : null;
+        this._digestMark = Number.isFinite(saved.digestMark) ? saved.digestMark : null;
         const s = this._state;
         s.label = saved.label || s.label;
         s.preset = saved.preset || 'custom';
         s.totalSeconds = Math.max(1, Number(saved.totalSeconds) || 1);
+        s.lastDigest = saved.lastDigest ? String(saved.lastDigest) : '';
 
         if (saved.status === 'RUNNING' && saved.deadline > 0) {
             s.status = 'RUNNING';
@@ -394,11 +398,9 @@ var IslandTimerProvider = class IslandTimerProvider {
                 return false;
             }
 
-            this._emit('TIMER_TICK', 4, 1000, {
-                remainingSeconds: this._state.remainingSeconds,
-                formatted: this._formatTime(this._state.remainingSeconds),
-                progressPercent: this._state.progressPercent,
-            });
+            // The running timer is already persistent activity in the island.
+            // A tick is a state redraw, not a notification-worthy queue event.
+            this._notifyState();
 
             return true;
         };

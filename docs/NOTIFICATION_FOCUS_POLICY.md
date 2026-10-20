@@ -51,9 +51,17 @@ message list's original parent, index and `y_expand` at attach time and restores
 all three. Disabling the extension must leave a working stock date menu; that is
 the invariant to check after any change to this file.
 
-Nothing in the shade polls while the popup is closed. The cards draw only while
-on screen, and the music scrubber's one-second redraw runs only while it is
-visible and a track is playing.
+The cards draw only while on screen, and the music scrubber's one-second redraw
+runs only while it is visible and a track is playing. AI quota snapshots slow
+to five minutes while their cards and alerts are hidden. Agent Office tasks use
+its live local WebSocket, with a guarded status-filtered poll as the fallback
+and periodic consistency check.
+
+While GNOME's built-in recorder is active, the island hides task names and
+details, AI percentages, media metadata and already-queued event text. GNOME 42
+on X11 cannot reliably discover screen sharing performed outside Shell (for
+example an application's own X11 capture), so this automatic privacy boundary
+is deliberately described as recorder-aware rather than universal.
 
 ## Normal Notifications
 
@@ -64,8 +72,12 @@ visible and a track is playing.
   Focus timer does this for focus sessions (not breaks) and gives back the
   previous value, unless the user changed it during the session. Its deadline
   is saved in `~/.local/state/adaptive-desktop/focus-timer.json`, so the session
-  and the DND it holds survive suspend and a shell restart. When it ends, the
-  card shows how many notifications from how many apps arrived meanwhile.
+  and the DND it holds survive suspend and a shell restart. Its arrival marker
+  is saved with the deadline, and a bounded ledger in
+  `~/.local/state/adaptive-desktop/notification-arrivals.json` counts arrivals
+  even if an application withdraws them before the session ends. The ledger
+  stores application keys and hashes, never notification text. When focus ends,
+  the card shows how many notifications from how many apps arrived meanwhile.
 - The shade's Focus tile writes that same key, so `scripts/focus-cli.py` and the
   tile are two views of one setting rather than two ideas of focus.
 
@@ -80,7 +92,8 @@ visible and a track is playing.
 
 ## Grouping and its fallbacks
 
-`notifications.js` groups by `MessageTray.Source`. It deliberately does not
+`notifications.js` groups by application ID when GNOME has one, falling back to
+the visible source title. It deliberately does not
 subclass `MessageList.MessageListSection`: that class defines `_messages` as
 "every child of `_list`, unwrapped", so putting group headers in that list would
 corrupt its own `empty`, `can-clear` and `clear()` logic. It implements the small

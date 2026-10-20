@@ -24,7 +24,7 @@
 
 /* exported GroupedNotificationSection */
 
-const { St, Clutter, GObject } = imports.gi;
+const { St, Clutter, GObject, GLib } = imports.gi;
 const Main = imports.ui.main;
 const Util = imports.misc.util;
 const Calendar = imports.ui.calendar;
@@ -36,6 +36,38 @@ const NotificationOrder = Me.imports.notificationOrder;
 // Groups larger than this collapse to a summary until clicked.
 const COLLAPSE_AFTER = 3;
 const GROUP_ICON_SIZE = 20;
+const ARRIVAL_DIR = GLib.build_filenamev([GLib.get_user_state_dir(), 'adaptive-desktop']);
+const ARRIVAL_PATH = GLib.build_filenamev([ARRIVAL_DIR, 'notification-arrivals.json']);
+
+function _loadArrivalJournal() {
+    try {
+        const [ok, bytes] = GLib.file_get_contents(ARRIVAL_PATH);
+        const saved = ok ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+        return new NotificationOrder.ArrivalJournal(saved);
+    } catch (e) {
+        return new NotificationOrder.ArrivalJournal();
+    }
+}
+
+function _notificationFingerprint(appKey, notification) {
+    let stamp = '';
+    try {
+        const dt = notification.datetime;
+        if (dt && typeof dt.to_unix === 'function')
+            stamp = `${dt.to_unix()}:${dt.get_microsecond ? dt.get_microsecond() : 0}`;
+        else if (dt && typeof dt.getTime === 'function')
+            stamp = String(dt.getTime());
+        else if (dt)
+            stamp = String(dt);
+    } catch (e) {}
+    const id = notification.id || notification._id || '';
+    const title = notification.title || '';
+    const body = notification.bannerBodyText || notification.body || '';
+    const raw = `${appKey}|${id}|${stamp}|${title}|${body}`;
+    // The ledger needs identity, not notification content. Persist only a hash
+    // so focus accounting cannot become a second notification-history store.
+    return GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, raw, -1);
+}
 
 var NotificationGroup = GObject.registerClass({
     Signals: {
@@ -238,6 +270,21 @@ var NotificationGroup = GObject.registerClass({
         this._sync();
     }
 
+    updateUrgency(message, urgent) {
+        const meta = this._metadata.get(message);
+        if (!meta || meta.urgent === !!urgent)
+            return;
+        meta.urgent = !!urgent;
+        this._messages.sort((a, b) => NotificationOrder.compareMessages(
+            this._metadata.get(a) || {}, this._metadata.get(b) || {}));
+        this._messages.forEach((item, index) => {
+            if (this._list.get_children().indexOf(item) !== index)
+                this._list.set_child_at_index(item, index);
+        });
+        this._sync();
+        this.emit('group-changed');
+    }
+
     _removeMessage(message) {
         // Message.close() only announces the intent; the container is what
         // actually takes the card away.
@@ -351,7 +398,9 @@ var GroupedNotificationSection = GObject.registerClass({
         this._empty = true;
         this._canClear = false;
         this._count = 0;
-        this._sequence = 0;
+        this._arrivalJournal = _loadArrivalJournal();
+        this._sequence = this._arrivalJournal.sequence;
+        this._arrivalSaveId = 0;
 
         Main.messageTray.connectObject(
             'source-added', (_tray, source) => this._addSource(source),
@@ -476,6 +525,8 @@ var GroupedNotificationSection = GObject.registerClass({
 
         notification.connectObject('updated', () => {
             message.setSecondaryActor(new Calendar.TimeLabel(notification.datetime));
+            group.updateUrgency(message,
+                notification.urgency === MessageTray.Urgency.CRITICAL);
         }, message);
 
         // Acknowledging a non-urgent notification is what stops it re-banner-ing.
@@ -483,7 +534,13 @@ var GroupedNotificationSection = GObject.registerClass({
         if (!urgent && this.mapped)
             notification.acknowledged = true;
 
-        group.addMessage(message, urgent, ++this._sequence);
+        const appKey = this._sourceKeys.get(source) || this._groupKey(source);
+        const arrival = this._arrivalJournal.record(
+            appKey, _notificationFingerprint(appKey, notification));
+        this._sequence = this._arrivalJournal.sequence;
+        if (arrival.added)
+            this._queueArrivalSave();
+        group.addMessage(message, urgent, arrival.sequence);
         this._reorder();
         this._sync();
     }
@@ -512,17 +569,29 @@ var GroupedNotificationSection = GObject.registerClass({
         return this._sequence;
     }
 
-    // What arrived after `sequence` and is still unread in the list.
+    // What arrived after `sequence`, including notifications withdrawn since.
     summarySince(sequence) {
-        let count = 0;
-        let apps = 0;
-        for (const group of this._groups.values()) {
-            const n = group.countSince(sequence);
-            count += n;
-            if (n > 0)
-                apps++;
+        return this._arrivalJournal.summarySince(sequence);
+    }
+
+    _queueArrivalSave() {
+        if (this._arrivalSaveId)
+            return;
+        this._arrivalSaveId = GLib.timeout_add(GLib.PRIORITY_LOW, 200, () => {
+            this._arrivalSaveId = 0;
+            this._saveArrivalJournal();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _saveArrivalJournal() {
+        try {
+            GLib.mkdir_with_parents(ARRIVAL_DIR, 0o700);
+            GLib.file_set_contents(ARRIVAL_PATH,
+                JSON.stringify(this._arrivalJournal.snapshot()));
+        } catch (e) {
+            logError(e, '[Adaptive Shade] saving notification arrival ledger');
         }
-        return { count, apps };
     }
 
     setAllExpanded(expanded) {
@@ -580,6 +649,11 @@ var GroupedNotificationSection = GObject.registerClass({
     }
 
     destroy() {
+        if (this._arrivalSaveId) {
+            GLib.source_remove(this._arrivalSaveId);
+            this._arrivalSaveId = 0;
+            this._saveArrivalJournal();
+        }
         Main.messageTray.disconnectObject(this);
         Main.sessionMode.disconnectObject(this);
         for (const source of this._sourceKeys.keys())

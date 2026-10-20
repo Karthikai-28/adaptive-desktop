@@ -225,6 +225,14 @@ check(ov.media.text === "Teardrop · Massive Attack", "Overview shows the curren
 check(ov.timer.text.startsWith("18:42 left"), "Overview shows focus time remaining");
 check(describeOverview({ tasks: [{ title: "Secret" }], isScreenSharing: true }).tasks.text === "1 running",
     "Overview hides a task title while the screen is shared");
+const privateOverview = describeOverview({
+    quota: ovState.quota,
+    media: { title: "Private song", artist: "Private artist", isPlaying: true },
+    isScreenSharing: true,
+});
+check(privateOverview.quota.text === "Hidden while sharing" &&
+    privateOverview.media.text === "Media playing",
+"Overview hides AI usage and media metadata while the screen is shared");
 const badges = describeBadges(ovState, nowS);
 check(badges.tasks.text === "2" && badges.media.text === "▶" && badges.timer.text === "18:42",
     "Tabs carry live badges: task count, playing, countdown");
@@ -247,6 +255,9 @@ const uiSource = fs.readFileSync(require.resolve("../shell/adaptive-shell@local/
 check(!/shade\._[a-zA-Z]/.test(uiSource) && uiSource.includes("mountActivityCenter"),
     "Activity Center mounts through the Shade API, not a private field");
 check(!/Task #14|Midnight City|Agent: Lena/.test(uiSource), "No demo data is left in the cards");
+check(uiSource.includes('notify::screencast-in-progress') && uiSource.includes('setDormant'),
+    "Screen recording privacy and dormant quota polling are wired to the live UI");
+check(!uiSource.includes('MAX_TASK_ROWS'), "The Tasks card renders every running task");
 check(!/new St\.Button\(\{[^}]*can_focus: false/.test(uiSource.slice(uiSource.indexOf("var IslandOverlay"))),
     "Every card control can take keyboard focus");
 

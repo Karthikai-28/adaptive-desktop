@@ -351,6 +351,38 @@ part of `verify-all.sh --quick`). **None is verified live yet.**
   across suspend and across `--restart-shell`. Record each one with
   `scripts/record-live-verification.py`.
 
+### Shade v3.2 — correctness and idle-work pass (2026-10-20)
+
+- ✅ Focus summaries now use a bounded durable arrival ledger, so withdrawn
+  notifications still count and the marker survives a Shell restart. The file
+  stores hashes rather than notification text. Restored sessions that expired
+  while Shell was down also retain their digest.
+- ✅ Recorder privacy is live rather than a test-only backend switch. Starting
+  GNOME's recorder immediately projects already-surfaced and queued events,
+  tasks, AI usage and media through redacted views; stopping restores the
+  original state. GNOME cannot reliably observe arbitrary X11 application
+  capture, so that remains outside the automatic guarantee.
+- ✅ Tasks request `status=running` directly and render every result. Agent
+  Office's WebSocket supplies task and log changes immediately; non-overlapping
+  polling remains as fallback and consistency check. The Events API accepts a
+  task ID so the card no longer downloads a task's full 400-event history for
+  four lines. Visible ages and logs keep moving even when a task's step count
+  is quiet.
+- ✅ One-second timer ticks update state directly instead of occupying the
+  eight-entry event queue. Start, pause, resume, digest and expiry remain real
+  surfaced events.
+- ✅ AI quota polling switches from 60 seconds to five minutes while its card
+  and alert are hidden. Antigravity transcript monitoring is debounced, parses
+  only appended records on the Shell thread and selects the newest transcript.
+- ✅ Island attachment is transactional: a failure restores the clock, actors,
+  providers and signal handlers before the extension drops the object.
+- ✅ A notification whose urgency changes after creation is re-sorted and its
+  application's critical marker is refreshed.
+- ✅ Activity Center height uses the monitor work area and measured visible
+  chrome instead of a fixed 260px reservation.
+- ⬜ Live check the v3.1 list above plus start/stop GNOME screen recording while
+  a task, quota alert and track title are visible.
+
 ## Milestone 10 — Window management
 
 - ✅ Smart tiling.
