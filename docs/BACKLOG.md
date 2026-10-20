@@ -799,18 +799,46 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
 - ✅ **Launch** RViz2 (and recent `.rviz` configs), rqt, rqt_graph, a terminal
   on the same setup, the demo talker and listener; Show and Stop for running
   ones. RViz2 opened and stopped on a virtual display.
+- ✅ **Hardening (v2 audit)**: Stop ends only process groups the panel
+  started; a failed attach is rolled back; settings are written atomically
+  under a lock; a half-started demo is stopped; hidden namespaces and topics
+  only hidden nodes use are left out; ros2_control polling always cleans up;
+  the "elsewhere" hint compares the middleware too; details are read again
+  after the watcher restarts; the watcher scans every 10 s while closed.
+- ✅ **Panel v2** (`verify-ros-panel.py` against real nodes, 80+ checks;
+  `verify-ros-nested.sh` in the nested shell): search; Health (no publisher,
+  no server, duplicate names, QoS mismatches, `/diagnostics` merged with
+  stale detection, TF warnings); favourites; previews with image thumbnails
+  and message age; the TF tree with rates and stale frames; confirmed writes:
+  typed parameters, lifecycle transitions, service calls, action goals,
+  one-off messages; launch files with arguments, saved launches, supervised
+  runs with exit codes, crashes with Log and Restart; rosbag record and play
+  with summaries and free space; saved setups; following Project Context's
+  workspace; Dynamic Island alerts (crash, diagnostics, starred node lost,
+  recording) and a red icon while recording; the palette's `ros` mode. The
+  list is rebuilt per block, only where its inputs changed, forty rows a page.
 - 🔬 **Live in the session**: needs `sync-shell.sh` and a shell restart.
-- 🔬 **Gazebo**: not installed here; the row offers
-  `sudo apt install ros-humble-ros-gz`. Launching it (`ros_gz_sim`, Gazebo
-  Classic's `gazebo_ros`, or plain `gz sim` / `ign gazebo`) is untested.
-- 🔬 **ros2_control controllers**: listed when a controller_manager runs;
-  untested, `controller_manager_msgs` is not installed here.
+- 🔬 **Gazebo**: installed now (`ros_gz_sim`, so the panel starts
+  `ros2 launch ros_gz_sim gz_sim.launch.py`); opening a world from the panel
+  has not been tried live.
+- 🔬 **ros2_control controllers**: listing and Configure / Activate /
+  Deactivate are written; untested, `controller_manager_msgs` is not
+  installed here. Loading and unloading controllers is not offered.
+- 🔬 **Island alerts**: checked through the bus (`verify-dynamic-island.js`,
+  privacy included) and the panel's events in the nested shell; how they look
+  live is not.
+- Not done from the audit: names-first parameter reading (the first 200 are
+  read with their values), cancelling a running Hz or preview when its row
+  folds (each ends after two seconds anyway), a recording indicator as an
+  island activity (the top-bar icon and island events stand in), and forms
+  per field for calls and goals (a YAML template of the type stands in).
 
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the
    nine-dot button left of Network, Start demo, expand `/talker`, open RViz2.
-   Then the Gazebo install button.
+   Then Gazebo with a world, Record and Stop (watch the icon and the island),
+   a launch file with an argument, and `ros` in the command palette.
 0. `./install.sh --status`, then `./install.sh`, then
    `./scripts/reload-adaptive-shell.sh --restart-shell`. As of Milestone 16
    the live extension is two milestones behind the repository, four
