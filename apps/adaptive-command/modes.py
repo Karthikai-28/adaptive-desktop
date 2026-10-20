@@ -12,6 +12,9 @@
     timer 10m [label]      a notification after that long
     keys [text]            every Adaptive keyboard shortcut
     new <template> <path>  a project from a template
+    ros [text]             ROS 2: launch a saved launch or launch file, open RViz2,
+                           Gazebo or rqt, record ("ros record /a /b"), stop what the
+                           panel started, use a saved setup, "ros domain 7"
 
 Your own commands are executables in ~/.config/adaptive-desktop/commands/;
 each shows up as an action, named after its file.
@@ -50,7 +53,9 @@ REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO / "services" / "project-context"))
 import extras  # noqa: E402
 
-MODE_WORDS = ("snip", "todo", "git", "time", "grep", "kill", "ssh", "branch", "timer", "keys", "new")
+ROS_HELPER = REPO / "shell" / "adaptive-shell@local" / "tools" / "ros_info.py"
+
+MODE_WORDS = ("snip", "todo", "git", "time", "grep", "kill", "ssh", "branch", "timer", "keys", "new", "ros")
 _MODE = re.compile(r"^\s*(" + "|".join(MODE_WORDS) + r")(?:\s+(.*))?$", re.I | re.S)
 
 
@@ -545,6 +550,92 @@ def new_project_rows(rest, templates):
                 ("run-notify", f"New project {os.path.basename(folder)}",
                  [str(REPO / "scripts" / "project-cli.py"), "new", folder,
                   "--template", name, "--active"], None), 300)]
+
+
+# ------------------------------------------------------------------- ROS 2
+
+ROS_GROUP = "ROS 2"
+ROS_ICON = "applications-science-symbolic"
+_ROS_TOPIC = re.compile(r"^/[A-Za-z0-9_/~{}]*$")
+
+
+def ros_status(helper=ROS_HELPER, timeout=5):
+    """The ROS panel's `status`, or None when the helper does not answer."""
+    try:
+        out = subprocess.run([sys.executable, str(helper), "status"], capture_output=True,
+                             text=True, timeout=timeout).stdout
+        data = json.loads(out)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def ros_rows(rest, status, helper=ROS_HELPER):
+    """What the ROS 2 panel does, as palette rows. Each runs the panel's helper
+    (`say`, so the notification is a sentence); the panel sees the result."""
+    if not status or not status.get("installed"):
+        return [row("ROS 2 is not installed", "Nothing under /opt/ros has a setup.bash",
+                    ROS_GROUP, ROS_ICON, score=300)]
+
+    def act(title, *args):
+        return ("run-notify", f"ROS 2: {title}", [sys.executable, str(helper), "say", *args], None)
+
+    words = rest.split()
+    first = words[0].casefold() if words else ""
+    # Commands that take what follows them.
+    if first == "domain" and len(words) == 2:
+        if words[1].isdigit() and 0 <= int(words[1]) <= 232:
+            return [row(f"Use ROS domain {words[1]}", f"Now domain {status['domain']}; terminals keep theirs",
+                        ROS_GROUP, ROS_ICON, "Use", act(f"domain {words[1]}", "set", "domain", words[1]), 300)]
+        return [row("A domain ID is 0 to 232", "ros domain 7", ROS_GROUP, ROS_ICON, score=300)]
+    if first == "record" and len(words) > 1:
+        topics = [w for w in words[1:] if _ROS_TOPIC.match(w)]
+        if len(topics) != len(words) - 1:
+            return [row("Topics start with /", "ros record /camera/image /imu", ROS_GROUP, ROS_ICON, score=300)]
+        return [row(f"Record {', '.join(topics[:3])}{' …' if len(topics) > 3 else ''}",
+                    f"A bag in {status.get('bag_dir', '').replace(str(Path.home()), '~')}", ROS_GROUP,
+                    "media-record-symbolic", "Record", act("record", "bag-start", *topics), 300)]
+
+    tools = status.get("tools", {})
+    distro = (status.get("distro") or "").title()
+    rows = [row("ROS 2 terminal", f"{distro} · domain {status['domain']}", ROS_GROUP,
+                "utilities-terminal-symbolic", "Open", ("run", [sys.executable, str(helper), "terminal"], None))]
+    for tool, name in (("rviz2", "RViz2"), ("gazebo", "Gazebo"), ("rqt", "rqt"), ("rqt_graph", "rqt_graph")):
+        if tools.get(tool, {}).get("installed"):
+            rows.append(row(f"Open {name}", f"On domain {status['domain']}", ROS_GROUP, ROS_ICON, "Open",
+                            act(f"open {name}", "launch", tool)))
+    for config in status.get("rviz_configs", []):
+        rows.append(row(f"Open RViz2 with {config['name']}", config["path"].replace(str(Path.home()), "~"),
+                        ROS_GROUP, ROS_ICON, "Open", act(f"RViz2 {config['name']}", "launch", "rviz2", config["path"])))
+    for saved in status.get("saved_launches", []):
+        rows.append(row(f"Launch {saved['name']}", " ".join([Path(saved["file"]).name, *saved.get("args", [])]),
+                        ROS_GROUP, "system-run-symbolic", "Launch", act(f"launch {saved['name']}", "launch-saved", saved["name"])))
+    for launch in status.get("launch_files", []):
+        rows.append(row(f"Launch {launch['name']}", launch["path"].replace(str(Path.home()), "~"),
+                        ROS_GROUP, "system-run-symbolic", "Launch",
+                        act(f"launch {launch['name']}", "launch", "launch", launch["path"])))
+    if tools.get("bag", {}).get("installed") and not (status.get("runs") or {}).get("bag"):
+        rows.append(row("Record every topic", "ros record /a /b records only those", ROS_GROUP,
+                        "media-record-symbolic", "Record", act("record", "bag-start", "--all")))
+        for bag in status.get("bags", []):
+            rows.append(row(f"Play {bag['name']}", "A bag recorded from the panel", ROS_GROUP,
+                            "media-playback-start-symbolic", "Play", act(f"play {bag['name']}", "bag-play", bag["path"])))
+    for tool, runs in (status.get("runs") or {}).items():
+        if runs:
+            what = ", ".join(sorted({r.get("meta", {}).get("name") or tool for r in runs}))
+            rows.append(row(f"Stop {what}", "Started from the ROS panel", ROS_GROUP, "process-stop-symbolic",
+                            "Stop", act(f"stop {tool}", "stop", tool)))
+    for setup in status.get("setups", []):
+        rows.append(row(f"Use setup {setup['name']}", f"Domain {setup['domain']}"
+                        f"{', this computer only' if setup.get('localhost') else ''}", ROS_GROUP, ROS_ICON,
+                        "Use", act(f"setup {setup['name']}", "use-setup", setup["name"])))
+
+    wanted = [w.casefold() for w in words]
+    hits = [r for r in rows if all(w in f"{r['title']} {r['subtitle']}".casefold() for w in wanted)]
+    if not hits:
+        return [row("Nothing in ROS 2 matches", "ros launch …, ros rviz, ros record /a, ros stop, ros domain 7",
+                    ROS_GROUP, ROS_ICON, score=300)]
+    return [{**r, "score": 300 - rank} for rank, r in enumerate(hits[:12])]
 
 
 # ------------------------------------------------------------ your commands

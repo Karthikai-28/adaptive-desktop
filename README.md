@@ -139,6 +139,7 @@ thing:
 | `kill <name>` | ask one of your processes to quit |
 | `ssh <host>` | hosts from `~/.ssh/config`, in a terminal |
 | `new <template> <folder>` | a project from a template |
+| `ros`, `ros record /a /b`, `ros domain 7` | ROS 2: launch, RViz2, record, stop, saved setups |
 
 Executables in `~/.config/adaptive-desktop/commands/` show up as actions.
 

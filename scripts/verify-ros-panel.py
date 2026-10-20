@@ -236,6 +236,10 @@ def main():
     used = helper(env, "use-setup", "Arm bench")
     check(used.get("domain") == 12 and used.get("localhost") is True, "setups: using one applies it", used.get("domain"))
     check(helper(env, "forget-setup", "Arm bench").get("setups") == [], "setups: forgotten")
+    said = subprocess.run([sys.executable, str(HELPER), "say", "use-setup", "Arm bench"], env=env,
+                          capture_output=True, text=True)
+    check(said.returncode == 1 and said.stdout.strip() == "No saved setup is called Arm bench",
+          "say: the palette gets a sentence and a failing exit code", said.stdout)
     helper(env, "set", "all", "")
     check(helper(env, "save-launch", "Robot", str(robot_launch), "--launch-prefix=gdb").get("ok") is False,
           "launches: only name:=value arguments are taken")

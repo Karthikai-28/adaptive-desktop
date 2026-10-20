@@ -17,6 +17,7 @@
                                        saved robot setups: domain, discovery, middleware, workspace
     ros_info.py favorite <kind> <name> star or unstar a node, topic, service or action
     ros_info.py open-log <tool>        a terminal following that tool's log
+    ros_info.py say <command> [args]   any of these, answering with a sentence (the palette)
     ros_info.py terminal               a terminal with the same ROS setup as the panel
     ros_info.py install-gazebo         a terminal on the apt command (the password is typed there)
     ros_info.py watch                  the live graph; see below
@@ -2191,6 +2192,70 @@ def watch():
     return 0
 
 
+def run_command(command, args, program="ros_info.py"):
+    """One one-shot command's reply."""
+    try:
+        if command == "status":
+            return status(refresh=args[:1] == ["refresh"])
+        if command == "set" and args and len(args) % 2 == 0:
+            return set_values(list(zip(args[::2], args[1::2])))
+        if command == "launch" and args:
+            return launch(args[0], args[1] if len(args) > 1 else None, args[2:])
+        if command == "launch-saved" and len(args) == 1:
+            return launch_saved(args[0])
+        if command == "save-launch" and len(args) >= 2:
+            return save_launch(args[0], args[1], args[2:])
+        if command == "forget-launch" and len(args) == 1:
+            return forget_launch(args[0])
+        if command == "stop" and args:
+            return stop(args[0])
+        if command == "runs":
+            return runs()
+        if command == "terminal":
+            return terminal()
+        if command == "install-gazebo":
+            return install_gazebo()
+        if command == "favorite" and len(args) == 2:
+            return toggle_favorite(args[0], args[1])
+        if command == "bag-start" and args:
+            return bag_start(args)
+        if command == "bag-play" and len(args) == 1:
+            return bag_play(args[0])
+        if command == "save-setup" and len(args) == 1:
+            return save_setup(args[0])
+        if command == "use-setup" and len(args) == 1:
+            return use_setup(args[0])
+        if command == "forget-setup" and len(args) == 1:
+            return forget_setup(args[0])
+        if command == "open-log" and len(args) == 1:
+            return open_log(args[0])
+        return {"ok": False, "error": f"usage: see the top of {program}"}
+    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:  # The shell reads stdout as JSON, whatever happened.
+        return {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
+
+
+def sentence(command, result):
+    """A reply as one line for a notification (`say`, for the command palette)."""
+    if result.get("ok") is False:
+        return result.get("error") or "It did not work"
+    if command in ("launch", "launch-saved"):
+        return "Started"
+    if command == "stop":
+        count = result.get("stopped", 0)
+        return f"Stopped {count} run{'s' if count != 1 else ''}" if count else "Nothing started here was running"
+    if command == "bag-start":
+        return f"Recording to {result.get('path', '').replace(str(HOME), '~')}"
+    if command == "bag-play":
+        return f"Playing {Path(result.get('path', '')).name}"
+    if command in ("set", "use-setup") and result.get("installed"):
+        named = next((w["name"] for w in result.get("workspaces", []) if w["path"] == result.get("workspace")), "none")
+        return (f"Domain {result['domain']}, {'this computer only' if result['localhost'] else 'whole network'}, "
+                f"{result.get('rmw_name', '')}, workspace {named}")
+    return "Done"
+
+
 def main(argv):
     command = argv[1] if len(argv) > 1 else "status"
     args = argv[2:]
@@ -2198,48 +2263,12 @@ def main(argv):
         return watch()
     if command == "run" and len(args) >= 4 and args[2] == "--":
         return supervise(args[0], args[1], args[3:])
-    try:
-        if command == "status":
-            result = status(refresh=args[:1] == ["refresh"])
-        elif command == "set" and args and len(args) % 2 == 0:
-            result = set_values(list(zip(args[::2], args[1::2])))
-        elif command == "launch" and args:
-            result = launch(args[0], args[1] if len(args) > 1 else None, args[2:])
-        elif command == "launch-saved" and len(args) == 1:
-            result = launch_saved(args[0])
-        elif command == "save-launch" and len(args) >= 2:
-            result = save_launch(args[0], args[1], args[2:])
-        elif command == "forget-launch" and len(args) == 1:
-            result = forget_launch(args[0])
-        elif command == "stop" and args:
-            result = stop(args[0])
-        elif command == "runs":
-            result = runs()
-        elif command == "terminal":
-            result = terminal()
-        elif command == "install-gazebo":
-            result = install_gazebo()
-        elif command == "favorite" and len(args) == 2:
-            result = toggle_favorite(args[0], args[1])
-        elif command == "bag-start" and args:
-            result = bag_start(args)
-        elif command == "bag-play" and len(args) == 1:
-            result = bag_play(args[0])
-        elif command == "save-setup" and len(args) == 1:
-            result = save_setup(args[0])
-        elif command == "use-setup" and len(args) == 1:
-            result = use_setup(args[0])
-        elif command == "forget-setup" and len(args) == 1:
-            result = forget_setup(args[0])
-        elif command == "open-log" and len(args) == 1:
-            result = open_log(args[0])
-        else:
-            result = {"ok": False, "error": f"usage: see the top of {argv[0]}"}
-    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as e:
-        result = {"ok": False, "error": str(e)}
-    except Exception as e:  # The shell reads stdout as JSON, whatever happened.
-        result = {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
-    emit(result)
+    if command == "say" and args:
+        result = run_command(args[0], args[1:], argv[0])
+        print(sentence(args[0], result), flush=True)
+    else:
+        result = run_command(command, args, argv[0])
+        emit(result)
     return 1 if result.get("ok") is False else 0
 
 

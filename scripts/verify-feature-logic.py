@@ -347,6 +347,29 @@ def palette_modes():
           "new: creates through project-cli")
     check(M.new_project_rows("rust ~/x", templates)[0]["action"] is None, "new: unknown template refused")
 
+    check(M.mode_of("ros launch arm") == ("ros", "launch arm") and M.mode_of("rosbag") == (None, ""),
+          "ros: a mode word, not a prefix")
+    check(M.ros_rows("", None)[0]["action"] is None, "ros: without ROS 2 it says so")
+    ros = {"installed": True, "distro": "humble", "domain": 3, "bag_dir": "/b",
+           "tools": {"rviz2": {"installed": True}, "gazebo": {"installed": False}, "bag": {"installed": True}},
+           "rviz_configs": [{"name": "arm.rviz", "path": "/w/arm.rviz"}],
+           "saved_launches": [{"name": "Arm bringup", "file": "/w/src/arm/launch/arm.launch.py", "args": ["sim:=true"]}],
+           "launch_files": [{"name": "arm.launch.py", "path": "/w/src/arm/launch/arm.launch.py"}],
+           "bags": [], "setups": [{"name": "Bench", "domain": 7, "localhost": True}],
+           "runs": {"launch": [{"pgid": 9, "meta": {"name": "Arm bringup"}}]}}
+    saved = [r for r in M.ros_rows("bringup", ros) if r["title"] == "Launch Arm bringup"]
+    check(len(saved) == 1 and saved[0]["action"][0] == "run-notify"
+          and saved[0]["action"][2][-3:] == ["say", "launch-saved", "Arm bringup"],
+          "ros: a saved launch runs through the panel's helper")
+    check([r["title"] for r in M.ros_rows("stop", ros)] == ["Stop Arm bringup"], "ros: stop what the panel started")
+    check(not any("Gazebo" in r["title"] for r in M.ros_rows("", ros)), "ros: a missing tool is not offered")
+    check(M.ros_rows("domain 7", ros)[0]["action"][2][-3:] == ["set", "domain", "7"]
+          and M.ros_rows("domain 300", ros)[0]["action"] is None, "ros: domain takes 0 to 232")
+    check(M.ros_rows("record /cam /imu", ros)[0]["action"][2][-3:] == ["bag-start", "/cam", "/imu"]
+          and M.ros_rows("record cam", ros)[0]["action"] is None, "ros: record takes topic names")
+    check(M.ros_rows("use bench", ros)[0]["action"][2][-2:] == ["use-setup", "Bench"], "ros: saved setups")
+    check(M.ros_rows("zzz", ros)[0]["action"] is None, "ros: nothing matching says so")
+
     R = load(REPO / "scripts/adaptive-run-notify.py", "run_notify")
     check(R.summarize(0, "a\nSwitched to branch 'x'\n") == (True, "Switched to branch 'x'"), "run-notify: success shows the last line")
     check(R.summarize(1, "") == (False, "Exited with status 1"), "run-notify: a silent failure still says so")

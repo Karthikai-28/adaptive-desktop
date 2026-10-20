@@ -457,6 +457,8 @@ class Palette(Gtk.ApplicationWindow):
             rows = M.content_rows(M.content_search(root, rest), root)
             return rows or [M.row("Nothing in the project's files matches", root.replace(str(Path.home()), "~"),
                                   "In Files", "text-x-generic-symbolic", score=WEIGHT_ANSWER)]
+        if mode == "ros":
+            return M.ros_rows(rest, M.ros_status())
         return []
 
     def _dedupe(self, results):
@@ -1150,6 +1152,7 @@ class Palette(Gtk.ApplicationWindow):
             ("End a Process", "kill ", "kill <name>", "process-stop-symbolic"),
             ("SSH to a Host", "ssh ", "Hosts from ~/.ssh/config", "network-server-symbolic"),
             ("New Project from Template", "new ", "new <template> <folder>", "folder-new-symbolic"),
+            ("ROS 2", "ros ", "Launch, RViz2, record, stop, setups: ros <what>", "applications-science-symbolic"),
         ]
 
         results = []
