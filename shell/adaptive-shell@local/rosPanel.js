@@ -26,6 +26,7 @@ const LIST_MAX_HEIGHT = 680;
 const KEEP_WATCHING_S = 60;
 const STOP_GRACE_MS = 2000;
 const COPIED_MS = 1100;
+const REQUEST_REPLY_TIMEOUT_MS = 7000;
 const SOURCE_HINTS = { panel: 'set here', default: 'default' };
 const LIFECYCLE_CLASSES = {
     active: 'adaptive-network-good',
@@ -104,6 +105,19 @@ var RosPanel = class RosPanel {
     }
 
     attach() {
+        try {
+            this._attach();
+        } catch (e) {
+            try {
+                this.detach();
+            } catch (cleanupError) {
+                logError(cleanupError, '[Adaptive ROS] cleaning up failed attach');
+            }
+            throw e;
+        }
+    }
+
+    _attach() {
         this._button = new PanelMenu.Button(0.5, 'ROS 2', false);
         this._button.add_child(new St.Icon({
             gicon: CC.extensionIcon('ros-symbolic'),
@@ -157,10 +171,12 @@ var RosPanel = class RosPanel {
         this._openStateId = this._button.menu.connect('open-state-changed', (_m, open) => {
             if (open) {
                 this._cancelStop();
+                this._setWatchMode(true);
                 this._loadStatus(() => this._startWatch());
                 this._render();
             } else {
                 this._domainDraft = null;
+                this._setWatchMode(false);
                 this._scheduleStop();
             }
         });
@@ -311,6 +327,8 @@ var RosPanel = class RosPanel {
         this._watchSetup = this._setupKey();
         this._watchError = '';
         this._graph = null;
+        this._details.clear();
+        this._rates.clear();
         this._readLine(watch);
     }
 
@@ -349,12 +367,16 @@ var RosPanel = class RosPanel {
         }
         if (message.type === 'graph') {
             this._graph = message;
+            this._fetchExpandedDetails();
             this._render();
         } else if (message.type === 'reply') {
-            const done = this._pending.get(message.id);
+            const pending = this._pending.get(message.id);
             this._pending.delete(message.id);
-            if (done)
-                done(message);
+            if (pending) {
+                if (pending.timeoutId)
+                    GLib.source_remove(pending.timeoutId);
+                pending.done(message);
+            }
         } else if (message.type === 'error') {
             this._watchError = message.error;
             this._render();
@@ -373,8 +395,11 @@ var RosPanel = class RosPanel {
     _failPending() {
         const pending = [...this._pending.values()];
         this._pending.clear();
-        for (const done of pending)
-            done({ error: 'The ROS helper stopped' });
+        for (const item of pending) {
+            if (item.timeoutId)
+                GLib.source_remove(item.timeoutId);
+            item.done({ error: 'The ROS helper stopped' });
+        }
     }
 
     // Closing stdin is how the watcher is asked to quit; it is killed if it
@@ -384,7 +409,7 @@ var RosPanel = class RosPanel {
         if (!watch)
             return;
         this._watch = null;
-        this._pending.clear();
+        this._failPending();
         watch.cancellable.cancel();
         try {
             watch.stdin.close(null);
@@ -430,13 +455,44 @@ var RosPanel = class RosPanel {
             return;
         }
         const id = this._nextId++;
-        this._pending.set(id, done);
+        const pending = { done, timeoutId: 0 };
+        pending.timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            REQUEST_REPLY_TIMEOUT_MS, () => {
+                if (this._pending.get(id) === pending) {
+                    this._pending.delete(id);
+                    done({ error: 'The ROS helper did not answer in time' });
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+        this._pending.set(id, pending);
         try {
             const text = `${JSON.stringify({ id, cmd, ...fields })}\n`;
             this._watch.stdin.write_all(new TextEncoder().encode(text), null);
         } catch (e) {
             this._pending.delete(id);
+            GLib.source_remove(pending.timeoutId);
             done({ error: 'The ROS helper stopped' });
+        }
+    }
+
+    _setWatchMode(active) {
+        if (!this._watch)
+            return;
+        this._request('mode', { active }, () => {});
+    }
+
+    _fetchExpandedDetails() {
+        if (!this._graph)
+            return;
+        for (const node of this._graph.nodes || []) {
+            const key = `node:${node.name}`;
+            if (this._expanded.has(key) && !this._details.has(key))
+                this._fetchNode(node);
+        }
+        for (const topic of this._graph.topics || []) {
+            const key = `topic:${topic.name}`;
+            if (this._expanded.has(key) && !this._details.has(key))
+                this._fetch(this._details, key, 'topic', { name: topic.name });
         }
     }
 
@@ -630,7 +686,8 @@ var RosPanel = class RosPanel {
             const footer = new St.BoxLayout({ style_class: 'adaptive-ros-setup-footer', x_expand: true });
             footer.add_child(new St.Label({
                 text: `${other.count} ROS ${other.count === 1 ? 'process runs' : 'processes run'} on domain ` +
-                    `${other.domain}${other.localhost ? ', this computer only' : ''}`,
+                    `${other.domain}${other.localhost ? ', this computer only' : ''}` +
+                    `${other.rmw_name ? ` · ${other.rmw_name}` : ''}`,
                 style_class: 'adaptive-ros-hint',
                 x_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
@@ -640,8 +697,13 @@ var RosPanel = class RosPanel {
                 label: 'Watch them',
                 can_focus: true,
             });
-            follow.connect('clicked', () => this._setMany([
-                'domain', String(other.domain), 'localhost', other.localhost ? '1' : '0']));
+            follow.connect('clicked', () => {
+                const pairs = ['domain', String(other.domain),
+                    'localhost', other.localhost ? '1' : '0'];
+                if ((status.middlewares || []).some(item => item.id === other.rmw))
+                    pairs.push('rmw', other.rmw);
+                this._setMany(pairs);
+            });
             footer.add_child(follow);
             box.add_child(footer);
         }
@@ -715,19 +777,22 @@ var RosPanel = class RosPanel {
         const info = status.tools[tool];
         const note = this._notes[tool];
         const running = info.pids.length > 0;
+        const owned = (info.owned_pids || []).length > 0;
+        const external = (info.external_pids || []).length > 0;
         if (!info.installed) {
             return CC.makeRow({ icon, title: name, subtitle: 'Not installed' });
         }
         return CC.makeRow({
             icon,
             title: name,
-            subtitle: note ? note.text : running ? 'Running' : idle,
+            subtitle: note ? note.text : owned && external ? 'Running here and outside the panel'
+                : owned ? 'Running · started here' : external ? 'Running outside the panel' : idle,
             alert: !!(note && note.error),
             active: running,
             // The plain pill is the red one, for what ends something.
             actions: running ? [
                 { label: 'Show', quiet: true, onClick: () => this._show(tool) },
-                { label: 'Stop', onClick: () => this._stop(tool) },
+                ...(owned ? [{ label: 'Stop', onClick: () => this._stop(tool) }] : []),
             ] : [
                 { label: 'Open', quiet: true, onClick: () => this._launch(tool) },
             ],
@@ -780,7 +845,8 @@ var RosPanel = class RosPanel {
         }
 
         const demo = status.tools.demo;
-        const stopDemo = demo.pids.length ? { label: 'Stop demo', onClick: () => this._stop('demo') } : null;
+        const stopDemo = (demo.owned_pids || []).length
+            ? { label: 'Stop demo', onClick: () => this._stop('demo') } : null;
         this._section('nodes', `Nodes · ${graph.nodes.length}`, () => {
             if (!graph.nodes.length) {
                 this._list.add_child(CC.makeRow({
@@ -981,6 +1047,12 @@ var RosPanel = class RosPanel {
                 box.add_child(new St.Label({ text: 'Reading…', style_class: 'adaptive-ros-meta' }));
             } else if (data.parameters) {
                 box.add_child(this._parameters(data.parameters));
+                if (data.parameters_truncated) {
+                    box.add_child(new St.Label({
+                        text: `Showing ${data.parameters.length} of ${data.parameter_total} parameters`,
+                        style_class: 'adaptive-ros-meta',
+                    }));
+                }
             } else if (!detail.error) {
                 box.add_child(new St.Label({ text: 'Did not answer in time', style_class: 'adaptive-ros-meta' }));
             }

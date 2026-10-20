@@ -38,6 +38,7 @@ import os
 import pwd
 import queue
 import re
+import fcntl
 import shlex
 import shutil
 import signal
@@ -50,6 +51,7 @@ from pathlib import Path
 HOME = Path.home()
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "adaptive-desktop" / "ros2.json"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "adaptive-desktop" / "ros"
+RUNS = CACHE / "owned-runs.json"
 ROS_ROOT = Path(os.environ.get("ADAPTIVE_ROS_ROOT", "/opt/ros"))
 SHELL_FILES = {"zsh": (".zshenv", ".zprofile", ".zshrc"),
                "bash": (".profile", ".bash_profile", ".bashrc")}
@@ -68,6 +70,8 @@ HZ_WINDOW_S = 2.0
 REQUEST_TIMEOUT_S = 3.0
 GRAPH_EVERY_S = 1.0
 CONTROLLERS_EVERY_S = 3.0
+IDLE_GRAPH_EVERY_S = 10.0
+MAX_PARAMETERS = 200
 
 
 def emit(obj):
@@ -90,9 +94,28 @@ def read_config():
 
 def write_config(data):
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG.with_suffix(".tmp")
+    tmp = CONFIG.with_name(f"{CONFIG.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.chmod(tmp, 0o600)
     tmp.replace(CONFIG)
+
+
+class file_lock:
+    """An advisory lock for the panel's small cross-process state files."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.handle = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = open(self.path, "a+")
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *_args):
+        fcntl.flock(self.handle, fcntl.LOCK_UN)
+        self.handle.close()
 
 
 def login_shell():
@@ -343,10 +366,13 @@ def elsewhere(setup):
         except ValueError:
             continue
         localhost = env.get(b"ROS_LOCALHOST_ONLY", b"").lower() in (b"1", b"true")
-        if (domain, localhost) != (setup["domain"], setup["localhost"]):
-            groups[(domain, localhost)] = groups.get((domain, localhost), 0) + 1
-    return [{"domain": d, "localhost": l, "count": n}
-            for (d, l), n in sorted(groups.items(), key=lambda kv: -kv[1])]
+        distro = env.get(b"ROS_DISTRO", b"").decode(errors="replace")
+        rmw = env.get(b"RMW_IMPLEMENTATION", b"").decode(errors="replace") or DEFAULT_RMW.get(distro, "")
+        if (domain, localhost, rmw) != (setup["domain"], setup["localhost"], setup["rmw"]):
+            groups[(domain, localhost, rmw)] = groups.get((domain, localhost, rmw), 0) + 1
+    return [{"domain": d, "localhost": l, "rmw": r,
+             "rmw_name": RMW_NAMES.get(r, r), "count": n}
+            for (d, l, r), n in sorted(groups.items(), key=lambda kv: -kv[1])]
 
 
 def gazebo_flavour(distro, env_path=None):
@@ -413,6 +439,9 @@ def status():
     base = ROS_ROOT / distro
     flavour, _ = gazebo_flavour(distro)
     procs = running()
+    owned = owned_runs()
+    owned_groups = {name: {int(entry["pgid"]) for entry in entries}
+                    for name, entries in owned.items()}
     roots = search_roots(setup)
     tools = {
         "rviz2": (base / "bin" / "rviz2").is_file(),
@@ -433,7 +462,14 @@ def status():
         "rmw_name": RMW_NAMES.get(setup["rmw"], setup["rmw"]),
         "middlewares": [{"id": m, "name": RMW_NAMES[m]} for m in middlewares(distro)],
         "workspaces": spaces,
-        "tools": {name: {"installed": ok, "pids": procs.get(name, [])} for name, ok in tools.items()},
+        "tools": {name: {
+            "installed": ok,
+            "pids": procs.get(name, []),
+            "owned_pids": [pid for pid in procs.get(name, [])
+                           if pid_group(pid) in owned_groups.get(name, set())],
+            "external_pids": [pid for pid in procs.get(name, [])
+                              if pid_group(pid) not in owned_groups.get(name, set())],
+        } for name, ok in tools.items()},
         "gazebo_flavour": flavour,
         "gazebo_install": f"sudo apt install ros-{distro}-ros-gz",
         "rviz_configs": recent_files(roots, lambda p: p.endswith(".rviz")),
@@ -446,8 +482,77 @@ def log_file(tool):
     return CACHE / f"{tool}.log"
 
 
+def read_runs():
+    try:
+        data = json.loads(RUNS.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_runs(data):
+    RUNS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = RUNS.with_name(f"{RUNS.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.chmod(tmp, 0o600)
+    tmp.replace(RUNS)
+
+
+def process_group_exists(pgid):
+    try:
+        os.killpg(int(pgid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def pid_group(pid):
+    try:
+        # /proc/<pid>/stat: process group is field five. Split after the final
+        # ')' because a process name itself may contain spaces.
+        rest = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        return int(rest[2])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def owned_runs(tool=None):
+    """Live process groups started by this panel, pruning dead entries."""
+    with file_lock(RUNS.with_suffix(".lock")):
+        data = read_runs()
+        cleaned = {}
+        for name, entries in data.items():
+            live = [entry for entry in entries if process_group_exists(entry.get("pgid", 0))]
+            if live:
+                cleaned[name] = live
+        if cleaned != data:
+            write_runs(cleaned)
+    return cleaned.get(tool, []) if tool else cleaned
+
+
+def remember_runs(tool, procs, argv):
+    with file_lock(RUNS.with_suffix(".lock")):
+        data = read_runs()
+        entries = [entry for entry in data.get(tool, [])
+                   if process_group_exists(entry.get("pgid", 0))]
+        entries.extend({"pid": proc.pid, "pgid": proc.pid, "argv": command,
+                        "started": time.time()} for proc, command in zip(procs, argv))
+        data[tool] = entries
+        write_runs(data)
+
+
+def forget_runs(tool):
+    with file_lock(RUNS.with_suffix(".lock")):
+        data = read_runs()
+        data.pop(tool, None)
+        write_runs(data)
+
+
 def spawn(argv, env, tool, cwd=None):
-    log = open(log_file(tool), "ab")
+    path = log_file(tool)
+    if path.exists() and path.stat().st_size > 2 * 1024 * 1024:
+        path.replace(path.with_suffix(".log.1"))
+    log = open(path, "ab")
     log.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} {' '.join(argv)}\n".encode())
     log.flush()
     return subprocess.Popen(argv, env=env, cwd=cwd or str(HOME), start_new_session=True,
@@ -479,27 +584,36 @@ def launch(tool, file=None):
         time.sleep(0.05)
     failed = [p for p in procs if p.poll() not in (None, 0)]
     if failed:
+        for proc in procs:
+            if proc.poll() is None:
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except OSError:
+                    pass
         tail = log_file(tool).read_text(errors="replace").strip().splitlines()[-3:]
         return {"ok": False, "error": tail[-1] if tail else "It exited at once", "log": str(log_file(tool))}
+    remember_runs(tool, procs, argv)
     return {"ok": True, "pids": [p.pid for p in procs], "log": str(log_file(tool))}
 
 
 def stop(tool):
-    pids = running().get(tool, [])
-    for pid in pids:
+    entries = owned_runs(tool)
+    groups = [int(entry["pgid"]) for entry in entries]
+    for pgid in groups:
         try:
-            os.kill(pid, signal.SIGINT)
+            os.killpg(pgid, signal.SIGINT)
         except OSError:
             pass
     deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and any(Path(f"/proc/{p}").exists() for p in pids):
+    while time.monotonic() < deadline and any(process_group_exists(pgid) for pgid in groups):
         time.sleep(0.1)
-    for pid in pids:
+    for pgid in groups:
         try:
-            os.kill(pid, signal.SIGTERM)
+            os.killpg(pgid, signal.SIGTERM)
         except OSError:
             pass
-    return {"ok": True, "stopped": len(pids)}
+    forget_runs(tool)
+    return {"ok": True, "stopped": len(groups)}
 
 
 def terminal_rc(setup):
@@ -559,31 +673,38 @@ def install_gazebo():
     return open_terminal("Install Gazebo", ["bash", "-c", script])
 
 
-def set_value(key, value):
-    config = read_config()
-    if key == "all" and value == "":
-        config = {}
-    elif value == "":
-        config.pop(key, None)
-    elif key == "domain":
-        domain = int(value)
-        if not 0 <= domain <= 232:
-            return {"ok": False, "error": "A domain ID is 0 to 232"}
-        config[key] = domain
-    elif key == "localhost":
-        config[key] = value.lower() in ("1", "true", "yes", "on")
-    elif key == "rmw":
-        if value not in middlewares(settings()["distro"]):
-            return {"ok": False, "error": f"{value} is not installed"}
-        config[key] = value
-    elif key == "workspace":
-        if value != "none" and not (Path(value) / "install" / "setup.bash").is_file():
-            return {"ok": False, "error": f"{value} has no install/setup.bash"}
-        config[key] = "" if value == "none" else value
-    else:
-        return {"ok": False, "error": f"unknown setting {key}"}
-    write_config(config)
+def set_values(pairs):
+    """Validate and commit a setting batch atomically across helper processes."""
+    with file_lock(CONFIG.with_suffix(".lock")):
+        config = read_config()
+        for key, value in pairs:
+            if key == "all" and value == "":
+                config = {}
+            elif value == "":
+                config.pop(key, None)
+            elif key == "domain":
+                domain = int(value)
+                if not 0 <= domain <= 232:
+                    return {"ok": False, "error": "A domain ID is 0 to 232"}
+                config[key] = domain
+            elif key == "localhost":
+                config[key] = value.lower() in ("1", "true", "yes", "on")
+            elif key == "rmw":
+                if value not in middlewares(settings()["distro"]):
+                    return {"ok": False, "error": f"{value} is not installed"}
+                config[key] = value
+            elif key == "workspace":
+                if value != "none" and not (Path(value) / "install" / "setup.bash").is_file():
+                    return {"ok": False, "error": f"{value} has no install/setup.bash"}
+                config[key] = "" if value == "none" else value
+            else:
+                return {"ok": False, "error": f"unknown setting {key}"}
+        write_config(config)
     return {"ok": True, **status()}
+
+
+def set_value(key, value):
+    return set_values([(key, value)])
 
 
 # ------------------------------------------------------------------ interfaces
@@ -682,6 +803,8 @@ class Watcher:
         self.controllers = None
         self.controller_jobs = {}
         self.next_controllers = 0.0
+        self.graph_every = GRAPH_EVERY_S
+        self.next_graph = 0.0
 
     # --- the graph
 
@@ -714,7 +837,7 @@ class Watcher:
             counts[full] = counts.get(full, 0) + 1
             if counts[full] > 1:
                 continue
-            if name.startswith("_"):
+            if hidden(full):
                 hidden_nodes += 1
                 continue
             try:
@@ -757,7 +880,8 @@ class Watcher:
         actions = [{"name": name, "types": types,
                     "servers": ends["action_servers"].get(name, []),
                     "clients": ends["action_clients"].get(name, [])}
-                   for name, types in self.action.get_action_names_and_types(self.node)]
+                   for name, types in self.action.get_action_names_and_types(self.node)
+                   if not hidden(name)]
         return {"nodes": nodes, "topics": topics, "services": services, "actions": actions,
                 "hidden": {"nodes": hidden_nodes, "topics": hidden_topics,
                            "parameter_services": parameter_services}}
@@ -788,6 +912,7 @@ class Watcher:
             self.controllers = {"error": "controller_manager_msgs is not in this setup"}
             return
         found = []
+        errors = []
         for service in managers:
             client = self.node.create_client(ListControllers, service)
             future = client.call_async(ListControllers.Request())
@@ -797,14 +922,26 @@ class Watcher:
             for service, (client, future, deadline) in list(self.controller_jobs.items()):
                 if not future.done() and time.monotonic() < deadline:
                     continue
-                if future.done() and future.result() is not None:
-                    for c in future.result().controller:
-                        found.append({"name": c.name, "type": getattr(c, "type", ""),
-                                      "state": getattr(c, "state", ""), "manager": service.rsplit("/", 1)[0] or "/"})
-                self.node.destroy_client(client)
-                del self.controller_jobs[service]
+                try:
+                    response = future.result() if future.done() else None
+                    if response is not None:
+                        for c in response.controller:
+                            found.append({"name": c.name, "type": getattr(c, "type", ""),
+                                          "state": getattr(c, "state", ""),
+                                          "manager": service.rsplit("/", 1)[0] or "/"})
+                    elif future.done():
+                        errors.append(f"{service} did not answer")
+                    else:
+                        errors.append(f"{service} timed out")
+                except Exception as e:
+                    errors.append(f"{service}: {str(e) or e.__class__.__name__}")
+                finally:
+                    self.node.destroy_client(client)
+                    del self.controller_jobs[service]
             if not self.controller_jobs:
                 self.controllers = {"list": sorted(found, key=lambda c: c["name"])}
+                if errors:
+                    self.controllers["error"] = "; ".join(errors)
                 return True
             return False
         self.jobs.append(Job(None, collect))
@@ -825,6 +962,12 @@ class Watcher:
                 self.node_detail(rid, request["name"])
             elif cmd == "hz":
                 self.measure(rid, request["name"])
+            elif cmd == "mode":
+                active = bool(request.get("active"))
+                self.graph_every = GRAPH_EVERY_S if active else IDLE_GRAPH_EVERY_S
+                if active:
+                    self.next_graph = 0.0
+                emit({"type": "reply", "id": rid, "ok": True})
             else:
                 emit({"type": "reply", "id": rid, "error": f"unknown request {cmd}"})
         except Exception as e:
@@ -833,7 +976,8 @@ class Watcher:
     def endpoints(self, topic):
         def rows(infos):
             return [{"node": join_name(i.node_namespace, i.node_name), "type": i.topic_type,
-                     **qos_summary(i.qos_profile)} for i in infos if not i.node_name.startswith("_")]
+                     **qos_summary(i.qos_profile)} for i in infos
+                    if not hidden(join_name(i.node_namespace, i.node_name))]
         return (rows(self.node.get_publishers_info_by_topic(topic)),
                 rows(self.node.get_subscriptions_info_by_topic(topic)))
 
@@ -861,7 +1005,7 @@ class Watcher:
             from rclpy.parameter import parameter_value_to_python
             lister = self.node.create_client(ListParameters, f"{full}/list_parameters")
             getter = self.node.create_client(GetParameters, f"{full}/get_parameters")
-            state = {"names": None, "values": None}
+            state = {"names": None, "values": None, "total": 0}
             listed = lister.call_async(ListParameters.Request())
             waiting.append(lister)
             waiting.append(getter)
@@ -869,7 +1013,9 @@ class Watcher:
             def on_list(future):
                 if future.result() is None:
                     return
-                names = sorted(future.result().result.names)
+                all_names = sorted(future.result().result.names)
+                state["total"] = len(all_names)
+                names = all_names[:MAX_PARAMETERS]
                 state["names"] = names
                 request = GetParameters.Request()
                 request.names = names
@@ -909,6 +1055,8 @@ class Watcher:
             if not done and time.monotonic() < deadline:
                 return False
             result["parameters"] = state["values"]
+            result["parameter_total"] = state.get("total", len(state["values"] or []))
+            result["parameters_truncated"] = result["parameter_total"] > len(state["values"] or [])
             result["lifecycle"] = lifecycle["label"] or None
             if not done:
                 result["timed_out"] = True
@@ -974,7 +1122,6 @@ class Watcher:
         settle = time.monotonic() + 0.6
         while time.monotonic() < settle:
             self.executor.spin_once(timeout_sec=0.05)
-        next_graph = 0.0
         while True:
             self.executor.spin_once(timeout_sec=0.05)
             while True:
@@ -986,8 +1133,8 @@ class Watcher:
                     return
                 self.handle(request)
             self.jobs = [job for job in self.jobs if not job.step()]
-            if time.monotonic() >= next_graph:
-                next_graph = time.monotonic() + GRAPH_EVERY_S
+            if time.monotonic() >= self.next_graph:
+                self.next_graph = time.monotonic() + self.graph_every
                 self.publish_graph()
 
     def close(self):
@@ -1045,10 +1192,7 @@ def main(argv):
         if command == "status":
             result = status()
         elif command == "set" and args and len(args) % 2 == 0:
-            for key, value in zip(args[::2], args[1::2]):
-                result = set_value(key, value)
-                if not result.get("ok"):
-                    break
+            result = set_values(list(zip(args[::2], args[1::2])))
         elif command == "launch" and args:
             result = launch(args[0], args[1] if len(args) > 1 else None)
         elif command == "stop" and args:

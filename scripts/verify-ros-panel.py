@@ -131,6 +131,10 @@ def main():
     check(reset.get("domain") == DOMAIN and reset["from"]["domain"] == "shell", "set: all '' follows ~/.bashrc again")
     both = helper(env, "set", "domain", "7", "localhost", "0")
     check(both.get("domain") == 7 and both.get("localhost") is False, "set: several pairs at once", both)
+    rejected = helper(env, "set", "domain", "8", "rmw", "rmw_nonexistent")
+    after_rejected = helper(env, "status")
+    check(rejected.get("ok") is False and after_rejected.get("domain") == 7,
+          "set: a rejected batch changes nothing", rejected)
     helper(env, "set", "all", "")
 
     # A Zsh login reads ~/.zshrc, and a workspace sourced through a variable from a
@@ -180,8 +184,10 @@ def main():
     nodes.append(subprocess.Popen([str(lib / "demo_nodes_cpp" / "listener")], env=stray_env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     time.sleep(0.5)
-    check({"domain": DOMAIN + 3, "localhost": True, "count": 1} in helper(env, "status").get("elsewhere", []),
-          "status: a ROS process on another domain is reported", helper(env, "status").get("elsewhere"))
+    elsewhere = helper(env, "status").get("elsewhere", [])
+    check(any(item.get("domain") == DOMAIN + 3 and item.get("localhost") is True and
+              item.get("rmw") == "rmw_fastrtps_cpp" and item.get("count") == 1 for item in elsewhere),
+          "status: a ROS process on another domain is reported with its middleware", elsewhere)
     watch = Watch(env)
     try:
         want = {"/talker", "/lc_talker", "/fibonacci_action_server"}
@@ -243,6 +249,15 @@ def main():
                 proc.kill()
 
     # ---------------------------------------------------------- launch
+    external = subprocess.Popen([str(lib / "demo_nodes_cpp" / "talker")], env=node_env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.3)
+    refused_stop = helper(env, "stop", "demo")
+    check(refused_stop.get("stopped") == 0 and external.poll() is None,
+          "stop: a demo started outside the panel is left alone", refused_stop)
+    external.send_signal(signal.SIGINT)
+    external.wait(5)
+
     launched = helper(env, "launch", "demo")
     check(launched.get("ok") is True and len(launched.get("pids", [])) == 2, "launch: the demo starts", launched)
     time.sleep(1)

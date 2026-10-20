@@ -894,6 +894,13 @@ class AdaptiveShellV16 {
             this._rosPanel.attach();
         } catch (e) {
             logError(e, '[Adaptive Shell] installing the ROS 2 panel');
+            if (this._rosPanel) {
+                try {
+                    this._rosPanel.detach();
+                } catch (cleanupError) {
+                    logError(cleanupError, '[Adaptive Shell] cleaning up the ROS 2 panel');
+                }
+            }
             this._rosPanel = null;
         }
     }
