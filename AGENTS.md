@@ -63,4 +63,4 @@ are recorded with `scripts/record-live-verification.py`.
 - Repo conventions (single `master` branch, commit identity, commit cadence, UI palette, Files
   inspector scope) are in this repo's memory: `memctl read`.
 
-<!-- map-check: commit=eefda6eb06a0 time=1792514722 -->
+<!-- map-check: commit=3b1154706063 time=1792517611 -->
