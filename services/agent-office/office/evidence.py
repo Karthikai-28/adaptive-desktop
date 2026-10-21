@@ -1,4 +1,5 @@
 """Small, private evidence search over Office records and explicitly scoped project files."""
+import asyncio
 import json
 import os
 import re
@@ -33,14 +34,22 @@ class Evidence:
     def __init__(self, office):
         self.office = office
 
-    def search(self, query, mission_id=None, limit=40):
+    async def search(self, query, mission_id=None, limit=40):
+        """Office records are read here, on the event loop; capsules and files are scanned in a thread."""
         query = (query or "").strip()
         terms = _terms(query)
         if not terms:
             raise ValueError("search needs at least one word")
+        limit = max(1, min(int(limit), 100))
         mission = self.office.store.mission(int(mission_id), with_tasks=True) if mission_id else None
         if mission_id and not mission:
             raise ValueError("no such mission")
+        missions = [mission] if mission else self.office.store.missions(limit=300)
+        tasks = mission["tasks"] if mission else self.office.store.tasks(limit=1000)
+        hidden = {str(Path(p).resolve()) for p in self.office.repos.hidden}
+        return await asyncio.to_thread(self._search, query, terms, mission, missions, tasks, hidden, limit)
+
+    def _search(self, query, terms, mission, missions, tasks, hidden, limit):
         out = []
 
         def add(kind, ref, title, text):
@@ -49,21 +58,19 @@ class Evidence:
                 out.append({"kind": kind, "ref": ref, "title": title,
                             "snippet": _snippet(terms, text), "score": score})
 
-        missions = [mission] if mission else self.office.store.missions(limit=300)
         for m in missions:
-            if not m:
-                continue
             add("mission", f"mission:{m['id']}", m["title"],
-                "\n".join([m["title"], m["objective"], *m["criteria"], m.get("summary", ""), m.get("error", "")]))
-        tasks = mission["tasks"] if mission else self.office.store.tasks(limit=1000)
+                "\n".join([m["title"], m["objective"], *m["criteria"], m.get("summary") or "", m.get("error") or ""]))
         for t in tasks:
             add("task", f"task:{t['id']}", t["title"],
                 "\n".join(str(t.get(k) or "") for k in ("title", "body", "result", "error")))
-        for row in self.office.capsules.list(limit=300):
-            if mission and row.get("mission_id") != mission["id"]:
-                continue
+        # a mission's search reads every one of its capsules; the office-wide search reads the newest 300
+        rows = (self.office.capsules.list(limit=None, mission_id=mission["id"]) if mission
+                else self.office.capsules.list(limit=300))
+        for row in rows:
             c = self.office.capsules.get(row["id"])
-            add("capsule", c["path"], c.get("mission") or c["id"], json.dumps(c, sort_keys=True))
+            if c:
+                add("capsule", c["path"], c.get("mission") or c["id"], json.dumps(c, sort_keys=True))
 
         roots = []
         project = (mission or {}).get("project") or ""
@@ -74,16 +81,13 @@ class Evidence:
         repo = (mission or {}).get("repo") or ""
         if repo:
             roots.append(Path(repo))
-        seen, scanned = set(), 0
-        hidden = {str(Path(p).resolve()) for p in self.office.repos.hidden}
-        for root in roots:
-            if str(root) in seen:
-                continue
-            seen.add(str(root))
+        scanned, cap, full = 0, limit * 4, False
+        for root in dict.fromkeys(roots):
             for dirpath, dirs, files in os.walk(root, followlinks=False):
                 dirs[:] = [d for d in dirs if d not in SECRET_PRUNE and not d.startswith(".")]
                 for name in files:
-                    if scanned >= 5000 or len(out) >= limit * 4:
+                    if scanned >= 5000 or len(out) >= cap:
+                        full = True
                         break
                     p = Path(dirpath, name)
                     if _is_secret(name) or p.suffix.lower() not in TEXT_SUFFIXES:
@@ -105,6 +109,10 @@ class Evidence:
                             ref = str(p)
                         out.append({"kind": "file", "ref": f"{ref}:{line}", "title": p.name,
                                     "snippet": _snippet(terms, text), "score": score})
+                if full:
+                    break
+            if full:
+                break
         out.sort(key=lambda x: (-x["score"], x["kind"], x["title"]))
-        return {"query": query, "mission_id": int(mission_id) if mission_id else None,
-                "results": out[:max(1, min(int(limit), 100))], "scanned_files": scanned}
+        return {"query": query, "mission_id": mission["id"] if mission else None,
+                "results": out[:limit], "scanned_files": scanned, "truncated": full}

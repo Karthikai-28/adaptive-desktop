@@ -145,7 +145,7 @@ private fun taskColor(status: String) = when (status) {
 }
 
 private fun missionColor(status: String) = when (status) {
-    "running" -> Amber
+    "running", "unverified" -> Amber
     "queued" -> Accent
     "succeeded" -> Green
     "failed" -> Red
@@ -674,7 +674,14 @@ private fun MissionScreen(ctx: Ctx, id: Int) {
         }
         Section("Objective"); TextBlock(m.str("objective"))
         Section("Acceptance criteria")
-        Group { m.optJSONArray("criteria").strings().forEach { Line("◻  $it") } }
+        val verdicts = m.optJSONArray("verdicts").objects().associateBy { it.str("id") }
+        Group {
+            m.optJSONArray("criteria").strings().forEachIndexed { i, c ->
+                val v = verdicts["C${i + 1}"]
+                val mark = when (v?.str("verdict")) { "PASS" -> "✓"; "FAIL" -> "✗"; "MISSING" -> "?"; else -> "◻" }
+                Line("$mark  C${i + 1} · $c", v?.str("evidence") ?: "")
+            }
+        }
         Section("Evidence search")
         Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Field(search, { search = it }, "Search reports, capsules and files", Modifier.weight(1f))

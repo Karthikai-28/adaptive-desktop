@@ -47,7 +47,8 @@ def write_agy_settings(repos=()):
     # MCP is allowed: the only server configured in the agents' agy profiles is the scoped knowledge graph
     deny = [f"read_file({HOME / p})" for p in SECRET_DIRS + SECRET_FILES]
     # the office's own files (agy's home sits in DATA too and must stay readable: MCP tool schemas live there)
-    deny += [f"read_file({DATA / p})" for p in ("office.db", "office.db-wal", "office.db-shm", "logs", "tts")]
+    deny += [f"read_file({DATA / p})" for p in ("office.db", "office.db-wal", "office.db-shm", "logs", "tts",
+                                                 "operator.key", "mission-control")]
     for home, offline in ((AGY_HOME, False), (AGY_HOME_LOCAL, True)):
         cfg_dir = home / ".gemini" / "antigravity-cli"
         cfg_dir.mkdir(parents=True, exist_ok=True)

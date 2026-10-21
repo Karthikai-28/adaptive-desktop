@@ -28,8 +28,8 @@ PORT="$(python3 -c "import json;print(json.load(open('$APP/config.json'))['port'
 MODEL="$(python3 -c "import json;c=json.load(open('$APP/config.json'));print(next((p['model'] for p in c.get('providers',{}).values() if p['engine']=='agy'),c.get('gemini_model','')))")"
 # local providers (engine ollama), one "model url" per line - optional: the office runs without them
 LOCAL="$(python3 -c "import json;c=json.load(open('$APP/config.json'));[print(p['model'],p.get('url','http://127.0.0.1:11434')) for p in c.get('providers',{}).values() if p['engine']=='ollama']")"
-PY_MODULES="fastapi uvicorn websockets pydantic edge_tts"
-PY_PACKAGES="fastapi>=0.110 uvicorn>=0.29 websockets>=12 pydantic>=2 edge-tts>=6.1"
+PY_MODULES="fastapi uvicorn websockets pydantic edge_tts yaml"
+PY_PACKAGES="fastapi>=0.110 uvicorn>=0.29 websockets>=12 pydantic>=2 edge-tts>=6.1 pyyaml>=5.4"
 
 MODE=install; AUTOSTART=0; OPEN=0
 for arg in "$@"; do

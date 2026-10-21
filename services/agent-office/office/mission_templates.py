@@ -1,4 +1,5 @@
 """High-value mission templates that bind existing Adaptive tools to checked Office work."""
+import asyncio
 import json
 import subprocess
 
@@ -26,27 +27,37 @@ def ros_snapshot():
 
 
 async def launch_ros_investigation(office, agent, title, problem, bag="", project="", repo="",
-                                   baseline_bag="", simulation_command=""):
-    problem = (problem or "").strip()
+                                   baseline_bag="", simulation_command="", criteria=None, **mission):
+    """Start a ROS investigation; mission carries created_by/risk/workflow/approval through to add_mission.
+    The ROS snapshot and recording comparison are taken fresh on every launch, off the event loop."""
+    problem, bag, baseline_bag = (problem or "").strip(), (bag or "").strip(), (baseline_bag or "").strip()
+    simulation_command = (simulation_command or "").strip()
     if not problem:
         raise ValueError("describe the ROS failure to investigate")
-    snap = ros_snapshot()
-    comparison = None
-    if baseline_bag.strip() and bag.strip():
-        comparison = compare_bags(baseline_bag.strip(), bag.strip())
+    if baseline_bag and not bag:
+        raise ValueError("a baseline recording needs a recording to compare it with")
+    comparison = await asyncio.to_thread(compare_bags, baseline_bag, bag) if baseline_bag else None
+    snap = await asyncio.to_thread(ros_snapshot)
     objective = (f"Investigate this ROS 2 failure and produce a reproducible, evidence-backed engineering report.\n\n"
                  f"Observed problem:\n{problem}\n\n"
-                 + (f"Recording or dataset:\n{bag.strip()}\n\n" if bag.strip() else "")
-                 + (f"Baseline recording:\n{baseline_bag.strip()}\n\n" if baseline_bag.strip() else "")
-                 + (f"Simulation or replay command:\n{simulation_command.strip()}\n\n" if simulation_command.strip() else "")
+                 + (f"Recording or dataset:\n{bag}\n\n" if bag else "")
+                 + (f"Baseline recording:\n{baseline_bag}\n\n" if baseline_bag else "")
+                 + (f"Simulation or replay command:\n{simulation_command}\n\n" if simulation_command else "")
                  + (f"Recording comparison:\n```json\n{json.dumps(comparison, indent=2)}\n```\n\n" if comparison else "")
                  + f"ROS setup snapshot captured when the mission was launched:\n```json\n{snap}\n```")
-    mission = await office.add_mission(agent, title or "Investigate ROS 2 failure", objective,
-                                       ROS_CRITERIA, project, repo)
-    datasets = [x for x in (baseline_bag.strip(), bag.strip()) if x]
+    template = {"kind": "ros-investigation", "problem": problem, "bag": bag, "baseline_bag": baseline_bag,
+                "simulation_command": simulation_command}
+    m = await office.add_mission(agent, title or "Investigate ROS 2 failure", objective, criteria or ROS_CRITERIA,
+                                 project, repo, template=template, **mission)
     notes = "Initial ROS setup snapshot:\n" + snap
     if comparison:
         notes += "\n\nRecording comparison:\n" + json.dumps(comparison, indent=2)
-    office.capsules.create(mission_id=mission["id"], command=simulation_command.strip() or f"python3 {ROS_HELPER} status",
-                           datasets=datasets, notes=notes)
-    return office.store.mission(mission["id"], with_tasks=True)
+    out = office.store.mission(m["id"], with_tasks=True)
+    try:   # the mission is already queued: a capsule that cannot be written is reported, not raised
+        await office.capsules.create(mission_id=m["id"], command=simulation_command or f"python3 {ROS_HELPER} status",
+                                     datasets=[x for x in (baseline_bag, bag) if x], notes=notes)
+    except (OSError, ValueError) as e:
+        out["capsule_error"] = str(e)
+        await office.activity(agent, "info", f"Mission #{m['id']}: the work capsule could not be saved ({e})",
+                              m["tasks"][0]["id"] if m.get("tasks") else None)
+    return out

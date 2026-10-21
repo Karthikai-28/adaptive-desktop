@@ -13,9 +13,11 @@
   office capsule create [--mission ID] [--command CMD] [--dataset REF] [--result REF]
   office capsule list | office capsule show <id>
   office evidence "search words" [--mission ID]
-  office workflow create ID "Title" --objective TEXT --criterion TEXT [--allowed-agent ID]
-  office workflow list | office workflow show ID | office workflow run ID [--input NAME=VALUE]
-  office retention DAYS [--kind capsules|exports] [--apply]
+  office workflow create ID "Title" --objective TEXT --criterion TEXT [--risk read|write|hardware|external]
+                         [--allowed-agent ID]   (or --from-mission ID instead of --objective/--criterion)
+  office workflow list | office workflow show ID | office workflow run ID [--input NAME=VALUE] [--approve]
+  office retention DAYS [--kind capsules|exports] [--apply]   (--apply needs the operator)
+  office operator-key                             the key that lets the office app approve runs (owner only)
   office ask <agent> "<message>" [--no-wait]      direct message; waits for the reply
   office log [--agent A] [-n N]                   recent activity
   office meeting start "<topic>" --with maya,arjun[,claude]
@@ -35,17 +37,53 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 URL = os.environ.get("OFFICE_URL", "http://127.0.0.1:8790").rstrip("/")
-ACTOR = os.environ.get("OFFICE_ACTOR", "operator")
+STATE = Path(os.environ.get("OFFICE_STATE") or Path.home() / ".local/share/adaptive-desktop/agent-office")
+KEY_FILE = STATE / "data" / "operator.key"
+
+
+def _actor():
+    """Who is running this command. The manager's Claude starts with OFFICE_ACTOR=manager; its commands are
+    recognised by that ancestor whatever their own environment says, so they never carry the operator key."""
+    claimed = os.environ.get("OFFICE_ACTOR", "operator")
+    pid = os.getpid()
+    for _ in range(64):
+        try:
+            env = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            break
+        if b"OFFICE_ACTOR=manager" in env:
+            return "manager"
+        pid = int(stat.rsplit(")", 1)[1].split()[1])
+        if pid <= 1:
+            break
+    return claimed if claimed in ("operator", "manager") else "operator"
+
+
+ACTOR = _actor()
+
+
+def operator_key():
+    if ACTOR != "operator":
+        return ""
+    try:
+        return KEY_FILE.read_text().strip()
+    except OSError:
+        return ""
 
 
 def call(method, path, body=None, query=None):
     url = URL + path + ("?" + urllib.parse.urlencode({k: v for k, v in (query or {}).items() if v is not None})
                         if query else "")
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json", "X-Office": "1"})
+    headers = {"Content-Type": "application/json", "X-Office": "1", "X-Office-Actor": ACTOR}
+    key = operator_key()
+    if key:
+        headers["X-Office-Operator"] = key
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read() or b"null")
@@ -168,6 +206,8 @@ def cmd_mission(a):
                  "problem": a.title, "bag": a.bag or "", "baseline_bag": a.baseline_bag or "",
                  "simulation_command": a.simulation_command or "", "project": a.project or "", "repo": a.repo or ""})
         print(f"ROS investigation #{m['id']} {m['status']} (task #{m['tasks'][0]['id']})")
+        if m.get("capsule_error"):
+            print(f"  the work capsule could not be saved: {m['capsule_error']}")
         return
     if a.action == "create":
         m = call("POST", "/api/missions", {"agent": a.agent, "title": a.title,
@@ -181,7 +221,7 @@ def cmd_mission(a):
         return
     if a.action == "export":
         x = call("POST", f"/api/missions/{a.id}/export")
-        print(f"mission #{a.id} audit exported to {x['path']} ({x['bytes']} bytes)")
+        print(f"mission #{a.id} audit exported to {x['path']} ({x['bytes']} bytes, sha256 {x['sha256']})")
         return
     if a.action == "show":
         rows = [call("GET", f"/api/missions/{a.id}")]
@@ -190,9 +230,15 @@ def cmd_mission(a):
     for m in rows:
         print(f"#{m['id']:<4} {m['status']:<10} {m['title']}")
         if a.action == "show":
+            print(f"  risk: {m.get('risk') or '-'}  by: {m.get('created_by')}"
+                  + (f"  workflow: {m['workflow_id']}" if m.get("workflow_id") else "")
+                  + (f"  approved by: {m['approved_by']}" if m.get("approved_by") else ""))
             print(f"  objective: {m['objective']}")
-            for criterion in m["criteria"]:
-                print(f"  - {criterion}")
+            verdict = {v["id"]: v for v in m.get("verdicts") or []}
+            for i, criterion in enumerate(m["criteria"], 1):
+                v = verdict.get(f"C{i}")
+                print(f"  C{i} [{v['verdict'] if v else '    '}] {criterion}"
+                      + (f"\n       {v['evidence']}" if v and v["evidence"] else ""))
             for t in m.get("tasks", []):
                 print(f"  task #{t['id']} {t['status']}: {t['title']} ({t['agent']})")
             if m.get("summary"):
@@ -228,14 +274,16 @@ def cmd_evidence(a):
         print(f"[{r['kind']}] {r['title']}  {r['ref']}\n  {r['snippet']}")
     if not d["results"]:
         print(f"no matching evidence ({d['scanned_files']} files scanned)")
+    if d.get("truncated"):
+        print(f"(search stopped after {d['scanned_files']} files; narrow it with more words)")
 
 
 def cmd_workflow(a):
     if a.action == "create":
         w = call("POST", "/api/workflows", {"id": a.id, "title": a.title, "description": a.description or "",
-                 "objective": a.objective, "criteria": a.criterion or [], "agent": a.agent or "",
+                 "objective": a.objective or "", "criteria": a.criterion or [], "agent": a.agent or "",
                  "project": a.project or "", "repo": a.repo or "", "risk": a.risk,
-                 "allowed_agents": a.allowed_agent or []})
+                 "allowed_agents": a.allowed_agent or [], "from_mission": a.from_mission})
         print(f"workflow {w['id']} saved")
         return
     if a.action == "show":
@@ -259,6 +307,17 @@ def cmd_retention(a):
     print(f"{action} {d['count']} file(s), {d['bytes']} bytes")
     for row in d["files"]:
         print(f"  {row['path']}")
+    if d.get("kept_mission_capsules"):
+        print(f"kept {d['kept_mission_capsules']} old capsule(s) that belong to a mission")
+
+
+def cmd_operator_key(a):
+    if ACTOR != "operator":
+        sys.exit("office: only the owner can read the operator key")
+    key = operator_key()
+    if not key:
+        sys.exit(f"office: no operator key yet at {KEY_FILE} (start the office once)")
+    print(key)
 
 
 def cmd_ask(a):
@@ -412,7 +471,7 @@ def main():
     s = sub.add_parser("cancel"); s.add_argument("id", type=int)
     s = sub.add_parser("retry"); s.add_argument("id", type=int)
     s = sub.add_parser("mission"); s.add_argument("action", choices=["create", "ros", "list", "show", "cancel", "export"])
-    s.add_argument("title", nargs="?"); s.add_argument("--id", type=int)
+    s.add_argument("title", nargs="?")
     s.add_argument("--objective"); s.add_argument("--criterion", action="append")
     s.add_argument("--agent", default="maya"); s.add_argument("--project"); s.add_argument("--repo")
     s.add_argument("--bag"); s.add_argument("--baseline-bag"); s.add_argument("--simulation-command"); s.add_argument("--name")
@@ -428,10 +487,12 @@ def main():
     s.add_argument("--objective"); s.add_argument("--criterion", action="append"); s.add_argument("--agent")
     s.add_argument("--project"); s.add_argument("--repo"); s.add_argument("--risk", default="write")
     s.add_argument("--allowed-agent", action="append"); s.add_argument("--input", action="append")
+    s.add_argument("--from-mission", type=int, help="copy objective, criteria and scope from this mission")
     s.add_argument("--approve", action="store_true", help="approve this hardware/external workflow run")
     s = sub.add_parser("retention"); s.add_argument("days", type=int)
     s.add_argument("--kind", action="append", choices=["capsules", "exports"])
     s.add_argument("--apply", action="store_true")
+    sub.add_parser("operator-key")
     s = sub.add_parser("ask"); s.add_argument("agent"); s.add_argument("message")
     s.add_argument("--no-wait", action="store_true"); s.add_argument("--timeout", type=int, default=900)
     s = sub.add_parser("log"); s.add_argument("--agent"); s.add_argument("-n", type=int, default=40)
@@ -457,8 +518,10 @@ def main():
     if a.cmd == "capsule" and a.action == "show" and not a.id:
         p.error("capsule show needs a capsule id")
     if a.cmd == "workflow":
-        if a.action == "create" and (not a.id or not a.title or not a.objective or not a.criterion):
-            p.error("workflow create needs ID, title, --objective and at least one --criterion")
+        if a.action == "create" and (not a.id or not a.title or
+                                     (not a.from_mission and (not a.objective or not a.criterion))):
+            p.error("workflow create needs ID, title, and --objective with at least one --criterion "
+                    "(or --from-mission ID)")
         if a.action in ("show", "run") and not a.id:
             p.error(f"workflow {a.action} needs a workflow id")
     if a.cmd in (None, "help"):

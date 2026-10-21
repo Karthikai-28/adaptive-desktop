@@ -34,6 +34,8 @@ from .evidence import Evidence
 from .workflows import Workflows
 from .audit_export import AuditExport
 from .retention import Retention
+from . import verdicts
+from .workflows import RISKS
 
 NAME_RE_CACHE = {}
 
@@ -108,6 +110,7 @@ class Office:
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             self.store.update_task(t["id"], status="queued")
             self.store.add_event(t["agent"], "info", "Resuming after an office restart", t["id"])
+            await self._sync_mission(t.get("mission_id"))
         for aid in self.agents:
             self._spawn(self._chat_worker(aid))
         self.manager.start()
@@ -451,27 +454,44 @@ class Office:
 
     # ------------------------------------------------------------------ missions and tasks
     async def add_mission(self, agent, title, objective, criteria=None, project="", repo="",
-                          created_by="operator"):
+                          created_by="operator", risk="", workflow_id="", approved_by="", allowed_agents=None,
+                          template=None):
         if agent not in self.agents:
             raise ValueError(f"unknown agent '{agent}'. Agents: {', '.join(self.agents)}")
         title, objective = title.strip(), objective.strip()
         if not title or not objective:
             raise ValueError("a mission needs a title and objective")
+        if len(title) > 200:
+            raise ValueError("a mission title must be under 200 characters")
         criteria = [str(x).strip() for x in (criteria or []) if str(x).strip()]
         if not criteria:
             raise ValueError("a mission needs at least one acceptance criterion")
         if len(criteria) > 20 or any(len(x) > 500 for x in criteria):
             raise ValueError("use at most 20 acceptance criteria, each under 500 characters")
+        allowed = list(dict.fromkeys(allowed_agents or []))
+        if allowed and agent not in allowed:
+            raise ValueError(f"this mission is limited to: {', '.join(allowed)}")
         project = _slug(project, 40) if project else ""
         repo = self.repos.resolve(repo) if repo else ""
-        m = self.store.add_mission(title, objective, criteria, project, repo, created_by)
-        checklist = "\n".join(f"- [ ] {x}" for x in criteria)
+        risk = risk or ("write" if repo else "read")
+        if risk not in RISKS:
+            raise ValueError(f"risk must be one of: {', '.join(sorted(RISKS))}")
+        if risk == "read" and repo:
+            raise ValueError("a read-only mission cannot name a writable repository")
+        if risk in ("hardware", "external") and not approved_by:
+            raise ValueError(f"a {risk} mission needs the operator's approval")
+        m = self.store.add_mission(title, objective, criteria, project, repo, created_by, risk, workflow_id,
+                                   approved_by, time.time() if approved_by else None, allowed, template)
+        checklist = "\n".join(f"- C{i}: {x}" for i, x in enumerate(criteria, 1))
         body = (f"MISSION #{m['id']}\n\nObjective:\n{objective}\n\nAcceptance criteria:\n{checklist}\n\n"
                 "Complete the objective within the assigned repository scope. Verify every criterion with "
-                "concrete evidence. In the final report, list each criterion as PASS or FAIL with the command, "
-                "file, output, or observation that supports it. Do not claim success when a criterion is unverified.")
+                "concrete evidence. End the final report with one line per criterion in exactly this form:\n"
+                "C1: PASS - <the command, file, output, or observation that proves it>\n"
+                "C2: FAIL - <what is missing or wrong>\n"
+                "The mission only succeeds when every criterion has a PASS line with evidence. "
+                "Do not claim success when a criterion is unverified.")
         try:
-            t = await self.add_task(agent, title, body, project, created_by, None, repo, m["id"])
+            await self.add_task(agent, title, body, project, created_by, None, repo, m["id"])
         except Exception:
             self.store.update_mission(m["id"], status="failed", finished_at=time.time(),
                                       error="could not create the mission's first task")
@@ -480,35 +500,49 @@ class Office:
         await self.broadcast({"type": "mission", "mission": m})
         return m
 
+    def mission_task_allowed(self, mid, agent, repo):
+        """Raises unless a task for agent (with an already resolved repo) stays inside mission mid's boundary."""
+        m = self.store.mission(int(mid))
+        if not m:
+            raise ValueError(f"mission #{mid} does not exist")
+        if m["status"] not in ("queued", "running"):
+            raise ValueError(f"mission #{mid} is {m['status']}; start a new mission (or retry its task)")
+        if repo and repo != m["repo"]:
+            raise ValueError(f"mission #{mid} may only change {m['repo'] or 'no repository'}")
+        if m["allowed_agents"] and agent not in m["allowed_agents"]:
+            raise ValueError(f"mission #{mid} is limited to: {', '.join(m['allowed_agents'])}")
+        return m
+
     async def _sync_mission(self, mid):
+        """Derive a mission's state from its tasks; finished work is judged against the acceptance criteria."""
         if not mid:
             return None
         m = self.store.mission(mid, with_tasks=True)
-        if not m:
-            return None
-        states = [t["status"] for t in m["tasks"]]
-        now, update = time.time(), {}
-        if any(s == "running" for s in states):
-            status = "running"
-            if not m["started_at"]:
-                update["started_at"] = now
-        elif states and all(s == "done" for s in states):
-            status = "succeeded"
-            update["finished_at"] = m["finished_at"] or now
-            update["summary"] = "\n\n".join(t["result"] for t in m["tasks"] if t["result"])[-20000:]
-            update["error"] = ""
-        elif any(s == "failed" for s in states):
-            status = "failed"
-            update["finished_at"] = m["finished_at"] or now
-            update["error"] = "; ".join(t["error"] for t in m["tasks"] if t["status"] == "failed" and t["error"])[-4000:]
-        elif states and all(s in ("done", "cancelled") for s in states) and any(s == "cancelled" for s in states):
-            status = "cancelled"
-            update["finished_at"] = m["finished_at"] or now
-        else:
-            status = "queued"
-            update["finished_at"] = None
-        if m["status"] != status or update:
-            m = self.store.update_mission(mid, status=status, **update)
+        if not m or not m["tasks"]:
+            return m
+        tasks, now = m["tasks"], time.time()
+        states = {t["status"] for t in tasks}
+        report = "\n\n".join(t["result"] for t in tasks if t["result"])[-20000:]
+        if "running" in states or states & {"queued", "blocked"}:
+            want = {"status": "running" if "running" in states else "queued", "finished_at": None, "error": "",
+                    "summary": "", "verdicts": []}
+            if "running" in states and not m["started_at"]:
+                want["started_at"] = now
+        elif states == {"done"}:
+            rows = verdicts.judge(m["criteria"], [t["result"] for t in tasks])
+            status, error = verdicts.outcome(rows)
+            want = {"status": status, "finished_at": m["finished_at"] or now, "summary": report, "error": error,
+                    "verdicts": rows}
+        elif "failed" in states:
+            want = {"status": "failed", "finished_at": m["finished_at"] or now, "summary": report, "verdicts": [],
+                    "error": "; ".join(f"task #{t['id']}: {t['error'] or 'failed'}" for t in tasks
+                                       if t["status"] == "failed")[-4000:]}
+        else:                                           # only done and cancelled tasks are left
+            want = {"status": "cancelled", "finished_at": m["finished_at"] or now, "summary": report, "error": "",
+                    "verdicts": []}
+        changed = {k: v for k, v in want.items() if m.get(k) != v}
+        if changed:
+            m = self.store.update_mission(mid, **changed)
             await self.broadcast({"type": "mission", "mission": m})
         return m
 
@@ -529,10 +563,10 @@ class Office:
             raise ValueError("a task needs a title")
         if depends_on and not self.store.task(int(depends_on)):
             raise ValueError(f"task #{depends_on} does not exist")
-        if mission_id and not self.store.mission(int(mission_id)):
-            raise ValueError(f"mission #{mission_id} does not exist")
         project = _slug(project, 40) if project else ""
         repo = self.repos.resolve(repo) if repo else ""
+        if mission_id:
+            self.mission_task_allowed(mission_id, agent, repo)
         t = self.store.add_task(agent, title.strip(), body.strip(), project, created_by,
                                 int(depends_on) if depends_on else None, repo,
                                 int(mission_id) if mission_id else None)

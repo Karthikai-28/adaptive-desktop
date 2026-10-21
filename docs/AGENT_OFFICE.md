@@ -29,7 +29,7 @@ The installer is idempotent. It installs whatever is missing:
 | What | How |
 |---|---|
 | bubblewrap (the agents' sandbox) | `apt`, asks for sudo only if missing |
-| FastAPI, uvicorn, websockets, pydantic, edge-tts | `pip --target .local/office-pydeps` (git-ignored) |
+| FastAPI, uvicorn, websockets, pydantic, edge-tts, PyYAML | `pip --target .local/office-pydeps` (git-ignored) |
 | `agy` | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` |
 | `claude` | `curl -fsSL https://claude.ai/install.sh \| bash` |
 | `office` command | link in `~/.local/bin` |
@@ -49,11 +49,11 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Ask Claude** | Tell Claude what you want. A tool-free Codex turn drafts the plan; Claude verifies and corrects it, then assigns useful work across the whole available team (chaining dependencies), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
 | **Meetings and calls** | **Call meeting** → pick people → everyone walks to the meeting room. Type or talk; agents answer out loud. Say a name ("Arjun, …") to ask one person. **Hands-free** keeps listening and pauses while agents speak. With Claude in the room, it chairs the meeting, writes minutes at the end and assigns the agreed action items. **Call** on an agent's card starts a 1:1 call. |
 | **Tasks** | Kanban board of every task with live activity, full reports, cancel and retry. |
-| **Missions** | Outcome-based work with an objective, measurable acceptance criteria, a writable-repository boundary, linked tasks, cancellation, and one evidence report. Open **Missions** in the top bar or use `office mission`. |
-| **Work capsules** | Save the exact repository revision, dirty files, dependency-lock fingerprints, runtime, command, launch arguments, parameters, datasets and results for a mission. A capsule is readable JSON under `company/capsules/`; create one from a mission or with `office capsule`. |
+| **Missions** | Outcome-based work with an objective, measurable acceptance criteria (C1, C2, ...), a writable-repository boundary, linked tasks, cancellation, and one evidence report. A mission **succeeds** only when the report has a `C<n>: PASS - <evidence>` line for every criterion; a `FAIL` line makes it **failed**, and a report without a verdict for each criterion leaves it **unverified**. Open **Missions** in the top bar or use `office mission`. |
+| **Work capsules** | Save the exact repository revision, dirty files, dependency-lock fingerprints, runtime, command, launch arguments, parameters, datasets and results for a mission. A capsule is readable JSON under `data/mission-control/capsules/`, where agents can't reach it; create one from a mission or with `office capsule`. |
 | **Evidence search** | Search a mission's objective, criteria, task reports, capsules, project artifacts and explicitly scoped repository. Results cite the mission, task, capsule or exact file and line; search stays local and skips secret-shaped files. |
-| **Reusable workflows** | Save a mission as a parameterized team workflow. A workflow keeps its acceptance criteria, assigned roles, risk class and repository boundary. Hardware and external workflows require explicit approval on every run. |
-| **Audit and retention** | Export a mission, task events, policy and capsules as one JSON audit bundle. `office retention DAYS` previews old capsule/export removal; add `--apply` to perform exactly the listed deletion. |
+| **Reusable workflows** | Save a mission as a parameterized team workflow. A workflow keeps its acceptance criteria, assigned roles, risk class and repository boundary; a ROS investigation keeps its problem and recordings and captures a fresh ROS snapshot on every run. Hardware and external workflows need the operator's approval on every run, and only the operator can change a saved workflow. |
+| **Audit and retention** | Export a mission, task events, verdicts, policy (risk, workflow, who approved it) and capsules as one JSON audit bundle with a SHA-256 checksum. `office retention DAYS` previews old export removal; add `--apply` (operator only) to perform exactly the listed deletion. A capsule that belongs to a mission is never deleted. |
 | **ROS investigations** | Capture the live ROS setup, baseline and candidate recording metadata, missing/type-changed topics and message-count regressions, plus an exact simulation or replay command in the evidence capsule. |
 | **Mission Control on the phone** | Adaptive Link's native Office has a Missions tab for launching scoped work, reading criteria and reports, searching evidence and cancelling work. It uses the paired phone's mutually authenticated Office gateway and requires that device's Commands switch. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
@@ -74,6 +74,8 @@ private code must remain local.
 | Unit | `services/adaptive-agent-office.service` |
 | Work the team produces | `~/.local/share/adaptive-desktop/agent-office/company/` (`projects/<name>/`, `meetings/`) |
 | Office database, agy home, voice cache, logs | `~/.local/share/adaptive-desktop/agent-office/data/` |
+| Workflows, work capsules, audit exports | `data/mission-control/` (no agent sandbox mounts `data/`) |
+| Operator key | `data/operator.key` (mode 0600; `office operator-key` prints it for the owner) |
 
 Set `OFFICE_STATE` to put the state somewhere else. To hire someone, add an entry to
 `config.json` with a free desk (`p4`-`p6`, `e4`-`e6`, `r2`-`r6`), a look, an edge-tts voice
@@ -96,8 +98,11 @@ office evidence "navigation timeout" --mission 3
 office workflow create inspect-component "Inspect {{component}}" \
   --objective "Explain {{component}} with cited evidence" --criterion "The report cites its sources" --risk read
 office workflow run inspect-component --input component=planner
-office retention 90                         preview old capsules and audit exports
-office retention 90 --kind exports --apply delete exactly the previewed old exports
+office workflow create replay-stall "Replay stall" --from-mission 7 --risk read
+office workflow run move-arm --approve      hardware/external: approves this one run (owner only)
+office retention 90                         preview old exports and capsules without a mission
+office retention 90 --kind exports --apply delete exactly the previewed old exports (owner only)
+office operator-key                         the key the office app asks for before it approves a run
 office ask claude "what's the status of the launch?"     (waits for the reply)
 office meeting start "Weekly sync" --with maya,arjun,claude / office meeting end
 office provider [gemini|local] [--fallback local|none]   what agents run on (meetings: config "meeting_provider")
@@ -141,13 +146,25 @@ office autopilot on|off · office pause · office resume · office open
   Origin headers, and requires its same-origin write header. Remote phone access goes only through
   Adaptive Link's paired, mutually authenticated gateway and the phone's Commands permission; the
   Office port is never exposed on the LAN. `GET /api/health` reports the service's local-only mode.
-- **Workflow authority.** Read workflows cannot name a writable repository. A saved repository
-  boundary cannot be widened when a workflow runs, role allowlists are enforced, and hardware or
-  external workflows require one-run approval. The agents still receive only the one repository
-  named by the resulting mission as writable.
-- **Retention is inspectable.** Retention covers generated capsule and audit JSON only. It previews
-  paths and byte counts by default, accepts 1–3650 days, and does not delete mission/task history or
-  project source.
+- **The operator key.** Approving a hardware/external workflow run, deleting records with retention,
+  changing a saved workflow, and adding or re-running work in a hardware/external mission need the
+  random key in `data/operator.key`. Your own `office` command attaches it. The app asks for it once
+  (paste the output of `office operator-key`) and keeps it in that browser's local storage. No agent
+  sandbox mounts `data/`. The manager's Claude is denied reading the key, and the server recognises
+  the manager's `office` calls by their process tree, never by the identity they claim, so the manager
+  can neither use the key nor pass as the owner. Its missions and workflow runs count against its
+  40-tasks-an-hour limit and are recorded as `manager`. The phone has no key, so it can't approve.
+- **Workflow authority.** Workflows, capsules and exports live in `data/mission-control/`, which
+  agents can't reach, so they can't rewrite a workflow's risk class or edit evidence. Read workflows
+  can't name a writable repository. A workflow's repository is resolved when it's saved and is its
+  boundary: a run may repeat it but never name another, and a workflow saved without one never gets
+  one. Role allowlists are enforced, and the mission records its risk, workflow, allowed agents and
+  who approved it. Tasks added to a mission stay inside its repository and roles, and a finished
+  mission takes no new tasks. The agents still receive only the one repository named by the mission
+  as writable.
+- **Retention is inspectable.** Retention covers audit exports, capsules saved without a mission, and
+  leftover temporary files. It previews paths and byte counts by default, accepts 1–3650 days, and
+  never deletes a mission's capsules, mission/task history or project source.
 
 - Every agent runs inside **bubblewrap**: the system is read-only and the home folder is replaced
   by an empty one holding only developer tools (read-only), agy's own home, the company workspace
@@ -172,6 +189,9 @@ office autopilot on|off · office pause · office resume · office open
   never to publish, push, buy or send anything off the machine unless you ask.
 - The **server** listens on 127.0.0.1 only and rejects cross-site requests and foreign Host
   headers. Agent-written pages are served in a sandboxed origin, so they can't call the office API.
+  Agent *commands* share the host network, so they can reach the API over loopback. Everything
+  that needs the owner checks the operator key, which they can't read (`scripts/verify-agent-office.sh`
+  probes this from inside the sandbox).
 - **Quota.** Autopilot reviews are capped at 20 per hour and Claude may queue at most 40 tasks per
   hour. A typical task uses 50-100k tokens. The top bar shows the remaining 5-hour and weekly limits
   for Gemini and Claude/GPT; a limit that the subscription disables is shown as off, not as 0%.
@@ -338,7 +358,8 @@ included). The task board's own count is fresh input + output of a task's last a
 ## Checks
 
 ```sh
-scripts/verify-agent-office.sh          # syntax, roster, a throwaway server's API and guards (no quota)
+scripts/verify-agent-office.sh          # syntax, roster, a throwaway server's API and guards (no quota),
+                                        # then the page in headless Chrome (scripts/verify-agent-office-ui.py)
 scripts/install-agent-office.sh --status
 ```
 

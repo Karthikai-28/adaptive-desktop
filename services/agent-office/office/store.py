@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS missions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL, objective TEXT NOT NULL, project TEXT DEFAULT '', repo TEXT DEFAULT '',
   criteria TEXT DEFAULT '[]', status TEXT NOT NULL DEFAULT 'queued', created_by TEXT DEFAULT 'operator',
-  created_at REAL, started_at REAL, finished_at REAL, summary TEXT DEFAULT '', error TEXT DEFAULT ''
+  created_at REAL, started_at REAL, finished_at REAL, summary TEXT DEFAULT '', error TEXT DEFAULT '',
+  risk TEXT DEFAULT '', workflow_id TEXT DEFAULT '', approved_by TEXT DEFAULT '', approved_at REAL,
+  allowed_agents TEXT DEFAULT '[]', verdicts TEXT DEFAULT '[]', template TEXT DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +43,13 @@ TASK_FIELDS = ("agent", "title", "body", "project", "status", "created_by", "dep
                "attempts", "created_at", "started_at", "finished_at", "result", "error",
                "steps", "tokens", "repo", "mission_id")
 MISSION_FIELDS = ("title", "objective", "project", "repo", "criteria", "status", "created_by",
-                  "created_at", "started_at", "finished_at", "summary", "error")
+                  "created_at", "started_at", "finished_at", "summary", "error", "risk", "workflow_id",
+                  "approved_by", "approved_at", "allowed_agents", "verdicts", "template")
+MISSION_JSON = {"criteria": "[]", "allowed_agents": "[]", "verdicts": "[]", "template": "{}"}
+# columns added after the missions table first shipped
+MISSION_COLUMNS = {"risk": "TEXT DEFAULT ''", "workflow_id": "TEXT DEFAULT ''", "approved_by": "TEXT DEFAULT ''",
+                   "approved_at": "REAL", "allowed_agents": "TEXT DEFAULT '[]'", "verdicts": "TEXT DEFAULT '[]'",
+                   "template": "TEXT DEFAULT '{}'"}
 
 
 class Store:
@@ -55,6 +63,10 @@ class Store:
         if "mission_id" not in {r[1] for r in self.db.execute("PRAGMA table_info(tasks)")}:
             self.db.execute("ALTER TABLE tasks ADD COLUMN mission_id INTEGER")
         self.db.execute("CREATE INDEX IF NOT EXISTS tasks_mission ON tasks(mission_id, id)")
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(missions)")}
+        for col, decl in MISSION_COLUMNS.items():
+            if col not in have:
+                self.db.execute(f"ALTER TABLE missions ADD COLUMN {col} {decl}")
 
     # ---- key/value ----
     def get(self, key, default=None):
@@ -111,12 +123,17 @@ class Store:
     # ---- missions ----
     @staticmethod
     def _mission(row):
-        return dict(row, criteria=json.loads(row["criteria"] or "[]")) if row else None
+        if not row:
+            return None
+        return dict(row, **{k: json.loads(row[k] or empty) for k, empty in MISSION_JSON.items()})
 
-    def add_mission(self, title, objective, criteria=None, project="", repo="", created_by="operator"):
+    def add_mission(self, title, objective, criteria=None, project="", repo="", created_by="operator", risk="",
+                    workflow_id="", approved_by="", approved_at=None, allowed_agents=None, template=None):
         cur = self.db.execute(
-            "INSERT INTO missions(title,objective,criteria,project,repo,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
-            (title, objective, json.dumps(criteria or []), project, repo, created_by, time.time()))
+            "INSERT INTO missions(title,objective,criteria,project,repo,created_by,created_at,risk,workflow_id,"
+            "approved_by,approved_at,allowed_agents,template) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (title, objective, json.dumps(criteria or []), project, repo, created_by, time.time(), risk,
+             workflow_id, approved_by, approved_at, json.dumps(allowed_agents or []), json.dumps(template or {})))
         return self.mission(cur.lastrowid)
 
     def mission(self, mid, with_tasks=False):
@@ -131,12 +148,19 @@ class Store:
         return [self._mission(r) for r in self.db.execute(
             "SELECT * FROM missions ORDER BY id DESC LIMIT ?", (limit,))]
 
+    def mission_count(self):
+        return self.db.execute("SELECT COUNT(*) FROM missions").fetchone()[0]
+
+    def mission_ids(self):
+        return {r[0] for r in self.db.execute("SELECT id FROM missions")}
+
     def update_mission(self, mid, **kw):
         bad = set(kw) - set(MISSION_FIELDS)
         if bad:
             raise ValueError(f"unknown mission fields {bad}")
-        if "criteria" in kw and not isinstance(kw["criteria"], str):
-            kw["criteria"] = json.dumps(kw["criteria"])
+        for k in MISSION_JSON:
+            if k in kw and not isinstance(kw[k], str):
+                kw[k] = json.dumps(kw[k])
         sets = ",".join(f"{k}=?" for k in kw)
         self.db.execute(f"UPDATE missions SET {sets} WHERE id=?", (*kw.values(), mid))
         return self.mission(mid, with_tasks=True)

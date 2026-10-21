@@ -16,7 +16,7 @@ import re
 import signal
 import time
 
-from . import codex
+from . import codex, operator
 from .config import COMPANY, ROOT
 
 ALLOWED = ["Bash(office:*)", "Bash(office *)", "Read", "Glob", "Grep", "LS"]
@@ -53,6 +53,7 @@ class Manager:
         self.q = asyncio.Queue()
         self.busy = False
         self.proc = None
+        self.pids = set()           # running manager processes: the server tells their `office` calls apart
         self.planner_run = None
         self.finished = []          # tasks waiting for an autopilot review
         self._flush_handle = None
@@ -434,6 +435,7 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
     async def _claude(self, prompt, sid, model):
         cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
                "--permission-mode", "dontAsk", "--allowedTools", *ALLOWED,
+               "--disallowedTools", f"Read(/{operator.KEY_FILE})",
                "--model", model, "--append-system-prompt", self._brief()]
         if sid:
             cmd += ["--resume", sid]
@@ -445,6 +447,14 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
             *cmd, cwd=str(COMPANY), env=env, stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=True, limit=16 * 1024 * 1024)
+        pid = self.proc.pid
+        self.pids.add(pid)
+        try:
+            return await self._claude_turn()
+        finally:
+            self.pids.discard(pid)
+
+    async def _claude_turn(self):
         err_task = asyncio.create_task(self.proc.stderr.read())
         out = {"text": "", "err": "", "sid": None, "ctx": 0}
 
