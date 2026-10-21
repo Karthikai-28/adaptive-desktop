@@ -304,6 +304,8 @@ var IslandQuotaProvider = class IslandQuotaProvider {
 
         if (!this._bus)
             return;
+        if (this._bus.resolveQuotaAlerts)
+            this._bus.resolveQuotaAlerts(this._levels);
         if (event)
             this._bus.emitEvent(event.type, { ...event.payload, data: this.getData() });
         else if (this._bus._notifyStateChange)

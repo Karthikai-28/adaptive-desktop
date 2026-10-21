@@ -301,6 +301,29 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         this._tuckCurrentEvent();
     }
 
+    // Sticky quota warnings must stop being true when a fresh snapshot shows
+    // that their provider recovered or moved to a different severity.
+    resolveQuotaAlerts(levels) {
+        const isCurrent = item => {
+            if (!item || (item.payload || {}).provider !== 'quota')
+                return true;
+            const source = item.payload.source;
+            if (item.type === (IslandEvents.QUOTA_CRITICAL_BREACH || 'QUOTA_CRITICAL_BREACH'))
+                return levels[source] === 'critical';
+            if (item.type === (IslandEvents.QUOTA_CAUTION_BREACH || 'QUOTA_CAUTION_BREACH'))
+                return levels[source] === 'caution';
+            return true;
+        };
+
+        const before = this._queue.length;
+        this._queue = this._queue.filter(isCurrent);
+        if (!isCurrent(this._surfacedEvent)) {
+            this._tuckCurrentEvent();
+        } else if (this._queue.length !== before) {
+            this._notifyStateChange();
+        }
+    }
+
     setScreenSharing(active) {
         const sharing = Boolean(active);
         if (this._isScreenSharing === sharing)

@@ -318,12 +318,22 @@ async function main() {
 
     // Test 5.2: Preemption (P1 interrupts P3 immediately)
     island.emitEvent('QUOTA_CRITICAL_BREACH', {
+        provider: 'quota', source: 'codex',
         priority: Types.IslandPriority.P1_URGENT,
         dwellMs: -1,
         message: 'Quota Critical!',
     });
     check(island.getState().surfacedEvent.type === 'QUOTA_CRITICAL_BREACH', 'bus: P1 urgent event preempted P3');
     check(island.getState().queueLength === 1, 'bus: interrupted P3 re-queued with remaining dwell');
+    island.resolveQuotaAlerts({ codex: 'normal', claude: 'normal', gemini: 'normal' });
+    check(island.getState().surfacedEvent.type === 'TRACK_CHANGED',
+        'bus: a recovered quota automatically clears its stale sticky alert');
+    island.emitEvent('QUOTA_CRITICAL_BREACH', {
+        provider: 'quota', source: 'codex',
+        priority: Types.IslandPriority.P1_URGENT,
+        dwellMs: -1,
+        message: 'Quota Critical!',
+    });
 
     // Test 5.3: Queue capacity boundary (capacity = 8)
     for (let i = 0; i < 12; i++) {

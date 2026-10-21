@@ -375,6 +375,8 @@ part of `verify-all.sh --quick`). **None is verified live yet.**
   rollout, its session directory and Claude's local usage cache for changes.
   Visible fallback polling is 15 seconds for Gemini and missed file events,
   then switches to five minutes while the card and alert are hidden.
+  A fresh lower reading automatically clears a previously sticky critical or
+  caution alert, so the pill cannot keep displaying an obsolete percentage.
   Antigravity transcript monitoring is debounced, parses only appended records
   on the Shell thread and selects the newest transcript.
 - ✅ Island attachment is transactional: a failure restores the clock, actors,
