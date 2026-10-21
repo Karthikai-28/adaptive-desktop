@@ -13,7 +13,8 @@
     ros_info.py stop <tool>            ask what the panel started of it to quit
     ros_info.py runs                   what the panel started and how the last ones ended
     ros_info.py launch-args <file>     the arguments a launch file declares, for the form
-    ros_info.py build [package...]     colcon build of the workspace (as it was built last)
+    ros_info.py build [--up-to] [package...]   colcon build of the workspace (as it was built
+                                       last), or of packages (--up-to: with their dependencies)
     ros_info.py log-tail <tool> [text] [all|warning|error]   a run's log, filtered
     ros_info.py run-control <tool> pause|resume   build | launch | node
     ros_info.py plot </topic/field>    rqt_plot on one numeric field
@@ -21,7 +22,7 @@
     ros_info.py bag-control pause|resume   the bag started here (playback; recording from Iron)
     ros_info.py save-setup <name> | use-setup <name> | forget-setup <name>
                                        saved robot setups: domain, discovery, middleware, workspace
-    ros_info.py save-robot-profile <name> [package] | use-robot-profile <name>
+    ros_info.py save-robot-profile <name> [package] | use-robot-profile <name> | forget-robot-profile <name>
                                        a setup plus package, favourites and saved launches
     ros_info.py parameter-profile save|diff|apply <node> <name>
                                        a node's parameters kept, compared, loaded back
@@ -124,6 +125,11 @@ RMW_NAMES = {"rmw_fastrtps_cpp": "Fast DDS", "rmw_fastrtps_dynamic_cpp": "Fast D
              "rmw_zenoh_cpp": "Zenoh"}
 PARAMETER_SERVICES = {"describe_parameters", "get_parameter_types", "get_parameters",
                       "list_parameters", "set_parameters", "set_parameters_atomically"}
+# colcon build options that end a --cmake-args list.
+COLCON_OPTIONS = {"--base-paths", "--build-base", "--install-base", "--log-base", "--symlink-install",
+                  "--merge-install", "--event-handlers", "--parallel-workers", "--executor",
+                  "--continue-on-error", "--mixin", "--ament-cmake-args", "--catkin-cmake-args",
+                  "--cmake-target", "--cmake-clean-cache", "--cmake-clean-first", "--cmake-force-configure"}
 SKIP_DIRS = {"build", "install", "log", "node_modules", "snap", "venv", ".venv", "__pycache__"}
 HZ_WINDOW_S = 2.0
 REQUEST_TIMEOUT_S = 3.0
@@ -270,8 +276,28 @@ def distros():
         return []
 
 
+def has_packages(src, depth=4):
+    """A package.xml somewhere in the first few levels under src."""
+    if not src.is_dir():
+        return False
+    for directory, dirs, files in os.walk(src):
+        if "package.xml" in files:
+            return True
+        if Path(directory).relative_to(src).parts.__len__() >= depth:
+            dirs[:] = []
+        else:
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
+    return False
+
+
+def is_workspace(path):
+    """Built (install/setup.bash) or not yet (packages under src/)."""
+    path = Path(path)
+    return (path / "install" / "setup.bash").is_file() or has_packages(path / "src")
+
+
 def workspaces():
-    """colcon workspaces in the home folder: <dir>/install/setup.bash, two levels deep."""
+    """colcon workspaces in the home folder, built or not, two levels deep."""
     found = []
     try:
         tops = [p for p in HOME.iterdir() if p.is_dir() and not p.name.startswith(".")]
@@ -285,9 +311,20 @@ def workspaces():
         except OSError:
             pass
         for path in candidates:
-            if (path / "install" / "setup.bash").is_file():
+            if is_workspace(path):
                 found.append({"name": str(path.relative_to(HOME)), "path": str(path)})
+                found += build_trees(path)
     return found
+
+
+def build_trees(workspace):
+    """Projects in a workspace that build into their own tree, like
+    src/<project>/.build/<distro>, each a workspace of its own."""
+    trees = []
+    for setup in sorted(Path(workspace).glob("src/*/.build/*/install/setup.bash")):
+        tree = setup.parent.parent
+        trees.append({"name": workspace_name(str(tree)), "path": str(tree)})
+    return trees
 
 
 def workspace_layout(workspace):
@@ -319,6 +356,15 @@ def workspace_layout(workspace):
             continue
         if arg in ("--symlink-install", "--merge-install"):
             values[arg] = None
+        elif arg == "--cmake-args":
+            # Its values may start with "-" too; they run to the next colcon option.
+            i += 1
+            cmake = []
+            while i < len(argv) and argv[i] not in COLCON_OPTIONS and not argv[i].startswith("--packages"):
+                cmake.append(argv[i])
+                i += 1
+            values[arg] = cmake
+            continue
         i += 1
     # Only a command line that built this very install tree describes it.
     if values.get("--install-base", str(root / "install")) != str(root / "install"):
@@ -327,7 +373,8 @@ def workspace_layout(workspace):
         layout["sources"] = sources
     layout["log_base"] = Path(values.get("--log-base", root / "log"))
     layout["options"] = [part for key, value in values.items() if key != "--log-base"
-                         for part in ((key,) if value is None else (key, value))]
+                         for part in ((key,) if value is None else (key, *value) if isinstance(value, list)
+                                      else (key, value))]
     if sources:
         layout["options"] += ["--base-paths", *map(str, sources)]
     return layout
@@ -358,7 +405,8 @@ def workspace_packages(workspace):
         for lib in (root / "install" / name / "lib" / name, root / "install" / "lib" / name):
             if lib.is_dir():
                 executables.update(str(f) for f in lib.iterdir() if f.is_file() and os.access(f, os.X_OK))
-        found.append({"name": name, "path": directory,
+        built = (root / "install" / name).is_dir() or (root / "install" / "share" / name).is_dir()
+        found.append({"name": name, "path": directory, "built": built,
                       "executables": [{"name": Path(f).name, "path": f} for f in sorted(executables)]})
         dirs[:] = []
     return sorted(found, key=lambda item: item["name"])
@@ -445,7 +493,7 @@ def settings():
                                      lambda v: str(v).lower() in ("1", "true"), False)
     rmw, rmw_from = pick("rmw", "RMW_IMPLEMENTATION", str, "")
     workspace, workspace_from = pick("workspace", "workspace", str, "")
-    if workspace and not (Path(workspace) / "install" / "setup.bash").is_file():
+    if workspace and not is_workspace(workspace):
         workspace = ""
     if workspace_from == "shell" and shell.get("workspace_from_project"):
         workspace_from = "project"
@@ -1026,9 +1074,10 @@ def launch_arguments(file):
     return {"ok": True, "arguments": parse_show_args(proc.stdout)}
 
 
-def workspace_build(packages=()):
-    """colcon build of the workspace (or the chosen packages), the way it was
-    built last, in the distro's environment without the overlay itself."""
+def workspace_build(packages=(), up_to=False):
+    """colcon build of the workspace (or the chosen packages, and with `up_to`
+    what they depend on), the way it was built last, in the distro's
+    environment without the overlay itself."""
     setup = settings()
     if not setup.get("workspace"):
         return {"ok": False, "error": "Choose a workspace first"}
@@ -1048,10 +1097,10 @@ def workspace_build(packages=()):
     argv = ["colcon", "--log-base", str(layout["log_base"]), "build", *layout["options"],
             "--event-handlers", "console_cohesion+"]
     if chosen:
-        argv += ["--packages-select", *chosen]
+        argv += ["--packages-up-to" if up_to else "--packages-select", *chosen]
     log_file("build").write_text("")
     meta = {"name": "Build " + (", ".join(chosen) if chosen else workspace_name(str(workspace))),
-            "workspace": str(workspace), "packages": chosen}
+            "workspace": str(workspace), "packages": chosen, "up_to": bool(up_to and chosen)}
     return start("build", [argv], ros_env({**setup, "workspace": ""}), meta, cwd=str(workspace))
 
 
@@ -1207,7 +1256,9 @@ def terminal_rc(setup):
         ws = Path(setup["workspace"])
         # A build tree like proj/.build/humble opens in proj.
         top = next((p.parent for p in (ws, *ws.parents) if p.name.startswith(".")), ws)
-        lines += [f"source {shlex.quote(str(ws / 'install' / 'setup.zsh'))}", f"cd {shlex.quote(str(top))}"]
+        overlay = shlex.quote(str(ws / "install" / "setup.zsh"))
+        # A workspace may be chosen before its first build.
+        lines += [f"[[ -f {overlay} ]] && source {overlay}", f"cd {shlex.quote(str(top))}"]
     lines.append(f"export ROS_DOMAIN_ID={int(setup['domain'])}")
     lines.append("export ROS_LOCALHOST_ONLY=1" if setup["localhost"] else "unset ROS_LOCALHOST_ONLY")
     if setup["rmw_set"]:
@@ -1461,6 +1512,13 @@ def save_robot_profile(name, package=""):
     return {"ok": True, "robot_profiles": items}
 
 
+def forget_robot_profile(name):
+    with file_lock(ROBOT_PROFILES.with_suffix(".lock")):
+        items = [profile for profile in read_json(ROBOT_PROFILES, list) if profile.get("name") != name]
+        write_json(ROBOT_PROFILES, items)
+    return {"ok": True, "robot_profiles": items}
+
+
 def use_robot_profile(name):
     """The profile's setup, its favourites, and its saved launches (added to
     the ones kept now; a launch of the same name is replaced)."""
@@ -1603,8 +1661,8 @@ def set_values(pairs):
                 config[key] = value
             elif key == "workspace":
                 value = str(Path(value).expanduser().resolve()) if value != "none" else value
-                if value != "none" and not (Path(value) / "install" / "setup.bash").is_file():
-                    return {"ok": False, "error": f"{value} has no install/setup.bash"}
+                if value != "none" and not is_workspace(value):
+                    return {"ok": False, "error": f"{value} is not a colcon workspace (no install/setup.bash, no packages in src)"}
                 config[key] = "" if value == "none" else value
             else:
                 return {"ok": False, "error": f"unknown setting {key}"}
@@ -2925,7 +2983,7 @@ def run_command(command, args, program="ros_info.py"):
         if command == "launch-args" and len(args) == 1:
             return launch_arguments(args[0])
         if command == "build":
-            return workspace_build(args)
+            return workspace_build([a for a in args if a != "--up-to"], "--up-to" in args)
         if command == "log-tail" and args:
             return log_tail(args[0], args[1] if len(args) > 1 else "",
                             args[2] if len(args) > 2 else "all", args[3] if len(args) > 3 else 120)
@@ -2960,6 +3018,8 @@ def run_command(command, args, program="ros_info.py"):
             return save_robot_profile(args[0], args[1] if len(args) > 1 else "")
         if command == "use-robot-profile" and len(args) == 1:
             return use_robot_profile(args[0])
+        if command == "forget-robot-profile" and len(args) == 1:
+            return forget_robot_profile(args[0])
         if command == "parameter-profile" and len(args) == 3:
             return parameter_profile(args[0], args[1], args[2])
         if command == "open-log" and len(args) == 1:

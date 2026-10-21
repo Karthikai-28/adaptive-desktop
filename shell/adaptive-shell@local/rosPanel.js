@@ -65,6 +65,8 @@ const TOOL_NAMES = {
     demo: 'The demo', launch: 'Launch', bag: 'Rosbag', node: 'Node', build: 'Build', plot: 'rqt_plot',
 };
 const PAUSABLE = new Set(['build', 'launch', 'node']);
+// Sections a search unfolds, so what matches is seen, not only counted.
+const SEARCHED = new Set(['nodes', 'topics', 'services', 'actions']);
 const GROUP_TRANSITIONS = ['configure', 'activate', 'deactivate', 'cleanup'];
 // rcl_interfaces ParameterType: 5 to 9 are the arrays (5 of bytes).
 const PARAMETER_ARRAY = new Set([5, 6, 7, 8, 9]);
@@ -211,6 +213,10 @@ var RosPanel = class RosPanel {
         this._focus = null;
         this._scrollToTop = false;
         this._searchText = '';
+        // Sections folded by hand during this search.
+        this._searchFolded = new Set();
+        // Per-package builds also build what the package depends on.
+        this._buildUpTo = false;
         // The one write waiting for its confirming click: { key, until }.
         this._armed = null;
         // From `runs`: what the panel started that runs, and how runs ended.
@@ -273,6 +279,7 @@ var RosPanel = class RosPanel {
         });
         this._search.clutter_text.connect('text-changed', () => {
             this._searchText = this._search.get_text().trim().toLowerCase();
+            this._searchFolded.clear();
             this._render();
         });
         // Escape clears a search first; with none it closes the menu as usual.
@@ -949,10 +956,13 @@ var RosPanel = class RosPanel {
         this._fetchExpandedDetails();
     }
 
+    // A name, namespace, type or diagnostic message matches; the other names
+    // an item carries (a node's topics) do not, or every node would match /rosout.
     _matches(item) {
         if (!this._searchText)
             return true;
-        return JSON.stringify(item).toLowerCase().includes(this._searchText);
+        const words = [item.name, item.short, item.namespace, item.message, item.hardware_id, ...(item.types || [])];
+        return words.some(word => typeof word === 'string' && word.toLowerCase().includes(this._searchText));
     }
 
     // ------------------------------------------------------- confirmed writes
@@ -1180,6 +1190,7 @@ var RosPanel = class RosPanel {
             this._parameterDraft, this._packagePath, this._armed && this._armed.key,
             this._status && this._status.favorites,
             this._paramProfileDraft, this._paramDiff, this._profileDraft, this._logView, this._bagDraft,
+            [...this._searchFolded], this._buildUpTo,
             this._bagTopics && [...this._bagTopics], this._tfLookup, this._plotDraft,
             [...this._lifecycleSelection], this._lifecycleResult, this._focus,
             this._status && [this._status.parameter_profiles, this._status.robot_profiles],
@@ -1477,30 +1488,17 @@ var RosPanel = class RosPanel {
         if (!packages.some(p => p.path === this._packagePath))
             this._packagePath = '';
         if (status.workspace) {
-            box.add_child(this._dropdown('Package', [{ name: 'All packages', path: '' }, ...packages], item => {
-                this._packagePath = item.path;
-                this._launchDraft = null;
-            }, (packages.find(p => p.path === this._packagePath) || {}).name || 'All packages'));
             if (status.tools.build.installed)
-                this._addBuild(box, status, packages.find(p => p.path === this._packagePath));
+                this._addBuild(box, status, named ? named.name : 'the workspace');
+            this._addPackages(box, status, packages);
+        } else {
+            box.add_child(this._note('Choose a workspace to list its packages and build them'));
         }
 
         for (const issue of status.environment || [])
             box.add_child(this._note(issue.text, issue.level === 'error'));
 
-        const profiles = status.robot_profiles || [];
-        if (profiles.length)
-            box.add_child(this._dropdown('Robot profile', profiles, item => this._useRobotProfile(item.name), 'Choose…'));
-        if (this._profileDraft !== null) {
-            box.add_child(this._textEntry({ text: this._profileDraft || '', hint: 'Robot profile name', focus: true,
-                onChange: text => { this._profileDraft = text; },
-                onActivate: text => this._saveRobotProfile(text),
-                onEscape: () => { this._profileDraft = null; this._render(); } }));
-        } else {
-            box.add_child(this._smallButton('Save robot profile', () => {
-                this._profileDraft = named ? named.name : 'Robot'; this._render();
-            }));
-        }
+        this._addRobotProfiles(box, status, named);
 
         this._addSetups(box, status);
 
@@ -1618,13 +1616,13 @@ var RosPanel = class RosPanel {
         });
     }
 
-    // Build the workspace or the chosen package; while it runs, how far it is.
-    _addBuild(box, status, selectedPackage) {
+    // colcon build of everything; while a build runs, how far it is.
+    _addBuild(box, status, workspaceName) {
         const builds = ((this._runs && this._runs.running) || status.runs || {}).build || [];
         const progress = (this._runs && this._runs.running ? this._runs.build : status.build) || {};
         const note = this._notes.build;
         const failed = progress.failed || [];
-        let subtitle = note ? note.text : 'colcon build, the way this workspace was built last';
+        let subtitle = note ? note.text : `Every package in ${workspaceName}, the way it was built last`;
         if (builds.length) {
             const done = (progress.finished || []).length;
             const started = Math.max(done, (progress.started || []).length);
@@ -1633,36 +1631,129 @@ var RosPanel = class RosPanel {
         }
         box.add_child(CC.makeRow({
             icon: 'system-run-symbolic',
-            title: builds.length ? builds[0].meta.name || 'Build' : selectedPackage ? `Build ${selectedPackage.name}` : 'Build workspace',
+            title: builds.length ? builds[0].meta.name || 'Build' : 'colcon build',
             subtitle,
             alert: !!(note && note.error) || failed.length > 0,
             active: builds.length > 0,
             actions: builds.length ? [
                 { label: 'Log', quiet: true, onClick: () => this._openLogView('build') },
                 { label: 'Stop', onClick: () => this._stop('build') },
-            ] : [{ label: 'Build', quiet: true, onClick: () => this._buildWorkspace(selectedPackage ? [selectedPackage.name] : []) }],
+            ] : [{ label: 'Build all', onClick: () => this._buildWorkspace([]) }],
         }));
         if (builds.length && progress.last)
             box.add_child(this._note(progress.last));
     }
 
-    _buildWorkspace(packages) {
+    // The workspace's packages, each with its own Build; a click on one
+    // narrows the launch files and nodes below to it.
+    _addPackages(box, status, packages) {
+        const building = (((this._runs && this._runs.running) || status.runs || {}).build || []).length > 0;
+        const folded = this._expanded.has('workspace:packages-folded');
+        const unbuilt = packages.filter(p => !p.built).length;
+        const heading = new St.BoxLayout({ style_class: 'adaptive-ros-launch-heading', x_expand: true });
+        const toggle = this._smallButton(`${folded ? '▸' : '▾'}  Packages · ${packages.length}` +
+            `${unbuilt ? ` · ${unbuilt} not built` : ''}`, () => this._toggle('workspace:packages-folded'), 'adaptive-ros-select');
+        toggle.x_expand = true;
+        toggle.get_child().x_align = Clutter.ActorAlign.START;
+        heading.add_child(toggle);
+        if (packages.length && status.tools.build.installed) {
+            heading.add_child(this._smallButton(`${this._buildUpTo ? '✓' : '○'} With dependencies`, () => {
+                this._buildUpTo = !this._buildUpTo;
+                this._render();
+            }));
+        }
+        box.add_child(heading);
+        if (folded)
+            return;
+        if (!packages.length) {
+            box.add_child(this._note('No package.xml under this workspace\'s sources'));
+            return;
+        }
+        for (const pkg of packages) {
+            const selected = pkg.path === this._packagePath;
+            const select = () => {
+                this._packagePath = selected ? '' : pkg.path;
+                this._launchDraft = null;
+                this._render();
+            };
+            const facts = [pkg.built ? plural(pkg.executables.length, 'executable') : 'not built yet'];
+            if (selected)
+                facts.push('launch files and nodes below are this package\'s');
+            box.add_child(CC.makeRow({
+                icon: pkg.built ? 'package-x-generic-symbolic' : 'dialog-warning-symbolic',
+                title: pkg.name,
+                subtitle: facts.join(' · '),
+                active: selected,
+                onActivate: select,
+                actions: [
+                    { label: selected ? 'Show all' : 'Select', quiet: true, onClick: select },
+                    building || !status.tools.build.installed ? null : {
+                        label: 'Build', quiet: true, onClick: () => this._buildWorkspace([pkg.name], this._buildUpTo),
+                    },
+                ].filter(Boolean),
+            }));
+        }
+    }
+
+    _buildWorkspace(packages, upTo = false) {
         this._notes.build = { text: 'Starting the build…' };
         this._render();
-        this._helper(['build', ...packages], reply => {
+        this._helper(['build', ...(upTo && packages.length ? ['--up-to'] : []), ...packages], reply => {
             this._notes.build = reply.ok ? null : { text: reply.error, error: true };
             this._loadStatus();
             this._pollRuns();
         });
     }
 
+    // A robot profile: this setup with its package, favourites and saved
+    // launches. The one matching the setup now is shown as in use.
+    _addRobotProfiles(box, status, named) {
+        const profiles = status.robot_profiles || [];
+        const current = profiles.find(p => p.domain === status.domain && !!p.localhost === !!status.localhost &&
+            (p.rmw || '') === (status.rmw_set ? status.rmw : '') && (p.workspace || '') === (status.workspace || ''));
+        const note = this._notes.profile;
+        box.add_child(CC.makeRow({
+            icon: 'user-bookmarks-symbolic',
+            title: current ? `Robot profile · ${current.name}` : 'Robot profile',
+            subtitle: note ? note.text : current ? 'In use: the setup matches it'
+                : 'Keeps this setup with its package, favourites and saved launches',
+            alert: !!(note && note.error),
+            actions: [
+                { label: 'Save…', quiet: true, onClick: () => {
+                    this._profileDraft = current ? current.name : named ? named.name : 'Robot';
+                    this._render();
+                } },
+                current ? { label: 'Forget', quiet: true, onClick: () => this._forgetRobotProfile(current.name) } : null,
+            ].filter(Boolean),
+        }));
+        if (this._profileDraft !== null) {
+            box.add_child(this._textEntry({ text: this._profileDraft || '', hint: 'Profile name, Enter to save', focus: true,
+                onChange: text => { this._profileDraft = text; },
+                onActivate: text => this._saveRobotProfile(text),
+                onEscape: () => { this._profileDraft = null; this._render(); } }));
+        }
+        if (profiles.length)
+            box.add_child(this._dropdown('Use profile', profiles, item => this._useRobotProfile(item.name),
+                current ? current.name : `${profiles.length} saved`));
+    }
+
+    _forgetRobotProfile(name) {
+        this._helper(['forget-robot-profile', name], reply => {
+            if (reply.ok)
+                this._status.robot_profiles = reply.robot_profiles;
+            this._notes.profile = reply.ok ? null : { text: reply.error, error: true };
+            this._render();
+        });
+    }
+
     _saveRobotProfile(name) {
         const selected = (this._status.packages || []).find(p => p.path === this._packagePath);
         this._helper(['save-robot-profile', name.trim(), selected ? selected.name : ''], reply => {
-            this._profileDraft = null;
-            if (reply.ok)
+            if (reply.ok) {
+                this._profileDraft = null;
                 this._status.robot_profiles = reply.robot_profiles;
-            this._notes.setup = reply.ok ? null : { text: reply.error, error: true };
+            }
+            this._notes.profile = reply.ok ? null : { text: reply.error, error: true };
             this._render();
         });
     }
@@ -1671,12 +1762,12 @@ var RosPanel = class RosPanel {
         this._helper(['use-robot-profile', name], reply => {
             if (reply.ok) {
                 this._status = reply;
-                this._notes.setup = null;
+                this._notes.profile = null;
                 const selected = (reply.packages || []).find(p => p.name === (reply.profile || {}).package);
                 this._packagePath = selected ? selected.path : '';
                 this._restartWatch();
             } else {
-                this._notes.setup = { text: reply.error, error: true };
+                this._notes.profile = { text: reply.error, error: true };
             }
             this._render();
         });
@@ -1844,7 +1935,7 @@ var RosPanel = class RosPanel {
         const meta = run.meta || {};
         this._helper(['stop', run.tool], () => {
             if (run.tool === 'build')
-                this._buildWorkspace(meta.packages || []);
+                this._buildWorkspace(meta.packages || [], !!meta.up_to);
             else if (run.tool === 'plot')
                 this._openRqtPlot(meta.expression);
             else
@@ -2624,7 +2715,8 @@ var RosPanel = class RosPanel {
     // A heading that folds the rows `fill` adds under it.
     _section(id, text, fill, extra = null, onOpen = null) {
         const key = `section:${id}`;
-        const open = this._expanded.has(key);
+        const searching = !!this._searchText && SEARCHED.has(id);
+        const open = searching ? !this._searchFolded.has(key) : this._expanded.has(key);
         const heading = new St.BoxLayout({ style_class: 'adaptive-tasks-heading adaptive-ros-section', x_expand: true });
         const content = new St.BoxLayout({ style_class: 'adaptive-ros-section-box' });
         content.add_child(new St.Icon({
@@ -2645,7 +2737,17 @@ var RosPanel = class RosPanel {
             x_align: Clutter.ActorAlign.START,
             accessible_name: open ? `Fold ${id}` : `Unfold ${id}`,
         });
-        toggle.connect('clicked', () => this._toggle(key, onOpen));
+        toggle.connect('clicked', () => {
+            if (!searching) {
+                this._toggle(key, onOpen);
+            } else {
+                if (open)
+                    this._searchFolded.add(key);
+                else
+                    this._searchFolded.delete(key);
+                this._render();
+            }
+        });
         heading.add_child(toggle);
         if (extra)
             heading.add_child(this._smallButton(extra.label, extra.onClick));

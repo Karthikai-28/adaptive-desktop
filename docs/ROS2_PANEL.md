@@ -11,9 +11,11 @@ does the panel's actions from the keyboard.
   when the panel is closed. It opens a recording card linking back to ROS 2.
   The top-bar icon turns red while the panel records a bag, orange while
   `/diagnostics` reports an error.
-- **Search** (under the header): narrows every section to what matches a
-  node, topic, service, action, type or namespace; the section headings say
-  "3 of 40". Escape clears it.
+- **Search** (under the header): narrows every section to the items whose
+  name, namespace or type matches (not the names an item carries, or every
+  node would match `/rosout`); the section headings say "3 of 40", and
+  Nodes, Topics, Services and Actions open by themselves while a search is
+  typed (folding one keeps it folded for that search). Escape clears it.
 - **Setup**: domain ID (click to change), discovery range (localhost only or
   the LAN), middleware, and the workspace overlay (searchable dropdown with None, discovered workspaces,
   and Choose path for a custom built colcon workspace). By default
@@ -27,17 +29,24 @@ does the panel's actions from the keyboard.
   - If ROS processes started outside the panel run on another domain,
     discovery range or middleware, the card says so and **Watch them**
     switches to it.
-  - **Package**: All packages or any package from the selected workspace's
-    source manifests. This filters launch files and installed executable nodes;
-    the running graph stays complete because DDS does not expose package identity.
-    Executables come from that workspace's merged or isolated install tree.
+  - The workspace list holds built workspaces (`install/setup.bash`), ones
+    not built yet (packages under `src/`, so they can be chosen and built),
+    and projects inside a workspace that build into their own tree
+    (`src/<project>/.build/<distro>`, named after the project).
+  - **Packages**: with a workspace chosen, every package from its source
+    manifests is a row: built or "not built yet", how many executables, and
+    its own **Build** (`--packages-select`; with **With dependencies** ticked,
+    `--packages-up-to`). A click on a package narrows the launch files and
+    executable nodes below to it (Show all undoes it); the running graph
+    stays complete because DDS does not expose package identity. Without a
+    workspace the panel says to choose one.
     Launch, config, world and executable choices use bounded, searchable dropdowns.
     Workspace launch discovery includes every matching file, rather than twelve recent files.
-  - **Build**: colcon build of the workspace, or of the chosen package
-    (`--packages-select`), run the way the workspace was built last: a build
-    tree like `proj/.build/humble` keeps its sources elsewhere, and its last
-    command line in `log/latest_build/logger_all.log` gives the base paths,
-    build and install base and `--symlink-install`. While it runs the row
+  - **colcon build**: **Build all** builds every package, run the way the
+    workspace was built last: a build tree like `proj/.build/humble` keeps
+    its sources elsewhere, and its last command line in
+    `log/latest_build/logger_all.log` gives the base paths, build and install
+    base, `--symlink-install` and `--cmake-args`. While it runs the row
     shows "3 of 5 packages done", failed packages and the last output line,
     with Log and Stop. The distro's environment is used, not the overlay
     being built.
@@ -48,10 +57,11 @@ does the panel's actions from the keyboard.
   - **Setups**: the current domain, discovery, middleware and workspace saved
     under a name (a robot, a bench); a dropdown applies one, the one in use is
     lit.
-  - **Robot profiles**: a setup plus the package, the favourites and the saved
-    launches, saved under a name. Using one applies the setup, then puts its
-    favourites back and adds its saved launches (one of the same name is
-    replaced).
+  - **Robot profile**: a setup plus the package, the favourites and the saved
+    launches, saved under a name (**Save…**). Use profile applies one, then
+    puts its favourites back and adds its saved launches (one of the same name
+    is replaced). The profile matching the setup now is named on the row as
+    in use, with **Forget**.
   - When Project Context's active project is, holds (`proj/.build/<distro>`)
     or sits in a colcon workspace the panel does not use, the card offers
     **Use it** or **Always follow** (the workspace then follows the active

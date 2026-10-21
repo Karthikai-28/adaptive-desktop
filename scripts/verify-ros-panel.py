@@ -310,6 +310,7 @@ def main():
           and profile.get("profile", {}).get("package") == "bringup",
           "robot profiles: setup, package, favourites and saved launches come back", profile.get("favorites"))
     check(helper(env, "use-robot-profile", "Nope").get("ok") is False, "robot profiles: an unknown one is refused")
+    check(helper(env, "forget-robot-profile", "Arm").get("robot_profiles") == [], "robot profiles: forgotten")
     helper(env, "set", "all", "")
 
     # Imported here, after HOME points at the throwaway home: it reads HOME once.
@@ -346,11 +347,21 @@ def main():
     (tree / "log" / "latest_build" / "logger_all.log").write_text(
         "[0.1s] DEBUG:colcon:Command line arguments: " + repr(
             ["/usr/bin/colcon", "--log-base", str(tree / "log"), "build", "--base-paths", str(home / "proj" / "packages"),
-             "--build-base", str(tree / "build"), "--install-base", str(tree / "install"), "--symlink-install"]) + "\n")
+             "--build-base", str(tree / "build"), "--install-base", str(tree / "install"), "--symlink-install",
+             "--cmake-args", "-DCMAKE_BUILD_TYPE=Release", "--no-warn-unused-cli", "--event-handlers", "desktop_notification-"]) + "\n")
     layout = ros_info.workspace_layout(str(tree))
     check(layout["sources"] == [home / "proj" / "packages"] and "--symlink-install" in layout["options"]
           and [p["name"] for p in ros_info.workspace_packages(str(tree))] == ["arm"],
           "workspace: a build tree's sources and options come from its last colcon run", layout)
+    cmake = layout["options"][layout["options"].index("--cmake-args"):][:3]
+    check(cmake == ["--cmake-args", "-DCMAKE_BUILD_TYPE=Release", "--no-warn-unused-cli"]
+          and "desktop_notification-" not in layout["options"], "workspace: the last build's CMake arguments are kept", layout)
+    lab_tree = ws / "src" / "lab" / ".build" / "humble"
+    (lab_tree / "install").mkdir(parents=True)
+    (lab_tree / "install" / "setup.bash").write_text("# a project's own build tree\n")
+    check({"name": "lab", "path": str(lab_tree)} in ros_info.workspaces(),
+          "workspace: a project that builds into src/<project>/.build/<distro> is offered")
+    subprocess.run(["rm", "-rf", str(ws / "src" / "lab")])
 
     # ---------------------------------------------------------- watch
     node_env = ros_info.ros_env({"distro": Path(setup).parent.name, "workspace": "", "domain": DOMAIN,
@@ -653,14 +664,15 @@ def main():
             '<?xml version="1.0"?><package format="3"><name>tiny_pkg</name><version>0.0.1</version>'
             '<description>t</description><maintainer email="a@b.c">a</maintainer><license>MIT</license>'
             '<export><build_type>ament_python</build_type></export></package>')
-        (build_ws / "install").mkdir()
-        (build_ws / "install" / "setup.bash").write_text("# not built yet\n")
         before = helper(env, "set", "workspace", str(build_ws))
+        check(before.get("workspace") == str(build_ws) and [(p["name"], p["built"]) for p in before.get("packages", [])]
+              == [("tiny_pkg", False)], "build: a workspace never built can be chosen, its package not built", before.get("error"))
         check(any("Not built yet: tiny_pkg" in i["text"] for i in before.get("environment", [])),
               "build: an unbuilt package is pointed out", before.get("environment"))
         check(helper(env, "build", "no_such_pkg").get("ok") is False, "build: an unknown package is refused")
-        started = helper(env, "build", "tiny_pkg")
-        check(started.get("ok") is True, "build: colcon starts", started)
+        started = helper(env, "build", "--up-to", "tiny_pkg")
+        check(started.get("ok") is True and helper(env, "runs")["running"]["build"][0]["meta"]["up_to"] is True,
+              "build: colcon starts, with its dependencies", started)
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline and helper(env, "runs")["running"].get("build"):
             time.sleep(1)
@@ -669,8 +681,8 @@ def main():
         check(ros_info.build_progress().get("finished") == ["tiny_pkg"], "build: progress names the finished package",
               ros_info.build_progress())
         after = helper(env, "status")
-        check(not any("Not built" in i["text"] for i in after.get("environment", [])),
-              "build: once built, nothing is pointed out", after.get("environment"))
+        check(not any("Not built" in i["text"] for i in after.get("environment", []))
+              and after["packages"][0]["built"] is True, "build: once built, nothing is pointed out", after.get("environment"))
         helper(env, "set", "all", "")
     else:
         print("SKIP build: colcon is not installed")

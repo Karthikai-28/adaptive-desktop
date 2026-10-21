@@ -90,6 +90,14 @@ check $? "ros: a render with nothing new keeps the built rows"
 ros_text "ros._search.set_text('fibonacci'); return true;" >/dev/null
 seen="$(ros_wait_for "'Nodes · 1 of 5', '/fibonacci_action_server'")"
 [ "$seen" = true ]; check $? "ros: the search narrows the graph$([ "$seen" = true ] || echo " ($seen)")"
+# Names, types and namespaces match, not the names a node carries, and the
+# sections holding matches open by themselves.
+ros_text "ros._search.set_text('chatter'); return true;" >/dev/null
+seen="$(ros_wait_for "'Nodes · 0 of 5', 'Topics · 1 of', '/chatter', 'std_msgs/msg/String · 1 publisher'")"
+[ "$seen" = true ]; check $? "ros: a search opens the sections it matches in, by name$([ "$seen" = true ] || echo " ($seen)")"
+ros_text "ros._search.set_text('act'); return true;" >/dev/null
+seen="$(ros_wait_for "'Nodes · 1 of 5', 'Topics · 0 of', 'served by /fibonacci_action_server'")"
+[ "$seen" = true ]; check $? "ros: a search does not match every node through its fields$([ "$seen" = true ] || echo " ($seen)")"
 ros_text "ros._search.set_text(''); return true;" >/dev/null
 
 ros_text "ros._toggle('section:health', () => ros._fetchHealth()); return true;" >/dev/null
@@ -255,9 +263,32 @@ if [ -n "${ADAPTIVE_ROS_SHOT:-}" ]; then
             shot.screenshot_finish(result); stream.close(null); resolve(true); }); });" >/dev/null
 fi
 
+# A workspace's packages, each with Build, and Build all.
+seen="$(ros_text "ros._status = {...ros._status, workspace: '/fixture/ros2_ws', tools: {...ros._status.tools, build: {installed: true}},
+        packages: [{name: 'alpha', path: '/fixture/ros2_ws/src/alpha', built: true, executables: [{name: 'go', path: '/x'}]},
+                   {name: 'beta', path: '/fixture/ros2_ws/src/beta', built: false, executables: []}]};
+    ros._packagePath = ''; ros._renderNow(); await sleep(200);
+    const text = labels(ros._list).join('|');
+    const builds = text.split('|').filter(t => t === 'Build').length;
+    return ['colcon build', 'Build all', 'Packages · 2 · 1 not built', 'With dependencies', 'alpha', '1 executable',
+        'beta', 'not built yet'].every(w => text.includes(w)) && builds === 2 || text;")"
+[ "$seen" = true ]; check $? "ros: the workspace lists its packages, each with its own Build$([ "$seen" = true ] || echo " ($seen)")"
+
 ros_text "ros._status = ros._layoutTestSaved; delete ros._layoutTestSaved;
     ros._loadStatus = ros._layoutTestLoadStatus; delete ros._layoutTestLoadStatus;
     ros._packagePath = ''; ros._expanded.delete('select:Files'); ros._renderNow(); return true;" >/dev/null
+
+# A robot profile in use is named; Forget removes it.
+seen="$(ros_text "ros._saveRobotProfile('Bench rig');
+    for (let i = 0; i < 40; i++) { const t = labels(ros._list).join('|');
+        if (t.includes('Robot profile · Bench rig') && t.includes('In use')) return true; await sleep(250); }
+    return labels(ros._list).join('|');")"
+[ "$seen" = true ]; check $? "ros: a saved robot profile shows as in use$([ "$seen" = true ] || echo " ($seen)")"
+seen="$(ros_text "ros._forgetRobotProfile('Bench rig');
+    for (let i = 0; i < 40; i++) { const t = labels(ros._list).join('|');
+        if (!t.includes('Bench rig') && t.includes('Keeps this setup')) return true; await sleep(250); }
+    return labels(ros._list).join('|');")"
+[ "$seen" = true ]; check $? "ros: Forget removes the robot profile$([ "$seen" = true ] || echo " ($seen)")"
 
 # A node that leaves disappears from the dropdown by itself.
 ros_stop_nodes
