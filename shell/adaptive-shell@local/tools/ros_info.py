@@ -12,9 +12,19 @@
     ros_info.py save-launch <name> <file> [name:=value...] | forget-launch <name>
     ros_info.py stop <tool>            ask what the panel started of it to quit
     ros_info.py runs                   what the panel started and how the last ones ended
-    ros_info.py bag-start --all | <topic>...   bag-play <dir>
+    ros_info.py launch-args <file>     the arguments a launch file declares, for the form
+    ros_info.py build [package...]     colcon build of the workspace (as it was built last)
+    ros_info.py log-tail <tool> [text] [all|warning|error]   a run's log, filtered
+    ros_info.py run-control <tool> pause|resume   build | launch | node
+    ros_info.py plot </topic/field>    rqt_plot on one numeric field
+    ros_info.py bag-start --all | <topic>...   bag-play <dir> [rate] [loop] [clock]
+    ros_info.py bag-control pause|resume   the bag started here (playback; recording from Iron)
     ros_info.py save-setup <name> | use-setup <name> | forget-setup <name>
                                        saved robot setups: domain, discovery, middleware, workspace
+    ros_info.py save-robot-profile <name> [package] | use-robot-profile <name>
+                                       a setup plus package, favourites and saved launches
+    ros_info.py parameter-profile save|diff|apply <node> <name>
+                                       a node's parameters kept, compared, loaded back
     ros_info.py favorite <kind> <name> star or unstar a node, topic, service or action
     ros_info.py open-log <tool>        a terminal following that tool's log
     ros_info.py say <command> [args]   any of these, answering with a sentence (the palette)
@@ -48,14 +58,20 @@ start. Requests come on stdin, one JSON object a line:
     {"id": 4, "cmd": "hz", "name": "/chatter"}       rate and bandwidth over two seconds
     {"cmd": "sample", "name": "/chatter"}            the next message (images as a thumbnail)
     {"cmd": "tf"}                                    the TF tree, rates and stale frames
+    {"cmd": "tf_lookup", "source": ..., "target": ...}  one transform, its age and RPY
+    {"cmd": "plot", "name": "/odom", "field": "pose/pose/position/x"}
+                                                     progress lines of new values until cancelled
     {"cmd": "health"}                                QoS mismatches across every topic
     {"cmd": "template", "kind": "service", "type": "example_interfaces/srv/AddTwoInts"}
     {"cmd": "parameter", "node": ..., "name": ...}     fetch one typed value
-    {"cmd": "cancel", "ids": [4]}                      cancel pending Hz/Preview requests
+    {"cmd": "cancel", "ids": [4]}                      cancel pending Hz/Preview/plot requests
     {"cmd": "set_parameter", "node": ..., "name": ..., "value": "1.5", "ptype": 3}
     {"cmd": "lifecycle", "node": ..., "transition": "configure"}
+    {"cmd": "lifecycle_group", "nodes": [...], "transition": "activate"}   each node's outcome
     {"cmd": "call", "name": ..., "type": ..., "value": "{a: 1}"}       a service
-    {"cmd": "goal", "name": ..., "type": ..., "value": "{order: 5}"}   an action
+    {"cmd": "goal", "name": ..., "type": ..., "value": "{order: 5}"}   an action; feedback
+                                                     comes as progress lines
+    {"cmd": "cancel_goal", "goal_id": n}             cancel the goal request n sent
     {"cmd": "publish", "name": ..., "type": ..., "value": "{data: hi}"}  one message
     {"cmd": "controller", "manager": ..., "name": ..., "op": "activate"}
     {"cmd": "mode", "active": false}                 slower graph polling while closed
@@ -92,6 +108,8 @@ THUMBS = CACHE / "thumbs"
 FAVORITES = CONFIG.parent / "ros-favorites.json"
 SAVED_LAUNCHES = CONFIG.parent / "ros-launches.json"
 SETUPS = CONFIG.parent / "ros-setups.json"
+ROBOT_PROFILES = CONFIG.parent / "ros-robot-profiles.json"
+PARAMETER_PROFILES = CONFIG.parent / "ros-parameter-profiles"
 BAGS = Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local" / "share") / "adaptive-desktop" / "rosbags"
 ROS_ROOT = Path(os.environ.get("ADAPTIVE_ROS_ROOT", "/opt/ros"))
 SHELL_FILES = {"zsh": (".zshenv", ".zprofile", ".zshrc"),
@@ -127,7 +145,10 @@ TF_WINDOW_S = 1.5
 TF_STALE_S = 1.0
 THUMB_WIDTH = 240
 HISTORY_KEEP = 20
-TOOLS = ("rviz2", "gazebo", "rqt", "rqt_graph", "demo", "launch", "bag", "node")
+PLOT_EVERY_S = 0.25
+PLOT_MAX_S = 600.0
+PLOT_KEEP = 200
+TOOLS = ("rviz2", "gazebo", "rqt", "rqt_graph", "demo", "launch", "bag", "node", "build", "plot")
 LAUNCH_SUFFIXES = (".launch.py", ".launch.xml", ".launch.yaml")
 LAUNCH_ARG = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*:=.*$", re.S)
 SAVED_NAME = re.compile(r"^[\w][\w .:+-]{0,40}$")
@@ -269,6 +290,49 @@ def workspaces():
     return found
 
 
+def workspace_layout(workspace):
+    """Where a workspace's packages are and how colcon built it last. A build
+    tree like proj/.build/humble keeps its sources elsewhere, which only its
+    last colcon command line (log/latest_build/logger_all.log) says; without
+    one the sources are src/ and colcon's defaults apply."""
+    import ast
+    root = Path(workspace)
+    layout = {"sources": [root / "src"], "log_base": root / "log", "options": []}
+    try:
+        with open(root / "log" / "latest_build" / "logger_all.log", errors="replace") as log:
+            line = next((l for l in (log.readline() for _ in range(8)) if "Command line arguments:" in l), "")
+        argv = ast.literal_eval(line.split("Command line arguments:", 1)[1].strip())
+    except (OSError, IndexError, SyntaxError, ValueError):
+        return layout
+    values, sources, i = {}, [], 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("--log-base", "--build-base", "--install-base") and i + 1 < len(argv):
+            values[arg] = str((root / argv[i + 1]).resolve())
+            i += 2
+            continue
+        if arg == "--base-paths":
+            i += 1
+            while i < len(argv) and not argv[i].startswith("-"):
+                sources.append((root / argv[i]).resolve())
+                i += 1
+            continue
+        if arg in ("--symlink-install", "--merge-install"):
+            values[arg] = None
+        i += 1
+    # Only a command line that built this very install tree describes it.
+    if values.get("--install-base", str(root / "install")) != str(root / "install"):
+        return layout
+    if sources:
+        layout["sources"] = sources
+    layout["log_base"] = Path(values.get("--log-base", root / "log"))
+    layout["options"] = [part for key, value in values.items() if key != "--log-base"
+                         for part in ((key,) if value is None else (key, value))]
+    if sources:
+        layout["options"] += ["--base-paths", *map(str, sources)]
+    return layout
+
+
 def workspace_packages(workspace):
     """Source packages plus installed executables; package names come from manifests."""
     import xml.etree.ElementTree as ET
@@ -276,7 +340,8 @@ def workspace_packages(workspace):
         return []
     root = Path(workspace)
     found = []
-    for directory, dirs, files in os.walk(root / "src"):
+    walks = (walk for source in workspace_layout(workspace)["sources"] for walk in os.walk(source))
+    for directory, dirs, files in walks:
         dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
         if "COLCON_IGNORE" in files or "AMENT_IGNORE" in files:
             dirs[:] = []
@@ -287,7 +352,7 @@ def workspace_packages(workspace):
             name = ET.parse(Path(directory) / "package.xml").getroot().findtext("name", "").strip()
         except (OSError, ET.ParseError):
             continue
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name):
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) or any(f["name"] == name for f in found):
             continue
         executables = set()
         for lib in (root / "install" / name / "lib" / name, root / "install" / "lib" / name):
@@ -615,10 +680,13 @@ def status(refresh=False):
         "demo": (base / "lib" / "demo_nodes_cpp" / "talker").is_file(),
         "launch": (base / "share" / "ros2launch").is_dir(),
         "bag": (base / "share" / "ros2bag").is_dir(),
+        "build": shutil.which("colcon") is not None,
+        "plot": (base / "lib" / "rqt_plot" / "rqt_plot").is_file() or shutil.which("rqt_plot") is not None,
     }
     spaces = workspaces()
     if setup["workspace"] and all(w["path"] != setup["workspace"] for w in spaces):
         spaces.append({"name": workspace_name(setup["workspace"]), "path": setup["workspace"]})
+    packages = workspace_packages(setup["workspace"])
     project = active_project()
     project_ws = project and project_workspace(project[1])
     if project_ws and all(w["path"] != project_ws for w in spaces):
@@ -632,7 +700,7 @@ def status(refresh=False):
         "rmw_name": RMW_NAMES.get(setup["rmw"], setup["rmw"]),
         "middlewares": [{"id": m, "name": RMW_NAMES[m]} for m in middlewares(distro)],
         "workspaces": spaces,
-        "packages": workspace_packages(setup["workspace"]),
+        "packages": packages,
         "tools": {name: {
             "installed": ok,
             "pids": procs.get(name, []),
@@ -648,14 +716,85 @@ def status(refresh=False):
         "setups": read_json(SETUPS, list),
         "project": {"name": project[0], "path": project[1], "workspace": project_ws} if project else None,
         "history": read_json(HISTORY, list)[-8:][::-1],
-        "runs": {name: [{"pgid": e["pgid"], "meta": e.get("meta", {}), "started": e.get("started")}
+        "runs": {name: [{"pgid": e["pgid"], "meta": e.get("meta", {}), "started": e.get("started"),
+                         "paused": bool(e.get("paused"))}
                         for e in entries] for name, entries in owned.items()},
         "recording": recording(owned.get("bag", [])),
         "bags": recent_bags(),
         "bag_dir": str(BAGS),
         "bag_free": free_space(BAGS),
         "favorites": read_json(FAVORITES, list),
+        "robot_profiles": read_json(ROBOT_PROFILES, list),
+        "parameter_profiles": parameter_profiles(),
+        "environment": environment_health(setup, packages),
+        "build": build_progress() if owned.get("build") else {},
+        "bag_recording_pauses": bag_pausable(distro, []),
     }
+
+
+def environment_health(setup, packages):
+    """What would make a build or a launch fail, said before it does. (Nodes on
+    another domain are the "elsewhere" row's business.)"""
+    issues = []
+    if setup.get("rmw_set") and setup.get("rmw") not in middlewares(setup.get("distro")):
+        issues.append({"level": "error", "text": f"{setup.get('rmw')} is not installed for {setup.get('distro')}"})
+    if not setup.get("workspace"):
+        return issues
+    workspace = Path(setup["workspace"])
+    layout = workspace_layout(workspace)
+    if not any(source.is_dir() for source in layout["sources"]):
+        issues.append({"level": "warning", "text": "The workspace has no src folder, so it cannot be built here"})
+        return issues
+    if shutil.which("colcon") is None:
+        issues.append({"level": "warning", "text": "colcon is not installed: sudo apt install python3-colcon-common-extensions"})
+    unbuilt = [p["name"] for p in packages if not (workspace / "install" / p["name"]).is_dir()]
+    if unbuilt:
+        issues.append({"level": "warning", "text": f"Not built yet: {', '.join(unbuilt[:4])}"
+                                                   f"{f' and {len(unbuilt) - 4} more' if len(unbuilt) > 4 else ''}"})
+    # colcon's events.log ends each package with "JobEnded: {..., 'rc': n}".
+    latest = layout["log_base"] / "latest_build"
+    try:
+        events = (latest / "events.log").read_text(errors="replace")
+        built_at = latest.resolve().stat().st_mtime
+    except OSError:
+        events, built_at = "", None
+    failed = re.findall(r"JobEnded: \{'identifier': '([^']+)', 'rc': [1-9]", events)
+    if failed:
+        issues.append({"level": "error", "text": f"The last build failed for {', '.join(failed[:4])}"})
+    if built_at is not None:
+        newer = next((p["name"] for p in packages if newest_source(Path(p["path"])) > built_at), None)
+        if newer:
+            issues.append({"level": "info", "text": f"{newer} changed since the last build"})
+    return issues
+
+
+def newest_source(root, limit=400):
+    """The newest modification time among a package's first `limit` files."""
+    newest = 0.0
+    seen = 0
+    for directory, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
+        for name in files:
+            try:
+                newest = max(newest, os.stat(os.path.join(directory, name)).st_mtime)
+            except OSError:
+                pass
+            seen += 1
+            if seen >= limit:
+                return newest
+    return newest
+
+
+def parameter_profiles():
+    try:
+        files = sorted(PARAMETER_PROFILES.glob("*.yaml"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        files = []
+    profiles = []
+    for path in files[:40]:
+        name, _, node = path.stem.partition("--")
+        profiles.append({"name": name, "node": "/" + node.replace("__", "/") if node else "", "path": str(path)})
+    return profiles
 
 
 def log_file(tool):
@@ -736,9 +875,9 @@ def spawn(argv, env, tool, meta=None, cwd=None):
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
 
-def start(tool, argv, env, meta=None, settle=0.8):
+def start(tool, argv, env, meta=None, settle=0.8, cwd=None):
     """Start each command of argv; if one fails at once, stop them all."""
-    procs = [spawn(a, env, tool, meta) for a in argv]
+    procs = [spawn(a, env, tool, meta, cwd) for a in argv]
     # Something that cannot start says so at once; give it a moment to.
     deadline = time.monotonic() + settle
     while time.monotonic() < deadline and all(p.poll() is None for p in procs):
@@ -830,6 +969,165 @@ def forget_launch(name):
     return {"ok": True, "saved_launches": items}
 
 
+SHOW_ARG = re.compile(r"^    '(?P<name>[^']+)':$")
+SHOW_DEFAULT = re.compile(r"^\s+\(default: (?P<value>.*)\)$")
+SHOW_CHOICES = re.compile(r"\.? ?Valid choices are: (?P<list>\[.*\])$")
+
+
+def parse_show_args(text):
+    """`ros2 launch <file> --show-args`: each argument is "    'name':", then its
+    description (which may run over several lines) and "(default: 'x')" when
+    it has one. An argument without a default must be given."""
+    import ast
+    arguments = []
+    current = None
+    for raw in text.splitlines():
+        match = SHOW_ARG.match(raw)
+        if match:
+            current = {"name": match["name"], "default": "", "description": "", "required": True, "choices": []}
+            arguments.append(current)
+            continue
+        if current is None or not raw.strip():
+            continue
+        match = SHOW_DEFAULT.match(raw)
+        if match:
+            value = match["value"]
+            try:
+                value = str(ast.literal_eval(value))
+            except (SyntaxError, ValueError):
+                pass
+            current.update(default=value, required=False)
+            continue
+        line = raw.strip()
+        match = SHOW_CHOICES.search(line)
+        if match:
+            try:
+                current["choices"] = [str(c) for c in ast.literal_eval(match["list"])]
+                line = line[:match.start()]
+            except (SyntaxError, ValueError):
+                pass
+        current["description"] = f"{current['description']} {line}".strip()
+    return arguments
+
+
+def launch_arguments(file):
+    """The arguments a launch file declares, for the launch form."""
+    command, error = launch_argv(file, [])
+    if error:
+        return {"ok": False, "error": error}
+    try:
+        proc = subprocess.run([*command, "--show-args"], env=ros_env(settings()), capture_output=True,
+                              text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "The launch file took too long to load"}
+    if proc.returncode:
+        lines = (proc.stderr or proc.stdout).strip().splitlines()
+        return {"ok": False, "error": lines[-1] if lines else f"ros2 launch exited with {proc.returncode}"}
+    return {"ok": True, "arguments": parse_show_args(proc.stdout)}
+
+
+def workspace_build(packages=()):
+    """colcon build of the workspace (or the chosen packages), the way it was
+    built last, in the distro's environment without the overlay itself."""
+    setup = settings()
+    if not setup.get("workspace"):
+        return {"ok": False, "error": "Choose a workspace first"}
+    workspace = Path(setup["workspace"])
+    layout = workspace_layout(workspace)
+    if not any(source.is_dir() for source in layout["sources"]):
+        return {"ok": False, "error": "The workspace has no src folder to build"}
+    if shutil.which("colcon") is None:
+        return {"ok": False, "error": "colcon is not installed"}
+    if owned_runs("build"):
+        return {"ok": False, "error": "A build started here is already running"}
+    known = {p["name"] for p in workspace_packages(str(workspace))}
+    chosen = sorted(set(packages))
+    unknown = [name for name in chosen if name not in known]
+    if unknown:
+        return {"ok": False, "error": f"{unknown[0]} is not a package in this workspace"}
+    argv = ["colcon", "--log-base", str(layout["log_base"]), "build", *layout["options"],
+            "--event-handlers", "console_cohesion+"]
+    if chosen:
+        argv += ["--packages-select", *chosen]
+    log_file("build").write_text("")
+    meta = {"name": "Build " + (", ".join(chosen) if chosen else workspace_name(str(workspace))),
+            "workspace": str(workspace), "packages": chosen}
+    return start("build", [argv], ros_env({**setup, "workspace": ""}), meta, cwd=str(workspace))
+
+
+def build_progress():
+    """How far the build started here is, from its console_cohesion output:
+    which packages finished, which failed, and the last line."""
+    try:
+        lines = log_file("build").read_text(errors="replace").splitlines()
+    except OSError:
+        return {}
+    finished = [m[1] for line in lines for m in [re.match(r"^Finished <<< (\S+)", line)] if m]
+    failed = [m[1] for line in lines for m in [re.match(r"^Failed\s+<<< (\S+)", line)] if m]
+    started = [m[1] for line in lines for m in [re.match(r"^Starting >>> (\S+)", line)] if m]
+    last = next((line for line in reversed(lines) if line.strip() and not line.startswith("--- ")), "")
+    return {"finished": finished, "failed": failed, "started": started, "last": last[:200]}
+
+
+def log_tail(tool, query="", severity="all", limit=120):
+    if tool not in TOOLS:
+        return {"ok": False, "error": "Unknown ROS tool"}
+    try:
+        lines = log_file(tool).read_text(errors="replace").splitlines()
+    except OSError:
+        lines = []
+    query = query.lower().strip()
+    levels = {"error": ("error", "fatal", "traceback", "exception"),
+              "warning": ("warn", "error", "fatal", "traceback", "exception")}
+    needles = levels.get(severity, ())
+    lines = [line for line in lines if (not query or query in line.lower()) and
+             (not needles or any(word in line.lower() for word in needles))]
+    try:
+        limit = max(1, min(int(limit), 500))
+    except ValueError:
+        limit = 120
+    return {"ok": True, "text": "\n".join(lines[-limit:]), "lines": len(lines)}
+
+
+def mark_paused(tool, paused):
+    with file_lock(RUNS.with_suffix(".lock")):
+        data = read_runs()
+        for entry in data.get(tool, []):
+            entry["paused"] = paused
+        write_runs(data)
+
+
+def control_run(tool, operation):
+    """Pause or resume a tool's process groups (SIGSTOP / SIGCONT). Not for
+    bag playback, whose clock would jump on resume: see bag_control."""
+    if tool not in ("build", "launch", "node") or operation not in ("pause", "resume"):
+        return {"ok": False, "error": "Only builds, launches and nodes pause"}
+    entries = owned_runs(tool)
+    if not entries:
+        return {"ok": False, "error": "Nothing started here is running"}
+    sig = signal.SIGSTOP if operation == "pause" else signal.SIGCONT
+    for entry in entries:
+        try:
+            os.killpg(int(entry["pgid"]), sig)
+        except OSError:
+            pass
+    mark_paused(tool, operation == "pause")
+    return {"ok": True, "count": len(entries), "paused": operation == "pause"}
+
+
+def plot_topic(expression):
+    """rqt_plot on one numeric field: the larger, separate plot window."""
+    if not re.fullmatch(r"(/[A-Za-z0-9_]+)+(\[[0-9]+\])?(/[A-Za-z0-9_]+(\[[0-9]+\])?)*", expression or ""):
+        return {"ok": False, "error": "Choose a numeric topic field"}
+    setup = settings()
+    # rqt_plot lives in lib/, not on PATH.
+    command = ROS_ROOT / setup["distro"] / "lib" / "rqt_plot" / "rqt_plot"
+    if not command.is_file():
+        return {"ok": False, "error": f"rqt_plot is not installed: sudo apt install ros-{setup['distro']}-rqt-plot"}
+    return start("plot", [[str(command), expression]], ros_env(setup),
+                 {"name": f"Plot {expression}", "expression": expression})
+
+
 def supervise(tool, meta_text, argv):
     """`run`: start argv, wait for it, write down how it ended.
 
@@ -868,9 +1166,11 @@ def runs():
     """What the panel started that still runs, and how the last ones ended."""
     owned = owned_runs()
     return {"ok": True,
-            "running": {tool: [{"pgid": e["pgid"], "meta": e.get("meta", {}), "started": e.get("started")}
+            "running": {tool: [{"pgid": e["pgid"], "meta": e.get("meta", {}), "started": e.get("started"),
+                                "paused": bool(e.get("paused"))}
                                for e in entries] for tool, entries in owned.items()},
             "recording": recording(owned.get("bag", [])),
+            "build": build_progress() if owned.get("build") else {},
             "history": read_json(HISTORY, list)[-8:][::-1]}
 
 
@@ -879,6 +1179,8 @@ def stop(tool):
     groups = [int(entry["pgid"]) for entry in entries]
     for pgid in groups:
         try:
+            # A paused group would hold SIGINT until it is resumed.
+            os.killpg(pgid, signal.SIGCONT)
             os.killpg(pgid, signal.SIGINT)
         except OSError:
             pass
@@ -1047,15 +1349,68 @@ def bag_start(topics):
     return {**result, "path": str(output), "topics": "all" if every else topics}
 
 
-def bag_play(path):
+def bag_play(path, rate=1.0, loop=False, clock=False):
     bag = Path(path)
     if not bag.is_dir() or not (bag / "metadata.yaml").is_file():
         return {"ok": False, "error": "That is not a ROS 2 bag"}
     if owned_runs("bag"):
         return {"ok": False, "error": "A bag started here is already running; stop it first"}
     env = ros_env(settings())
-    result = start("bag", [["ros2", "bag", "play", str(bag)]], env, {"play": str(bag), "name": bag.name})
+    try:
+        rate = float(rate)
+    except ValueError:
+        rate = 0
+    if not 0.1 <= rate <= 10:
+        return {"ok": False, "error": "Playback speed is 0.1 to 10"}
+    argv = ["ros2", "bag", "play", str(bag), "--rate", str(rate)]
+    if loop:
+        argv.append("--loop")
+    if clock:
+        argv.append("--clock")
+    result = start("bag", [argv], env, {"play": str(bag), "name": bag.name,
+                                        "rate": rate, "loop": loop, "clock": clock})
     return {**result, "path": str(bag)}
+
+
+def bag_pausable(distro, entries):
+    """Playback always pauses (through the player's service). Recording only
+    from Iron on: Humble's recorder has no pause service."""
+    playing = any((entry.get("meta") or {}).get("play") for entry in entries)
+    return playing or distro not in ("foxy", "galactic", "humble")
+
+
+def bag_control(operation):
+    """Pause or resume the bag started here through rosbag2's own services. A
+    stopped process would not do: the player's clock would jump on resume and
+    send everything that fell due at once."""
+    if operation not in ("pause", "resume"):
+        return {"ok": False, "error": "Bag control is pause or resume"}
+    entries = owned_runs("bag")
+    if not entries:
+        return {"ok": False, "error": "No bag started here is running"}
+    setup = settings()
+    if not bag_pausable(setup["distro"], entries):
+        return {"ok": False, "error": f"Recording cannot pause on {setup['distro'].title()}; "
+                                      "stop it and record a new bag"}
+    playing = any((entry.get("meta") or {}).get("play") for entry in entries)
+    service = f"/rosbag2_{'player' if playing else 'recorder'}/{operation}"
+    kind = f"rosbag2_interfaces/srv/{operation.title()}"
+    env = ros_env(setup)
+    try:
+        # `service call` waits for ever for a service that is not there.
+        listed = subprocess.run(["ros2", "service", "list"], env=env, capture_output=True,
+                                text=True, timeout=8).stdout.split()
+        if service not in listed:
+            return {"ok": False, "error": f"The bag does not offer {service} yet"}
+        proc = subprocess.run(["ros2", "service", "call", service, kind, "{}"], env=env,
+                              capture_output=True, text=True, timeout=8)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"{service} did not answer"}
+    if proc.returncode:
+        lines = (proc.stderr or proc.stdout).strip().splitlines()
+        return {"ok": False, "error": lines[-1] if lines else f"{service} failed"}
+    mark_paused("bag", operation == "pause")
+    return {"ok": True, "paused": operation == "pause"}
 
 
 # ------------------------------------------------------------------ saved setups
@@ -1088,6 +1443,134 @@ def use_setup(name):
                        ("localhost", "1" if item.get("localhost") else "0"),
                        ("rmw", item.get("rmw") or ""),
                        ("workspace", item.get("workspace") or "none")])
+
+
+def save_robot_profile(name, package=""):
+    if not SAVED_NAME.match(name or ""):
+        return {"ok": False, "error": "A profile name is letters, digits, spaces and .:+-"}
+    setup = settings()
+    item = {"name": name, "domain": setup["domain"], "localhost": setup["localhost"],
+            "rmw": setup["rmw"] if setup["rmw_set"] else "", "workspace": setup["workspace"],
+            "package": package, "favorites": read_json(FAVORITES, list),
+            "launches": read_json(SAVED_LAUNCHES, list)}
+    with file_lock(ROBOT_PROFILES.with_suffix(".lock")):
+        items = [profile for profile in read_json(ROBOT_PROFILES, list) if profile.get("name") != name]
+        items.append(item)
+        items.sort(key=lambda profile: profile["name"].lower())
+        write_json(ROBOT_PROFILES, items)
+    return {"ok": True, "robot_profiles": items}
+
+
+def use_robot_profile(name):
+    """The profile's setup, its favourites, and its saved launches (added to
+    the ones kept now; a launch of the same name is replaced)."""
+    profile = next((p for p in read_json(ROBOT_PROFILES, list) if p.get("name") == name), None)
+    if not profile:
+        return {"ok": False, "error": f"No robot profile is called {name}"}
+    result = set_values([("domain", str(profile.get("domain", 0))),
+                         ("localhost", "1" if profile.get("localhost") else "0"),
+                         ("rmw", profile.get("rmw") or ""),
+                         ("workspace", profile.get("workspace") or "none")])
+    if result.get("ok") is False:
+        return result
+    with file_lock(FAVORITES.with_suffix(".lock")):
+        write_json(FAVORITES, profile.get("favorites") or [])
+    launches = [item for item in profile.get("launches") or [] if isinstance(item, dict) and item.get("name")]
+    if launches:
+        with file_lock(SAVED_LAUNCHES.with_suffix(".lock")):
+            names = {item["name"] for item in launches}
+            items = [item for item in read_json(SAVED_LAUNCHES, list) if item.get("name") not in names]
+            write_json(SAVED_LAUNCHES, sorted(items + launches, key=lambda item: item["name"].lower()))
+    result.update(favorites=read_json(FAVORITES, list), saved_launches=read_json(SAVED_LAUNCHES, list),
+                  profile=profile)
+    return result
+
+
+def flat_parameters(document):
+    """A `ros2 param dump` document as {"a.b": value}: the one node's
+    ros__parameters, nested names joined with dots."""
+    nodes = [v for v in (document or {}).values() if isinstance(v, dict)]
+    values = (nodes[0] if nodes else {}).get("ros__parameters") or {}
+    flat = {}
+
+    def walk(prefix, item):
+        for key, value in item.items():
+            name = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, dict):
+                walk(name, value)
+            else:
+                flat[name] = value
+    walk("", values)
+    return flat
+
+
+def dump_parameters(node, env):
+    """The node's parameters as YAML text (Humble on prints them to stdout)."""
+    try:
+        proc = subprocess.run(["ros2", "param", "dump", node], env=env, capture_output=True,
+                              text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return None, f"{node} did not answer"
+    if proc.returncode or not proc.stdout.strip():
+        lines = (proc.stderr or proc.stdout).strip().splitlines()
+        return None, lines[-1] if lines else f"{node} did not answer"
+    return proc.stdout, None
+
+
+def parameter_profile(operation, node, name):
+    """save: the node's parameters now. diff: what applying would change.
+    apply: load them back (`ros2 param load`)."""
+    import yaml
+    if operation not in ("save", "diff", "apply") or not SAVED_NAME.match(name or ""):
+        return {"ok": False, "error": "A profile name is letters, digits, spaces and .:+-"}
+    if not re.fullmatch(r"(/[A-Za-z_][A-Za-z0-9_]*)+", node or ""):
+        return {"ok": False, "error": "That is not a node name"}
+    # "--" separates the profile from the node in the file name.
+    safe_name = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9_.+-]+", "_", name))
+    path = PARAMETER_PROFILES / f"{safe_name}--{node.strip('/').replace('/', '__')}.yaml"
+    env = ros_env(settings())
+    if operation == "save":
+        text, error = dump_parameters(node, env)
+        if error:
+            return {"ok": False, "error": error}
+        # qos_overrides are read-only once a node runs: loading them back
+        # could only fail, so they are not kept.
+        document = yaml.safe_load(text) or {}
+        for values in document.values():
+            if isinstance(values, dict) and isinstance(values.get("ros__parameters"), dict):
+                values["ros__parameters"].pop("qos_overrides", None)
+        PARAMETER_PROFILES.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump(document, sort_keys=False))
+        return {"ok": True, "path": str(path), "parameter_profiles": parameter_profiles()}
+    if not path.is_file():
+        return {"ok": False, "error": f"No parameter profile is called {name}"}
+    if operation == "diff":
+        text, error = dump_parameters(node, env)
+        if error:
+            return {"ok": False, "error": error}
+        try:
+            now, saved = flat_parameters(yaml.safe_load(text)), flat_parameters(yaml.safe_load(path.read_text()))
+        except (OSError, yaml.YAMLError) as error:
+            return {"ok": False, "error": f"Cannot read the profile: {error}"}
+        saved = {key: value for key, value in saved.items() if not key.startswith("qos_overrides.")}
+        changes = [{"name": key, "current": now.get(key), "saved": saved[key], "missing": key not in now}
+                   for key in sorted(saved) if now.get(key) != saved[key] or key not in now]
+        return {"ok": True, "changes": changes, "unchanged": len(saved) - len(changes)}
+    try:
+        proc = subprocess.run(["ros2", "param", "load", node, str(path)], env=env,
+                              capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"{node} did not answer"}
+    # `param load` prints a line per parameter and exits 0 when some fail; a
+    # read-only one (set when the node started) is skipped, not an error.
+    outcome = [line for line in proc.stdout.splitlines() if line.startswith("Set parameter")]
+    read_only = [line for line in outcome if "read-only" in line]
+    failed = [line for line in outcome if "successful" not in line and line not in read_only]
+    if proc.returncode or failed:
+        lines = failed or (proc.stderr or proc.stdout).strip().splitlines()
+        return {"ok": False, "error": lines[-1] if lines else "The parameters did not load"}
+    return {"ok": True, "path": str(path), "applied": len(outcome) - len(read_only),
+            "read_only": len(read_only), "parameter_profiles": parameter_profiles()}
 
 
 def open_log(tool):
@@ -1268,6 +1751,34 @@ def parse_fields(text):
     return data
 
 
+def plot_path(field):
+    """"pose/position/x" or "ranges[3]" as attribute names and indexes."""
+    path = []
+    for part in (field or "").strip("/").split("/"):
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)((?:\[[0-9]+\])*)", part)
+        if not match:
+            return None
+        path.append(match[1])
+        path += [int(i) for i in re.findall(r"\[([0-9]+)\]", match[2])]
+    return path or None
+
+
+def field_value(message, path):
+    value = message
+    for step in path:
+        value = value[step] if isinstance(step, int) else getattr(value, step)
+    return value
+
+
+def quaternion_rpy(x, y, z, w):
+    """Roll, pitch and yaw in degrees."""
+    import math
+    roll = math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
+    pitch = math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x))))
+    yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+    return [round(math.degrees(a), 3) for a in (roll, pitch, yaw)]
+
+
 def message_text(message, limit=4000):
     from rosidl_runtime_py.convert import message_to_ordereddict
     text = json.dumps(message_to_ordereddict(message, truncate_length=MAX_ARRAY_ITEMS), indent=2, default=str)
@@ -1365,6 +1876,7 @@ class Watcher:
         self.executor.add_node(self.node)
         self.requests = queue.Queue()
         self.jobs = []
+        self.active_goals = {}
         self.last_graph = None
         self.graph = {}
         self.controllers = None
@@ -1594,7 +2106,7 @@ class Watcher:
                 self.parameter(rid, request["node"], request["name"])
             elif cmd == "cancel":
                 for job in list(self.jobs):
-                    if job.rid in request.get("ids", []) and job.kind in ("measure", "sample"):
+                    if job.rid in request.get("ids", []) and job.kind in ("measure", "sample", "plot"):
                         if job.cleanup:
                             job.cleanup()
                         self.jobs.remove(job)
@@ -1605,6 +2117,10 @@ class Watcher:
                 self.sample(rid, request["name"])
             elif cmd == "tf":
                 self.tf_tree(rid)
+            elif cmd == "tf_lookup":
+                self.tf_lookup(rid, request["source"], request["target"])
+            elif cmd == "plot":
+                self.plot(rid, request["name"], request["field"])
             elif cmd == "health":
                 emit({"type": "reply", "id": rid, **self.health()})
             elif cmd == "template":
@@ -1614,10 +2130,20 @@ class Watcher:
                                    request.get("ptype", 0))
             elif cmd == "lifecycle":
                 self.lifecycle_transition(rid, request["node"], request["transition"])
+            elif cmd == "lifecycle_group":
+                self.lifecycle_group(rid, request.get("nodes", []), request["transition"])
             elif cmd == "call":
                 self.call_service(rid, request["name"], request["type"], request.get("value", ""))
             elif cmd == "goal":
                 self.send_goal(rid, request["name"], request["type"], request.get("value", ""))
+            elif cmd == "cancel_goal":
+                goal_id = int(request.get("goal_id", 0))
+                handle = self.active_goals.get(goal_id)
+                if handle:
+                    handle.cancel_goal_async()
+                    emit({"type": "reply", "id": rid, "ok": True})
+                else:
+                    emit({"type": "reply", "id": rid, "error": "That goal is no longer running"})
             elif cmd == "publish":
                 self.publish_once(rid, request["name"], request["type"], request.get("value", ""))
             elif cmd == "controller":
@@ -1874,6 +2400,58 @@ class Watcher:
         job.cleanup = lambda: self.node.destroy_subscription(sub)
         self.jobs.append(job)
 
+    def plot(self, rid, topic, field):
+        """One numeric field of a topic over time: progress lines carry the new
+        values (at most every PLOT_EVERY_S) until it is cancelled, the panel
+        goes away, or PLOT_MAX_S passes."""
+        from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+        if self.busy("plot", 1):
+            emit({"type": "reply", "id": rid, "error": "One plot at a time"})
+            return
+        type_name, message_type = self.message_class(topic)
+        if not type_name:
+            emit({"type": "reply", "id": rid, "error": message_type})
+            return
+        path = plot_path(field)
+        if path is None:
+            emit({"type": "reply", "id": rid, "error": "Choose a numeric field"})
+            return
+        fresh, state = [], {"count": 0, "error": None}
+        start = time.monotonic()
+
+        def on_message(message):
+            try:
+                value = field_value(message, path)
+            except (AttributeError, IndexError, TypeError) as error:
+                state["error"] = f"{field}: {error}"
+                return
+            if isinstance(value, bool):
+                value = int(value)
+            if isinstance(value, (int, float)):
+                fresh.append([round(time.monotonic() - start, 3), value])
+                state["count"] += 1
+                del fresh[:-PLOT_KEEP]
+        # Best effort and volatile match every publisher, as for Hz.
+        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE,
+                         history=HistoryPolicy.KEEP_LAST, depth=10)
+        sub = self.node.create_subscription(message_type, topic, on_message, qos)
+        state["next"] = start + PLOT_EVERY_S
+
+        def finish():
+            now = time.monotonic()
+            if fresh and now >= state["next"]:
+                emit({"type": "progress", "id": rid, "values": list(fresh), "count": state["count"]})
+                fresh.clear()
+                state["next"] = now + PLOT_EVERY_S
+            if state["error"] or now - start >= PLOT_MAX_S:
+                emit({"type": "reply", "id": rid, "count": state["count"],
+                      **({"error": state["error"]} if state["error"] else {"ok": True})})
+                return True
+            return False
+        job = Job(rid, finish, "plot")
+        job.cleanup = lambda: self.node.destroy_subscription(sub)
+        self.jobs.append(job)
+
     def tf_tree(self, rid):
         """Listen to /tf and /tf_static a moment: every frame's parent, rate and
         age, and what is wrong with the tree (separate trees, stale frames)."""
@@ -1944,6 +2522,39 @@ class Watcher:
             return True
         self.jobs.append(Job(rid, finish, "tf"))
 
+    def tf_lookup(self, rid, source, target):
+        """Resolve a transform between two selected frames without shelling out."""
+        if not source or not target or source == target:
+            emit({"type": "reply", "id": rid, "error": "Choose two different frames"})
+            return
+        from tf2_ros import Buffer, TransformListener
+        buffer = Buffer()
+        listener = TransformListener(buffer, self.node, spin_thread=False)
+        deadline = time.monotonic() + REQUEST_TIMEOUT_S
+
+        def finish():
+            try:
+                transform = buffer.lookup_transform(target, source, self.rclpy.time.Time())
+            except Exception as error:
+                if time.monotonic() < deadline:
+                    return False
+                emit({"type": "reply", "id": rid, "error": str(error)})
+                return True
+            t, q = transform.transform.translation, transform.transform.rotation
+            stamp = transform.header.stamp
+            # Time 0 means static (or the latest of a static chain).
+            age = None
+            if stamp.sec or stamp.nanosec:
+                age = time.time() - (stamp.sec + stamp.nanosec / 1e9)
+            emit({"type": "reply", "id": rid, "ok": True, "source": source, "target": target,
+                  "translation": [t.x, t.y, t.z], "rotation": [q.x, q.y, q.z, q.w],
+                  "rpy": quaternion_rpy(q.x, q.y, q.z, q.w),
+                  "age_ms": round(age * 1000) if age is not None and -1 < age < 3600 else None})
+            return True
+        job = Job(rid, finish, "tf")
+        job.cleanup = lambda: listener.unregister()
+        self.jobs.append(job)
+
     # --- writes: each one is a confirmed click in the panel
 
     def call(self, rid, client, request, answer, kind, timeout=REQUEST_TIMEOUT_S):
@@ -2010,6 +2621,49 @@ class Watcher:
                   lambda response: {"ok": True} if response.success
                   else {"error": f"{node_name} turned down {transition}"}, "lifecycle")
 
+    def lifecycle_group(self, rid, nodes, transition):
+        """Apply one transition to selected nodes and report every outcome."""
+        from lifecycle_msgs.msg import Transition
+        from lifecycle_msgs.srv import ChangeState
+        ids = {"configure": Transition.TRANSITION_CONFIGURE,
+               "cleanup": Transition.TRANSITION_CLEANUP,
+               "activate": Transition.TRANSITION_ACTIVATE,
+               "deactivate": Transition.TRANSITION_DEACTIVATE}
+        nodes = sorted({str(node) for node in nodes if str(node).startswith("/")})[:40]
+        if transition not in ids or not nodes:
+            emit({"type": "reply", "id": rid, "error": "Choose lifecycle nodes and a transition"})
+            return
+        clients, futures, results = [], {}, {}
+        request = ChangeState.Request()
+        request.transition.id = ids[transition]
+        deadline = time.monotonic() + REQUEST_TIMEOUT_S
+        for name in nodes:
+            client = self.node.create_client(ChangeState, f"{name}/change_state")
+            clients.append(client)
+            if client.service_is_ready():
+                futures[name] = client.call_async(request)
+
+        def finish():
+            for name in nodes:
+                if name not in futures:
+                    client = clients[nodes.index(name)]
+                    if client.service_is_ready():
+                        futures[name] = client.call_async(request)
+            for name, future in list(futures.items()):
+                if future.done() and name not in results:
+                    reply = future.result()
+                    results[name] = bool(reply and reply.success)
+            if len(results) < len(nodes) and time.monotonic() < deadline:
+                return False
+            for name in nodes:
+                results.setdefault(name, False)
+            emit({"type": "reply", "id": rid, "ok": all(results.values()), "results": results,
+                  **({} if all(results.values()) else {"error": "Some nodes turned the transition down"})})
+            return True
+        job = Job(rid, finish, "lifecycle")
+        job.cleanup = lambda: [self.node.destroy_client(client) for client in clients]
+        self.jobs.append(job)
+
     def call_service(self, rid, name, type_name, text):
         from rosidl_runtime_py.set_message import set_message_fields
         from rosidl_runtime_py.utilities import get_service
@@ -2040,12 +2694,15 @@ class Watcher:
         goal = action.Goal()
         set_message_fields(goal, parse_fields(text))
         client = ActionClient(self.node, action, name)
-        state = {"sent": None, "result": None, "feedback": 0}
+        state = {"sent": None, "result": None, "feedback": 0, "handle": None}
         deadline = time.monotonic() + GOAL_TIMEOUT_S
         statuses = {1: "accepted", 2: "executing", 3: "canceling", 4: "succeeded", 5: "canceled", 6: "aborted"}
 
-        def on_feedback(_message):
+        def on_feedback(message):
             state["feedback"] += 1
+            text, truncated = message_text(message.feedback, 1200)
+            emit({"type": "progress", "id": rid, "feedback": state["feedback"],
+                  "text": text, "truncated": truncated})
 
         def finish():
             now = time.monotonic()
@@ -2067,6 +2724,9 @@ class Watcher:
             if not handle.accepted:
                 emit({"type": "reply", "id": rid, "error": f"{name} turned the goal down"})
                 return True
+            if state["handle"] is None:
+                state["handle"] = handle
+                self.active_goals[rid] = handle
             if state["result"] is None:
                 state["result"] = handle.get_result_async()
             if not state["result"].done():
@@ -2082,7 +2742,10 @@ class Watcher:
                   "feedback": state["feedback"], "text": text, "truncated": truncated})
             return True
         job = Job(rid, finish, "goal")
-        job.cleanup = client.destroy
+        def cleanup():
+            self.active_goals.pop(rid, None)
+            client.destroy()
+        job.cleanup = cleanup
         self.jobs.append(job)
 
     def publish_once(self, rid, topic, type_name, text):
@@ -2259,6 +2922,17 @@ def run_command(command, args, program="ros_info.py"):
             return save_launch(args[0], args[1], args[2:])
         if command == "forget-launch" and len(args) == 1:
             return forget_launch(args[0])
+        if command == "launch-args" and len(args) == 1:
+            return launch_arguments(args[0])
+        if command == "build":
+            return workspace_build(args)
+        if command == "log-tail" and args:
+            return log_tail(args[0], args[1] if len(args) > 1 else "",
+                            args[2] if len(args) > 2 else "all", args[3] if len(args) > 3 else 120)
+        if command == "run-control" and len(args) == 2:
+            return control_run(args[0], args[1])
+        if command == "plot" and len(args) == 1:
+            return plot_topic(args[0])
         if command == "stop" and args:
             return stop(args[0])
         if command == "runs":
@@ -2271,14 +2945,23 @@ def run_command(command, args, program="ros_info.py"):
             return toggle_favorite(args[0], args[1])
         if command == "bag-start" and args:
             return bag_start(args)
-        if command == "bag-play" and len(args) == 1:
-            return bag_play(args[0])
+        if command == "bag-play" and args:
+            return bag_play(args[0], args[1] if len(args) > 1 else 1.0,
+                            "loop" in args[2:], "clock" in args[2:])
+        if command == "bag-control" and len(args) == 1:
+            return bag_control(args[0])
         if command == "save-setup" and len(args) == 1:
             return save_setup(args[0])
         if command == "use-setup" and len(args) == 1:
             return use_setup(args[0])
         if command == "forget-setup" and len(args) == 1:
             return forget_setup(args[0])
+        if command == "save-robot-profile" and args:
+            return save_robot_profile(args[0], args[1] if len(args) > 1 else "")
+        if command == "use-robot-profile" and len(args) == 1:
+            return use_robot_profile(args[0])
+        if command == "parameter-profile" and len(args) == 3:
+            return parameter_profile(args[0], args[1], args[2])
         if command == "open-log" and len(args) == 1:
             return open_log(args[0])
         return {"ok": False, "error": f"usage: see the top of {program}"}
@@ -2301,6 +2984,12 @@ def sentence(command, result):
         return f"Recording to {result.get('path', '').replace(str(HOME), '~')}"
     if command == "bag-play":
         return f"Playing {Path(result.get('path', '')).name}"
+    if command == "build":
+        return "Building"
+    if command in ("run-control", "bag-control"):
+        return "Paused" if result.get("paused") else "Resumed"
+    if command == "use-robot-profile" and result.get("profile"):
+        return f"Using robot profile {result['profile']['name']}"
     if command in ("set", "use-setup") and result.get("installed"):
         named = next((w["name"] for w in result.get("workspaces", []) if w["path"] == result.get("workspace")), "none")
         return (f"Domain {result['domain']}, {'this computer only' if result['localhost'] else 'whole network'}, "

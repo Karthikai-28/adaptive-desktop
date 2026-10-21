@@ -14,7 +14,8 @@
     new <template> <path>  a project from a template
     ros [text]             ROS 2: launch a saved launch or launch file, open RViz2,
                            Gazebo or rqt, record ("ros record /a /b"), stop what the
-                           panel started, use a saved setup, "ros domain 7"
+                           panel started, build the workspace or a package, use a
+                           saved setup or robot profile, "ros domain 7"
 
 Your own commands are executables in ~/.config/adaptive-desktop/commands/;
 each shows up as an action, named after its file.
@@ -629,6 +630,17 @@ def ros_rows(rest, status, helper=ROS_HELPER):
         rows.append(row(f"Use setup {setup['name']}", f"Domain {setup['domain']}"
                         f"{', this computer only' if setup.get('localhost') else ''}", ROS_GROUP, ROS_ICON,
                         "Use", act(f"setup {setup['name']}", "use-setup", setup["name"])))
+    for profile in status.get("robot_profiles", []):
+        about = " · ".join(filter(None, [f"Domain {profile.get('domain', 0)}", profile.get("package")]))
+        rows.append(row(f"Use robot profile {profile['name']}", about, ROS_GROUP, ROS_ICON,
+                        "Use", act(f"robot profile {profile['name']}", "use-robot-profile", profile["name"])))
+    if status.get("workspace") and tools.get("build", {}).get("installed") and not (status.get("runs") or {}).get("build"):
+        workspace = Path(status["workspace"]).name
+        rows.append(row("Build the workspace", f"colcon build in {workspace}", ROS_GROUP, "system-run-symbolic",
+                        "Build", act("build", "build")))
+        for package in status.get("packages", []):
+            rows.append(row(f"Build {package['name']}", f"colcon build --packages-select in {workspace}", ROS_GROUP,
+                            "system-run-symbolic", "Build", act(f"build {package['name']}", "build", package["name"])))
 
     wanted = [w.casefold() for w in words]
     hits = [r for r in rows if all(w in f"{r['title']} {r['subtitle']}".casefold() for w in wanted)]

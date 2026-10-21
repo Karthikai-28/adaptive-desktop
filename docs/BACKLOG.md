@@ -833,6 +833,19 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   Calls/goals/messages have typed per-field editors; arrays use JSON inputs.
   Folding a row cancels active Hz/Preview subscriptions. Recording has a
   persistent island activity with screen-sharing privacy.
+- ✅ **Workflow: build → launch → inspect → stop** (`verify-ros-panel.py`, a
+  real colcon build included; `verify-ros-nested.sh` drives each in the panel):
+  workspace build of all or one package the way it was built last (a
+  `.build/<distro>` tree's sources from its colcon log), with progress and
+  environment checks; launch argument forms (descriptions, defaults, choices,
+  required); one run manager with in-panel logs filtered by severity and text,
+  pause, restart and stop; parameter profiles compared before a confirmed
+  restore; robot profiles (setup, package, favourites, saved launches); rosbag
+  topic ticks, playback speed, loop, `/clock` and pause through rosbag2's
+  service; a live numeric plot with rqt_plot for the larger view; TF lookup
+  between two frames; action feedback and Cancel goal; lifecycle groups with
+  each node's outcome; a focused graph view; palette `ros build`, robot
+  profiles. Recording cannot pause on Humble (no recorder service).
 - 🔬 **Physical session**: source changes pass helper checks and ROS interaction
   checks in a nested shell; appearance and hardware behavior still need live
   verification after the next shell restart. The wider nested desktop check
@@ -843,7 +856,9 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the
    nine-dot button left of Network, Start demo, expand `/talker`, open RViz2.
    Then Gazebo with a world, Record and Stop (watch the icon and the island),
-   a launch file with an argument, and `ros` in the command palette.
+   a launch file with an argument, and `ros` in the command palette. Then
+   Build on `robotics_learning_lab` (its `.build/humble` tree), a plot, the
+   graph view, and a parameter profile restore.
 0. `./install.sh --status`, then `./install.sh`, then
    `./scripts/reload-adaptive-shell.sh --restart-shell`. As of Milestone 16
    the live extension is two milestones behind the repository, four

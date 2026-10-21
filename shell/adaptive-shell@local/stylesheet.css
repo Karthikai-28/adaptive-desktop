@@ -2849,6 +2849,31 @@
     padding-right: 12px;
 }
 
+/* The live plot: taller than the shade's strips, same drawing. */
+.adaptive-ros-plot {
+    height: 72px;
+    margin: 4px 12px 2px 12px;
+}
+
+/* A run's log: its newest lines (the helper sends at most 60). */
+.adaptive-ros-log {
+    font-size: 8.5pt;
+}
+
+.adaptive-ros-focus-row {
+    spacing: 8px;
+    padding: 0 12px 0 18px;
+}
+
+.adaptive-ros-focus-centre {
+    margin: 6px 12px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: #F5F5F7;
+    font-weight: 600;
+    background-color: rgba(10, 132, 255, 0.18);
+}
+
 /* ------------------------------------------------------------------
  * Project indicator (projectIndicator.js): the active project, left of
  * the top bar, with its branch and uncommitted count.

@@ -5,12 +5,15 @@ A throwaway home with its own ~/.bashrc, workspace, RViz config and launch
 file, and real nodes (a talker, a lifecycle talker, an action server, a
 service, a static transform, and FIXTURE below) on a private domain with
 localhost-only discovery, so nothing here sees or disturbs a real robot.
-Checks the setup read from ~/.bashrc, settings, saved setups and launches, the
-live graph, diagnostics, node details, type definitions, topic rate, previews
-(an image too), the TF tree, QoS mismatches, every write (parameter, lifecycle,
-service call, action goal, one message), rosbag, launching, stopping and how
-runs ended, and that the watcher exits when its stdin closes. Skips without
-ROS 2 under /opt/ros. About 40 s.
+Checks the setup read from ~/.bashrc, settings, saved setups, robot profiles
+and launches (with the arguments a launch file declares), the live graph,
+diagnostics, node details, type definitions, topic rate, previews (an image
+too), a live plot, the TF tree and one transform, QoS mismatches, every write
+(parameter, parameter profile, lifecycle and a lifecycle group, service call,
+action goal with its feedback, one message), rosbag (playback paused through
+its service), launching, pausing, stopping and how runs ended, a run's log
+filtered, a real colcon build with its progress, and that the watcher exits
+when its stdin closes. Skips without ROS 2 under /opt/ros. About 70 s.
 """
 
 import glob
@@ -96,6 +99,7 @@ class Watch:
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         self.graph = None
         self.replies = {}
+        self.progress = {}
         self.next_id = 1
 
     def read(self, until, timeout):
@@ -115,15 +119,21 @@ class Watch:
                 self.graph = message
             elif message["type"] == "reply":
                 self.replies[message["id"]] = message
+            elif message["type"] == "progress":
+                self.progress.setdefault(message["id"], []).append(message)
             elif message["type"] == "error":
                 print("watch error:", message["error"])
         return until()
 
-    def ask(self, cmd, timeout=6, **fields):
+    def send(self, cmd, **fields):
         rid = self.next_id
         self.next_id += 1
         self.proc.stdin.write(json.dumps({"id": rid, "cmd": cmd, **fields}) + "\n")
         self.proc.stdin.flush()
+        return rid
+
+    def ask(self, cmd, timeout=6, **fields):
+        rid = self.send(cmd, **fields)
         self.read(lambda: rid in self.replies, timeout)
         return self.replies.get(rid, {"error": "no reply"})
 
@@ -267,6 +277,40 @@ def main():
     saved = helper(env, "save-launch", "Robot", str(robot_launch), "rate:=5")
     check([(s["name"], s["args"]) for s in saved.get("saved_launches", [])] == [("Robot", ["rate:=5"])],
           "launches: saved with its arguments", saved)
+    args_launch = home / "args.launch.py"
+    args_launch.write_text(
+        "from launch import LaunchDescription\n"
+        "from launch.actions import DeclareLaunchArgument\n\n\n"
+        "def generate_launch_description():\n"
+        "    return LaunchDescription([\n"
+        "        DeclareLaunchArgument('use_sim_time', default_value='false', description='Use the sim clock'),\n"
+        "        DeclareLaunchArgument('robot', description='Robot name'),\n"
+        "        DeclareLaunchArgument('mode', default_value='fast', choices=['fast', 'safe'], description='Mode')])\n")
+    declared = helper(env, "launch-args", str(args_launch))
+    check(declared.get("arguments") == [
+        {"name": "use_sim_time", "default": "false", "description": "Use the sim clock", "required": False, "choices": []},
+        {"name": "robot", "default": "", "description": "Robot name", "required": True, "choices": []},
+        {"name": "mode", "default": "fast", "description": "Mode", "required": False, "choices": ["fast", "safe"]}],
+          "launch form: declared arguments, defaults, required ones and choices", declared)
+    check(helper(env, "launch-args", str(robot_launch)).get("arguments") == [],
+          "launch form: a launch file that declares nothing has no arguments")
+    broken = home / "broken.launch.py"
+    broken.write_text("raise SystemExit('nope')\n")
+    check(helper(env, "launch-args", str(broken)).get("ok") is False, "launch form: a launch file that fails to load says so")
+
+    helper(env, "set", "domain", "14")
+    helper(env, "favorite", "topic", "/chatter")
+    check(helper(env, "save-robot-profile", "Arm", "bringup").get("ok") is True, "robot profiles: saved")
+    helper(env, "set", "all", "")
+    helper(env, "favorite", "topic", "/chatter")
+    helper(env, "forget-launch", "Robot")
+    profile = helper(env, "use-robot-profile", "Arm")
+    check(profile.get("domain") == 14 and profile.get("favorites") == [{"kind": "topic", "name": "/chatter"}]
+          and [s["name"] for s in profile.get("saved_launches", [])] == ["Robot"]
+          and profile.get("profile", {}).get("package") == "bringup",
+          "robot profiles: setup, package, favourites and saved launches come back", profile.get("favorites"))
+    check(helper(env, "use-robot-profile", "Nope").get("ok") is False, "robot profiles: an unknown one is refused")
+    helper(env, "set", "all", "")
 
     # Imported here, after HOME points at the throwaway home: it reads HOME once.
     os.environ.update(SHELL="/bin/bash", HOME=env["HOME"], XDG_CONFIG_HOME=env["XDG_CONFIG_HOME"], XDG_CACHE_HOME=env["XDG_CACHE_HOME"])
@@ -288,6 +332,25 @@ def main():
     wrong = {argv: ros_info.tool_of(list(argv)) for argv, tool in samples.items()
              if ros_info.tool_of(list(argv)) != tool}
     check(not wrong, "running tools are told apart by their command lines", wrong)
+    check(ros_info.plot_path("pose/position/x") == ["pose", "position", "x"] and ros_info.plot_path("ranges[2]") == ["ranges", 2]
+          and ros_info.plot_path("a b") is None, "plot: field paths with indexes")
+    check(ros_info.quaternion_rpy(0, 0, 0.7071068, 0.7071068) == [0.0, 0.0, 90.0], "tf: a quarter turn is yaw 90°")
+    check(ros_info.flat_parameters({"/n": {"ros__parameters": {"a": {"b": 1}, "c": "x"}}}) == {"a.b": 1, "c": "x"},
+          "parameter profiles: nested names are joined with dots")
+    # A build tree like proj/.build/humble: its sources are where its last colcon run said.
+    tree = home / "proj" / ".build" / "humble"
+    (tree / "install").mkdir(parents=True)
+    (tree / "log" / "latest_build").mkdir(parents=True)
+    (home / "proj" / "packages" / "arm").mkdir(parents=True)
+    (home / "proj" / "packages" / "arm" / "package.xml").write_text("<package><name>arm</name></package>")
+    (tree / "log" / "latest_build" / "logger_all.log").write_text(
+        "[0.1s] DEBUG:colcon:Command line arguments: " + repr(
+            ["/usr/bin/colcon", "--log-base", str(tree / "log"), "build", "--base-paths", str(home / "proj" / "packages"),
+             "--build-base", str(tree / "build"), "--install-base", str(tree / "install"), "--symlink-install"]) + "\n")
+    layout = ros_info.workspace_layout(str(tree))
+    check(layout["sources"] == [home / "proj" / "packages"] and "--symlink-install" in layout["options"]
+          and [p["name"] for p in ros_info.workspace_packages(str(tree))] == ["arm"],
+          "workspace: a build tree's sources and options come from its last colcon run", layout)
 
     # ---------------------------------------------------------- watch
     node_env = ros_info.ros_env({"distro": Path(setup).parent.name, "workspace": "", "domain": DOMAIN,
@@ -389,6 +452,28 @@ def main():
               and 5 < frames.get("base_link", {}).get("hz", 0) < 15 and tf.get("roots") == ["world"],
               "tf: static and moving frames, their parents, rate and the root", tf)
 
+        transform = watch.ask("tf_lookup", source="camera_link", target="world")
+        check([round(v, 3) for v in transform.get("translation", [])] == [0.0, 0.0, 0.1]
+              and transform.get("rpy") == [0.0, 0.0, 0.0] and 0 <= (transform.get("age_ms") or -1) < 2000,
+              "tf: where camera_link is in world, through a moving frame, and how old", transform)
+        check("error" in watch.ask("tf_lookup", source="camera_link", target="nowhere", timeout=8),
+              "tf: a frame that is not there says so")
+
+        plot = watch.send("plot", name="/camera/image", field="width")
+        watch.read(lambda: len(watch.progress.get(plot, [])) >= 2, 5)
+        values = [v for line in watch.progress.get(plot, []) for _, v in line["values"]]
+        check(len(watch.progress.get(plot, [])) >= 2 and values and set(values) == {8},
+              "plot: a field's values stream in", values[:5])
+        check("One plot" in watch.ask("plot", name="/camera/image", field="height").get("error", ""),
+              "plot: one at a time")
+        watch.ask("cancel", ids=[plot])
+        count = len(watch.progress.get(plot, []))
+        watch.read(lambda: False, 0.8)
+        check(len(watch.progress.get(plot, [])) == count and plot not in watch.replies,
+              "plot: cancelled, it stops")
+        check("error" in watch.ask("plot", name="/camera/image", field="no_such_field", timeout=3),
+              "plot: a field the message lacks says so")
+
         mismatch = watch.ask("topic", name="/camera/image").get("qos_warnings", [])
         check(mismatch == ["/fixture is best effort but /fixture requires reliable"],
               "topic: a QoS mismatch is named", mismatch)
@@ -409,6 +494,23 @@ def main():
         configured = watch.ask("lifecycle", node="/lc_talker", transition="configure")
         check(configured.get("ok") is True and watch.ask("node", name="/lc_talker").get("lifecycle") == "inactive",
               "lifecycle: configure moves the node to inactive", configured)
+        group = watch.ask("lifecycle_group", timeout=8, nodes=["/lc_talker", "/not_running"], transition="activate")
+        check(group.get("results") == {"/lc_talker": True, "/not_running": False} and group.get("ok") is False
+              and watch.ask("node", name="/lc_talker").get("lifecycle") == "active",
+              "lifecycle group: each node's outcome, the one that is there activated", group)
+
+        saved_profile = helper(env, "parameter-profile", "save", "/fixture", "Bench")
+        check(saved_profile.get("ok") is True and [(p["name"], p["node"]) for p in saved_profile["parameter_profiles"]]
+              == [("Bench", "/fixture")], "parameter profiles: saved", saved_profile)
+        watch.ask("set_parameter", node="/fixture", name="gain", value="3", ptype=3)
+        diff = helper(env, "parameter-profile", "diff", "/fixture", "Bench")
+        check([(c["name"], c["current"], c["saved"]) for c in diff.get("changes", [])] == [("gain", 3.0, 2.0)],
+              "parameter profiles: what restoring would change", diff)
+        applied = helper(env, "parameter-profile", "apply", "/fixture", "Bench")
+        check(applied.get("ok") is True and watch.ask("parameter", node="/fixture", name="gain").get("value") == 2.0,
+              "parameter profiles: restored", applied)
+        check(helper(env, "parameter-profile", "apply", "/fixture", "Nope").get("ok") is False,
+              "parameter profiles: an unknown one is refused")
 
         template = watch.ask("template", kind="service", type="example_interfaces/srv/AddTwoInts")
         check('"a": 0' in template.get("text", ""), "template: an empty request to start from", template)
@@ -417,10 +519,17 @@ def main():
         check('"sum": 5' in called.get("text", ""), "call: a service answers", called)
         check("mapping" in watch.ask("call", name="/add_two_ints", type="example_interfaces/srv/AddTwoInts",
                                      value="[1, 2]").get("error", ""), "call: fields that are no mapping are refused")
-        goal = watch.ask("goal", timeout=35, name="/fibonacci",
-                         type="action_tutorials_interfaces/action/Fibonacci", value="{order: 3}")
+        goal_id = watch.send("goal", name="/fibonacci", type="action_tutorials_interfaces/action/Fibonacci",
+                             value="{order: 3}")
+        watch.read(lambda: goal_id in watch.replies, 35)
+        goal = watch.replies.get(goal_id, {})
         check(goal.get("status") == "succeeded" and "sequence" in goal.get("text", ""),
               "goal: an action goal runs to its result", goal)
+        feedback = watch.progress.get(goal_id, [])
+        check(feedback and "partial_sequence" in feedback[-1].get("text", ""), "goal: its feedback comes as it runs",
+              feedback[-1:] if feedback else feedback)
+        check(watch.ask("cancel_goal", goal_id=goal_id).get("error") == "That goal is no longer running",
+              "goal: a finished goal cannot be cancelled")
         sent = watch.ask("publish", name="/fixture/command", type="std_msgs/msg/String", value="{data: go}")
         time.sleep(0.5)
         last = {name: watch.ask("parameter", node="/fixture", name=name).get("value") for name in ("gain", "last_command")}
@@ -437,6 +546,21 @@ def main():
         bags = helper(env, "status").get("bags", [])
         check(len(bags) == 1 and bags[0].get("messages", 0) >= 1 and bags[0].get("topics") == 1,
               "bag: the stopped recording is listed with its messages and topics", bags)
+        check(helper(env, "bag-play", bags[0]["path"], "50").get("ok") is False, "bag: a speed over 10 is refused")
+        played = helper(env, "bag-play", bags[0]["path"], "0.5", "loop")
+        running_bag = helper(env, "runs")["running"].get("bag", [])
+        check(played.get("ok") is True and running_bag and running_bag[0]["meta"].get("loop") is True
+              and running_bag[0]["meta"].get("rate") == 0.5, "bag: playback at half speed, looping", played)
+        paused = {}
+        for _ in range(6):
+            paused = helper(env, "bag-control", "pause")
+            if paused.get("ok"):
+                break
+            time.sleep(1)
+        check(paused.get("ok") is True and helper(env, "runs")["running"]["bag"][0]["paused"] is True,
+              "bag: playback pauses through rosbag2's own service", paused)
+        check(helper(env, "bag-control", "resume").get("ok") is True, "bag: and resumes")
+        helper(env, "stop", "bag")
 
         for proc in nodes:
             proc.send_signal(signal.SIGINT)
@@ -492,12 +616,64 @@ def main():
     running_launch = helper(env, "runs")["running"].get("launch", [])
     check(saved_run.get("ok") is True and running_launch and running_launch[0]["meta"]["args"] == ["rate:=5"],
           "launch: a saved launch runs with its arguments", (saved_run, running_launch))
+    pause = helper(env, "run-control", "launch", "pause")
+    check(pause.get("ok") is True and helper(env, "runs")["running"]["launch"][0]["paused"] is True,
+          "run manager: a launch pauses", pause)
+    check(helper(env, "run-control", "bag", "pause").get("ok") is False, "run manager: a bag is not paused by signal")
+    began = time.monotonic()
     helper(env, "stop", "launch")
     check(not helper(env, "status")["tools"]["launch"]["pids"], "stop: the launch and what it started quit")
+    check(time.monotonic() - began < 3, "stop: a paused launch stops at once, not after the grace time")
+    (Path(env["XDG_CACHE_HOME"]) / "adaptive-desktop" / "ros" / "demo.log").write_text(
+        "[INFO] fine\n[WARN] battery low\n[ERROR] motor stalled\nplain line\n")
+    errors = helper(env, "log-tail", "demo", "", "error")
+    warned = helper(env, "log-tail", "demo", "battery", "warning")
+    check(errors.get("text") == "[ERROR] motor stalled" and warned.get("text") == "[WARN] battery low",
+          "logs: filtered by severity and text", (errors, warned))
     rc = ros_info.terminal_rc(ros_info.settings()).read_text()
     check(f"export ROS_DOMAIN_ID={DOMAIN}" in rc and "export ROS_LOCALHOST_ONLY=1" in rc and str(ws) in rc
           and rc.index(".zshrc") < rc.index("ROS_DOMAIN_ID"),
           "terminal: KTERM Zsh first, then the panel's setup")
+
+    # ---------------------------------------------------------- build
+    if subprocess.run(["which", "colcon"], capture_output=True).returncode == 0:
+        build_ws = home / "build_ws"
+        pkg = build_ws / "src" / "tiny_pkg"
+        (pkg / "resource").mkdir(parents=True)
+        (pkg / "tiny_pkg").mkdir()
+        (pkg / "tiny_pkg" / "__init__.py").write_text("")
+        (pkg / "resource" / "tiny_pkg").write_text("")
+        (pkg / "setup.cfg").write_text("[develop]\nscript_dir=$base/lib/tiny_pkg\n[install]\ninstall_scripts=$base/lib/tiny_pkg\n")
+        (pkg / "setup.py").write_text(
+            "from setuptools import setup\n"
+            "setup(name='tiny_pkg', version='0.0.1', packages=['tiny_pkg'],\n"
+            "      data_files=[('share/ament_index/resource_index/packages', ['resource/tiny_pkg']),\n"
+            "                  ('share/tiny_pkg', ['package.xml'])])\n")
+        (pkg / "package.xml").write_text(
+            '<?xml version="1.0"?><package format="3"><name>tiny_pkg</name><version>0.0.1</version>'
+            '<description>t</description><maintainer email="a@b.c">a</maintainer><license>MIT</license>'
+            '<export><build_type>ament_python</build_type></export></package>')
+        (build_ws / "install").mkdir()
+        (build_ws / "install" / "setup.bash").write_text("# not built yet\n")
+        before = helper(env, "set", "workspace", str(build_ws))
+        check(any("Not built yet: tiny_pkg" in i["text"] for i in before.get("environment", [])),
+              "build: an unbuilt package is pointed out", before.get("environment"))
+        check(helper(env, "build", "no_such_pkg").get("ok") is False, "build: an unknown package is refused")
+        started = helper(env, "build", "tiny_pkg")
+        check(started.get("ok") is True, "build: colcon starts", started)
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline and helper(env, "runs")["running"].get("build"):
+            time.sleep(1)
+        ended = [h for h in helper(env, "runs")["history"] if h["tool"] == "build"]
+        check(ended and ended[0]["returncode"] == 0, "build: it finishes", ended[:1])
+        check(ros_info.build_progress().get("finished") == ["tiny_pkg"], "build: progress names the finished package",
+              ros_info.build_progress())
+        after = helper(env, "status")
+        check(not any("Not built" in i["text"] for i in after.get("environment", [])),
+              "build: once built, nothing is pointed out", after.get("environment"))
+        helper(env, "set", "all", "")
+    else:
+        print("SKIP build: colcon is not installed")
 
     subprocess.run(["rm", "-rf", str(home)])
     print(f"\n{failures} check(s) failed" if failures else "\nAll ROS panel checks passed.")

@@ -23,6 +23,7 @@ const PanelMenu = imports.ui.panelMenu;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const CC = Me.imports.ccUtil;
+const Sparkline = Me.imports.sparkline;
 
 const HELPER = Me.dir.get_child('tools').get_child('ros_info.py').get_path();
 const LIST_MAX_HEIGHT = 680;
@@ -33,6 +34,11 @@ const REQUEST_REPLY_TIMEOUT_MS = 7000;
 // A call may wait 10 s for its service, a goal 30 s for its result.
 const CALL_REPLY_TIMEOUT_MS = 15000;
 const GOAL_REPLY_TIMEOUT_MS = 40000;
+// The helper ends a plot after ten minutes; this only catches a lost reply.
+const PLOT_REPLY_TIMEOUT_MS = 610000;
+const PLOT_SAMPLES = 120;
+const LOG_LINES = 60;
+const PLOT_ACCENT = '#0A84FF';
 const ARM_MS = 5000;
 const RUNS_POLL_S = 5;
 const PAGE_ROWS = 40;
@@ -56,8 +62,10 @@ const CONTROLLER_NEXT = { unconfigured: 'configure', inactive: 'activate', activ
 const WINDOWED = new Set(['rviz2', 'gazebo', 'rqt', 'rqt_graph']);
 const TOOL_NAMES = {
     rviz2: 'RViz2', gazebo: 'Gazebo', rqt: 'rqt', rqt_graph: 'rqt_graph',
-    demo: 'The demo', launch: 'Launch', bag: 'Rosbag',
+    demo: 'The demo', launch: 'Launch', bag: 'Rosbag', node: 'Node', build: 'Build', plot: 'rqt_plot',
 };
+const PAUSABLE = new Set(['build', 'launch', 'node']);
+const GROUP_TRANSITIONS = ['configure', 'activate', 'deactivate', 'cleanup'];
 // rcl_interfaces ParameterType: 5 to 9 are the arrays (5 of bytes).
 const PARAMETER_ARRAY = new Set([5, 6, 7, 8, 9]);
 
@@ -184,6 +192,24 @@ var RosPanel = class RosPanel {
         this._setupDraft = null;
         this._launchDraft = null;
         this._parameterDraft = null;
+        this._paramProfileDraft = null;
+        // A parameter profile compared with the running node before applying.
+        this._paramDiff = null;
+        this._profileDraft = null;
+        // A run's log, filtered, under Running from here: { tool, query, severity, text }.
+        this._logView = null;
+        this._bagDraft = null;
+        // Topics ticked for the next recording; null records what the list shows.
+        this._bagTopics = null;
+        this._tfLookup = null;
+        this._plotDraft = null;
+        // The live plot: { topic, field, values, id }; its strip is redrawn in place.
+        this._plot = null;
+        this._lifecycleSelection = new Set();
+        this._lifecycleResult = null;
+        // The focused graph view: { kind, name, back: [...] }.
+        this._focus = null;
+        this._scrollToTop = false;
         this._searchText = '';
         // The one write waiting for its confirming click: { key, until }.
         this._armed = null;
@@ -291,6 +317,11 @@ var RosPanel = class RosPanel {
                 this._setupDraft = null;
                 this._launchDraft = null;
                 this._parameterDraft = null;
+                this._paramProfileDraft = null;
+                this._paramDiff = null;
+                this._profileDraft = null;
+                this._bagDraft = null;
+                this._stopPlot();
                 this._disarm();
                 this._setWatchMode(false);
                 this._scheduleStop();
@@ -481,6 +512,8 @@ var RosPanel = class RosPanel {
             const before = this._runs;
             this._runs = reply;
             this._noticeRuns(before, reply);
+            if (this._logView && this._button.menu.isOpen)
+                this._loadLogView(true);
             this._syncIndicator();
             const running = Object.values(reply.running || {}).some(list => list.length);
             if (running) {
@@ -572,7 +605,10 @@ var RosPanel = class RosPanel {
         this._rates.clear();
         this._samples.clear();
         this._tf = null;
+        this._tfLookup = null;
         this._health = null;
+        this._stopPlot();
+        this._lifecycleResult = null;
         this._presentFavorites = null;
         this._nodesKey = null;
         for (const composer of this._composers.values())
@@ -628,6 +664,10 @@ var RosPanel = class RosPanel {
                     GLib.source_remove(pending.timeoutId);
                 pending.done(message);
             }
+        } else if (message.type === 'progress') {
+            const pending = this._pending.get(message.id);
+            if (pending && pending.progress)
+                pending.progress(message);
         } else if (message.type === 'error') {
             this._watchError = message.error;
             this._render();
@@ -719,13 +759,13 @@ var RosPanel = class RosPanel {
         }
     }
 
-    _request(cmd, fields, done, timeoutMs = REQUEST_REPLY_TIMEOUT_MS) {
+    _request(cmd, fields, done, timeoutMs = REQUEST_REPLY_TIMEOUT_MS, progress = null) {
         if (!this._watch) {
             done({ error: 'ROS 2 is not being watched' });
-            return;
+            return 0;
         }
         const id = this._nextId++;
-        const pending = { done, cmd, fields, timeoutId: 0 };
+        const pending = { done, cmd, fields, progress, timeoutId: 0 };
         pending.timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
             if (this._pending.get(id) === pending) {
                 this._pending.delete(id);
@@ -742,6 +782,7 @@ var RosPanel = class RosPanel {
             GLib.source_remove(pending.timeoutId);
             done({ error: 'The ROS helper stopped' });
         }
+        return id;
     }
 
     _setWatchMode(active) {
@@ -950,6 +991,8 @@ var RosPanel = class RosPanel {
     // What Record records: the topics the graph shows (narrowed by the
     // search), or every topic (`null`) before the graph is known.
     _topicsToRecord() {
+        if (this._bagTopics)
+            return [...this._bagTopics].sort();
         return this._graph ? this._graph.topics
             .filter(topic => !topic.system && this._matches(topic))
             .map(topic => topic.name) : null;
@@ -958,7 +1001,8 @@ var RosPanel = class RosPanel {
     _recordTopics() {
         const topics = this._topicsToRecord();
         if (topics && !topics.length) {
-            this._notes.bag = { text: 'No topic to record: the search shows none', error: true };
+            this._notes.bag = { text: this._bagTopics ? 'No topic to record: tick one under Topics'
+                : 'No topic to record: the search shows none', error: true };
             this._render();
             return;
         }
@@ -972,12 +1016,22 @@ var RosPanel = class RosPanel {
         });
     }
 
-    _playBag(path) {
+    _playBag(path, options = null) {
+        options = options || { rate: '1', loop: false, clock: false };
         this._notes.bag = { text: 'Starting playback…' };
         this._render();
-        this._helper(['bag-play', path], reply => {
+        this._helper(['bag-play', path, String(options.rate || 1),
+            ...(options.loop ? ['loop'] : []), ...(options.clock ? ['clock'] : [])], reply => {
             this._notes.bag = reply.ok ? null : { text: reply.error, error: true };
+            this._bagDraft = null;
             this._loadStatus();
+            this._pollRuns();
+        });
+    }
+
+    _bagControl(operation) {
+        this._helper(['bag-control', operation], reply => {
+            this._notes.bag = reply.ok ? null : { text: reply.error, error: true };
             this._pollRuns();
         });
     }
@@ -1048,11 +1102,25 @@ var RosPanel = class RosPanel {
             composer.busy = true;
             composer.reply = null;
             const timeout = cmd === 'goal' ? GOAL_REPLY_TIMEOUT_MS : CALL_REPLY_TIMEOUT_MS;
-            this._request(cmd, { name, type, value: composer.text }, reply => {
+            composer.requestId = this._request(cmd, { name, type, value: composer.text }, reply => {
                 composer.busy = false;
+                composer.requestId = 0;
                 composer.reply = reply;
                 this._queueRender();
-            }, timeout);
+            }, timeout, progress => {
+                composer.feedback = progress;
+                this._queueRender();
+            });
+        });
+    }
+
+    _cancelGoal(composer) {
+        if (!composer.requestId)
+            return;
+        this._request('cancel_goal', { goal_id: composer.requestId }, reply => {
+            if (reply.error)
+                composer.reply = reply;
+            this._queueRender();
         });
     }
 
@@ -1111,6 +1179,10 @@ var RosPanel = class RosPanel {
             map(this._samples), map(this._composers), map(this._pages), this._notes, this._searchText,
             this._parameterDraft, this._packagePath, this._armed && this._armed.key,
             this._status && this._status.favorites,
+            this._paramProfileDraft, this._paramDiff, this._profileDraft, this._logView, this._bagDraft,
+            this._bagTopics && [...this._bagTopics], this._tfLookup, this._plotDraft,
+            [...this._lifecycleSelection], this._lifecycleResult, this._focus,
+            this._status && [this._status.parameter_profiles, this._status.robot_profiles],
         ]);
     }
 
@@ -1152,7 +1224,8 @@ var RosPanel = class RosPanel {
                 subtitle: 'Nothing under /opt/ros has a setup.bash',
             })));
         } else {
-            block('setup', [status, this._domainDraft, this._setupDraft],
+            const runs = this._runs || {};
+            block('setup', [status, this._domainDraft, this._setupDraft, runs.build, (runs.running || {}).build],
                 () => this._out.add_child(this._setup(status)));
             block('launch', [status, this._runs, this._launchDraft, [...this._dismissed], this._graph !== null],
                 () => this._addLaunch(status));
@@ -1174,7 +1247,8 @@ var RosPanel = class RosPanel {
         this._scrollId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._scrollId = 0;
             if (this._button)
-                adjustment.value = Math.min(scrolled, adjustment.upper - adjustment.page_size);
+                adjustment.value = this._scrollToTop ? 0 : Math.min(scrolled, adjustment.upper - adjustment.page_size);
+            this._scrollToTop = false;
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -1407,6 +1481,25 @@ var RosPanel = class RosPanel {
                 this._packagePath = item.path;
                 this._launchDraft = null;
             }, (packages.find(p => p.path === this._packagePath) || {}).name || 'All packages'));
+            if (status.tools.build.installed)
+                this._addBuild(box, status, packages.find(p => p.path === this._packagePath));
+        }
+
+        for (const issue of status.environment || [])
+            box.add_child(this._note(issue.text, issue.level === 'error'));
+
+        const profiles = status.robot_profiles || [];
+        if (profiles.length)
+            box.add_child(this._dropdown('Robot profile', profiles, item => this._useRobotProfile(item.name), 'Choose…'));
+        if (this._profileDraft !== null) {
+            box.add_child(this._textEntry({ text: this._profileDraft || '', hint: 'Robot profile name', focus: true,
+                onChange: text => { this._profileDraft = text; },
+                onActivate: text => this._saveRobotProfile(text),
+                onEscape: () => { this._profileDraft = null; this._render(); } }));
+        } else {
+            box.add_child(this._smallButton('Save robot profile', () => {
+                this._profileDraft = named ? named.name : 'Robot'; this._render();
+            }));
         }
 
         this._addSetups(box, status);
@@ -1525,6 +1618,70 @@ var RosPanel = class RosPanel {
         });
     }
 
+    // Build the workspace or the chosen package; while it runs, how far it is.
+    _addBuild(box, status, selectedPackage) {
+        const builds = ((this._runs && this._runs.running) || status.runs || {}).build || [];
+        const progress = (this._runs && this._runs.running ? this._runs.build : status.build) || {};
+        const note = this._notes.build;
+        const failed = progress.failed || [];
+        let subtitle = note ? note.text : 'colcon build, the way this workspace was built last';
+        if (builds.length) {
+            const done = (progress.finished || []).length;
+            const started = Math.max(done, (progress.started || []).length);
+            subtitle = `${builds[0].paused ? 'Paused' : 'Building'} · ${done} of ${plural(started, 'package')} done` +
+                `${failed.length ? ` · ${failed.join(', ')} failed` : ''}`;
+        }
+        box.add_child(CC.makeRow({
+            icon: 'system-run-symbolic',
+            title: builds.length ? builds[0].meta.name || 'Build' : selectedPackage ? `Build ${selectedPackage.name}` : 'Build workspace',
+            subtitle,
+            alert: !!(note && note.error) || failed.length > 0,
+            active: builds.length > 0,
+            actions: builds.length ? [
+                { label: 'Log', quiet: true, onClick: () => this._openLogView('build') },
+                { label: 'Stop', onClick: () => this._stop('build') },
+            ] : [{ label: 'Build', quiet: true, onClick: () => this._buildWorkspace(selectedPackage ? [selectedPackage.name] : []) }],
+        }));
+        if (builds.length && progress.last)
+            box.add_child(this._note(progress.last));
+    }
+
+    _buildWorkspace(packages) {
+        this._notes.build = { text: 'Starting the build…' };
+        this._render();
+        this._helper(['build', ...packages], reply => {
+            this._notes.build = reply.ok ? null : { text: reply.error, error: true };
+            this._loadStatus();
+            this._pollRuns();
+        });
+    }
+
+    _saveRobotProfile(name) {
+        const selected = (this._status.packages || []).find(p => p.path === this._packagePath);
+        this._helper(['save-robot-profile', name.trim(), selected ? selected.name : ''], reply => {
+            this._profileDraft = null;
+            if (reply.ok)
+                this._status.robot_profiles = reply.robot_profiles;
+            this._notes.setup = reply.ok ? null : { text: reply.error, error: true };
+            this._render();
+        });
+    }
+
+    _useRobotProfile(name) {
+        this._helper(['use-robot-profile', name], reply => {
+            if (reply.ok) {
+                this._status = reply;
+                this._notes.setup = null;
+                const selected = (reply.packages || []).find(p => p.name === (reply.profile || {}).package);
+                this._packagePath = selected ? selected.path : '';
+                this._restartWatch();
+            } else {
+                this._notes.setup = { text: reply.error, error: true };
+            }
+            this._render();
+        });
+    }
+
     // -------------------------------------------------------------- launch
 
     _addLaunch(status) {
@@ -1582,9 +1739,117 @@ var RosPanel = class RosPanel {
                     { label: 'Log', onClick: () => this._terminal('open-log', 'node') },
                     { label: 'Stop', onClick: () => this._stop('node') },
                 ] }));
+        this._addRunManager(status);
         this._addCrashes(status);
         if (status.tools.bag.installed)
             this._addBags(status);
+    }
+
+    // Everything started from the panel in one list: its log, pause, restart, stop.
+    _addRunManager(status) {
+        const running = (this._runs && this._runs.running) || status.runs || {};
+        const entries = Object.entries(running).flatMap(([tool, runs]) => runs.map(run => ({ tool, ...run })));
+        const now = Date.now() / 1000;
+        this._section('run-manager', `Running from here · ${entries.length}`, () => {
+            if (!entries.length)
+                this._out.add_child(this._note('Nothing started from this panel is running'));
+            for (const run of entries) {
+                const meta = run.meta || {};
+                const recording = run.tool === 'bag' && !meta.play;
+                this._out.add_child(CC.makeRow({
+                    icon: run.tool === 'build' ? 'system-run-symbolic' : 'media-playback-start-symbolic',
+                    title: meta.name || TOOL_NAMES[run.tool] || title(run.tool),
+                    subtitle: `${TOOL_NAMES[run.tool] || title(run.tool)} · ${run.paused ? 'paused · ' : ''}` +
+                        `${seconds(now - (run.started || now))}`,
+                    active: !run.paused,
+                    actions: [
+                        { label: 'Log', quiet: true, onClick: () => this._openLogView(run.tool) },
+                        PAUSABLE.has(run.tool) ? {
+                            label: run.paused ? 'Resume' : 'Pause', quiet: true,
+                            onClick: () => this._controlRun(run.tool, run.paused ? 'resume' : 'pause'),
+                        } : null,
+                        recording ? null : { label: 'Restart', quiet: true, onClick: () => this._restartRun(run) },
+                        { label: 'Stop', onClick: () => this._stop(run.tool) },
+                    ].filter(Boolean),
+                }));
+                const note = this._notes[run.tool];
+                if (note && note.error)
+                    this._out.add_child(this._note(note.text, true));
+            }
+            if (this._logView)
+                this._addLogView(this._logView);
+        });
+    }
+
+    _addLogView(view) {
+        this._out.add_child(new St.Label({ text: `${TOOL_NAMES[view.tool] || title(view.tool)} log`,
+            style_class: 'adaptive-ros-group' }));
+        this._out.add_child(this._dropdown('Show', ['all', 'warning', 'error'].map(name => ({ name: title(name), path: name })),
+            item => { view.severity = item.path; this._loadLogView(); }, title(view.severity)));
+        this._out.add_child(this._textEntry({ text: view.query, hint: 'Filter the log, Enter to apply…',
+            onChange: text => { view.query = text; }, onActivate: () => this._loadLogView() }));
+        const output = new St.Label({ text: view.loading && !view.text ? 'Reading…' : view.text || 'No matching lines',
+            style_class: 'adaptive-ros-definition adaptive-ros-log' });
+        output.clutter_text.line_wrap = true;
+        output.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        this._out.add_child(output);
+        if (view.lines > view.shown)
+            this._out.add_child(this._note(`The last ${view.shown} of ${view.lines} lines`));
+        this._out.add_child(this._buttons([
+            { label: 'Follow in a terminal', onClick: () => this._terminal('open-log', view.tool) },
+            { label: 'Close', onClick: () => { this._logView = null; this._render(); } },
+        ]));
+    }
+
+    _openLogView(tool) {
+        this._logView = { tool, query: '', severity: 'all', text: '', lines: 0, shown: 0, loading: true };
+        this._expanded.add('section:run-manager');
+        this._loadLogView();
+    }
+
+    // `quiet`: the poll's refresh, which renders only when the text changed.
+    _loadLogView(quiet = false) {
+        const view = this._logView;
+        if (!view || (quiet && view.loading))
+            return;
+        view.loading = true;
+        this._helper(['log-tail', view.tool, view.query, view.severity, String(LOG_LINES)], reply => {
+            if (this._logView !== view)
+                return;
+            view.loading = false;
+            const text = reply.ok ? reply.text : reply.error;
+            if (quiet && text === view.text)
+                return;
+            view.text = text;
+            view.lines = reply.lines || 0;
+            view.shown = text ? text.split('\n').length : 0;
+            if (quiet)
+                this._queueRender();
+            else
+                this._render();
+        });
+        if (!quiet)
+            this._render();
+    }
+
+    _controlRun(tool, operation) {
+        this._helper(['run-control', tool, operation], reply => {
+            this._notes[tool] = reply.ok ? null : { text: reply.error, error: true };
+            this._pollRuns();
+        });
+    }
+
+    // Stop it, then start the same thing again.
+    _restartRun(run) {
+        const meta = run.meta || {};
+        this._helper(['stop', run.tool], () => {
+            if (run.tool === 'build')
+                this._buildWorkspace(meta.packages || []);
+            else if (run.tool === 'plot')
+                this._openRqtPlot(meta.expression);
+            else
+                this._restart({ tool: run.tool, meta, pgid: run.pgid, ended: 0 });
+        });
     }
 
     _toolRow(status, tool, icon, name, idle) {
@@ -1639,7 +1904,21 @@ var RosPanel = class RosPanel {
         this._addFiles(saved.map(item => ({ ...item, path: item.name })), 'Saved', name => this._launchSaved(name));
         this._addFiles(files, 'Files', path => {
             const last = saved.find(item => item.file === path);
-            this._launchDraft = { file: path, text: last ? last.args.join(' ') : '' };
+            this._launchDraft = { file: path, text: last ? last.args.join(' ') : '', loading: true, arguments: [] };
+            const draft = this._launchDraft;
+            this._helper(['launch-args', path], reply => {
+                if (this._launchDraft !== draft)
+                    return;
+                draft.loading = false;
+                draft.arguments = reply.ok ? reply.arguments : [];
+                draft.argumentError = reply.ok ? '' : reply.error;
+                for (const argument of draft.arguments) {
+                    const previous = (last ? last.args : []).find(value => value.startsWith(`${argument.name}:=`));
+                    argument.value = previous ? previous.slice(argument.name.length + 2) : argument.default;
+                }
+                draft.text = draft.arguments.length ? '' : draft.text;
+                this._render();
+            });
             this._render();
         }, file => this._launchDraft && this._launchDraft.file === file.path);
 
@@ -1648,24 +1927,54 @@ var RosPanel = class RosPanel {
             return;
         const box = new St.BoxLayout({ style_class: 'adaptive-ros-detail', vertical: true, x_expand: true });
         box.add_child(new St.Label({ text: draft.file.replace(GLib.get_home_dir(), '~'), style_class: 'adaptive-ros-meta' }));
-        const args = () => draft.text.split(/\s+/).filter(Boolean);
+        // Only what differs from a default is passed (and saved).
+        const args = () => draft.arguments && draft.arguments.length
+            ? draft.arguments.filter(argument => argument.value !== '' && argument.value !== argument.default)
+                .map(argument => `${argument.name}:=${argument.value}`)
+            : draft.text.split(/\s+/).filter(Boolean);
         const go = () => {
+            const missing = (draft.arguments || []).find(argument => argument.required && !argument.value);
+            if (missing) {
+                draft.error = `${missing.name} has no default; give it a value`;
+                this._render();
+                return;
+            }
             this._launchDraft = null;
             this._launch('launch', draft.file, args());
         };
-        box.add_child(this._textEntry({
-            text: draft.text,
-            hint: 'Arguments: name:=value …, Enter to launch',
-            focus: true,
-            onChange: text => {
-                draft.text = text;
-            },
-            onActivate: go,
-            onEscape: () => {
-                this._launchDraft = null;
-                this._render();
-            },
-        }));
+        const cancel = () => {
+            this._launchDraft = null;
+            this._render();
+        };
+        if (draft.loading) {
+            box.add_child(this._note('Reading the arguments it declares…'));
+        } else if (draft.arguments && draft.arguments.length) {
+            for (const argument of draft.arguments) {
+                const about = [argument.name, argument.required ? 'required' : '', argument.description];
+                box.add_child(this._note(about.filter(Boolean).join(' · ')));
+                if (argument.choices.length) {
+                    box.add_child(this._dropdown(`Argument ${argument.name}`, argument.choices.map(name => ({ name })),
+                        item => { argument.value = item.name; }, argument.value || 'Choose…'));
+                } else {
+                    box.add_child(this._textEntry({ text: argument.value || '',
+                        hint: argument.required ? 'Required' : `Default ${argument.default || '(empty)'}`,
+                        onChange: text => { argument.value = text; }, onActivate: go, onEscape: cancel }));
+                }
+            }
+            if (draft.error)
+                box.add_child(this._note(draft.error, true));
+        } else {
+            if (draft.argumentError)
+                box.add_child(this._note(`Argument discovery: ${draft.argumentError}`));
+            box.add_child(this._textEntry({
+                text: draft.text,
+                hint: 'Arguments: name:=value …, Enter to launch',
+                focus: true,
+                onChange: text => { draft.text = text; },
+                onActivate: go,
+                onEscape: cancel,
+            }));
+        }
         const savedHere = saved.find(item => item.file === draft.file);
         box.add_child(this._buttons([
             { label: 'Launch', onClick: go },
@@ -1745,6 +2054,12 @@ var RosPanel = class RosPanel {
             subtitle = `Records ${this._searchText ? 'the topics the search shows' : 'every topic shown below'}` +
                 `${status.bag_free ? ` · ${bytes(status.bag_free)} free` : ''}`;
         const busy = !!(recording || playing);
+        const paused = runs.some(run => run.paused);
+        const pausable = !!playing || !!status.bag_recording_pauses;
+        if (busy && paused && !note)
+            subtitle = `Paused · ${subtitle}`;
+        else if (!busy && !note && this._bagTopics && !this._isArmed('bag:record'))
+            subtitle = `Records ${plural(this._bagTopics.size, 'chosen topic')}`;
         this._out.add_child(CC.makeRow({
             icon: 'media-record-symbolic',
             title: 'Rosbag',
@@ -1752,12 +2067,35 @@ var RosPanel = class RosPanel {
             alert: !!(note && note.error),
             active: busy,
             actions: busy ? [
-                { label: 'Log', quiet: true, onClick: () => this._terminal('open-log', 'bag') },
+                { label: 'Log', quiet: true, onClick: () => this._openLogView('bag') },
+                pausable ? { label: paused ? 'Resume' : 'Pause', quiet: true,
+                    onClick: () => this._bagControl(paused ? 'resume' : 'pause') } : null,
                 { label: 'Stop', onClick: () => this._stop('bag') },
-            ] : [
+            ].filter(Boolean) : [
+                { label: 'Topics', quiet: true, onClick: () => this._toggle('bag:topics') },
                 { label: this._isArmed('bag:record') ? 'Confirm' : 'Record', quiet: true, onClick: () => this._recordTopics() },
             ],
         }));
+        if (this._expanded.has('bag:topics') && this._graph && !busy) {
+            const topics = this._graph.topics.filter(topic => !topic.system);
+            if (!this._bagTopics)
+                this._bagTopics = new Set(topics.filter(topic => this._matches(topic)).map(topic => topic.name));
+            for (const topic of topics) {
+                const selected = this._bagTopics.has(topic.name);
+                this._out.add_child(this._smallButton(`${selected ? '✓' : '○'} ${topic.name}`, () => {
+                    if (selected)
+                        this._bagTopics.delete(topic.name);
+                    else
+                        this._bagTopics.add(topic.name);
+                    this._render();
+                }, 'adaptive-ros-select'));
+            }
+            this._out.add_child(this._buttons([
+                { label: 'All', onClick: () => { this._bagTopics = new Set(topics.map(topic => topic.name)); this._render(); } },
+                { label: 'None', onClick: () => { this._bagTopics = new Set(); this._render(); } },
+                { label: 'What the list shows', onClick: () => { this._bagTopics = null; this._toggle('bag:topics'); } },
+            ]));
+        }
         for (const bag of status.bags || []) {
             const parts = [];
             if (bag.duration_s !== undefined)
@@ -1772,10 +2110,24 @@ var RosPanel = class RosPanel {
                 title: bag.name,
                 subtitle: parts.join(' · '),
                 actions: [
-                    busy ? null : { label: 'Play', quiet: true, onClick: () => this._playBag(bag.path) },
+                    busy ? null : { label: 'Play…', quiet: true, onClick: () => {
+                        this._bagDraft = { path: bag.path, rate: '1', loop: false, clock: false };
+                        this._render();
+                    } },
                     { label: 'Folder', quiet: true, onClick: () => this._openFolder(bag.path) },
                 ].filter(Boolean),
             }));
+            if (this._bagDraft && this._bagDraft.path === bag.path) {
+                const draft = this._bagDraft;
+                this._out.add_child(this._textEntry({ text: draft.rate, hint: 'Playback speed · 0.1 to 10',
+                    onChange: text => { draft.rate = text; } }));
+                this._out.add_child(this._buttons([
+                    { label: `${draft.loop ? '✓' : '○'} Loop`, onClick: () => { draft.loop = !draft.loop; this._render(); } },
+                    { label: `${draft.clock ? '✓' : '○'} Publish clock`, onClick: () => { draft.clock = !draft.clock; this._render(); } },
+                    { label: 'Start playback', onClick: () => this._playBag(bag.path, draft) },
+                    { label: 'Cancel', onClick: () => { this._bagDraft = null; this._render(); } },
+                ]));
+            }
         }
     }
 
@@ -1816,6 +2168,11 @@ var RosPanel = class RosPanel {
         block('health', [issues, graph.diagnostics, this._health, tfWarnings],
             () => this._addHealth(graph, issues, tfWarnings));
         block('favorites', [graph, status.favorites], () => this._addFavorites(graph));
+        if (this._focus)
+            block('focus', [graph.nodes, graph.topics], () => this._addFocus(graph));
+        const plot = this._plot;
+        if (plot)
+            block('plot', [plot.topic, plot.field, plot.error, plot.done], () => this._addPlot(plot));
 
         const demo = status.tools.demo;
         const stopDemo = (demo.owned_pids || []).length
@@ -1842,6 +2199,10 @@ var RosPanel = class RosPanel {
                 });
             }, stopDemo);
         });
+
+        const lifecycleNodes = graph.nodes.filter(node => node.lifecycle);
+        if (lifecycleNodes.length > 1)
+            block('lifecycle', [lifecycleNodes.map(node => node.name)], () => this._addLifecycleGroup(lifecycleNodes));
 
         block('topics', [filtered.topics, graph.topics.length], () => {
             this._section('topics', countLabel('Topics', filtered.topics.length, graph.topics.length), () => {
@@ -2071,11 +2432,193 @@ var RosPanel = class RosPanel {
                 this._out.add_child(this._note('No transforms arrived'));
             if (rows > TF_ROWS || tf.data.truncated)
                 this._out.add_child(this._note(`Showing ${Math.min(rows, TF_ROWS)} frames`));
+            if (frames.length)
+                this._addTfLookup(frames, tf.data.roots);
         }, { label: tf && !tf.busy ? 'Read again' : 'Read', onClick: () => this._fetchTf() },
         () => {
             if (!this._tf)
                 this._fetchTf();
         });
+    }
+
+    // Pick two frames: are they connected, and where is one in the other.
+    _addTfLookup(frames, roots) {
+        const parent = new Map(frames.map(frame => [frame.child, frame.parent]));
+        const rootOf = name => {
+            const seen = new Set();
+            while (parent.has(name) && !seen.has(name)) {
+                seen.add(name);
+                name = parent.get(name);
+            }
+            return name;
+        };
+        const choices = [...new Set([...roots, ...frames.map(frame => frame.child)])].sort().map(name => ({ name }));
+        const lookup = this._tfLookup || { source: '', target: '' };
+        const pick = which => item => {
+            this._tfLookup = { source: lookup.source, target: lookup.target, [which]: item.name };
+        };
+        this._out.add_child(new St.Label({ text: 'Where one frame is in another', style_class: 'adaptive-ros-group' }));
+        this._out.add_child(this._dropdown('Frame', choices, pick('source'), lookup.source || 'Choose…'));
+        this._out.add_child(this._dropdown('Seen from', choices, pick('target'), lookup.target || 'Choose…'));
+        if (!lookup.source || !lookup.target)
+            return;
+        if (lookup.source === lookup.target) {
+            this._out.add_child(this._note('Choose two different frames'));
+            return;
+        }
+        const [a, b] = [rootOf(lookup.source), rootOf(lookup.target)];
+        if (a !== b) {
+            this._out.add_child(this._note(`Not connected: ${lookup.source} is in the ${a} tree, ` +
+                `${lookup.target} in the ${b} tree`, true));
+            return;
+        }
+        const reply = lookup.reply;
+        if (reply && reply.error) {
+            this._out.add_child(this._note(reply.error, true));
+        } else if (reply) {
+            const fixed = list => list.map(value => value.toFixed(3)).join('  ');
+            const lines = [
+                `Position  ${fixed(reply.translation)} m`,
+                `Roll, pitch, yaw  ${fixed(reply.rpy)}°`,
+                `Quaternion  ${fixed(reply.rotation)}`,
+                reply.age_ms === null || reply.age_ms === undefined ? 'Static' : `${reply.age_ms} ms old`,
+            ];
+            const label = new St.Label({ text: lines.join('\n'), style_class: 'adaptive-ros-definition' });
+            this._out.add_child(label);
+        }
+        this._out.add_child(this._buttons([{
+            label: lookup.busy ? 'Looking up…' : reply ? 'Look up again' : 'Look up',
+            onClick: () => this._lookupTf(),
+        }]));
+    }
+
+    _lookupTf() {
+        const lookup = this._tfLookup;
+        if (!lookup || lookup.busy)
+            return;
+        lookup.busy = true;
+        lookup.reply = null;
+        this._request('tf_lookup', { source: lookup.source, target: lookup.target }, reply => {
+            if (this._tfLookup !== lookup)
+                return;
+            this._tfLookup = { source: lookup.source, target: lookup.target, busy: false, reply };
+            this._queueRender();
+        });
+        this._render();
+    }
+
+    // One transition for several lifecycle nodes, and how each one took it.
+    _addLifecycleGroup(nodes) {
+        this._section('lifecycle', `Lifecycle group · ${plural(nodes.length, 'node')}`, () => {
+            const outcome = this._lifecycleResult;
+            for (const node of nodes) {
+                const chosen = this._lifecycleSelection.has(node.name);
+                const result = outcome && outcome.results ? outcome.results[node.name] : undefined;
+                const after = result === undefined ? '' : result ? ` · ${outcome.transition} done` : ` · turned ${outcome.transition} down`;
+                this._out.add_child(this._smallButton(`${chosen ? '✓' : '○'} ${node.name}${after}`, () => {
+                    if (chosen)
+                        this._lifecycleSelection.delete(node.name);
+                    else
+                        this._lifecycleSelection.add(node.name);
+                    this._render();
+                }, result === false ? 'adaptive-ros-select adaptive-network-warn' : 'adaptive-ros-select'));
+            }
+            const chosen = nodes.map(node => node.name).filter(name => this._lifecycleSelection.has(name));
+            this._out.add_child(this._buttons([
+                { label: 'All', onClick: () => { nodes.forEach(node => this._lifecycleSelection.add(node.name)); this._render(); } },
+                { label: 'None', onClick: () => { this._lifecycleSelection.clear(); this._render(); } },
+            ]));
+            if (!chosen.length) {
+                this._out.add_child(this._note('Tick the nodes, then choose a transition'));
+            } else {
+                this._out.add_child(this._buttons(GROUP_TRANSITIONS.map(transition => {
+                    const armed = this._isArmed(`lifecycle-group:${transition}`);
+                    return { label: armed ? `Confirm ${transition} ${chosen.length}` : title(transition), armed,
+                        onClick: () => this._lifecycleGroup(transition, chosen) };
+                })));
+            }
+            if (outcome && outcome.busy)
+                this._out.add_child(this._note(`${title(outcome.transition)}…`));
+            else if (outcome && outcome.error)
+                this._out.add_child(this._note(outcome.error, true));
+        });
+    }
+
+    _lifecycleGroup(transition, names) {
+        this._confirmed(`lifecycle-group:${transition}`, () => {
+            this._lifecycleResult = { busy: true, transition };
+            this._request('lifecycle_group', { nodes: names, transition }, reply => {
+                this._lifecycleResult = { transition, results: reply.results || {}, error: reply.error || '' };
+                for (const node of this._graph ? this._graph.nodes : []) {
+                    if (names.includes(node.name) && this._expanded.has(`node:${node.name}`))
+                        this._fetchNode(node);
+                }
+                this._queueRender();
+            }, CALL_REPLY_TIMEOUT_MS);
+        });
+    }
+
+    // A node with the topics in and out of it, or a topic with the nodes on
+    // either end; a click on a neighbour moves the focus there.
+    _focusOn(kind, name) {
+        const back = this._focus ? [...this._focus.back, { kind: this._focus.kind, name: this._focus.name }] : [];
+        this._focus = { kind, name, back: back.slice(-10) };
+        this._expanded.add('section:focus');
+        this._scrollToTop = true;
+        this._render();
+    }
+
+    _addFocus(graph) {
+        const focus = this._focus;
+        const topics = new Map(graph.topics.map(topic => [topic.name, topic]));
+        const node = focus.kind === 'node' ? graph.nodes.find(item => item.name === focus.name) : null;
+        const topic = focus.kind === 'topic' ? topics.get(focus.name) : null;
+        const goBack = () => {
+            const previous = focus.back[focus.back.length - 1];
+            this._focus = previous ? { ...previous, back: focus.back.slice(0, -1) } : null;
+            this._render();
+        };
+        this._section('focus', `Graph view · ${focus.name}`, () => {
+            if (!node && !topic) {
+                this._out.add_child(this._note(`${focus.name} is no longer in the graph`));
+                return;
+            }
+            const side = (heading, items, empty) => {
+                this._out.add_child(new St.Label({ text: heading, style_class: 'adaptive-ros-group' }));
+                if (!items.length)
+                    this._out.add_child(this._note(empty));
+                for (const item of items) {
+                    const line = new St.BoxLayout({ style_class: 'adaptive-ros-focus-row', x_expand: true });
+                    const button = this._smallButton(item.name, () => this._focusOn(item.kind, item.name), 'adaptive-ros-name');
+                    button.get_child().ellipsize = Pango.EllipsizeMode.MIDDLE;
+                    line.add_child(button);
+                    if (item.meta) {
+                        const meta = new St.Label({ text: item.meta, style_class: 'adaptive-ros-meta', x_expand: true,
+                            y_align: Clutter.ActorAlign.CENTER });
+                        meta.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+                        line.add_child(meta);
+                    }
+                    this._out.add_child(line);
+                }
+            };
+            const peers = (list, own) => (list || []).filter(name => name !== own);
+            if (node) {
+                side('In ↓  topics it subscribes to', node.subscribers.map(t => {
+                    const from = peers((topics.get(t.name) || {}).publishers, node.name);
+                    return { kind: 'topic', name: t.name, meta: from.length ? `from ${names(from)}` : 'nobody publishes it' };
+                }), 'Subscribes to nothing');
+                this._out.add_child(new St.Label({ text: `●  ${node.name}`, style_class: 'adaptive-ros-focus-centre' }));
+                side('Out ↓  topics it publishes', node.publishers.map(t => {
+                    const to = peers((topics.get(t.name) || {}).subscribers, node.name);
+                    return { kind: 'topic', name: t.name, meta: to.length ? `to ${names(to)}` : 'no subscribers' };
+                }), 'Publishes nothing');
+            } else {
+                side('In ↓  publishers', topic.publishers.map(name => ({ kind: 'node', name })), 'Nobody publishes it');
+                this._out.add_child(new St.Label({ text: `●  ${topic.name} · ${topic.types.join(', ')}`,
+                    style_class: 'adaptive-ros-focus-centre' }));
+                side('Out ↓  subscribers', topic.subscribers.map(name => ({ kind: 'node', name })), 'Nobody subscribes');
+            }
+        }, { label: focus.back.length ? 'Back' : 'Close', onClick: goBack });
     }
 
     // A heading that folds the rows `fill` adds under it.
@@ -2209,6 +2752,8 @@ var RosPanel = class RosPanel {
                 { warn: !peers.length });
         });
 
+        box.add_child(this._buttons([{ label: 'Show in the graph view', onClick: () => this._focusOn('node', node.name) }]));
+
         if (node.lifecycle) {
             box.add_child(new St.Label({ text: 'Lifecycle', style_class: 'adaptive-ros-group' }));
             const state = data.lifecycle;
@@ -2230,6 +2775,26 @@ var RosPanel = class RosPanel {
         }
         if (node.parameter_services) {
             box.add_child(new St.Label({ text: 'Parameters · click a value to change it', style_class: 'adaptive-ros-group' }));
+            const profiles = (this._status.parameter_profiles || []).filter(profile => profile.node === node.name);
+            const controls = new St.BoxLayout({ vertical: true, x_expand: true });
+            if (profiles.length)
+                controls.add_child(this._dropdown(`Parameter profile ${node.name}`, profiles,
+                    profile => this._compareParameterProfile(node.name, profile.name), 'Compare and restore…'));
+            const diff = this._paramDiff && this._paramDiff.node === node.name ? this._paramDiff : null;
+            if (diff)
+                this._addParameterDiff(controls, diff);
+            if (this._paramProfileDraft && this._paramProfileDraft.node === node.name) {
+                controls.add_child(this._textEntry({ text: this._paramProfileDraft.name, hint: 'Profile name', focus: true,
+                    onChange: text => { this._paramProfileDraft.name = text; },
+                    onActivate: text => this._parameterProfile('save', node.name, text),
+                    onEscape: () => { this._paramProfileDraft = null; this._render(); } }));
+            } else {
+                controls.add_child(this._smallButton('Save parameter profile', () => {
+                    this._paramProfileDraft = { node: node.name, name: node.name.split('/').pop() || 'parameters' };
+                    this._render();
+                }));
+            }
+            box.add_child(controls);
             if (detail.busy) {
                 box.add_child(this._note('Reading…'));
             } else if (data.parameters) {
@@ -2250,6 +2815,63 @@ var RosPanel = class RosPanel {
         if (note)
             box.add_child(this._note(note.text, note.error));
         return box;
+    }
+
+    _compareParameterProfile(node, name) {
+        const diff = { node, name, busy: true };
+        this._paramDiff = diff;
+        this._helper(['parameter-profile', 'diff', node, name], reply => {
+            if (this._paramDiff !== diff)
+                return;
+            this._paramDiff = { node, name, busy: false, error: reply.ok ? '' : reply.error,
+                changes: reply.changes || [], unchanged: reply.unchanged || 0 };
+            this._render();
+        });
+    }
+
+    _addParameterDiff(box, diff) {
+        if (diff.busy) {
+            box.add_child(this._note(`Comparing ${diff.name} with the running node…`));
+            return;
+        }
+        if (diff.error) {
+            box.add_child(this._note(diff.error, true));
+        } else {
+            box.add_child(this._note(diff.changes.length
+                ? `${diff.name} would change ${plural(diff.changes.length, 'parameter')}` +
+                  `${diff.unchanged ? `; ${diff.unchanged} already match` : ''}`
+                : `${diff.name} matches the node as it is`));
+            const lines = diff.changes.map(change => change.missing
+                ? `${change.name}: not declared now → ${valueText(change.saved)}`
+                : `${change.name}: ${valueText(change.current)} → ${valueText(change.saved)}`);
+            if (lines.length)
+                box.add_child(new St.Label({ text: lines.join('\n'), style_class: 'adaptive-ros-definition' }));
+        }
+        const key = `param-profile:${diff.node}:${diff.name}`;
+        const armed = this._isArmed(key);
+        box.add_child(this._buttons([
+            diff.changes && diff.changes.length ? { label: armed ? `Confirm restoring ${diff.name}` : 'Restore', armed,
+                onClick: () => this._confirmed(key, () => this._parameterProfile('apply', diff.node, diff.name)) } : null,
+            { label: 'Cancel', onClick: () => { this._paramDiff = null; this._render(); } },
+        ]));
+    }
+
+    _parameterProfile(operation, node, name) {
+        this._helper(['parameter-profile', operation, node, name.trim()], reply => {
+            this._paramProfileDraft = null;
+            this._paramDiff = null;
+            if (reply.ok)
+                this._status.parameter_profiles = reply.parameter_profiles;
+            const skipped = reply.read_only ? `, ${reply.read_only} read-only left as they are` : '';
+            this._notes[`op:${node}`] = reply.ok ? {
+                text: operation === 'save' ? 'Parameter profile saved' : `Restored ${plural(reply.applied || 0, 'parameter')}${skipped}`,
+            } : { text: reply.error, error: true };
+            if (operation === 'apply' && reply.ok) {
+                const graphNode = (this._graph.nodes || []).find(item => item.name === node);
+                if (graphNode) this._fetchNode(graphNode);
+            }
+            this._render();
+        });
     }
 
     // Values are buttons: a click edits one (in its own type), Enter arms
@@ -2348,6 +2970,8 @@ var RosPanel = class RosPanel {
             top.add_child(this._rateButton(name));
         if (sample)
             top.add_child(this._sampleButton(name));
+        if (sample && types.length)
+            top.add_child(this._smallButton('Plot', () => this._preparePlot(name, types[0]), 'adaptive-ros-rate'));
         box.add_child(top);
 
         const bottom = new St.BoxLayout({ style_class: 'adaptive-ros-entry-meta', x_expand: true });
@@ -2371,11 +2995,135 @@ var RosPanel = class RosPanel {
             box.add_child(this._note(measured.error, true));
         if (sample && this._samples.has(name))
             box.add_child(this._preview(this._samples.get(name)));
+        if (this._plotDraft && this._plotDraft.topic === name) {
+            const draft = this._plotDraft;
+            if (draft.loading)
+                box.add_child(this._note('Reading numeric fields…'));
+            else if (draft.fields.length)
+                box.add_child(this._dropdown(`Plot field ${name}`, draft.fields.map(path => ({ name: path })),
+                    item => this._startPlot(name, item.name), draft.selected || 'Choose…'));
+            else
+                box.add_child(this._note(draft.error || 'This message has no numeric scalar fields', true));
+        }
         for (const type of types) {
             if (this._expanded.has(`iface:${where}:${type}`))
                 box.add_child(this._definition(type));
         }
         return box;
+    }
+
+    _preparePlot(topic, type) {
+        const draft = { topic, type, fields: [], loading: true, error: '' };
+        this._plotDraft = draft;
+        this._request('template', { kind: 'topic', type }, reply => {
+            if (this._plotDraft !== draft)
+                return;
+            draft.loading = false;
+            draft.error = reply.error || '';
+            draft.fields = (reply.fields || []).filter(field =>
+                /^(u?int|float|double)/.test(field.type) && !field.type.includes('[') && !field.type.includes('sequence'))
+                .map(field => field.path.join('/'));
+            this._render();
+        });
+        this._render();
+    }
+
+    // A live strip of one numeric field; new values redraw it in place, so the
+    // list is not rebuilt four times a second.
+    _startPlot(topic, field) {
+        this._stopPlot();
+        const plot = { topic, field, values: [], count: 0, error: '', done: false, id: 0, strip: null, label: null };
+        this._plot = plot;
+        this._plotDraft = null;
+        this._expanded.add('section:plot');
+        this._scrollToTop = true;
+        plot.id = this._request('plot', { name: topic, field }, reply => {
+            if (this._plot !== plot)
+                return;
+            plot.id = 0;
+            plot.done = true;
+            plot.error = reply.error || '';
+            this._queueRender();
+        }, PLOT_REPLY_TIMEOUT_MS, progress => {
+            if (this._plot !== plot)
+                return;
+            for (const [, value] of progress.values)
+                plot.values.push(value);
+            plot.values.splice(0, Math.max(0, plot.values.length - PLOT_SAMPLES));
+            plot.count = progress.count;
+            if (plot.strip)
+                plot.strip.setValues(plot.values);
+            if (plot.label)
+                plot.label.text = this._plotText(plot);
+        });
+        this._render();
+    }
+
+    _stopPlot() {
+        const plot = this._plot;
+        this._plot = null;
+        if (!plot || !plot.id)
+            return;
+        const pending = this._pending.get(plot.id);
+        if (pending) {
+            GLib.source_remove(pending.timeoutId);
+            this._pending.delete(plot.id);
+        }
+        if (this._watch)
+            this._request('cancel', { ids: [plot.id] }, () => {});
+    }
+
+    _plotText(plot) {
+        const values = plot.values;
+        if (!values.length)
+            return plot.done ? 'No values arrived' : 'Waiting for messages…';
+        const number = value => String(Number(value.toPrecision(5)));
+        return `Now ${number(values[values.length - 1])} · low ${number(Math.min(...values))} · ` +
+            `high ${number(Math.max(...values))} · ${plural(plot.count, 'message')}`;
+    }
+
+    _addPlot(plot) {
+        this._section('plot', `Plot · ${plot.topic}/${plot.field}`, () => {
+            const strip = new Sparkline.Sparkline(PLOT_ACCENT, 'range', PLOT_SAMPLES);
+            strip.actor.add_style_class_name('adaptive-ros-plot');
+            strip.setValues(plot.values);
+            const label = new St.Label({ text: this._plotText(plot), style_class: 'adaptive-ros-meta' });
+            plot.strip = strip;
+            plot.label = label;
+            // The block is rebuilt with the list; only the newest strip is fed.
+            strip.actor.connect('destroy', () => {
+                if (plot.strip === strip) {
+                    plot.strip = null;
+                    plot.label = null;
+                }
+            });
+            this._out.add_child(strip.actor);
+            this._out.add_child(label);
+            if (plot.error)
+                this._out.add_child(this._note(plot.error, true));
+            const rqt = this._status.tools.plot && this._status.tools.plot.installed;
+            this._out.add_child(this._buttons([
+                rqt ? { label: 'Open in rqt_plot', onClick: () => this._openRqtPlot(`${plot.topic}/${plot.field}`) } : null,
+                plot.done ? { label: 'Plot again', onClick: () => this._startPlot(plot.topic, plot.field) } : null,
+                { label: plot.done ? 'Close' : 'Stop', onClick: () => {
+                    this._stopPlot();
+                    this._render();
+                } },
+            ]));
+        });
+    }
+
+    // The larger plot in its own window.
+    _openRqtPlot(expression) {
+        this._helper(['plot', expression], reply => {
+            if (reply.ok) {
+                this._button.menu.close();
+                this._pollRuns();
+            } else if (this._plot) {
+                this._plot.error = reply.error;
+                this._render();
+            }
+        });
     }
 
     // The previewed message: an image as its thumbnail, else its fields.
@@ -2517,8 +3265,13 @@ var RosPanel = class RosPanel {
                 armed,
                 onClick: () => this._send(key, cmd, name, type),
             },
+            cmd === 'goal' && composer.busy ? {
+                label: 'Cancel goal', onClick: () => this._cancelGoal(composer),
+            } : null,
             { label: 'Close', onClick: () => this._toggleComposer(key) },
         ]));
+        if (composer.feedback)
+            box.add_child(this._note(`Feedback ${composer.feedback.feedback} · ${composer.feedback.text}`));
         const reply = composer.reply;
         if (reply && reply.error) {
             box.add_child(this._note(reply.error, true));
@@ -2577,6 +3330,7 @@ var RosPanel = class RosPanel {
             box.add_child(this._note(`QoS: ${warning}`, true));
         ends('Published by', data.publishers || [], topic.publishers);
         ends('Subscribed by', data.subscribers || [], topic.subscribers);
+        box.add_child(this._buttons([{ label: 'Show in the graph view', onClick: () => this._focusOn('topic', topic.name) }]));
         this._addComposerToggle(box, `publish:${topic.name}`, 'publish', topic.name, topic.types[0],
             'topic', 'Publish', 'Publish one message…');
         this._out.add_child(box);

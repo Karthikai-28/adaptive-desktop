@@ -368,6 +368,12 @@ def palette_modes():
     check(M.ros_rows("record /cam /imu", ros)[0]["action"][2][-3:] == ["bag-start", "/cam", "/imu"]
           and M.ros_rows("record cam", ros)[0]["action"] is None, "ros: record takes topic names")
     check(M.ros_rows("use bench", ros)[0]["action"][2][-2:] == ["use-setup", "Bench"], "ros: saved setups")
+    built = {**ros, "workspace": "/w", "packages": [{"name": "arm"}], "tools": {**ros["tools"], "build": {"installed": True}},
+             "robot_profiles": [{"name": "Rig", "domain": 4, "package": "arm"}]}
+    check([r["action"][2][-2:] for r in M.ros_rows("build", built)] == [["say", "build"], ["build", "arm"]]
+          and [r["title"] for r in M.ros_rows("build", {**built, "runs": {"build": [{"pgid": 1}]}})] == ["Stop build"],
+          "ros: build the workspace or one package, not while a build runs")
+    check(M.ros_rows("rig", built)[0]["action"][2][-2:] == ["use-robot-profile", "Rig"], "ros: robot profiles")
     check(M.ros_rows("zzz", ros)[0]["action"] is None, "ros: nothing matching says so")
 
     R = load(REPO / "scripts/adaptive-run-notify.py", "run_notify")

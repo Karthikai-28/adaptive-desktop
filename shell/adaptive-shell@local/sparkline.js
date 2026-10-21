@@ -26,12 +26,15 @@ function hexToRgb(hex) {
 var Sparkline = class Sparkline {
     // `accent` is a #rrggbb string; `scale` is the value that reaches the top of
     // the strip. Percentages pass 100; unbounded series (network throughput)
-    // pass null and get rescaled to their own running peak.
-    constructor(accent, scale = 100) {
+    // pass null and get rescaled to their own running peak; signed series (a
+    // ROS topic field) pass 'range' and span the window's own low to high.
+    constructor(accent, scale = 100, samples = SAMPLES) {
         this._accent = hexToRgb(accent);
         this._scale = scale;
-        this._values = new Array(SAMPLES).fill(NaN);
+        this._samples = samples;
+        this._values = new Array(samples).fill(NaN);
         this._peak = 0;
+        this._low = 0;
 
         this.actor = new St.DrawingArea({
             style_class: 'adaptive-shade-sparkline',
@@ -48,8 +51,24 @@ var Sparkline = class Sparkline {
     push(value) {
         this._values.shift();
         this._values.push(value);
+        this._rescale();
+        this.actor.queue_repaint();
+    }
 
-        if (this._scale === null) {
+    // The newest values, oldest first; older samples fall off the left.
+    setValues(values) {
+        const recent = values.slice(-this._samples);
+        this._values = [...new Array(this._samples - recent.length).fill(NaN), ...recent];
+        this._rescale();
+        this.actor.queue_repaint();
+    }
+
+    _rescale() {
+        if (this._scale === 'range') {
+            const finite = this._values.filter(Number.isFinite);
+            this._low = finite.length ? Math.min(...finite) : 0;
+            this._peak = finite.length ? Math.max(...finite) : 0;
+        } else if (this._scale === null) {
             // Autoscaling to the peak of the visible window only, so an old
             // burst does not flatten the chart forever after it scrolls off.
             this._peak = this._values.reduce(
@@ -57,12 +76,10 @@ var Sparkline = class Sparkline {
                 0
             );
         }
-
-        this.actor.queue_repaint();
     }
 
     reset() {
-        this._values = new Array(SAMPLES).fill(NaN);
+        this._values = new Array(this._samples).fill(NaN);
         this._peak = 0;
         this.actor.queue_repaint();
     }
@@ -104,23 +121,28 @@ var Sparkline = class Sparkline {
         cr.lineTo(width, height - 0.5);
         cr.stroke();
 
-        const scale = this._scale !== null
-            ? this._scale
-            : Math.max(this._peak, 1);
+        let low = 0;
+        let scale = this._scale !== null ? this._scale : Math.max(this._peak, 1);
+        if (this._scale === 'range') {
+            // A flat series sits mid-strip rather than on an edge.
+            const span = this._peak - this._low;
+            low = span > 0 ? this._low : this._low - 1;
+            scale = span > 0 ? span : 2;
+        }
 
         // Headroom top and bottom so a pegged series keeps its whole stroke,
         // and room on the right for the dot marking the latest sample.
         const inset = 3;
         const usable = Math.max(1, height - inset * 2);
-        const step = (width - inset) / (SAMPLES - 1);
+        const step = (width - inset) / (this._samples - 1);
 
         const points = [];
-        for (let i = 0; i < SAMPLES; i++) {
+        for (let i = 0; i < this._samples; i++) {
             const value = this._values[i];
             if (!Number.isFinite(value))
                 continue;
 
-            const clamped = Math.max(0, Math.min(1, value / scale));
+            const clamped = Math.max(0, Math.min(1, (value - low) / scale));
             points.push({
                 x: i * step,
                 y: inset + (1 - clamped) * usable,

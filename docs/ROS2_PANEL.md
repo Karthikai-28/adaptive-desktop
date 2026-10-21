@@ -33,9 +33,25 @@ does the panel's actions from the keyboard.
     Executables come from that workspace's merged or isolated install tree.
     Launch, config, world and executable choices use bounded, searchable dropdowns.
     Workspace launch discovery includes every matching file, rather than twelve recent files.
+  - **Build**: colcon build of the workspace, or of the chosen package
+    (`--packages-select`), run the way the workspace was built last: a build
+    tree like `proj/.build/humble` keeps its sources elsewhere, and its last
+    command line in `log/latest_build/logger_all.log` gives the base paths,
+    build and install base and `--symlink-install`. While it runs the row
+    shows "3 of 5 packages done", failed packages and the last output line,
+    with Log and Stop. The distro's environment is used, not the overlay
+    being built.
+  - **Environment checks** under the workspace say what would make a build or
+    a launch fail before it does: a middleware not installed for the distro,
+    no source folder, no colcon, packages not built yet, packages the last
+    build failed (colcon's `events.log`), and a package changed since then.
   - **Setups**: the current domain, discovery, middleware and workspace saved
     under a name (a robot, a bench); a dropdown applies one, the one in use is
     lit.
+  - **Robot profiles**: a setup plus the package, the favourites and the saved
+    launches, saved under a name. Using one applies the setup, then puts its
+    favourites back and adds its saved launches (one of the same name is
+    replaced).
   - When Project Context's active project is, holds (`proj/.build/<distro>`)
     or sits in a colcon workspace the panel does not use, the card offers
     **Use it** or **Always follow** (the workspace then follows the active
@@ -48,15 +64,28 @@ does the panel's actions from the keyboard.
   the panel started it Log and Stop. **Rescan files** walks the folders again
   (the search is kept five minutes).
   - **Launch files**: saved launches start at a click; a launch file from a
-    workspace's `src` first asks for its arguments (`name:=value …`, nothing
-    else is taken) and can be saved with them.
+    workspace's `src` first shows a form of the arguments it declares
+    (`ros2 launch … --show-args`): each with its description and default,
+    a dropdown when it declares choices, and "required" when it has no default
+    (Launch holds back until it is given). Only values that differ from a
+    default are passed and saved. A file whose arguments cannot be read falls
+    back to a `name:=value …` entry.
+  - **Running from here** (the run manager): everything the panel started, in
+    one list, with how long it has run, **Log**, **Pause**/**Resume** (builds,
+    launches and nodes, by SIGSTOP/SIGCONT), **Restart** and **Stop**. Log
+    opens the run's last 60 lines in the panel, filtered by text and by
+    severity (warnings, errors), following the run while it is open.
   - A run the panel started that exited by itself with an error stays listed
     for a day with its exit code, **Log** and **Restart**.
   - **Rosbag**: Record records the topics the graph shows (narrowed by the
     search) into `~/.local/share/adaptive-desktop/rosbags`, after a confirming
-    click; while it runs the row shows its size and length. Recent bags are
-    listed with length, messages, topics and size, with Play and Folder. One
-    bag runs at a time.
+    click, or the topics ticked under **Topics**; while it runs the row shows
+    its size and length. Recent bags are listed with length, messages, topics
+    and size, with Play… (speed 0.1 to 10, loop, publish `/clock` for
+    simulated time) and Folder. Playback pauses and resumes through rosbag2's
+    own `/rosbag2_player/pause` service; recording pauses only from Iron on
+    (Humble's recorder has no pause service, so the button is not offered).
+    One bag runs at a time.
 - **Health**: what looks wrong, worst first: duplicate node names, topics
   someone listens to that nobody publishes, services and actions with clients
   but no server, QoS mismatches (a best-effort publisher with a reliable
@@ -67,6 +96,15 @@ does the panel's actions from the keyboard.
 - **Favourites**: starred nodes, topics, services and actions (the star on
   each row), as a compact dashboard: counts, the last measured rate, and
   "not in the graph now" for one that left.
+- **Graph view**: **Show in the graph view** on a node or a topic focuses the
+  graph on it: a node with the topics coming in (and who publishes them) and
+  going out (and who subscribes), a topic with its publishers and
+  subscribers. A click on a neighbour moves the focus there; Back returns.
+- **Plot**: Plot on a topic lists the message's numeric fields; choosing one
+  draws it live in the panel (the last 120 values, scaled to their own low and
+  high, with now, low, high and the message count). **Open in rqt_plot** opens
+  the larger plot in its own window. One plot at a time; it stops after ten
+  minutes, when the panel closes, or on Stop.
 - **Nodes**: every visible node with what it has. Expanding a node shows its
   topics (type, the nodes on the other end, QoS, Hz, Preview), services and
   clients, actions, its enclave, and:
@@ -75,7 +113,14 @@ does the panel's actions from the keyboard.
     double is 2.0; lists as `[1, 2]`); Enter arms the change, a second Enter
     sends it. Arrays longer than 64 items are shown cut and not editable;
   - its lifecycle state, with the transitions it can take (Configure,
-    Activate, Cleanup, Deactivate), each confirmed.
+    Activate, Cleanup, Deactivate), each confirmed;
+  - parameter profiles: **Save parameter profile** keeps the node's
+    parameters (`ros2 param dump`) under a name; choosing a saved one first
+    compares it with the running node ("would change 2 parameters", each
+    `now → saved`), then **Restore** loads it after a confirming click.
+- **Lifecycle group** (with two or more lifecycle nodes): tick nodes, then
+  Configure, Activate, Deactivate or Cleanup them together after a confirming
+  click; each node shows whether it took the transition.
   Clicking any type shows its definition (`.msg`, `.srv`, `.action`).
 - **Topics**, **Services**, **Actions**: the whole graph by name, folded by
   default, forty rows at a time (Show more), each row expandable the same
@@ -85,12 +130,16 @@ does the panel's actions from the keyboard.
   **Send a goal…** open a form generated from the request type (nested scalar fields, boolean
   dropdowns, and JSON array inputs),
   and send them after a confirming click, showing the response, the goal's
-  result or how many subscribers got the message. A goal without a result in
-  30 s is cancelled.
+  result or how many subscribers got the message. A goal shows its feedback
+  as it arrives and can be cancelled (**Cancel goal**); one without a result
+  in 30 s is cancelled.
 - **TF tree**: read on demand (1.5 s of `/tf` and `/tf_static`): each frame
   under its parent, static ones marked, moving ones with rate and age; more
   than one root, a frame with two parents and a frame older than a second are
-  reported in Health.
+  reported in Health. Under the tree, pick a frame and the frame to see it
+  from: frames in separate trees are said to be unconnected at once;
+  otherwise Look up gives the position, roll/pitch/yaw, quaternion and the
+  transform's age (or "Static").
 - **Controllers**: ros2_control controllers and their state when a
   controller_manager runs, with Configure, Activate or Deactivate (confirmed).
   Load accepts a configured controller name; inactive or unconfigured controllers
@@ -120,7 +169,8 @@ while the panel is open and for a minute after it closes.
 
 `ros` lists the panel's actions: the ROS terminal, Open RViz2 (with each
 config), Gazebo, rqt, Launch (saved launches and launch files), Record every
-topic, Play a bag, Stop what the panel started, Use a saved setup. Words after
+topic, Play a bag, Stop what the panel started, Use a saved setup or robot
+profile, Build the workspace or one package. Words after
 `ros` filter them; `ros record /a /b` records those topics and `ros domain 7`
 switches the domain. Each runs the helper's `say`, so the notification is a
 sentence.
@@ -156,6 +206,10 @@ shell never loads ROS itself.
   a controller switch) wait until the service or action server is there, then
   send once; every client, publisher and action client is destroyed when its
   reply is out.
+- **Streams**: a goal's feedback and a plot's values come as `progress` lines
+  carrying the request id before (or instead of) its reply. A plot sends at
+  most four a second; the panel redraws its strip in place rather than
+  rebuilding the list.
 
 `shell/adaptive-shell@local/rosPanel.js` is the dropdown: it starts and stops
 the watcher, keeps what is unfolded and typed, and renders. The list is built
@@ -167,7 +221,7 @@ in an entry of the list.
 ## Checks
 
 ```sh
-python3 scripts/verify-ros-panel.py        # helper against real nodes, ~40 s
+python3 scripts/verify-ros-panel.py        # helper against real nodes, ~70 s
 python3 scripts/verify-ros-controllers.py  # sourced ROS + controller_manager_msgs required
 scripts/verify-shell-nested.sh --extra scripts/verify-ros-nested.sh
 python3 scripts/verify-feature-logic.py    # the palette's ros mode
@@ -177,8 +231,10 @@ The first two skip when ROS 2 is not installed. They use a private domain with
 localhost-only discovery, so they never see or disturb a real robot. The
 helper check runs a fixture node of its own (diagnostics, an image with a QoS
 mismatch, a moving TF frame, a typed parameter) next to the demos, a service,
-an action server and a static transform, and covers every request and write;
-the nested check drives the panel in a real GNOME Shell, writes included.
+an action server and a static transform, and covers every request and write,
+and builds a one-package workspace with colcon; the nested check drives the
+panel in a real GNOME Shell, writes included, with a second lifecycle node, a
+static transform and a number on `/level` for the group, TF lookup and plot.
 
 ## Gotchas
 
@@ -210,3 +266,20 @@ the nested check drives the panel in a real GNOME Shell, writes included.
   to use controller operations live; the UI reports its absence.
 - A custom workspace must have `install/setup.bash`; unbuilt source trees cannot
   supply ROS interfaces or executable nodes. None disables the workspace overlay.
+- `ros2 launch <file> --show-args` indents every argument (`    'name':`), its
+  description and `(default: 'x')`; a description may run over several lines,
+  the later ones not indented. "Valid choices are: [...]" ends a description.
+- `ros2 param dump` prints to stdout from Humble on (`--output-dir` is
+  deprecated). `ros2 param load` exits 0 when some parameters fail; it says so
+  per line. Every rclcpp node has read-only `qos_overrides.*`, which can never
+  be loaded back, so profiles leave them out and a read-only refusal counts
+  as skipped, not failed.
+- A stopped (SIGSTOP) process group holds SIGINT until it is continued: Stop
+  sends SIGCONT first, or a paused launch would wait out the grace time.
+- Bag playback is not paused by signal: rosbag2's player keeps time with a
+  steady clock and would send everything that fell due at once on resume.
+- `ros2 service call` waits for ever for a service that is not there, so the
+  bag's pause service is looked for in `ros2 service list` first.
+- rqt_plot is in the distro's `lib/rqt_plot/`, not on PATH.
+- `ros2 topic pub`'s own node is hidden (`_ros2cli_…`), so a topic only it
+  publishes is not listed; the plot still subscribes to it by name.
