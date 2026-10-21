@@ -91,6 +91,19 @@ guard.usage = {"rows": [dict(rows[0], percent=0, remaining="0%"),
                          dict(rows[2], percent=0, remaining="0%", resets="2099-01-01T00:00:00Z")]}
 assert guard.exhausted_until() == 1792095506.0, "only Gemini exhaustion may pause Gemini work"
 PY
+# An installed office may have the pre-mission task table. Migration must add the column before its index.
+PYTHONPATH="$APP" python3 - "$TMP/old.db" <<'PY' || fail "old database migration"
+import sqlite3, sys
+p = sys.argv[1]
+db = sqlite3.connect(p)
+db.execute("CREATE TABLE tasks (id INTEGER PRIMARY KEY, agent TEXT NOT NULL, title TEXT NOT NULL)")
+db.commit(); db.close()
+from office.store import Store
+s = Store(p)
+cols = {r[1] for r in s.db.execute("PRAGMA table_info(tasks)")}
+assert "mission_id" in cols
+assert any(r[1] == "tasks_mission" for r in s.db.execute("PRAGMA index_list(tasks)"))
+PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
 # 2. A throwaway server: API, guards, path traversal
@@ -120,6 +133,11 @@ MID="$(curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d
 curl -fsS "$B/api/missions/$MID" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["tasks"]) == 1 and "PASS or FAIL" in d["tasks"][0]["body"]' || fail "mission detail"
 [ "$(code -X POST -H 'X-Office: 1' "$B/api/missions/$MID/cancel")" = 200 ] || fail "cancel mission"
 curl -fsS "$B/api/missions/$MID" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"] == "cancelled" and d["tasks"][0]["status"] == "cancelled"' || fail "mission cancellation state"
+CID="$(curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d "{\"mission_id\":$MID,\"command\":\"pytest -q\",\"parameters\":{\"seed\":\"42\"},\"datasets\":[\"bag://test\"],\"results\":[\"report.md\"]}" "$B/api/capsules" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["schema"] == 1 and d["command"] == "pytest -q" and d["parameters"]["seed"] == "42"; print(d["id"])')" || fail "create work capsule"
+curl -fsS "$B/api/capsules/$CID" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["mission_id"] and d["path"].startswith("capsules/")' || fail "read work capsule"
+[ "$(code "$B/api/capsules/../../office.db")" = 404 ] || fail "capsule path traversal"
+curl -fsS "$B/api/evidence/search?q=checked%20result&mission_id=$MID" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["mission_id"] and any(r["kind"] == "mission" and r["ref"].startswith("mission:") for r in d["results"])' || fail "mission evidence search"
+[ "$(code "$B/api/evidence/search?q=test&mission_id=99999")" = 400 ] || fail "evidence search accepted an unknown mission"
 curl -fsS "$B/api/events?task_id=999&limit=4" | python3 -c 'import json,sys; assert json.load(sys.stdin) == []' || fail "task-filtered events"
 [ -d "$TMP/state/company/projects" ] || fail "state folder layout"
 curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' || fail "study api"

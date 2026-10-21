@@ -9,6 +9,9 @@
   office cancel <task id> | office retry <task id>
   office mission create "<title>" --objective TEXT --criterion TEXT [--agent ID] [--repo PATH|NAME]
   office mission list | office mission show <id> | office mission cancel <id>
+  office capsule create [--mission ID] [--command CMD] [--dataset REF] [--result REF]
+  office capsule list | office capsule show <id>
+  office evidence "search words" [--mission ID]
   office ask <agent> "<message>" [--no-wait]      direct message; waits for the reply
   office log [--agent A] [-n N]                   recent activity
   office meeting start "<topic>" --with maya,arjun[,claude]
@@ -184,6 +187,35 @@ def cmd_mission(a):
                 print(f"\nError: {m['error']}")
 
 
+def cmd_capsule(a):
+    if a.action == "create":
+        params = {}
+        for item in a.parameter or []:
+            if "=" not in item:
+                sys.exit("office: --parameter must be NAME=VALUE")
+            k, v = item.split("=", 1); params[k.strip()] = v.strip()
+        c = call("POST", "/api/capsules", {"mission_id": a.mission, "project": a.project or "",
+                 "repo": a.repo or "", "command": a.command or "", "launch_args": a.arg or [],
+                 "parameters": params, "datasets": a.dataset or [], "results": a.result or [],
+                 "notes": a.notes or ""})
+        print(f"capsule {c['id']} saved to {c['path']}")
+        return
+    if a.action == "show":
+        c = call("GET", f"/api/capsules/{a.id}")
+        print(json.dumps(c, indent=2))
+        return
+    for c in call("GET", "/api/capsules", query={"limit": a.n}):
+        print(f"{c['id']}  mission #{c['mission_id'] or '-'}  {c['project'] or '-'}  {c['mission'] or ''}")
+
+
+def cmd_evidence(a):
+    d = call("GET", "/api/evidence/search", query={"q": a.query, "mission_id": a.mission, "limit": a.n})
+    for r in d["results"]:
+        print(f"[{r['kind']}] {r['title']}  {r['ref']}\n  {r['snippet']}")
+    if not d["results"]:
+        print(f"no matching evidence ({d['scanned_files']} files scanned)")
+
+
 def cmd_ask(a):
     to = a.agent.lower()
     m = call("POST", "/api/chat", {"to": to, "text": a.message,
@@ -339,6 +371,12 @@ def main():
     s.add_argument("--objective"); s.add_argument("--criterion", action="append")
     s.add_argument("--agent", default="maya"); s.add_argument("--project"); s.add_argument("--repo")
     s.add_argument("-n", type=int, default=30)
+    s = sub.add_parser("capsule"); s.add_argument("action", choices=["create", "list", "show"])
+    s.add_argument("id", nargs="?"); s.add_argument("--mission", type=int); s.add_argument("--project"); s.add_argument("--repo")
+    s.add_argument("--command"); s.add_argument("--arg", action="append"); s.add_argument("--parameter", action="append")
+    s.add_argument("--dataset", action="append"); s.add_argument("--result", action="append"); s.add_argument("--notes")
+    s.add_argument("-n", type=int, default=30)
+    s = sub.add_parser("evidence"); s.add_argument("query"); s.add_argument("--mission", type=int); s.add_argument("-n", type=int, default=40)
     s = sub.add_parser("ask"); s.add_argument("agent"); s.add_argument("message")
     s.add_argument("--no-wait", action="store_true"); s.add_argument("--timeout", type=int, default=900)
     s = sub.add_parser("log"); s.add_argument("--agent"); s.add_argument("-n", type=int, default=40)
@@ -359,6 +397,8 @@ def main():
                 a.id = int(a.title)
             except (TypeError, ValueError):
                 p.error(f"mission {a.action} needs a numeric mission id")
+    if a.cmd == "capsule" and a.action == "show" and not a.id:
+        p.error("capsule show needs a capsule id")
     if a.cmd in (None, "help"):
         print(__doc__.strip())
     elif a.cmd == "autopilot":

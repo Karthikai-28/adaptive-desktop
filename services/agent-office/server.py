@@ -173,6 +173,48 @@ async def cancel_mission(mid: int):
         bad(e)
 
 
+# ---------------------------------------------------------------- reproducible work capsules
+class CapsuleIn(BaseModel):
+    mission_id: int | None = None
+    project: str = ""
+    repo: str = ""
+    command: str = ""
+    launch_args: list[str] = []
+    parameters: dict = {}
+    datasets: list[str] = []
+    results: list[str] = []
+    notes: str = ""
+
+
+@app.post("/api/capsules")
+async def create_capsule(c: CapsuleIn):
+    try:
+        return office.capsules.create(**c.model_dump())
+    except ValueError as e:
+        bad(e)
+
+
+@app.get("/api/capsules")
+async def capsules(limit: int = 100):
+    return office.capsules.list(limit=min(limit, 500))
+
+
+@app.get("/api/capsules/{cid}")
+async def capsule(cid: str):
+    c = office.capsules.get(cid)
+    if not c:
+        raise HTTPException(404, "no such capsule")
+    return c
+
+
+@app.get("/api/evidence/search")
+async def search_evidence(q: str, mission_id: int | None = None, limit: int = 40):
+    try:
+        return office.evidence.search(q, mission_id, limit)
+    except ValueError as e:
+        bad(e)
+
+
 @app.get("/api/tasks/{tid}")
 async def task(tid: int):
     t = store.task(tid)

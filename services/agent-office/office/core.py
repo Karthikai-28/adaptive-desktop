@@ -29,6 +29,8 @@ from .graphs import Graphs
 from .ledger import Ledger
 from .repos import Repos
 from .study import Study
+from .capsules import Capsules
+from .evidence import Evidence
 
 NAME_RE_CACHE = {}
 
@@ -75,6 +77,8 @@ class Office:
         self.graphs = Graphs(self)
         self.ledger = Ledger(self)
         self.repos = Repos(self)
+        self.capsules = Capsules(self)
+        self.evidence = Evidence(self)
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 

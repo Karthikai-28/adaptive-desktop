@@ -49,6 +49,9 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Ask Claude** | Tell Claude what you want. A tool-free Codex turn drafts the plan; Claude verifies and corrects it, then assigns useful work across the whole available team (chaining dependencies), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
 | **Meetings and calls** | **Call meeting** → pick people → everyone walks to the meeting room. Type or talk; agents answer out loud. Say a name ("Arjun, …") to ask one person. **Hands-free** keeps listening and pauses while agents speak. With Claude in the room, it chairs the meeting, writes minutes at the end and assigns the agreed action items. **Call** on an agent's card starts a 1:1 call. |
 | **Tasks** | Kanban board of every task with live activity, full reports, cancel and retry. |
+| **Missions** | Outcome-based work with an objective, measurable acceptance criteria, a writable-repository boundary, linked tasks, cancellation, and one evidence report. Open **Missions** in the top bar or use `office mission`. |
+| **Work capsules** | Save the exact repository revision, dirty files, dependency-lock fingerprints, runtime, command, launch arguments, parameters, datasets and results for a mission. A capsule is readable JSON under `company/capsules/`; create one from a mission or with `office capsule`. |
+| **Evidence search** | Search a mission's objective, criteria, task reports, capsules, project artifacts and explicitly scoped repository. Results cite the mission, task, capsule or exact file and line; search stays local and skips secret-shaped files. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
 | **Tokens** | Live token usage: who spends what, on which work, and how. The **Tokens** button shows the team (per person by kind of work, over time, by step, by project, by how tasks ended, the most expensive tasks); click a person for their own breakdown (context per call, tasks, every run). Each person's card also has a **Tokens** tab. Windows: last hour to all time. It updates by itself as agents work. |
 
@@ -94,6 +97,12 @@ Set `OFFICE_STATE` to put the state somewhere else. To hire someone, add an entr
 office status                                 who is doing what
 office assign maya "Write a spec" --body "..." --project launch [--after 12]
 office tasks / office show 12 --events / office cancel 12 / office retry 12
+office mission create "Reproduce the failure" --objective "Find and verify the cause" \
+  --criterion "The failure is reproduced" --criterion "The fix passes its regression check" --repo my-robot
+office mission list / office mission show 3 / office mission cancel 3
+office capsule create --mission 3 --command "pytest -q" --parameter seed=42 --result reports/run.md
+office capsule list / office capsule show 20261021-120000-ab12cd34
+office evidence "navigation timeout" --mission 3
 office ask claude "what's the status of the launch?"     (waits for the reply)
 office meeting start "Weekly sync" --with maya,arjun,claude / office meeting end
 office provider [gemini|local] [--fallback local|none]   what agents run on (meetings: config "meeting_provider")

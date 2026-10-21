@@ -917,12 +917,31 @@ function openMissionCreate() {
 async function openMission(id) {
   let m; try { m = await api('GET', `/api/missions/${id}`); } catch (e) { return toast(e.message, 'error'); }
   const when = ts => ts ? new Date(ts * 1000).toLocaleString() : '';
+  const evidenceInput = h('input', { class: 'in', placeholder: 'Search this mission, reports, capsules, project files and scoped repository' });
+  const evidenceResults = h('div', { class: 'evidence-results' });
+  const evidenceGo = h('button', { class: 'act', style: 'flex:none;padding:0 12px' }, 'Search');
+  const runSearch = async () => {
+    if (!evidenceInput.value.trim()) return evidenceInput.focus();
+    evidenceGo.disabled = true; evidenceResults.replaceChildren(h('div', { class: 'empty' }, 'Searching local evidence…'));
+    try {
+      const d = await api('GET', `/api/evidence/search?q=${encodeURIComponent(evidenceInput.value)}&mission_id=${m.id}&limit=40`);
+      evidenceResults.replaceChildren(...(d.results.length ? d.results.map(r => h('button', { class: 'evidence-hit', onclick: () => {
+        if (r.kind === 'task') openTask(+r.ref.split(':')[1]);
+        else if (r.kind === 'file' && !r.ref.startsWith('/')) openFiles(r.ref.replace(/:\d+$/, ''));
+      } }, h('div', { class: 'evidence-title' }, h('span', { class: 'pill' }, r.kind), h('b', null, r.title)),
+      h('div', { class: 'evidence-snippet' }, r.snippet), h('code', null, r.ref))) : [h('div', { class: 'empty' }, `No matching evidence (${d.scanned_files} files scanned).`)]));
+    } catch (e) { evidenceResults.replaceChildren(); toast(e.message, 'error'); }
+    evidenceGo.disabled = false;
+  };
+  evidenceGo.onclick = runSearch;
+  evidenceInput.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
   const body = h('div', null,
     h('div', { class: 'kv' }, h('div', null, 'Status'), h('div', null, h('span', { class: `pill ${m.status}` }, m.status)),
       h('div', null, 'Project'), h('div', null, m.project || '—'), h('div', null, 'Repository'), h('div', null, m.repo || 'Read only'),
       h('div', null, 'Created'), h('div', null, when(m.created_at)), h('div', null, 'Finished'), h('div', null, when(m.finished_at) || '—')),
     h('div', { class: 'section' }, 'Objective'), h('div', { class: 'box' }, m.objective),
     h('div', { class: 'section' }, 'Acceptance criteria'), h('div', { class: 'criteria' }, ...m.criteria.map(x => h('div', null, '◻', h('span', null, x)))),
+    h('div', { class: 'section' }, 'Evidence search'), h('div', { class: 'evidence-search' }, evidenceInput, evidenceGo), evidenceResults,
     h('div', { class: 'section' }, 'Work'), h('div', { class: 'mission-tasks' }, ...m.tasks.map(taskCard)),
     m.summary ? [h('div', { class: 'section' }, 'Evidence report'), h('div', { class: 'box md', html: md(m.summary) })] : null,
     m.error ? [h('div', { class: 'section' }, 'Problem'), h('div', { class: 'box err' }, m.error)] : null);
@@ -930,8 +949,39 @@ async function openMission(id) {
   if (['queued', 'running'].includes(m.status)) foot.push(h('button', { class: 'act danger', style: 'flex:none;padding:0 14px', onclick: async () => {
     try { await api('POST', `/api/missions/${id}/cancel`); toast(`Mission #${id} cancelled`, 'ok'); openMissions(); } catch (e) { toast(e.message, 'error'); }
   } }, 'Cancel mission'));
+  foot.push(h('button', { class: 'act', style: 'flex:none;padding:0 14px', onclick: () => openCapsuleCreate(m) }, iconEl('file'), 'Save work capsule'));
   foot.push(h('button', { class: 'act primary', style: 'flex:none;padding:0 14px', onclick: openMissions }, 'All missions'));
   openModal('mission', `Mission #${m.id} · ${m.title}`, body, foot, true);
+}
+function openCapsuleCreate(m) {
+  const command = h('input', { class: 'in', placeholder: 'Exact command used to reproduce or verify the work' });
+  const args = h('textarea', { class: 'in', placeholder: 'Launch arguments, one per line' });
+  const params = h('textarea', { class: 'in', placeholder: '{\n  "seed": 42,\n  "mode": "simulation"\n}' });
+  const datasets = h('textarea', { class: 'in', placeholder: 'Dataset, recording, or input reference, one per line' });
+  const results = h('textarea', { class: 'in', placeholder: 'Result artifact or report, one per line' });
+  const notes = h('textarea', { class: 'in', placeholder: 'Anything needed to understand or repeat this run' });
+  const go = h('button', { class: 'act primary', style: 'flex:none;padding:0 16px' }, 'Save capsule');
+  go.onclick = async () => {
+    let parameters = {};
+    try { parameters = params.value.trim() ? JSON.parse(params.value) : {}; }
+    catch { return toast('Parameters must be valid JSON', 'warn'); }
+    go.disabled = true;
+    try {
+      const c = await api('POST', '/api/capsules', { mission_id: m.id, command: command.value,
+        launch_args: args.value.split('\n').filter(Boolean), parameters,
+        datasets: datasets.value.split('\n').filter(Boolean), results: results.value.split('\n').filter(Boolean), notes: notes.value });
+      toast(`Work capsule saved: ${c.path}`, 'ok'); openMission(m.id);
+    } catch (e) { toast(e.message, 'error'); go.disabled = false; }
+  };
+  openModal('capsule', `Work capsule · Mission #${m.id}`, h('div', null,
+    h('div', { class: 'hintline', style: 'margin-bottom:12px' }, 'The capsule records the repository revision, changed files, dependency lock fingerprints, runtime, inputs, and results.'),
+    h('label', { class: 'f' }, 'Command'), command,
+    h('label', { class: 'f' }, 'Launch arguments'), args,
+    h('label', { class: 'f' }, 'Parameters (JSON)'), params,
+    h('label', { class: 'f' }, 'Datasets / recordings'), datasets,
+    h('label', { class: 'f' }, 'Results'), results,
+    h('label', { class: 'f' }, 'Notes'), notes),
+    [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: () => openMission(m.id) }, 'Back'), go]);
 }
 
 // ---- meeting setup / invite

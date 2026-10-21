@@ -851,6 +851,32 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   verification after the next shell restart. The wider nested desktop check
   also reported an unrelated project-indicator git-status failure.
 
+## Milestone 19 — Mission Control and reproducible engineering work
+
+- ✅ **Outcome-based missions.** Agent Office launches a mission with an objective,
+  measurable acceptance criteria, a project and one writable repository. Mission
+  state follows its linked work; cancelling a mission stops every active task.
+- ✅ **Evidence contract.** The mission prompt requires PASS/FAIL evidence for every
+  criterion and preserves the completed task reports as the mission evidence report.
+- ✅ **Mission Control UI and CLI.** Missions can be launched, inspected and cancelled
+  in the Office UI or with `office mission`.
+- ✅ **Reproducible work capsules.** A mission can save a readable JSON manifest with
+  the git revision and dirty files, dependency-lock fingerprints, runtime, command,
+  launch arguments, parameters, dataset references and result artifacts. Capsules are
+  available through the UI, API and `office capsule`.
+- ✅ **Isolated verification.** The throwaway Office integration test covers mission
+  validation, cancellation, persistence, capsule creation and capsule path guards.
+- ✅ **Local project evidence search.** Mission Control searches the mission contract,
+  task reports, work capsules, Office project artifacts and the explicitly scoped
+  repository. It returns source references (including file lines), skips secret-shaped
+  files and does not send indexed content to a model. Retention controls and binary
+  recording search remain future work.
+- ⬜ ROS failure-investigation mission template: recording comparison, correlated
+  diagnostics, reproducible simulation, regression test and engineering report.
+- ⬜ Phone Mission Control: inspect evidence, answer a blocker and cancel scoped work
+  through Adaptive Link.
+- ⬜ Team permissions, shared workflow templates, audit export and private deployment.
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the

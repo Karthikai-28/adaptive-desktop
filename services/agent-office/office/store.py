@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS missions (
   criteria TEXT DEFAULT '[]', status TEXT NOT NULL DEFAULT 'queued', created_by TEXT DEFAULT 'operator',
   created_at REAL, started_at REAL, finished_at REAL, summary TEXT DEFAULT '', error TEXT DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS tasks_mission ON tasks(mission_id, id);
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   thread TEXT NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL, ts REAL, meta TEXT DEFAULT '{}'
@@ -55,6 +54,7 @@ class Store:
             self.db.execute("ALTER TABLE tasks ADD COLUMN repo TEXT DEFAULT ''")
         if "mission_id" not in {r[1] for r in self.db.execute("PRAGMA table_info(tasks)")}:
             self.db.execute("ALTER TABLE tasks ADD COLUMN mission_id INTEGER")
+        self.db.execute("CREATE INDEX IF NOT EXISTS tasks_mission ON tasks(mission_id, id)")
 
     # ---- key/value ----
     def get(self, key, default=None):
