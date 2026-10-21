@@ -52,6 +52,7 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Missions** | Outcome-based work with an objective, measurable acceptance criteria, a writable-repository boundary, linked tasks, cancellation, and one evidence report. Open **Missions** in the top bar or use `office mission`. |
 | **Work capsules** | Save the exact repository revision, dirty files, dependency-lock fingerprints, runtime, command, launch arguments, parameters, datasets and results for a mission. A capsule is readable JSON under `company/capsules/`; create one from a mission or with `office capsule`. |
 | **Evidence search** | Search a mission's objective, criteria, task reports, capsules, project artifacts and explicitly scoped repository. Results cite the mission, task, capsule or exact file and line; search stays local and skips secret-shaped files. |
+| **Mission Control on the phone** | Adaptive Link's native Office has a Missions tab for launching scoped work, reading criteria and reports, searching evidence and cancelling work. It uses the paired phone's mutually authenticated Office gateway and requires that device's Commands switch. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
 | **Tokens** | Live token usage: who spends what, on which work, and how. The **Tokens** button shows the team (per person by kind of work, over time, by step, by project, by how tasks ended, the most expensive tasks); click a person for their own breakdown (context per call, tasks, every run). Each person's card also has a **Tokens** tab. Windows: last hour to all time. It updates by itself as agents work. |
 
@@ -100,6 +101,7 @@ office tasks / office show 12 --events / office cancel 12 / office retry 12
 office mission create "Reproduce the failure" --objective "Find and verify the cause" \
   --criterion "The failure is reproduced" --criterion "The fix passes its regression check" --repo my-robot
 office mission list / office mission show 3 / office mission cancel 3
+office mission ros "localization jumps after map reload" --bag ~/bags/failure --repo my-robot
 office capsule create --mission 3 --command "pytest -q" --parameter seed=42 --result reports/run.md
 office capsule list / office capsule show 20261021-120000-ab12cd34
 office evidence "navigation timeout" --mission 3

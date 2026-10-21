@@ -15,6 +15,7 @@ from office import config, voice
 from office.config import AGY_HOME, COMPANY, DATA, STATIC
 from office.core import Office
 from office.store import Store
+from office.mission_templates import launch_ros_investigation
 
 CFG = config.load()
 PORT = int(os.environ.get("OFFICE_PORT", CFG["port"]))
@@ -169,6 +170,23 @@ async def mission(mid: int):
 async def cancel_mission(mid: int):
     try:
         return await office.cancel_mission(mid)
+    except ValueError as e:
+        bad(e)
+
+
+class RosMissionIn(BaseModel):
+    agent: str
+    problem: str
+    title: str = "Investigate ROS 2 failure"
+    bag: str = ""
+    project: str = ""
+    repo: str = ""
+
+
+@app.post("/api/missions/ros-investigation")
+async def ros_investigation(m: RosMissionIn):
+    try:
+        return await launch_ros_investigation(office, m.agent, m.title, m.problem, m.bag, m.project, m.repo)
     except ValueError as e:
         bad(e)
 

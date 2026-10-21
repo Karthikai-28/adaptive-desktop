@@ -869,6 +869,7 @@ async function openMissions() {
   const body = h('div', { id: 'missionList', class: 'mission-list' });
   openModal('missions', 'Mission Control', body, [], true);
   $('#modal .mh h2').after(h('div', { class: 'toolbar' },
+    h('button', { class: 'act', style: 'flex:none;padding:0 12px', onclick: openRosMission }, 'ROS failure'),
     h('button', { class: 'act primary', style: 'flex:none;padding:0 12px', onclick: openMissionCreate }, iconEl('plus'), 'New mission')));
   refreshMissions();
 }
@@ -913,6 +914,33 @@ function openMissionCreate() {
     h('label', { class: 'f' }, 'Writable repo'), repo, repos,
     h('div', { class: 'hintline' }, 'The assigned agent must report PASS or FAIL evidence for every criterion. Repository access stays scoped.')),
     [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: closeModal }, 'Cancel'), go]);
+}
+function openRosMission() {
+  const agent = h('select', { class: 'in' }, ...S.order.filter(id => id !== MGR).map(id => h('option', { value: id }, `${S.roster[id].name} — ${S.roster[id].role}`)));
+  const problem = h('textarea', { class: 'in', placeholder: 'What failed, what you expected, when it happened, and any useful symptoms.' });
+  const bag = h('input', { class: 'in', placeholder: 'optional rosbag, MCAP, log, or dataset path/reference' });
+  const project = h('input', { class: 'in', placeholder: 'optional project name' });
+  const repo = h('input', { class: 'in', list: 'rosMissionRepos', placeholder: 'writable repository path or name' });
+  const repos = h('datalist', { id: 'rosMissionRepos' });
+  api('GET', '/api/repos').then(r => repos.replaceChildren(...r.repos.map(p => h('option', { value: p })))).catch(() => {});
+  const go = h('button', { class: 'act primary', style: 'flex:none;padding:0 16px' }, 'Start investigation');
+  go.onclick = async () => {
+    if (!problem.value.trim()) return problem.focus();
+    go.disabled = true;
+    try {
+      const m = await api('POST', '/api/missions/ros-investigation', { agent: agent.value, problem: problem.value,
+        bag: bag.value, project: project.value, repo: repo.value });
+      S.missions.set(m.id, m); toast(`ROS investigation #${m.id} launched`, 'ok', agent.value); openMission(m.id);
+    } catch (e) { toast(e.message, 'error'); go.disabled = false; }
+  };
+  openModal('ros-mission', 'Investigate a ROS 2 failure', h('div', null,
+    h('div', { class: 'hintline', style: 'margin-bottom:12px' }, 'Mission Control captures the current ROS setup, creates a work capsule, and requires reproducible evidence for the diagnosis.'),
+    h('label', { class: 'f' }, 'Owner'), agent,
+    h('label', { class: 'f' }, 'Observed problem'), problem,
+    h('label', { class: 'f' }, 'Recording / dataset'), bag,
+    h('label', { class: 'f' }, 'Project'), project,
+    h('label', { class: 'f' }, 'Writable repo'), repo, repos),
+    [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: openMissions }, 'Back'), go]);
 }
 async function openMission(id) {
   let m; try { m = await api('GET', `/api/missions/${id}`); } catch (e) { return toast(e.message, 'error'); }

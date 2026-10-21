@@ -871,10 +871,15 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   repository. It returns source references (including file lines), skips secret-shaped
   files and does not send indexed content to a model. Retention controls and binary
   recording search remain future work.
-- ⬜ ROS failure-investigation mission template: recording comparison, correlated
-  diagnostics, reproducible simulation, regression test and engineering report.
-- ⬜ Phone Mission Control: inspect evidence, answer a blocker and cancel scoped work
-  through Adaptive Link.
+- ✅ **ROS failure-investigation mission template.** The Mission Control **ROS failure**
+  flow captures the current ROS setup, recording reference and a work capsule, then
+  requires reproduction, correlated diagnostics, cited root-cause evidence, a repeatable
+  regression check and an uncertainty-aware engineering report. Simulation execution and
+  automatic recording comparison remain work for the investigator and future adapters.
+- ✅ **Phone Mission Control.** Adaptive Link's native Office now receives live mission
+  state, launches bounded missions, shows their criteria/tasks/reports, searches their
+  evidence and cancels active work through the existing mutually authenticated Office
+  gateway. The APK builds; physical-device verification is still required.
 - ⬜ Team permissions, shared workflow templates, audit export and private deployment.
 
 ## Immediate next work

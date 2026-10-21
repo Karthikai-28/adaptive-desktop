@@ -113,13 +113,15 @@ private val Red = Color(0xFFFF453A)
 
 private enum class OfficeTab(val label: String, val icon: ImageVector) {
     Team("Team", Icons.Filled.Groups), Claude("Claude", Icons.Filled.AutoAwesome), Tasks("Tasks", Icons.Filled.Checklist),
-    Meeting("Meeting", Icons.Filled.Forum), More("More", Icons.Filled.Tune),
+    Missions("Missions", Icons.Filled.Description), Meeting("Meeting", Icons.Filled.Forum), More("More", Icons.Filled.Tune),
 }
 
 private sealed class Route {
     data class Person(val id: String, val tab: String = "chat", val draft: String = "") : Route()
     data class Task(val id: Int) : Route()
     data class NewTask(val agent: String = "") : Route()
+    data class Mission(val id: Int) : Route()
+    object NewMission : Route()
     data class Files(val path: String) : Route()
 }
 
@@ -138,6 +140,14 @@ private fun taskColor(status: String) = when (status) {
     "running" -> Amber
     "queued" -> Accent
     "done" -> Green
+    "failed" -> Red
+    else -> Dim
+}
+
+private fun missionColor(status: String) = when (status) {
+    "running" -> Amber
+    "queued" -> Accent
+    "succeeded" -> Green
     "failed" -> Red
     else -> Dim
 }
@@ -208,6 +218,7 @@ fun OfficePage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
                             OfficeTab.Team -> TeamTab(ctx)
                             OfficeTab.Claude -> Conversation(ctx, office.managerId, Modifier.fillMaxSize())
                             OfficeTab.Tasks -> TasksTab(ctx)
+                            OfficeTab.Missions -> MissionsTab(ctx)
                             OfficeTab.Meeting -> MeetingTab(ctx)
                             OfficeTab.More -> MoreTab(ctx)
                         }
@@ -217,6 +228,8 @@ fun OfficePage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
                 is Route.Person -> PersonScreen(ctx, top)
                 is Route.Task -> TaskScreen(ctx, top.id)
                 is Route.NewTask -> NewTaskScreen(ctx, top.agent)
+                is Route.Mission -> MissionScreen(ctx, top.id)
+                Route.NewMission -> NewMissionScreen(ctx)
                 is Route.Files -> FilesScreen(ctx, top.path)
             }
         }
@@ -615,6 +628,110 @@ private fun TaskLine(ctx: Ctx, t: JSONObject, showAgent: Boolean = true) {
         t.str("project").takeIf { it.isNotBlank() }, ago(t.optDouble("finished_at").takeIf { !it.isNaN() && it > 0 } ?: t.optDouble("created_at")))
     Line("#${t.optInt("id")}  ${t.str("title")}", bits.joinToString(" · "), leading = { Dot(taskColor(status), 10) },
         onClick = { ctx.push(Route.Task(t.optInt("id"))) })
+}
+
+@Composable
+private fun MissionsTab(ctx: Ctx) {
+    val rows = ctx.office.missions.values.sortedByDescending { it.optInt("id") }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Button("+ New mission") { ctx.push(Route.NewMission) }
+        }
+        if (rows.isEmpty()) Muted("No missions yet. Launch an outcome with measurable acceptance criteria.", Modifier.padding(24.dp))
+        else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
+            item { Group { rows.forEachIndexed { i, m ->
+                if (i > 0) Box(Modifier.padding(start = 38.dp).fillMaxWidth().height(0.5.dp).background(Hair))
+                val status = m.str("status")
+                Line("#${m.optInt("id")}  ${m.str("title")}",
+                    listOf(status, m.str("project").ifBlank { "no project" }, ago(m.optDouble("finished_at").takeIf { !it.isNaN() && it > 0 } ?: m.optDouble("created_at"))).joinToString(" · "),
+                    leading = { Dot(missionColor(status), 10) }, onClick = { ctx.push(Route.Mission(m.optInt("id"))) })
+            } } }
+        }
+    }
+}
+
+@Composable
+private fun MissionScreen(ctx: Ctx, id: Int) {
+    val office = ctx.office
+    val live = office.missions[id]
+    var detail by remember { mutableStateOf<JSONObject?>(null) }
+    var search by rememberSaveable { mutableStateOf("") }
+    var hits by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(id, live?.str("status")) { office.obj("missions/$id")?.let { detail = it } }
+    val m = detail ?: live
+    TopBar("Mission #$id", ctx.pop)
+    if (m == null) { Muted("Loading…", Modifier.padding(20.dp)); return }
+    val status = m.str("status")
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp).imePadding()) {
+        Text(m.str("title"), color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 20.dp))
+        FlowRow(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip(status, true, missionColor(status)); m.str("project").takeIf { it.isNotBlank() }?.let { Chip(it) }
+        }
+        if (status in listOf("running", "queued")) Row(Modifier.padding(horizontal = 20.dp)) {
+            Button("Cancel mission", Red) { scope.launch { office.act("missions/$id/cancel") } }
+        }
+        Section("Objective"); TextBlock(m.str("objective"))
+        Section("Acceptance criteria")
+        Group { m.optJSONArray("criteria").strings().forEach { Line("◻  $it") } }
+        Section("Evidence search")
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Field(search, { search = it }, "Search reports, capsules and files", Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            Button(if (searching) "…" else "Search", enabled = !searching && search.isNotBlank()) {
+                searching = true; scope.launch {
+                    val q = java.net.URLEncoder.encode(search, "UTF-8")
+                    hits = office.obj("evidence/search?q=$q&mission_id=$id&limit=30")?.optJSONArray("results").objects()
+                    searching = false
+                }
+            }
+        }
+        if (hits.isNotEmpty()) Group { hits.forEach { h -> Line("[${h.str("kind")}] ${h.str("title")}", "${h.str("snippet")}\n${h.str("ref")}") } }
+        val tasks = m.optJSONArray("tasks").objects()
+        if (tasks.isNotEmpty()) { Section("Work"); Group { tasks.forEach { TaskLine(ctx, it) } } }
+        m.str("summary").takeIf { it.isNotBlank() }?.let { Section("Evidence report"); TextBlock(it) }
+        m.str("error").takeIf { it.isNotBlank() }?.let { Section("Problem"); TextBlock(it) }
+    }
+}
+
+@Composable
+private fun NewMissionScreen(ctx: Ctx) {
+    val office = ctx.office
+    var who by remember { mutableStateOf(office.team.firstOrNull()?.str("id").orEmpty()) }
+    var title by rememberSaveable { mutableStateOf("") }
+    var objective by rememberSaveable { mutableStateOf("") }
+    var criteria by rememberSaveable { mutableStateOf("") }
+    var project by rememberSaveable { mutableStateOf("") }
+    var repo by rememberSaveable { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    TopBar("New mission", ctx.pop)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp).imePadding()) {
+        Section("Owner")
+        FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            office.team.forEach { p -> Chip(p.str("name"), who == p.str("id")) { who = p.str("id") } }
+        }
+        Section("Outcome")
+        Field(title, { title = it }, "Mission title", Modifier.padding(horizontal = 16.dp).fillMaxWidth())
+        Spacer(Modifier.height(10.dp)); Field(objective, { objective = it }, "Objective and boundaries", Modifier.padding(horizontal = 16.dp).fillMaxWidth(), lines = 5)
+        Spacer(Modifier.height(10.dp)); Field(criteria, { criteria = it }, "Acceptance criteria, one per line", Modifier.padding(horizontal = 16.dp).fillMaxWidth(), lines = 5)
+        Section("Scope")
+        Field(project, { project = it.filter { c -> c.isLetterOrDigit() || c in "-_" } }, "Project", Modifier.padding(horizontal = 16.dp).fillMaxWidth())
+        Spacer(Modifier.height(10.dp)); Field(repo, { repo = it }, "Writable repository path or name", Modifier.padding(horizontal = 16.dp).fillMaxWidth())
+        Muted("Every criterion must be reported as PASS or FAIL with evidence. Only the named repository can be changed.", Modifier.padding(20.dp))
+        Row(Modifier.padding(horizontal = 16.dp)) {
+            val checks = criteria.lines().map { it.trim() }.filter { it.isNotBlank() }
+            Button(if (busy) "Launching…" else "Launch mission", enabled = !busy && who.isNotBlank() && title.isNotBlank() && objective.isNotBlank() && checks.isNotEmpty()) {
+                busy = true; scope.launch {
+                    val payload = JSONObject().put("agent", who).put("title", title.trim()).put("objective", objective.trim())
+                        .put("criteria", JSONArray(checks)).put("project", project.trim()).put("repo", repo.trim())
+                    if (office.act("missions", payload) == null) { office.notices.tryEmit("Mission launched"); ctx.pop() }
+                    busy = false
+                }
+            }
+        }
+    }
 }
 
 @Composable

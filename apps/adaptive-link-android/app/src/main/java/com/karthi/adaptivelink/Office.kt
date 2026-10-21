@@ -54,6 +54,7 @@ class Office(private val client: LinkClient) {
         private set
     val agents = mutableStateMapOf<String, JSONObject>()
     val tasks = mutableStateMapOf<Int, JSONObject>()
+    val missions = mutableStateMapOf<Int, JSONObject>()
     var meeting by mutableStateOf<JSONObject?>(null)
         private set
     var settings by mutableStateOf(JSONObject())
@@ -165,6 +166,8 @@ class Office(private val client: LinkClient) {
                 m.optJSONArray("agents").objects().forEach { agents[it.str("id")] = it }
                 tasks.clear()
                 m.optJSONArray("tasks").objects().forEach { tasks[it.optInt("id")] = it }
+                missions.clear()
+                m.optJSONArray("missions").objects().forEach { missions[it.optInt("id")] = it }
                 meeting = m.optJSONObject("meeting")
                 settings = m.optJSONObject("settings") ?: JSONObject()
                 quotaUntil = m.optDouble("quota_until", 0.0).let { if (it.isNaN()) 0.0 else it }
@@ -185,6 +188,7 @@ class Office(private val client: LinkClient) {
                 incoming.tryEmit(msg)
             }
             "task" -> m.optJSONObject("task")?.let { tasks[it.optInt("id")] = it }
+            "mission" -> m.optJSONObject("mission")?.let { missions[it.optInt("id")] = it }
             "meeting" -> {
                 meeting = m.optJSONObject("meeting")
                 m.optJSONObject("ended")?.str("minutes_path")?.takeIf { it.isNotBlank() }?.let {

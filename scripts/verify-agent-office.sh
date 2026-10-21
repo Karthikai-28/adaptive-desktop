@@ -138,6 +138,8 @@ curl -fsS "$B/api/capsules/$CID" | python3 -c 'import json,sys; d=json.load(sys.
 [ "$(code "$B/api/capsules/../../office.db")" = 404 ] || fail "capsule path traversal"
 curl -fsS "$B/api/evidence/search?q=checked%20result&mission_id=$MID" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["mission_id"] and any(r["kind"] == "mission" and r["ref"].startswith("mission:") for r in d["results"])' || fail "mission evidence search"
 [ "$(code "$B/api/evidence/search?q=test&mission_id=99999")" = 400 ] || fail "evidence search accepted an unknown mission"
+RMID="$(curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"agent":"maya","problem":"the test robot loses localization","bag":"bag://localization-test"}' "$B/api/missions/ros-investigation" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["criteria"]) == 5 and "ROS setup snapshot" in d["objective"]; print(d["id"])')" || fail "ROS investigation mission"
+curl -fsS "$B/api/capsules" | python3 -c "import json,sys; assert any(c['mission_id'] == $RMID for c in json.load(sys.stdin))" || fail "ROS investigation capsule"
 curl -fsS "$B/api/events?task_id=999&limit=4" | python3 -c 'import json,sys; assert json.load(sys.stdin) == []' || fail "task-filtered events"
 [ -d "$TMP/state/company/projects" ] || fail "state folder layout"
 curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' || fail "study api"

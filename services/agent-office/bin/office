@@ -8,6 +8,7 @@
   office show <task id>                           full task with its report and activity
   office cancel <task id> | office retry <task id>
   office mission create "<title>" --objective TEXT --criterion TEXT [--agent ID] [--repo PATH|NAME]
+  office mission ros "<observed problem>" [--bag PATH] [--repo PATH|NAME]
   office mission list | office mission show <id> | office mission cancel <id>
   office capsule create [--mission ID] [--command CMD] [--dataset REF] [--result REF]
   office capsule list | office capsule show <id>
@@ -159,6 +160,11 @@ def cmd_retry(a):
 
 
 def cmd_mission(a):
+    if a.action == "ros":
+        m = call("POST", "/api/missions/ros-investigation", {"agent": a.agent, "title": a.name or "Investigate ROS 2 failure",
+                 "problem": a.title, "bag": a.bag or "", "project": a.project or "", "repo": a.repo or ""})
+        print(f"ROS investigation #{m['id']} {m['status']} (task #{m['tasks'][0]['id']})")
+        return
     if a.action == "create":
         m = call("POST", "/api/missions", {"agent": a.agent, "title": a.title,
                  "objective": a.objective, "criteria": a.criterion or [],
@@ -366,10 +372,11 @@ def main():
     s = sub.add_parser("show"); s.add_argument("id", type=int); s.add_argument("--events", action="store_true")
     s = sub.add_parser("cancel"); s.add_argument("id", type=int)
     s = sub.add_parser("retry"); s.add_argument("id", type=int)
-    s = sub.add_parser("mission"); s.add_argument("action", choices=["create", "list", "show", "cancel"])
+    s = sub.add_parser("mission"); s.add_argument("action", choices=["create", "ros", "list", "show", "cancel"])
     s.add_argument("title", nargs="?"); s.add_argument("--id", type=int)
     s.add_argument("--objective"); s.add_argument("--criterion", action="append")
     s.add_argument("--agent", default="maya"); s.add_argument("--project"); s.add_argument("--repo")
+    s.add_argument("--bag"); s.add_argument("--name")
     s.add_argument("-n", type=int, default=30)
     s = sub.add_parser("capsule"); s.add_argument("action", choices=["create", "list", "show"])
     s.add_argument("id", nargs="?"); s.add_argument("--mission", type=int); s.add_argument("--project"); s.add_argument("--repo")
@@ -397,6 +404,8 @@ def main():
                 a.id = int(a.title)
             except (TypeError, ValueError):
                 p.error(f"mission {a.action} needs a numeric mission id")
+        if a.action == "ros" and not a.title:
+            p.error("mission ros needs the observed problem")
     if a.cmd == "capsule" and a.action == "show" and not a.id:
         p.error("capsule show needs a capsule id")
     if a.cmd in (None, "help"):
