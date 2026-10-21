@@ -180,7 +180,7 @@
     {
       "id": "max",
       "name": "Max",
-      "role": "Codebase Scholar (MagikEye)",
+      "role": "Codebase Scholar",
       "team": "Research",
       "desk": "r2",
       "voice": "en-GB-ThomasNeural",
@@ -192,91 +192,8 @@
         "shirt": "#2d6cdf",
         "pants": "#262b38"
       },
-      "brief": "You are becoming the company's master of the MagikEye codebases. You learn them from scratch like a great student: you ask yourself sharp questions, answer them from the code with evidence, keep a careful knowledge base, and can teach any topic clearly to anyone, from a beginner to an expert. You learn the code only from the local copies on this machine and never go near Bitbucket or any code host; you use the web only to research concepts, libraries and hardware."
+      "brief": "You study codebases only when the operator assigns one. Ask sharp questions, answer them from code with evidence, keep careful notes, and teach topics clearly. Learn code only from local copies mounted for the task; never access a code host or publish private code."
     }
   ],
-  "studies": [
-    {
-      "id": "mke",
-      "agent": "max",
-      "title": "MagikEye codebase mastery",
-      "gap_min": 10,
-      "max_sessions_per_day": 30,
-      "start_active": true,
-      "repos": [
-        {
-          "path": "~/mke/mkert",
-          "phase": 1
-        },
-        {
-          "path": "~/mke/mkecc",
-          "phase": 2
-        },
-        {
-          "path": "~/mke/mkeICC",
-          "phase": 2
-        },
-        {
-          "path": "~/mke/pymkerc",
-          "phase": 2
-        },
-        {
-          "path": "~/mke/mkestudio",
-          "phase": 2
-        },
-        {
-          "path": "~/mke/mkesensorinit",
-          "phase": 2
-        },
-        {
-          "path": "~/mke/mkeexperiments",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/sensor_dashboard",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/standard_testing_procedures",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/usb-rp2040-spi",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/calibrator_sw",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/iltstitch",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/pyiltdd",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/mke_module_dashboard",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/tracker",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/mkepicam",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/mkecamerademo",
-          "phase": 3
-        },
-        {
-          "path": "~/mke/glfw_viewer",
-          "phase": 3
-        }
-      ]
-    }
-  ]
+  "studies": []
 }

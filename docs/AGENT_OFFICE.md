@@ -59,27 +59,11 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
 | **Tokens** | Live token usage: who spends what, on which work, and how. The **Tokens** button shows the team (per person by kind of work, over time, by step, by project, by how tasks ended, the most expensive tasks); click a person for their own breakdown (context per call, tasks, every run). Each person's card also has a **Tokens** tab. Windows: last hour to all time. It updates by itself as agents work. |
 
-## Study programs: an agent that masters codebases
+## Study programs
 
-**Max** (Codebase Scholar) studies the MagikEye codebases on his own, session after session (config.json
-`"studies"`: phase 1 `mkert`; phase 2 `mkecc`, `mkeICC`, `pymkerc`, `mkestudio`, `mkesensorinit`; phase 3
-the rest of the `~/mke` product repos). Each session he starts a fresh conversation, reads his knowledge base,
-picks the weakest foundational topic, asks himself questions, answers them from the code with evidence
-(file:line, commits), writes notes and lessons, raises deeper questions, and sends you a learning report.
-Session 1 surveys every repo and builds the curriculum; every fifth session is a self-examination
-(answer old questions from memory, check against the code, score honestly).
-
-| | |
-|---|---|
-| Knowledge base | `company/study/mke/`: `CURRICULUM.md`, `QUESTIONS.md`, `notes/`, `lessons/`, `glossary.md`, `JOURNAL.md`, `reports/`, `progress.json` |
-| Learning tab | on Max's card: mastery per topic, questions, self-test scores, **Teach me** / **Ask** per topic, his questions for you, pause / resume / study now |
-| Pace | a session every `gap_min` (10) minutes, at most `max_sessions_per_day` (30); pauses with work and with Gemini quota |
-| Terminal | `office study`, `office study pause`, `office study resume`, `office study now` |
-
-**Local code only.** The repos are mounted read-only and only those he is assigned; Bitbucket and the
-internal git server (192.168.1.10) are denied in his agy profile, git network commands fail inside the
-sandbox, and SSH keys do not exist for him. He may use the web for research (concepts, libraries, hardware)
-but is told never to put company code or names into a search. Repos not present on a machine are skipped.
+No autonomous study program is configured. Max can analyze a codebase only when the operator assigns
+a scoped task. The assigned repository is mounted according to the normal Office sandbox rules, and
+private code must remain local.
 
 ## Where things live
 
@@ -221,7 +205,7 @@ the rules below took 60-100k:
 - **Study sessions** start fresh and read `STATE.md` (600 words) instead of the whole knowledge base.
 
 Graphs for repos with no hub graph are built code-only (no model calls) with
-`GRAPHIFY_OUT=~/Obsidian/graphify-out/<repo> graphify update ~/mke/<repo>`. Never run that over a hub
+`GRAPHIFY_OUT=~/Obsidian/graphify-out/<repo> graphify update ~/projects/<repo>`. Never run that over a hub
 graph that was built with semantic extraction: it replaces the document and rationale nodes.
 
 ## When the quota runs out (`office/quota.py`)
