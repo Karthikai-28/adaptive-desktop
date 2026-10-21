@@ -1837,9 +1837,25 @@ def quaternion_rpy(x, y, z, w):
     return [round(math.degrees(a), 3) for a in (roll, pitch, yaw)]
 
 
+def compact_json(value, depth=0):
+    """JSON with each field on its own line but a list of plain values on one,
+    so an Odometry's two 36-number covariances take two lines, not 72."""
+    pad, inner = "  " * depth, "  " * (depth + 1)
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        rows = [f"{inner}{json.dumps(str(k))}: {compact_json(v, depth + 1)}" for k, v in value.items()]
+        return "{\n" + ",\n".join(rows) + f"\n{pad}}}"
+    if isinstance(value, (list, tuple)):
+        if all(not isinstance(v, (dict, list, tuple)) for v in value):
+            return "[" + ", ".join(json.dumps(v, default=str) for v in value) + "]"
+        return "[\n" + ",\n".join(f"{inner}{compact_json(v, depth + 1)}" for v in value) + f"\n{pad}]"
+    return json.dumps(value, default=str)
+
+
 def message_text(message, limit=4000):
     from rosidl_runtime_py.convert import message_to_ordereddict
-    text = json.dumps(message_to_ordereddict(message, truncate_length=MAX_ARRAY_ITEMS), indent=2, default=str)
+    text = compact_json(message_to_ordereddict(message, truncate_length=MAX_ARRAY_ITEMS))
     return text[:limit], len(text) > limit
 
 

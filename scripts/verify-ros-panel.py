@@ -336,6 +336,11 @@ def main():
     check(ros_info.plot_path("pose/position/x") == ["pose", "position", "x"] and ros_info.plot_path("ranges[2]") == ["ranges", 2]
           and ros_info.plot_path("a b") is None, "plot: field paths with indexes")
     check(ros_info.quaternion_rpy(0, 0, 0.7071068, 0.7071068) == [0.0, 0.0, 90.0], "tf: a quarter turn is yaw 90°")
+    odom = {"header": {"frame_id": "odom"}, "pose": {"covariance": [0.0] * 36}, "points": [{"x": 1}], "none": [],
+            "text": 'a "b"\nc'}
+    text = ros_info.compact_json(odom)
+    check(json.loads(text) == odom and text.count("\n") < 20 and '"covariance": [0.0, 0.0' in text,
+          "previews: plain arrays stay on one line, and the text is still JSON", text)
     check(ros_info.flat_parameters({"/n": {"ros__parameters": {"a": {"b": 1}, "c": "x"}}}) == {"a.b": 1, "c": "x"},
           "parameter profiles: nested names are joined with dots")
     # A build tree like proj/.build/humble: its sources are where its last colcon run said.
@@ -631,9 +636,14 @@ def main():
     check(pause.get("ok") is True and helper(env, "runs")["running"]["launch"][0]["paused"] is True,
           "run manager: a launch pauses", pause)
     check(helper(env, "run-control", "bag", "pause").get("ok") is False, "run manager: a bag is not paused by signal")
+    started = set(helper(env, "status")["tools"]["launch"]["owned_pids"])
     began = time.monotonic()
     helper(env, "stop", "launch")
-    check(not helper(env, "status")["tools"]["launch"]["pids"], "stop: the launch and what it started quit")
+    # Only what the panel started: a robot's own `ros2 launch` running elsewhere on this machine is listed
+    # (as running outside the panel) and must be left alone.
+    after = helper(env, "status")["tools"]["launch"]
+    check(started and not after["owned_pids"] and not started & set(after["pids"]),
+          "stop: the launch and what it started quit", (started, after))
     check(time.monotonic() - began < 3, "stop: a paused launch stops at once, not after the grace time")
     (Path(env["XDG_CACHE_HOME"]) / "adaptive-desktop" / "ros" / "demo.log").write_text(
         "[INFO] fine\n[WARN] battery low\n[ERROR] motor stalled\nplain line\n")

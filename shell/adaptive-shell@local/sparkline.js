@@ -63,6 +63,19 @@ var Sparkline = class Sparkline {
         this.actor.queue_repaint();
     }
 
+    // [bottom value, value span] of the strip.
+    _bounds() {
+        if (this._scale !== 'range')
+            return [0, this._scale !== null ? this._scale : Math.max(this._peak, 1)];
+        // A flat series sits mid-strip rather than on an edge, and so does
+        // noise: the strip spans at least 2% of the values' size (or 0.001),
+        // so a drone hovering at 1.2000-1.2001 m draws a level line, not a hill.
+        const middle = (this._peak + this._low) / 2;
+        const span = Math.max(this._peak - this._low,
+            Math.max(Math.abs(this._peak), Math.abs(this._low)) * 0.02, 1e-3);
+        return [middle - span / 2, span];
+    }
+
     _rescale() {
         if (this._scale === 'range') {
             const finite = this._values.filter(Number.isFinite);
@@ -121,14 +134,7 @@ var Sparkline = class Sparkline {
         cr.lineTo(width, height - 0.5);
         cr.stroke();
 
-        let low = 0;
-        let scale = this._scale !== null ? this._scale : Math.max(this._peak, 1);
-        if (this._scale === 'range') {
-            // A flat series sits mid-strip rather than on an edge.
-            const span = this._peak - this._low;
-            low = span > 0 ? this._low : this._low - 1;
-            scale = span > 0 ? span : 2;
-        }
+        const [low, scale] = this._bounds();
 
         // Headroom top and bottom so a pegged series keeps its whole stroke,
         // and room on the right for the dot marking the latest sample.

@@ -139,6 +139,15 @@ function title(text) {
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
 }
 
+// Text that keeps every line. St.Label ellipsizes by default, and a wrapped,
+// ellipsized label asks for one line only, so the scrolled list squeezed a
+// reply or a preview to its first line and drew the rest over its neighbours.
+function wrapped(label) {
+    label.clutter_text.line_wrap = true;
+    label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    return label;
+}
+
 // A saved launch's name from its file and arguments, in what a name may hold.
 function launchName(file, args) {
     const stem = GLib.path_get_basename(file).replace(/\.launch\.(py|xml|yaml)$/, '');
@@ -211,7 +220,7 @@ var RosPanel = class RosPanel {
         this._lifecycleResult = null;
         // The focused graph view: { kind, name, back: [...] }.
         this._focus = null;
-        this._scrollToTop = false;
+        this._scrollToBlock = null;     // a block just opened (plot, graph view): scroll to it
         this._searchText = '';
         // Sections folded by hand during this search.
         this._searchFolded = new Set();
@@ -330,6 +339,7 @@ var RosPanel = class RosPanel {
                 this._bagDraft = null;
                 this._stopPlot();
                 this._disarm();
+                this._scrollToBlock = null;
                 this._setWatchMode(false);
                 this._scheduleStop();
             }
@@ -1257,9 +1267,31 @@ var RosPanel = class RosPanel {
             GLib.source_remove(this._scrollId);
         this._scrollId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._scrollId = 0;
-            if (this._button)
-                adjustment.value = this._scrollToTop ? 0 : Math.min(scrolled, adjustment.upper - adjustment.page_size);
-            this._scrollToTop = false;
+            if (!this._button)
+                return GLib.SOURCE_REMOVE;
+            const target = this._scrollToBlock && this._blocks.get(this._scrollToBlock);
+            if (!target) {
+                this._scrollToBlock = null;
+                adjustment.value = Math.min(scrolled, adjustment.upper - adjustment.page_size);
+                return GLib.SOURCE_REMOVE;
+            }
+            // The plot and the graph view sit below the setup and the launchers:
+            // show the one just opened. A new block has no place until the list
+            // is laid out, so try again for a few frames until it has one (a render
+            // in between cancels this and tries again with the block it built).
+            let tries = 0;
+            this._scrollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
+                const actor = target.actor;
+                const placed = actor.get_stage() && actor.has_allocation() &&
+                    adjustment.upper >= actor.get_y() + Math.min(actor.get_height(), adjustment.page_size);
+                if (!placed && ++tries < 30)
+                    return GLib.SOURCE_CONTINUE;
+                this._scrollId = 0;
+                this._scrollToBlock = null;
+                if (actor.get_stage())
+                    adjustment.value = Math.max(0, Math.min(actor.get_y(), adjustment.upper - adjustment.page_size));
+                return GLib.SOURCE_REMOVE;
+            });
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -1306,8 +1338,7 @@ var RosPanel = class RosPanel {
             text,
             style_class: error ? 'adaptive-network-ssh-error' : 'adaptive-ros-meta',
         });
-        label.clutter_text.line_wrap = true;
-        return label;
+        return wrapped(label);
     }
 
     // An entry in the list. A render that the graph asks for waits until it
@@ -1326,6 +1357,7 @@ var RosPanel = class RosPanel {
             inner.single_line_mode = false;
             inner.activatable = false;
             inner.line_wrap = true;
+            inner.ellipsize = Pango.EllipsizeMode.NONE;
             inner.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
         }
         if (onChange)
@@ -1510,8 +1542,7 @@ var RosPanel = class RosPanel {
                 x_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
             });
-            label.clutter_text.line_wrap = true;
-            bar.add_child(label);
+            bar.add_child(wrapped(label));
             bar.add_child(this._buttons(buttons));
             box.add_child(bar);
         };
@@ -1881,8 +1912,7 @@ var RosPanel = class RosPanel {
             onChange: text => { view.query = text; }, onActivate: () => this._loadLogView() }));
         const output = new St.Label({ text: view.loading && !view.text ? 'Reading…' : view.text || 'No matching lines',
             style_class: 'adaptive-ros-definition adaptive-ros-log' });
-        output.clutter_text.line_wrap = true;
-        output.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        wrapped(output).clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
         this._out.add_child(output);
         if (view.lines > view.shown)
             this._out.add_child(this._note(`The last ${view.shown} of ${view.lines} lines`));
@@ -2129,10 +2159,16 @@ var RosPanel = class RosPanel {
         const runs = ((this._runs && this._runs.running) || status.runs || {}).bag || [];
         const playing = runs.find(run => run.meta && run.meta.play);
         const note = this._notes.bag;
+        const picking = this._expanded.has('bag:topics') && this._graph && !(recording || playing);
+        const topics = picking ? this._graph.topics.filter(topic => !topic.system) : [];
+        // Opening the picker starts from what the list shows; made before the
+        // subtitle, so the row says "Records N chosen topics" straight away.
+        if (picking && !this._bagTopics)
+            this._bagTopics = new Set(topics.filter(topic => this._matches(topic)).map(topic => topic.name));
         let subtitle;
         if (this._isArmed('bag:record')) {
-            const topics = this._topicsToRecord();
-            subtitle = `Confirm to record ${topics ? plural(topics.length, 'topic') : 'every topic'} ` +
+            const chosen = this._topicsToRecord();
+            subtitle = `Confirm to record ${chosen ? plural(chosen.length, 'topic') : 'every topic'} ` +
                 `to ${status.bag_dir.replace(GLib.get_home_dir(), '~')}`;
         } else if (note)
             subtitle = note.text;
@@ -2167,10 +2203,7 @@ var RosPanel = class RosPanel {
                 { label: this._isArmed('bag:record') ? 'Confirm' : 'Record', quiet: true, onClick: () => this._recordTopics() },
             ],
         }));
-        if (this._expanded.has('bag:topics') && this._graph && !busy) {
-            const topics = this._graph.topics.filter(topic => !topic.system);
-            if (!this._bagTopics)
-                this._bagTopics = new Set(topics.filter(topic => this._matches(topic)).map(topic => topic.name));
+        if (picking) {
             for (const topic of topics) {
                 const selected = this._bagTopics.has(topic.name);
                 this._out.add_child(this._smallButton(`${selected ? '✓' : '○'} ${topic.name}`, () => {
@@ -2655,7 +2688,7 @@ var RosPanel = class RosPanel {
         const back = this._focus ? [...this._focus.back, { kind: this._focus.kind, name: this._focus.name }] : [];
         this._focus = { kind, name, back: back.slice(-10) };
         this._expanded.add('section:focus');
-        this._scrollToTop = true;
+        this._scrollToBlock = 'focus';
         this._render();
     }
 
@@ -3138,7 +3171,7 @@ var RosPanel = class RosPanel {
         this._plot = plot;
         this._plotDraft = null;
         this._expanded.add('section:plot');
-        this._scrollToTop = true;
+        this._scrollToBlock = 'plot';
         plot.id = this._request('plot', { name: topic, field }, reply => {
             if (this._plot !== plot)
                 return;
@@ -3262,8 +3295,7 @@ var RosPanel = class RosPanel {
             text: `${data.text}${data.truncated ? '\n…' : ''}`,
             style_class: 'adaptive-ros-definition',
         });
-        label.clutter_text.line_wrap = true;
-        box.add_child(label);
+        box.add_child(wrapped(label));
         return box;
     }
 
@@ -3319,8 +3351,7 @@ var RosPanel = class RosPanel {
             text: known.busy ? 'Reading…' : known.error || known.data.text,
             style_class: known.error ? 'adaptive-ros-definition adaptive-network-warn' : 'adaptive-ros-definition',
         });
-        label.clutter_text.line_wrap = true;
-        return label;
+        return wrapped(label);
     }
 
     // The fields to send, what sending does, and what came back.
@@ -3330,6 +3361,8 @@ var RosPanel = class RosPanel {
         box.add_child(new St.Label({ text: `${verb} · request fields`, style_class: 'adaptive-ros-group' }));
         if (!composer.fields)
             box.add_child(this._note('Loading fields…'));
+        else if (!composer.fields.length && !composer.error)
+            box.add_child(this._note(cmd === 'publish' ? 'This message has no fields' : 'This request has no fields'));
         for (const field of composer.fields || []) {
             box.add_child(this._note(`${field.path.join('.')} · ${field.type}`));
             const isString = /^(w?string)(<|$)/.test(field.type);
@@ -3388,9 +3421,7 @@ var RosPanel = class RosPanel {
             if (parts.length)
                 box.add_child(this._note(parts.join(' · ')));
             if (reply.text) {
-                const label = new St.Label({ text: reply.text, style_class: 'adaptive-ros-definition' });
-                label.clutter_text.line_wrap = true;
-                box.add_child(label);
+                box.add_child(wrapped(new St.Label({ text: reply.text, style_class: 'adaptive-ros-definition' })));
             }
         }
         return box;

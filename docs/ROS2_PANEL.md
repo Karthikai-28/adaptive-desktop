@@ -293,3 +293,20 @@ static transform and a number on `/level` for the group, TF lookup and plot.
 - rqt_plot is in the distro's `lib/rqt_plot/`, not on PATH.
 - `ros2 topic pub`'s own node is hidden (`_ros2cli_…`), so a topic only it
   publishes is not listed; the plot still subscribes to it by name.
+- A wrapped `St.Label` must also have `ellipsize = NONE` (`wrapped()` in
+  `rosPanel.js`). St.Label ellipsizes by default, and a wrapped, ellipsized label
+  asks for one line as its minimum. The scrolled list hands out minimum sizes when
+  it is taller than the dropdown, so a call's reply or a preview showed only `{`
+  and drew the rest over the rows below. The nested check compares every wrapped
+  label's height with what it asks for.
+- The plot and the graph view are drawn below the setup and the launchers, so
+  opening one scrolls to its block once the list is laid out, not to the top.
+- The plot strip spans at least 2% of the values' size (or 0.001), so a steady
+  value with noise (a drone hovering at 1.2000-1.2001 m) draws a level line.
+- Previews and replies print a list of plain values on one line, so an
+  Odometry is about 40 lines rather than 115.
+- Parameter services (`get_parameters`, `set_parameters`, …) are counted in the
+  footer but not listed; each node shows its parameters instead. The panel's own
+  node and the `ros2` CLI daemon are hidden too.
+- `verify-ros-panel.py` runs on the real machine: a robot's own `ros2 launch`
+  can be running, listed as outside the panel, so checks look at `owned_pids`.
