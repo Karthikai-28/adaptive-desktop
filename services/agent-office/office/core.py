@@ -31,6 +31,9 @@ from .repos import Repos
 from .study import Study
 from .capsules import Capsules
 from .evidence import Evidence
+from .workflows import Workflows
+from .audit_export import AuditExport
+from .retention import Retention
 
 NAME_RE_CACHE = {}
 
@@ -79,6 +82,9 @@ class Office:
         self.repos = Repos(self)
         self.capsules = Capsules(self)
         self.evidence = Evidence(self)
+        self.workflows = Workflows(self)
+        self.audit_export = AuditExport(self)
+        self.retention = Retention()
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 

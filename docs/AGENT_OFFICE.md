@@ -52,6 +52,9 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Missions** | Outcome-based work with an objective, measurable acceptance criteria, a writable-repository boundary, linked tasks, cancellation, and one evidence report. Open **Missions** in the top bar or use `office mission`. |
 | **Work capsules** | Save the exact repository revision, dirty files, dependency-lock fingerprints, runtime, command, launch arguments, parameters, datasets and results for a mission. A capsule is readable JSON under `company/capsules/`; create one from a mission or with `office capsule`. |
 | **Evidence search** | Search a mission's objective, criteria, task reports, capsules, project artifacts and explicitly scoped repository. Results cite the mission, task, capsule or exact file and line; search stays local and skips secret-shaped files. |
+| **Reusable workflows** | Save a mission as a parameterized team workflow. A workflow keeps its acceptance criteria, assigned roles, risk class and repository boundary. Hardware and external workflows require explicit approval on every run. |
+| **Audit and retention** | Export a mission, task events, policy and capsules as one JSON audit bundle. `office retention DAYS` previews old capsule/export removal; add `--apply` to perform exactly the listed deletion. |
+| **ROS investigations** | Capture the live ROS setup, baseline and candidate recording metadata, missing/type-changed topics and message-count regressions, plus an exact simulation or replay command in the evidence capsule. |
 | **Mission Control on the phone** | Adaptive Link's native Office has a Missions tab for launching scoped work, reading criteria and reports, searching evidence and cancelling work. It uses the paired phone's mutually authenticated Office gateway and requires that device's Commands switch. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
 | **Tokens** | Live token usage: who spends what, on which work, and how. The **Tokens** button shows the team (per person by kind of work, over time, by step, by project, by how tasks ended, the most expensive tasks); click a person for their own breakdown (context per call, tasks, every run). Each person's card also has a **Tokens** tab. Windows: last hour to all time. It updates by itself as agents work. |
@@ -100,11 +103,17 @@ office assign maya "Write a spec" --body "..." --project launch [--after 12]
 office tasks / office show 12 --events / office cancel 12 / office retry 12
 office mission create "Reproduce the failure" --objective "Find and verify the cause" \
   --criterion "The failure is reproduced" --criterion "The fix passes its regression check" --repo my-robot
-office mission list / office mission show 3 / office mission cancel 3
-office mission ros "localization jumps after map reload" --bag ~/bags/failure --repo my-robot
+office mission list / office mission show 3 / office mission cancel 3 / office mission export 3
+office mission ros "localization jumps after map reload" --baseline-bag ~/bags/good \
+  --bag ~/bags/failure --simulation-command "ros2 launch robot replay.launch.py" --repo my-robot
 office capsule create --mission 3 --command "pytest -q" --parameter seed=42 --result reports/run.md
 office capsule list / office capsule show 20261021-120000-ab12cd34
 office evidence "navigation timeout" --mission 3
+office workflow create inspect-component "Inspect {{component}}" \
+  --objective "Explain {{component}} with cited evidence" --criterion "The report cites its sources" --risk read
+office workflow run inspect-component --input component=planner
+office retention 90                         preview old capsules and audit exports
+office retention 90 --kind exports --apply delete exactly the previewed old exports
 office ask claude "what's the status of the launch?"     (waits for the reply)
 office meeting start "Weekly sync" --with maya,arjun,claude / office meeting end
 office provider [gemini|local] [--fallback local|none]   what agents run on (meetings: config "meeting_provider")
@@ -143,6 +152,18 @@ office autopilot on|off · office pause · office resume · office open
   chains work. Interrupted tasks resume after a restart, and transient failures retry once.
 
 ## Safety
+
+- **Private by construction.** The desktop server binds to `127.0.0.1`, rejects foreign Host and
+  Origin headers, and requires its same-origin write header. Remote phone access goes only through
+  Adaptive Link's paired, mutually authenticated gateway and the phone's Commands permission; the
+  Office port is never exposed on the LAN. `GET /api/health` reports the service's local-only mode.
+- **Workflow authority.** Read workflows cannot name a writable repository. A saved repository
+  boundary cannot be widened when a workflow runs, role allowlists are enforced, and hardware or
+  external workflows require one-run approval. The agents still receive only the one repository
+  named by the resulting mission as writable.
+- **Retention is inspectable.** Retention covers generated capsule and audit JSON only. It previews
+  paths and byte counts by default, accepts 1–3650 days, and does not delete mission/task history or
+  project source.
 
 - Every agent runs inside **bubblewrap**: the system is read-only and the home folder is replaced
   by an empty one holding only developer tools (read-only), agy's own home, the company workspace

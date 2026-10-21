@@ -869,6 +869,7 @@ async function openMissions() {
   const body = h('div', { id: 'missionList', class: 'mission-list' });
   openModal('missions', 'Mission Control', body, [], true);
   $('#modal .mh h2').after(h('div', { class: 'toolbar' },
+    h('button', { class: 'act', style: 'flex:none;padding:0 12px', onclick: openWorkflows }, 'Workflows'),
     h('button', { class: 'act', style: 'flex:none;padding:0 12px', onclick: openRosMission }, 'ROS failure'),
     h('button', { class: 'act primary', style: 'flex:none;padding:0 12px', onclick: openMissionCreate }, iconEl('plus'), 'New mission')));
   refreshMissions();
@@ -919,6 +920,8 @@ function openRosMission() {
   const agent = h('select', { class: 'in' }, ...S.order.filter(id => id !== MGR).map(id => h('option', { value: id }, `${S.roster[id].name} — ${S.roster[id].role}`)));
   const problem = h('textarea', { class: 'in', placeholder: 'What failed, what you expected, when it happened, and any useful symptoms.' });
   const bag = h('input', { class: 'in', placeholder: 'optional rosbag, MCAP, log, or dataset path/reference' });
+  const baseline = h('input', { class: 'in', placeholder: 'optional baseline rosbag directory for automatic comparison' });
+  const simulation = h('input', { class: 'in', placeholder: 'optional simulation or replay command' });
   const project = h('input', { class: 'in', placeholder: 'optional project name' });
   const repo = h('input', { class: 'in', list: 'rosMissionRepos', placeholder: 'writable repository path or name' });
   const repos = h('datalist', { id: 'rosMissionRepos' });
@@ -929,7 +932,8 @@ function openRosMission() {
     go.disabled = true;
     try {
       const m = await api('POST', '/api/missions/ros-investigation', { agent: agent.value, problem: problem.value,
-        bag: bag.value, project: project.value, repo: repo.value });
+        bag: bag.value, baseline_bag: baseline.value, simulation_command: simulation.value,
+        project: project.value, repo: repo.value });
       S.missions.set(m.id, m); toast(`ROS investigation #${m.id} launched`, 'ok', agent.value); openMission(m.id);
     } catch (e) { toast(e.message, 'error'); go.disabled = false; }
   };
@@ -938,6 +942,8 @@ function openRosMission() {
     h('label', { class: 'f' }, 'Owner'), agent,
     h('label', { class: 'f' }, 'Observed problem'), problem,
     h('label', { class: 'f' }, 'Recording / dataset'), bag,
+    h('label', { class: 'f' }, 'Baseline recording'), baseline,
+    h('label', { class: 'f' }, 'Simulation / replay command'), simulation,
     h('label', { class: 'f' }, 'Project'), project,
     h('label', { class: 'f' }, 'Writable repo'), repo, repos),
     [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: openMissions }, 'Back'), go]);
@@ -978,6 +984,11 @@ async function openMission(id) {
     try { await api('POST', `/api/missions/${id}/cancel`); toast(`Mission #${id} cancelled`, 'ok'); openMissions(); } catch (e) { toast(e.message, 'error'); }
   } }, 'Cancel mission'));
   foot.push(h('button', { class: 'act', style: 'flex:none;padding:0 14px', onclick: () => openCapsuleCreate(m) }, iconEl('file'), 'Save work capsule'));
+  foot.push(h('button', { class: 'act', style: 'flex:none;padding:0 14px', onclick: () => saveMissionWorkflow(m) }, 'Save workflow'));
+  foot.push(h('button', { class: 'act', style: 'flex:none;padding:0 14px', onclick: async () => {
+    try { const x = await api('POST', `/api/missions/${m.id}/export`); toast(`Audit exported: ${x.path}`, 'ok'); }
+    catch (e) { toast(e.message, 'error'); }
+  } }, 'Export audit'));
   foot.push(h('button', { class: 'act primary', style: 'flex:none;padding:0 14px', onclick: openMissions }, 'All missions'));
   openModal('mission', `Mission #${m.id} · ${m.title}`, body, foot, true);
 }
@@ -1009,6 +1020,55 @@ function openCapsuleCreate(m) {
     h('label', { class: 'f' }, 'Datasets / recordings'), datasets,
     h('label', { class: 'f' }, 'Results'), results,
     h('label', { class: 'f' }, 'Notes'), notes),
+    [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: () => openMission(m.id) }, 'Back'), go]);
+}
+async function openWorkflows() {
+  let rows; try { rows = await api('GET', '/api/workflows'); } catch (e) { return toast(e.message, 'error'); }
+  const cards = rows.length ? rows.map(w => h('div', { class: 'mission-card' },
+    h('div', { class: 'mission-head' }, h('b', null, w.title), h('span', { class: 'pill' }, w.risk)),
+    h('div', { class: 'mission-objective' }, w.description || w.objective),
+    h('div', { class: 'mission-meta' }, w.id, w.allowed_agents?.length ? ` · ${w.allowed_agents.map(nameOf).join(', ')}` : ' · any agent'),
+    h('button', { class: 'act primary', style: 'margin-top:10px;padding:0 12px', onclick: async () => {
+      const source = [w.title, w.objective, ...(w.criteria || [])].join('\n');
+      const names = [...new Set([...source.matchAll(/\{\{\s*([a-zA-Z][\w-]*)\s*\}\}/g)].map(x => x[1]))];
+      const inputs = {};
+      for (const name of names) {
+        const value = prompt(`Workflow input: ${name}`);
+        if (value === null) return;
+        inputs[name] = value;
+      }
+      let approved = false;
+      if (['hardware', 'external'].includes(w.risk)) {
+        approved = confirm(`Approve this ${w.risk} workflow for one run? Review its objective and repository boundary before continuing.`);
+        if (!approved) return;
+      }
+      try { const m = await api('POST', `/api/workflows/${w.id}/run`, { inputs, approved }); toast(`Mission #${m.id} launched`, 'ok'); openMission(m.id); }
+      catch (e) { toast(e.message, 'error'); }
+    } }, 'Run workflow'))) : [h('div', { class: 'empty' }, 'No saved workflows yet. Save a mission as a workflow from its detail page.')];
+  const body = h('div', { class: 'mission-list' }, ...cards);
+  openModal('workflows', 'Workflow library', body, [h('button', { class: 'act primary', style: 'flex:none;padding:0 14px', onclick: openMissions }, 'Mission Control')], true);
+}
+function saveMissionWorkflow(m) {
+  const wid = h('input', { class: 'in', value: m.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) });
+  const title = h('input', { class: 'in', value: m.title });
+  const desc = h('input', { class: 'in', placeholder: 'When should the team use this workflow?' });
+  const risk = h('select', { class: 'in' }, ...['read', 'write', 'hardware', 'external'].map(x => h('option', { value: x, selected: x === (m.repo ? 'write' : 'read') }, x)));
+  const owner = m.tasks?.[0]?.agent || '';
+  const go = h('button', { class: 'act primary', style: 'flex:none;padding:0 16px' }, 'Save workflow');
+  go.onclick = async () => {
+    try {
+      await api('POST', '/api/workflows', { id: wid.value, title: title.value, description: desc.value,
+        objective: m.objective, criteria: m.criteria, agent: owner, project: m.project, repo: m.repo, risk: risk.value,
+        allowed_agents: owner ? [owner] : [] });
+      toast(`Workflow ${wid.value} saved`, 'ok'); openWorkflows();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  openModal('save-workflow', 'Save reusable workflow', h('div', null,
+    h('label', { class: 'f' }, 'Workflow ID'), wid,
+    h('label', { class: 'f' }, 'Title'), title,
+    h('label', { class: 'f' }, 'Description'), desc,
+    h('label', { class: 'f' }, 'Risk class'), risk,
+    h('div', { class: 'hintline' }, 'The workflow keeps this mission’s objective, criteria, project, repository boundary and assigned role.')),
     [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: () => openMission(m.id) }, 'Back'), go]);
 }
 

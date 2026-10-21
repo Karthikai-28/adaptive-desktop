@@ -16,6 +16,7 @@ from office.config import AGY_HOME, COMPANY, DATA, STATIC
 from office.core import Office
 from office.store import Store
 from office.mission_templates import launch_ros_investigation
+from office.ros_compare import compare_bags
 
 CFG = config.load()
 PORT = int(os.environ.get("OFFICE_PORT", CFG["port"]))
@@ -74,6 +75,13 @@ async def ws(sock: WebSocket):
 @app.get("/api/state")
 async def state():
     return office.snapshot()
+
+
+@app.get("/api/health")
+async def health():
+    return {"ok": True, "service": "agent-office", "local_only": True,
+            "paused": bool(store.get("paused", False)), "autopilot": bool(store.get("autopilot", False)),
+            "missions": len(store.missions(limit=500))}
 
 
 # ---------------------------------------------------------------- chat
@@ -174,11 +182,35 @@ async def cancel_mission(mid: int):
         bad(e)
 
 
+@app.post("/api/missions/{mid}/export")
+async def export_mission(mid: int):
+    try:
+        return office.audit_export.mission(mid)
+    except ValueError as e:
+        bad(e)
+
+
+class RetentionIn(BaseModel):
+    days: int = 90
+    kinds: list[str] = ["capsules", "exports"]
+    apply: bool = False
+
+
+@app.post("/api/retention")
+async def retention(r: RetentionIn):
+    try:
+        return office.retention.inspect(r.days, r.kinds, r.apply)
+    except ValueError as e:
+        bad(e)
+
+
 class RosMissionIn(BaseModel):
     agent: str
     problem: str
     title: str = "Investigate ROS 2 failure"
     bag: str = ""
+    baseline_bag: str = ""
+    simulation_command: str = ""
     project: str = ""
     repo: str = ""
 
@@ -186,7 +218,73 @@ class RosMissionIn(BaseModel):
 @app.post("/api/missions/ros-investigation")
 async def ros_investigation(m: RosMissionIn):
     try:
-        return await launch_ros_investigation(office, m.agent, m.title, m.problem, m.bag, m.project, m.repo)
+        return await launch_ros_investigation(office, m.agent, m.title, m.problem, m.bag, m.project, m.repo,
+                                              m.baseline_bag, m.simulation_command)
+    except ValueError as e:
+        bad(e)
+
+
+# ---------------------------------------------------------------- reusable workflows
+class WorkflowIn(BaseModel):
+    id: str = ""
+    title: str
+    description: str = ""
+    objective: str
+    criteria: list[str]
+    agent: str = ""
+    project: str = ""
+    repo: str = ""
+    risk: str = "write"
+    allowed_agents: list[str] = []
+
+
+class WorkflowRunIn(BaseModel):
+    inputs: dict = {}
+    agent: str = ""
+    project: str = ""
+    repo: str = ""
+    approved: bool = False
+
+
+@app.get("/api/workflows")
+async def workflows():
+    return office.workflows.list()
+
+
+@app.post("/api/workflows")
+async def save_workflow(w: WorkflowIn):
+    try:
+        return office.workflows.save(w.title, w.objective, w.criteria, w.description, w.id, w.agent,
+                                     w.project, w.repo, w.risk, w.allowed_agents)
+    except ValueError as e:
+        bad(e)
+
+
+@app.get("/api/workflows/{wid}")
+async def workflow(wid: str):
+    w = office.workflows.get(wid)
+    if not w:
+        raise HTTPException(404, "no such workflow")
+    return w
+
+
+@app.post("/api/workflows/{wid}/run")
+async def run_workflow(wid: str, r: WorkflowRunIn):
+    try:
+        return await office.workflows.run(wid, r.inputs, r.agent, r.project, r.repo, r.approved)
+    except ValueError as e:
+        bad(e)
+
+
+class RosCompareIn(BaseModel):
+    baseline: str
+    candidate: str
+
+
+@app.post("/api/ros/compare")
+async def ros_compare(r: RosCompareIn):
+    try:
+        return compare_bags(r.baseline, r.candidate)
     except ValueError as e:
         bad(e)
 

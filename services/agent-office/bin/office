@@ -9,10 +9,13 @@
   office cancel <task id> | office retry <task id>
   office mission create "<title>" --objective TEXT --criterion TEXT [--agent ID] [--repo PATH|NAME]
   office mission ros "<observed problem>" [--bag PATH] [--repo PATH|NAME]
-  office mission list | office mission show <id> | office mission cancel <id>
+  office mission list | office mission show <id> | office mission cancel <id> | office mission export <id>
   office capsule create [--mission ID] [--command CMD] [--dataset REF] [--result REF]
   office capsule list | office capsule show <id>
   office evidence "search words" [--mission ID]
+  office workflow create ID "Title" --objective TEXT --criterion TEXT [--allowed-agent ID]
+  office workflow list | office workflow show ID | office workflow run ID [--input NAME=VALUE]
+  office retention DAYS [--kind capsules|exports] [--apply]
   office ask <agent> "<message>" [--no-wait]      direct message; waits for the reply
   office log [--agent A] [-n N]                   recent activity
   office meeting start "<topic>" --with maya,arjun[,claude]
@@ -162,7 +165,8 @@ def cmd_retry(a):
 def cmd_mission(a):
     if a.action == "ros":
         m = call("POST", "/api/missions/ros-investigation", {"agent": a.agent, "title": a.name or "Investigate ROS 2 failure",
-                 "problem": a.title, "bag": a.bag or "", "project": a.project or "", "repo": a.repo or ""})
+                 "problem": a.title, "bag": a.bag or "", "baseline_bag": a.baseline_bag or "",
+                 "simulation_command": a.simulation_command or "", "project": a.project or "", "repo": a.repo or ""})
         print(f"ROS investigation #{m['id']} {m['status']} (task #{m['tasks'][0]['id']})")
         return
     if a.action == "create":
@@ -174,6 +178,10 @@ def cmd_mission(a):
     if a.action == "cancel":
         m = call("POST", f"/api/missions/{a.id}/cancel")
         print(f"mission #{m['id']} {m['status']}")
+        return
+    if a.action == "export":
+        x = call("POST", f"/api/missions/{a.id}/export")
+        print(f"mission #{a.id} audit exported to {x['path']} ({x['bytes']} bytes)")
         return
     if a.action == "show":
         rows = [call("GET", f"/api/missions/{a.id}")]
@@ -220,6 +228,37 @@ def cmd_evidence(a):
         print(f"[{r['kind']}] {r['title']}  {r['ref']}\n  {r['snippet']}")
     if not d["results"]:
         print(f"no matching evidence ({d['scanned_files']} files scanned)")
+
+
+def cmd_workflow(a):
+    if a.action == "create":
+        w = call("POST", "/api/workflows", {"id": a.id, "title": a.title, "description": a.description or "",
+                 "objective": a.objective, "criteria": a.criterion or [], "agent": a.agent or "",
+                 "project": a.project or "", "repo": a.repo or "", "risk": a.risk,
+                 "allowed_agents": a.allowed_agent or []})
+        print(f"workflow {w['id']} saved")
+        return
+    if a.action == "show":
+        print(json.dumps(call("GET", f"/api/workflows/{a.id}"), indent=2)); return
+    if a.action == "run":
+        inputs = {}
+        for item in a.input or []:
+            if "=" not in item: sys.exit("office: --input must be NAME=VALUE")
+            k, v = item.split("=", 1); inputs[k.strip()] = v.strip()
+        m = call("POST", f"/api/workflows/{a.id}/run", {"inputs": inputs, "agent": a.agent or "",
+                 "project": a.project or "", "repo": a.repo or "", "approved": a.approve})
+        print(f"workflow launched mission #{m['id']}: {m['title']}"); return
+    for w in call("GET", "/api/workflows"):
+        print(f"{w['id']:<28} {w['risk']:<8} {w['title']}")
+
+
+def cmd_retention(a):
+    d = call("POST", "/api/retention", {"days": a.days, "kinds": a.kind or ["capsules", "exports"],
+                                         "apply": a.apply})
+    action = "deleted" if a.apply else "would delete"
+    print(f"{action} {d['count']} file(s), {d['bytes']} bytes")
+    for row in d["files"]:
+        print(f"  {row['path']}")
 
 
 def cmd_ask(a):
@@ -372,11 +411,11 @@ def main():
     s = sub.add_parser("show"); s.add_argument("id", type=int); s.add_argument("--events", action="store_true")
     s = sub.add_parser("cancel"); s.add_argument("id", type=int)
     s = sub.add_parser("retry"); s.add_argument("id", type=int)
-    s = sub.add_parser("mission"); s.add_argument("action", choices=["create", "ros", "list", "show", "cancel"])
+    s = sub.add_parser("mission"); s.add_argument("action", choices=["create", "ros", "list", "show", "cancel", "export"])
     s.add_argument("title", nargs="?"); s.add_argument("--id", type=int)
     s.add_argument("--objective"); s.add_argument("--criterion", action="append")
     s.add_argument("--agent", default="maya"); s.add_argument("--project"); s.add_argument("--repo")
-    s.add_argument("--bag"); s.add_argument("--name")
+    s.add_argument("--bag"); s.add_argument("--baseline-bag"); s.add_argument("--simulation-command"); s.add_argument("--name")
     s.add_argument("-n", type=int, default=30)
     s = sub.add_parser("capsule"); s.add_argument("action", choices=["create", "list", "show"])
     s.add_argument("id", nargs="?"); s.add_argument("--mission", type=int); s.add_argument("--project"); s.add_argument("--repo")
@@ -384,6 +423,15 @@ def main():
     s.add_argument("--dataset", action="append"); s.add_argument("--result", action="append"); s.add_argument("--notes")
     s.add_argument("-n", type=int, default=30)
     s = sub.add_parser("evidence"); s.add_argument("query"); s.add_argument("--mission", type=int); s.add_argument("-n", type=int, default=40)
+    s = sub.add_parser("workflow"); s.add_argument("action", choices=["create", "list", "show", "run"])
+    s.add_argument("id", nargs="?"); s.add_argument("title", nargs="?"); s.add_argument("--description")
+    s.add_argument("--objective"); s.add_argument("--criterion", action="append"); s.add_argument("--agent")
+    s.add_argument("--project"); s.add_argument("--repo"); s.add_argument("--risk", default="write")
+    s.add_argument("--allowed-agent", action="append"); s.add_argument("--input", action="append")
+    s.add_argument("--approve", action="store_true", help="approve this hardware/external workflow run")
+    s = sub.add_parser("retention"); s.add_argument("days", type=int)
+    s.add_argument("--kind", action="append", choices=["capsules", "exports"])
+    s.add_argument("--apply", action="store_true")
     s = sub.add_parser("ask"); s.add_argument("agent"); s.add_argument("message")
     s.add_argument("--no-wait", action="store_true"); s.add_argument("--timeout", type=int, default=900)
     s = sub.add_parser("log"); s.add_argument("--agent"); s.add_argument("-n", type=int, default=40)
@@ -399,7 +447,7 @@ def main():
     if a.cmd == "mission":
         if a.action == "create" and (not a.title or not a.objective or not a.criterion):
             p.error("mission create needs a title, --objective, and at least one --criterion")
-        if a.action in ("show", "cancel"):
+        if a.action in ("show", "cancel", "export"):
             try:
                 a.id = int(a.title)
             except (TypeError, ValueError):
@@ -408,6 +456,11 @@ def main():
             p.error("mission ros needs the observed problem")
     if a.cmd == "capsule" and a.action == "show" and not a.id:
         p.error("capsule show needs a capsule id")
+    if a.cmd == "workflow":
+        if a.action == "create" and (not a.id or not a.title or not a.objective or not a.criterion):
+            p.error("workflow create needs ID, title, --objective and at least one --criterion")
+        if a.action in ("show", "run") and not a.id:
+            p.error(f"workflow {a.action} needs a workflow id")
     if a.cmd in (None, "help"):
         print(__doc__.strip())
     elif a.cmd == "autopilot":

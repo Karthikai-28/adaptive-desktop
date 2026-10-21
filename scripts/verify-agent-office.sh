@@ -118,6 +118,7 @@ for _ in $(seq 1 40); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/stat
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 B="http://127.0.0.1:$PORT"
 [ "$(code "$B/api/state")" = 200 ] || { cat "$TMP/server.log"; fail "server did not start"; }
+[ "$(curl -fsS "$B/api/health" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(str(d["ok"] and d["local_only"]).lower())')" = true ] || fail "health endpoint"
 [ "$(code "$B/")" = 200 ] || fail "page"
 [ "$(code "$B/static/app.js")" = 200 ] || fail "static files"
 [ "$(code -X POST -H 'Content-Type: application/json' -d '{}' "$B/api/settings")" = 403 ] || fail "POST without X-Office header was accepted"
@@ -140,6 +141,43 @@ curl -fsS "$B/api/evidence/search?q=checked%20result&mission_id=$MID" | python3 
 [ "$(code "$B/api/evidence/search?q=test&mission_id=99999")" = 400 ] || fail "evidence search accepted an unknown mission"
 RMID="$(curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"agent":"maya","problem":"the test robot loses localization","bag":"bag://localization-test"}' "$B/api/missions/ros-investigation" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["criteria"]) == 5 and "ROS setup snapshot" in d["objective"]; print(d["id"])')" || fail "ROS investigation mission"
 curl -fsS "$B/api/capsules" | python3 -c "import json,sys; assert any(c['mission_id'] == $RMID for c in json.load(sys.stdin))" || fail "ROS investigation capsule"
+# rosbag comparisons are deterministic and become part of the mission evidence capsule
+mkdir -p "$TMP/baseline-bag" "$TMP/candidate-bag"
+cat > "$TMP/baseline-bag/metadata.yaml" <<'JSON'
+{"rosbag2_bagfile_information":{"duration":{"nanoseconds":1000000000},"message_count":110,"topics_with_message_count":[{"topic_metadata":{"name":"/scan","type":"sensor_msgs/msg/LaserScan"},"message_count":100},{"topic_metadata":{"name":"/tf","type":"tf2_msgs/msg/TFMessage"},"message_count":10}]}}
+JSON
+cat > "$TMP/candidate-bag/metadata.yaml" <<'JSON'
+{"rosbag2_bagfile_information":{"duration":{"nanoseconds":900000000},"message_count":35,"topics_with_message_count":[{"topic_metadata":{"name":"/scan","type":"sensor_msgs/msg/LaserScan"},"message_count":25},{"topic_metadata":{"name":"/odom","type":"nav_msgs/msg/Odometry"},"message_count":10}]}}
+JSON
+curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' \
+    -d "{\"baseline\":\"$TMP/baseline-bag\",\"candidate\":\"$TMP/candidate-bag\"}" "$B/api/ros/compare" | \
+    python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["message_delta"] == -75 and any("/tf" in x for x in d["flags"])' || fail "ROS bag comparison"
+CMID="$(curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' \
+    -d "{\"agent\":\"maya\",\"problem\":\"planner stalls in replay\",\"baseline_bag\":\"$TMP/baseline-bag\",\"bag\":\"$TMP/candidate-bag\",\"simulation_command\":\"ros2 launch demo replay.launch.py\"}" \
+    "$B/api/missions/ros-investigation" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "Recording comparison" in d["objective"] and "Simulation or replay command" in d["objective"]; print(d["id"])')" || fail "compared ROS investigation mission"
+curl -fsS "$B/api/capsules" | python3 -c "import json,sys; rows=[x for x in json.load(sys.stdin) if x['mission_id'] == $CMID]; assert rows" || fail "compared ROS capsule"
+# reusable workflows preserve role and repository boundaries; higher-risk runs need one-run approval
+[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"id":"bad-read","title":"Bad","objective":"Read","criteria":["done"],"risk":"read","repo":"/tmp/writable"}' "$B/api/workflows")" = 400 ] || fail "read workflow accepted writable repo"
+[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"id":"bad-role","title":"Bad","objective":"Read","criteria":["done"],"risk":"read","allowed_agents":["maya","nobody"]}' "$B/api/workflows")" = 400 ] || fail "workflow accepted an unknown role"
+curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' \
+    -d '{"id":"inspect-component","title":"Inspect {{component}}","objective":"Explain {{component}} with evidence","criteria":["A cited {{component}} report exists"],"agent":"maya","risk":"read","allowed_agents":["maya"]}' \
+    "$B/api/workflows" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["id"] == "inspect-component" and d["allowed_agents"] == ["maya"]' || fail "save workflow"
+WMID="$(curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"inputs":{"component":"planner"},"agent":"maya"}' "$B/api/workflows/inspect-component/run" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["title"] == "Inspect planner" and "planner" in d["criteria"][0]; print(d["id"])')" || fail "run workflow"
+[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"inputs":{"component":"planner"},"agent":"zoe"}' "$B/api/workflows/inspect-component/run")" = 400 ] || fail "workflow role boundary"
+curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"id":"move-robot","title":"Move robot","objective":"Run movement check","criteria":["Robot stops safely"],"agent":"maya","risk":"hardware"}' "$B/api/workflows" >/dev/null || fail "save hardware workflow"
+[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{}' "$B/api/workflows/move-robot/run")" = 400 ] || fail "hardware workflow ran without approval"
+[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"approved":true}' "$B/api/workflows/move-robot/run")" = 200 ] || fail "approved hardware workflow"
+curl -fsS -X POST -H 'X-Office: 1' "$B/api/missions/$MID/export" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["path"].startswith("exports/mission-") and d["capsules"] == 1' || fail "mission audit export"
+[ -f "$TMP/state/company/exports/mission-$MID.json" ] || fail "mission audit file"
+python3 - "$TMP/state/company/exports/mission-$MID.json" <<'PY'
+import os, sys, time
+old = time.time() - 2 * 86400
+os.utime(sys.argv[1], (old, old))
+PY
+curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"days":1,"kinds":["exports"]}' "$B/api/retention" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["count"] == 1 and not d["apply"]' || fail "retention preview"
+[ -f "$TMP/state/company/exports/mission-$MID.json" ] || fail "retention preview deleted a file"
+curl -fsS -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"days":1,"kinds":["exports"],"apply":true}' "$B/api/retention" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["count"] == 1 and d["apply"]' || fail "retention apply"
+[ ! -e "$TMP/state/company/exports/mission-$MID.json" ] || fail "retention did not delete old export"
 curl -fsS "$B/api/events?task_id=999&limit=4" | python3 -c 'import json,sys; assert json.load(sys.stdin) == []' || fail "task-filtered events"
 [ -d "$TMP/state/company/projects" ] || fail "state folder layout"
 curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' || fail "study api"

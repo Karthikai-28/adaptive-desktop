@@ -869,18 +869,27 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
 - ✅ **Local project evidence search.** Mission Control searches the mission contract,
   task reports, work capsules, Office project artifacts and the explicitly scoped
   repository. It returns source references (including file lines), skips secret-shaped
-  files and does not send indexed content to a model. Retention controls and binary
-  recording search remain future work.
+  files and does not send indexed content to a model.
 - ✅ **ROS failure-investigation mission template.** The Mission Control **ROS failure**
   flow captures the current ROS setup, recording reference and a work capsule, then
   requires reproduction, correlated diagnostics, cited root-cause evidence, a repeatable
-  regression check and an uncertainty-aware engineering report. Simulation execution and
-  automatic recording comparison remain work for the investigator and future adapters.
+  regression check and an uncertainty-aware engineering report. It now compares rosbag2
+  metadata against a baseline (topics, types and message counts), flags regressions, and stores
+  the exact simulation or replay command in the mission and its capsule for bounded execution.
 - ✅ **Phone Mission Control.** Adaptive Link's native Office now receives live mission
   state, launches bounded missions, shows their criteria/tasks/reports, searches their
   evidence and cancels active work through the existing mutually authenticated Office
   gateway. The APK builds; physical-device verification is still required.
-- ⬜ Team permissions, shared workflow templates, audit export and private deployment.
+- ✅ **Team workflows and permissions.** Missions can be saved as parameterized workflow
+  contracts with role allowlists, risk classes and repository boundaries. Read-only workflows
+  cannot grant writes, saved repository scope cannot be widened at run time, and hardware or
+  external workflows require one-run approval in both the UI and CLI.
+- ✅ **Portable audit exports and retention.** A mission exports its contract, linked tasks,
+  events, policy and work capsules as one readable JSON bundle. Dry-run-first retention can
+  list and remove old capsule/export JSON without touching task history or project source.
+- ✅ **Private deployment boundary.** The Office remains loopback-only with Host/Origin/write
+  guards; phone use stays behind Adaptive Link's paired gateway and Commands permission. A
+  health endpoint reports this local-only state. The integration suite verifies these guards.
 
 ## Immediate next work
 
