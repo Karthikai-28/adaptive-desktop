@@ -28,10 +28,12 @@ class SnapshotTests(unittest.TestCase):
 
     def test_windows_and_partial_line(self):
         self.record()
-        data = quota.codex_snapshot(self.root, now=1791763200)
+        sources = []
+        data = quota.codex_snapshot(self.root, now=1791763200, source_out=sources)
         self.assertEqual([w['used'] for w in data['windows']], [25, 40])
         self.assertEqual([w['label'] for w in data['windows']], ['5h', 'Weekly'])
         self.assertFalse(data['stale'])
+        self.assertEqual(sources, [self.root / 'rollout-one.jsonl'])
 
     def test_stale_and_expired_do_not_assume_refill(self):
         self.record(used=100)

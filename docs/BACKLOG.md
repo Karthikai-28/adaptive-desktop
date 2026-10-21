@@ -371,9 +371,12 @@ part of `verify-all.sh --quick`). **None is verified live yet.**
 - ✅ One-second timer ticks update state directly instead of occupying the
   eight-entry event queue. Start, pause, resume, digest and expiry remain real
   surfaced events.
-- ✅ AI quota polling switches from 60 seconds to five minutes while its card
-  and alert are hidden. Antigravity transcript monitoring is debounced, parses
-  only appended records on the Shell thread and selects the newest transcript.
+- ✅ AI usage refreshes as soon as its card opens and watches the active Codex
+  rollout, its session directory and Claude's local usage cache for changes.
+  Visible fallback polling is 15 seconds for Gemini and missed file events,
+  then switches to five minutes while the card and alert are hidden.
+  Antigravity transcript monitoring is debounced, parses only appended records
+  on the Shell thread and selects the newest transcript.
 - ✅ Island attachment is transactional: a failure restores the clock, actors,
   providers and signal handlers before the extension drops the object.
 - ✅ A notification whose urgency changes after creation is re-sorted and its

@@ -41,7 +41,7 @@ function _loadModule(name) {
 const Types = _loadModule('islandTypes');
 const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {} } = Types;
 
-const DEFAULT_ACTIVE_POLL_MS = 60000;   // 60s when visible/compact
+const DEFAULT_ACTIVE_POLL_MS = 15000;   // fallback while visible; file events are normally immediate
 const DEFAULT_IDLE_POLL_MS   = 300000;  // 300s when dormant/idle
 
 var PROVIDERS = [['codex', 'Codex'], ['claude', 'Claude'], ['gemini', 'Gemini']];
@@ -137,6 +137,8 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         this._transcriptReadInFlight = false;
         this._transcriptReadPending = false;
         this._transcriptDebounceId = 0;
+        this._sourceMonitors = new Map();
+        this._sourceDebounceId = 0;
     }
 
     init() {
@@ -158,6 +160,10 @@ var IslandQuotaProvider = class IslandQuotaProvider {
             clearTimeout(this._pollTimerId);
             this._pollTimerId = 0;
         }
+        // Opening AI usage must replace a possibly five-minute-old dormant
+        // reading immediately. File monitors handle subsequent local updates.
+        if (!dormant)
+            this.poll();
         this._scheduleNextPoll();
     }
 
@@ -247,6 +253,7 @@ var IslandQuotaProvider = class IslandQuotaProvider {
     }
 
     applySnapshot(data) {
+        this._syncSourceMonitors((data || {})._watch || {});
         const now = Date.now() / 1000;
         for (const [key] of PROVIDERS)
             this._usage[key] = _clean((data || {})[key]);
@@ -309,6 +316,49 @@ var IslandQuotaProvider = class IslandQuotaProvider {
             this._usage[key] = { ...this._usage[key], stale: true };
         if (this._bus && this._bus._notifyStateChange)
             this._bus._notifyStateChange();
+    }
+
+    _syncSourceMonitors(watch) {
+        if (typeof Gio === 'undefined' || !Gio.File)
+            return;
+        const wanted = new Set(Object.values(watch).filter(path => typeof path === 'string' && path));
+        for (const [path, entry] of this._sourceMonitors) {
+            if (wanted.has(path))
+                continue;
+            try { entry.monitor.cancel(); } catch (e) {}
+            try { entry.cancellable.cancel(); } catch (e) {}
+            this._sourceMonitors.delete(path);
+        }
+        for (const path of wanted) {
+            if (this._sourceMonitors.has(path))
+                continue;
+            try {
+                const file = Gio.File.new_for_path(path);
+                if (!file.query_exists(null))
+                    continue;
+                const cancellable = new Gio.Cancellable();
+                const type = file.query_file_type(Gio.FileQueryInfoFlags.NONE, null);
+                const monitor = type === Gio.FileType.DIRECTORY
+                    ? file.monitor_directory(Gio.FileMonitorFlags.NONE, cancellable)
+                    : file.monitor_file(Gio.FileMonitorFlags.NONE, cancellable);
+                monitor.connect('changed', () => this._queueSourceRefresh());
+                this._sourceMonitors.set(path, { monitor, cancellable });
+            } catch (e) {
+                // Polling remains as the fallback when a source cannot be watched.
+            }
+        }
+    }
+
+    _queueSourceRefresh() {
+        if (this._destroyed || typeof GLib === 'undefined')
+            return;
+        if (this._sourceDebounceId)
+            GLib.source_remove(this._sourceDebounceId);
+        this._sourceDebounceId = GLib.timeout_add(GLib.PRIORITY_LOW, 300, () => {
+            this._sourceDebounceId = 0;
+            this.poll();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _initAgyWatcher() {
@@ -505,6 +555,15 @@ var IslandQuotaProvider = class IslandQuotaProvider {
             GLib.source_remove(this._transcriptDebounceId);
             this._transcriptDebounceId = 0;
         }
+        if (this._sourceDebounceId && typeof GLib !== 'undefined') {
+            GLib.source_remove(this._sourceDebounceId);
+            this._sourceDebounceId = 0;
+        }
+        for (const entry of this._sourceMonitors.values()) {
+            try { entry.monitor.cancel(); } catch (e) {}
+            try { entry.cancellable.cancel(); } catch (e) {}
+        }
+        this._sourceMonitors.clear();
     }
 };
 

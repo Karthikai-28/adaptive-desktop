@@ -49,7 +49,7 @@ def _iso(s):
         return None
 
 
-def codex_snapshot(root, now=None):
+def codex_snapshot(root, now=None, source_out=None):
     now = time.time() if now is None else now
     latest = None
     # Bounded tails keep polling cheap and avoid loading conversation histories.
@@ -75,7 +75,7 @@ def codex_snapshot(root, now=None):
                         continue
                     stamp = _iso(record['timestamp'])
                     if stamp is not None and (latest is None or stamp > latest[0]):
-                        latest = (stamp, limits)
+                        latest = (stamp, limits, path)
                     break
                 except (ValueError, KeyError, TypeError, AttributeError):
                     continue
@@ -83,7 +83,9 @@ def codex_snapshot(root, now=None):
             continue
     if latest is None:
         return _empty('No Codex session has recorded its limits yet')
-    stamp, limits = latest
+    stamp, limits, source = latest
+    if source_out is not None:
+        source_out.append(source)
     result = {'ts': stamp, 'stale': now - stamp > STALE_S['codex'], 'error': '', 'windows': []}
     for key in ('primary', 'secondary'):
         window = limits.get(key)
@@ -161,9 +163,20 @@ def snapshot(refresh=False):
             office = json.loads(response.read(65536))
     except (OSError, ValueError):
         office = None
-    return {'codex': codex_snapshot(Path.home() / '.codex' / 'sessions'),
-            'claude': claude_snapshot(Path.home() / '.claude.json'),
-            'gemini': gemini_snapshot(office)}
+    home = Path.home()
+    codex_sources = []
+    codex = codex_snapshot(home / '.codex' / 'sessions', source_out=codex_sources)
+    claude_config = home / '.claude.json'
+    watch = {'claude': str(claude_config)}
+    if codex_sources:
+        watch['codex'] = str(codex_sources[0])
+        # A newly started Codex session creates a sibling rollout. Watching the
+        # directory lets the shell discover it without waiting for a timer.
+        watch['codexDirectory'] = str(codex_sources[0].parent)
+    return {'codex': codex,
+            'claude': claude_snapshot(claude_config),
+            'gemini': gemini_snapshot(office),
+            '_watch': watch}
 
 
 if __name__ == '__main__':

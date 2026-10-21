@@ -145,6 +145,10 @@ async function main() {
         'quota: appended transcript chunks are accumulated without reparsing old lines');
     quota.setDormant(true);
     check(quota._isDormant === true, 'quota: dormant polling can be selected while its cards are hidden');
+    let wakePolls = 0;
+    quota._customFetcher = cb => { wakePolls++; cb(null, nextSnap); };
+    quota.setDormant(false);
+    check(wakePolls === 1, 'quota: opening AI usage refreshes a dormant reading immediately');
     quota.destroy();
 
     // =========================================================================
