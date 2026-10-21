@@ -198,6 +198,17 @@ textarea.in { resize: vertical; min-height: 110px; }
 .kv div:nth-child(odd) { color: var(--muted); }
 .box { background: var(--soft); border-radius: 12px; padding: 12px; font-size: 13.5px; line-height: 1.5; }
 .box.err { background: #fff6f6; color: #a8282c; }
+.pill.succeeded { background: #e7f8f0; color: #1f8a5b; }
+.mission-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-content: start; }
+.mission-card { text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 14px; padding: 14px; font: inherit; color: inherit; }
+.mission-card:hover { border-color: #aeb5ed; box-shadow: 0 4px 18px rgba(42,47,89,.08); }
+.mission-head { display: flex; align-items: center; gap: 10px; }
+.mission-head b { flex: 1; }
+.mission-objective { color: #4a4f6a; font-size: 13px; line-height: 1.4; margin-top: 9px; }
+.mission-meta { color: var(--muted); font-size: 11.5px; margin-top: 9px; }
+.criteria { display: flex; flex-direction: column; gap: 7px; }
+.criteria > div { display: flex; gap: 8px; padding: 8px 10px; background: var(--soft); border-radius: 9px; font-size: 13px; }
+.mission-tasks { display: grid; gap: 8px; }
 
 /* files */
 .files { display: grid; grid-template-columns: 300px 1fr; height: 100%; min-height: 0; }

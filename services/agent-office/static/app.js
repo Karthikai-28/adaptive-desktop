@@ -21,7 +21,7 @@ const savePrefs = () => { try { localStorage.setItem('office.prefs', JSON.string
 
 // ------------------------------------------------------------------ state
 const S = {
-  roster: {}, order: [], agents: {}, tasks: new Map(), meeting: null, settings: {}, usage: null, quotaUntil: 0,
+  roster: {}, order: [], agents: {}, tasks: new Map(), missions: new Map(), meeting: null, settings: {}, usage: null, quotaUntil: 0,
   threads: {}, unread: {}, events: [], view: { kind: 'home' }, tab: 'chat', operator: 'You', company: '', model: '',
   ready: false, eventsLoaded: new Set(), studies: [],
 };
@@ -172,6 +172,7 @@ function handle(m) {
       if (S.view.kind === 'agent' && S.view.id === m.task.agent) renderAgentHeader();
       refreshBoard(); refreshTaskDetail(m.task.id); return;
     }
+    case 'mission': S.missions.set(m.mission.id, m.mission); refreshMissions(); return;
     case 'meeting': return onMeeting(m);
     case 'toast': return toast(m.text, m.level, m.agent);
     case 'settings': S.settings = m.settings; S.quotaUntil = m.quota_until; renderQuota(); return;
@@ -189,6 +190,7 @@ function onState(m) {
   S.roster = Object.fromEntries(m.roster.map(p => [p.id, p]));
   S.agents = Object.fromEntries(m.agents.map(a => [a.id, a]));
   S.tasks = new Map(m.tasks.map(t => [t.id, t]));
+  S.missions = new Map((m.missions || []).map(x => [x.id, x]));
   S.settings = m.settings; S.quotaUntil = m.quota_until; S.studies = m.studies || []; S.providers = m.providers || [];
   document.title = `${m.company} · Agent Office`;
   $('#company').textContent = m.company;
@@ -294,6 +296,8 @@ function renderTop() {
   const mu = S.unread.manager || 0;
   $('#btnClaude').innerHTML = `${icon('spark')}<span class="lbl">Ask Claude</span>${mu ? `<span class="badge">${mu}</span>` : ''}`;
   $('#btnMeeting').innerHTML = `${icon(S.meeting ? 'users' : 'phone')}<span class="lbl">${S.meeting ? 'In meeting' : 'Call meeting'}</span>`;
+  const activeMissions = [...S.missions.values()].filter(m => ['queued', 'running'].includes(m.status)).length;
+  $('#btnMissions').innerHTML = `${icon('spark')}<span class="lbl">Missions</span>${activeMissions ? `<span class="badge">${activeMissions}</span>` : ''}`;
   $('#btnTasks').innerHTML = `${icon('clip')}<span class="lbl">Tasks</span>${queued ? `<span class="badge" style="background:#5865f2">${queued}</span>` : ''}`;
   $('#btnFiles').innerHTML = `${icon('folder')}<span class="lbl">Files</span>`;
   $('#btnTokens').innerHTML = `${icon('chart')}<span class="lbl">Tokens</span>`;
@@ -856,6 +860,80 @@ function openAssign(agent) {
   [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: closeModal }, 'Cancel'), go]);
 }
 
+// ---- missions
+async function openMissions() {
+  try {
+    const rows = await api('GET', '/api/missions?limit=100');
+    S.missions = new Map(rows.map(m => [m.id, m]));
+  } catch (e) { return toast(e.message, 'error'); }
+  const body = h('div', { id: 'missionList', class: 'mission-list' });
+  openModal('missions', 'Mission Control', body, [], true);
+  $('#modal .mh h2').after(h('div', { class: 'toolbar' },
+    h('button', { class: 'act primary', style: 'flex:none;padding:0 12px', onclick: openMissionCreate }, iconEl('plus'), 'New mission')));
+  refreshMissions();
+}
+function refreshMissions() {
+  const list = $('#missionList'); if (!list || modalKind !== 'missions') return;
+  const rows = [...S.missions.values()].sort((a, b) => b.id - a.id);
+  const cards = rows.length ? rows.map(m => h('button', { class: 'mission-card', onclick: () => openMission(m.id) },
+    h('div', { class: 'mission-head' }, h('b', null, `#${m.id} ${m.title}`), h('span', { class: `pill ${m.status}` }, m.status)),
+    h('div', { class: 'mission-objective' }, m.objective),
+    h('div', { class: 'mission-meta' }, m.project || 'No project', m.repo ? ` · ${m.repo.split('/').pop()}` : '', ` · ${ago(m.finished_at || m.started_at || m.created_at)}`)
+  )) : [h('div', { class: 'empty' }, 'No missions yet. Give the team an outcome and define how success will be proved.')];
+  list.replaceChildren(...cards);
+}
+function openMissionCreate() {
+  const agent = h('select', { class: 'in' }, ...S.order.filter(id => id !== MGR).map(id => h('option', { value: id }, `${S.roster[id].name} — ${S.roster[id].role}`)));
+  const title = h('input', { class: 'in', placeholder: 'e.g. Reproduce yesterday’s navigation failure' });
+  const objective = h('textarea', { class: 'in', placeholder: 'Describe the outcome, context, and boundaries.' });
+  const criteria = h('textarea', { class: 'in', placeholder: 'One measurable acceptance criterion per line\nFailure is reproduced from recorded inputs\nRoot cause is supported by logs or data\nProposed fix passes the regression check' });
+  const project = h('input', { class: 'in', placeholder: 'optional project name' });
+  const repo = h('input', { class: 'in', list: 'missionRepoList', placeholder: 'optional writable repository path or name' });
+  const repos = h('datalist', { id: 'missionRepoList' });
+  api('GET', '/api/repos').then(r => repos.replaceChildren(...r.repos.map(p => h('option', { value: p })))).catch(() => {});
+  const go = h('button', { class: 'act primary', style: 'flex:none;padding:0 16px' }, 'Launch mission');
+  go.onclick = async () => {
+    const checks = criteria.value.split('\n').map(x => x.trim()).filter(Boolean);
+    if (!title.value.trim()) return title.focus();
+    if (!objective.value.trim()) return objective.focus();
+    if (!checks.length) return criteria.focus();
+    go.disabled = true;
+    try {
+      const m = await api('POST', '/api/missions', { agent: agent.value, title: title.value, objective: objective.value,
+        criteria: checks, project: project.value, repo: repo.value });
+      S.missions.set(m.id, m); toast(`Mission #${m.id} launched`, 'ok', agent.value); openMissions();
+    } catch (e) { toast(e.message, 'error'); go.disabled = false; }
+  };
+  openModal('mission-create', 'Launch a mission', h('div', null,
+    h('label', { class: 'f' }, 'Owner'), agent,
+    h('label', { class: 'f' }, 'Mission'), title,
+    h('label', { class: 'f' }, 'Objective'), objective,
+    h('label', { class: 'f' }, 'Acceptance criteria'), criteria,
+    h('label', { class: 'f' }, 'Project'), project,
+    h('label', { class: 'f' }, 'Writable repo'), repo, repos,
+    h('div', { class: 'hintline' }, 'The assigned agent must report PASS or FAIL evidence for every criterion. Repository access stays scoped.')),
+    [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: closeModal }, 'Cancel'), go]);
+}
+async function openMission(id) {
+  let m; try { m = await api('GET', `/api/missions/${id}`); } catch (e) { return toast(e.message, 'error'); }
+  const when = ts => ts ? new Date(ts * 1000).toLocaleString() : '';
+  const body = h('div', null,
+    h('div', { class: 'kv' }, h('div', null, 'Status'), h('div', null, h('span', { class: `pill ${m.status}` }, m.status)),
+      h('div', null, 'Project'), h('div', null, m.project || '—'), h('div', null, 'Repository'), h('div', null, m.repo || 'Read only'),
+      h('div', null, 'Created'), h('div', null, when(m.created_at)), h('div', null, 'Finished'), h('div', null, when(m.finished_at) || '—')),
+    h('div', { class: 'section' }, 'Objective'), h('div', { class: 'box' }, m.objective),
+    h('div', { class: 'section' }, 'Acceptance criteria'), h('div', { class: 'criteria' }, ...m.criteria.map(x => h('div', null, '◻', h('span', null, x)))),
+    h('div', { class: 'section' }, 'Work'), h('div', { class: 'mission-tasks' }, ...m.tasks.map(taskCard)),
+    m.summary ? [h('div', { class: 'section' }, 'Evidence report'), h('div', { class: 'box md', html: md(m.summary) })] : null,
+    m.error ? [h('div', { class: 'section' }, 'Problem'), h('div', { class: 'box err' }, m.error)] : null);
+  const foot = [];
+  if (['queued', 'running'].includes(m.status)) foot.push(h('button', { class: 'act danger', style: 'flex:none;padding:0 14px', onclick: async () => {
+    try { await api('POST', `/api/missions/${id}/cancel`); toast(`Mission #${id} cancelled`, 'ok'); openMissions(); } catch (e) { toast(e.message, 'error'); }
+  } }, 'Cancel mission'));
+  foot.push(h('button', { class: 'act primary', style: 'flex:none;padding:0 14px', onclick: openMissions }, 'All missions'));
+  openModal('mission', `Mission #${m.id} · ${m.title}`, body, foot, true);
+}
+
 // ---- meeting setup / invite
 function pickList(ids, checked) {
   const wrap = h('div', { class: 'picks' });
@@ -1071,6 +1149,7 @@ const tokens = createTokens({ h, api, face, iconEl, S, MGR, openModal, modalKind
 // ------------------------------------------------------------------ top bar buttons
 $('#btnClaude').onclick = () => setView({ kind: 'agent', id: MGR }, 'chat');
 $('#btnMeeting').onclick = () => S.meeting ? setView({ kind: 'meeting' }) : openMeetingSetup();
+$('#btnMissions').onclick = openMissions;
 $('#btnTasks').onclick = () => openBoard();
 $('#btnFiles').onclick = () => openFiles('');
 $('#btnTokens').onclick = () => tokens.open();

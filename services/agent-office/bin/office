@@ -7,6 +7,8 @@
   office tasks [--agent A] [--status queued,running,done,failed] [-n N]
   office show <task id>                           full task with its report and activity
   office cancel <task id> | office retry <task id>
+  office mission create "<title>" --objective TEXT --criterion TEXT [--agent ID] [--repo PATH|NAME]
+  office mission list | office mission show <id> | office mission cancel <id>
   office ask <agent> "<message>" [--no-wait]      direct message; waits for the reply
   office log [--agent A] [-n N]                   recent activity
   office meeting start "<topic>" --with maya,arjun[,claude]
@@ -151,6 +153,35 @@ def cmd_cancel(a):
 def cmd_retry(a):
     t = call("POST", f"/api/tasks/{a.id}/retry")
     print(f"#{t['id']} {t['status']}")
+
+
+def cmd_mission(a):
+    if a.action == "create":
+        m = call("POST", "/api/missions", {"agent": a.agent, "title": a.title,
+                 "objective": a.objective, "criteria": a.criterion or [],
+                 "project": a.project or "", "repo": a.repo or ""})
+        print(f"mission #{m['id']} {m['status']}: {m['title']} (task #{m['tasks'][0]['id']})")
+        return
+    if a.action == "cancel":
+        m = call("POST", f"/api/missions/{a.id}/cancel")
+        print(f"mission #{m['id']} {m['status']}")
+        return
+    if a.action == "show":
+        rows = [call("GET", f"/api/missions/{a.id}")]
+    else:
+        rows = call("GET", "/api/missions", query={"limit": a.n})
+    for m in rows:
+        print(f"#{m['id']:<4} {m['status']:<10} {m['title']}")
+        if a.action == "show":
+            print(f"  objective: {m['objective']}")
+            for criterion in m["criteria"]:
+                print(f"  - {criterion}")
+            for t in m.get("tasks", []):
+                print(f"  task #{t['id']} {t['status']}: {t['title']} ({t['agent']})")
+            if m.get("summary"):
+                print(f"\nEvidence report:\n{m['summary']}")
+            if m.get("error"):
+                print(f"\nError: {m['error']}")
 
 
 def cmd_ask(a):
@@ -303,6 +334,11 @@ def main():
     s = sub.add_parser("show"); s.add_argument("id", type=int); s.add_argument("--events", action="store_true")
     s = sub.add_parser("cancel"); s.add_argument("id", type=int)
     s = sub.add_parser("retry"); s.add_argument("id", type=int)
+    s = sub.add_parser("mission"); s.add_argument("action", choices=["create", "list", "show", "cancel"])
+    s.add_argument("title", nargs="?"); s.add_argument("--id", type=int)
+    s.add_argument("--objective"); s.add_argument("--criterion", action="append")
+    s.add_argument("--agent", default="maya"); s.add_argument("--project"); s.add_argument("--repo")
+    s.add_argument("-n", type=int, default=30)
     s = sub.add_parser("ask"); s.add_argument("agent"); s.add_argument("message")
     s.add_argument("--no-wait", action="store_true"); s.add_argument("--timeout", type=int, default=900)
     s = sub.add_parser("log"); s.add_argument("--agent"); s.add_argument("-n", type=int, default=40)
@@ -315,6 +351,14 @@ def main():
     s = sub.add_parser("tokens"); s.add_argument("--since", default="24h"); s.add_argument("--provider")
     sub.add_parser("pause"); sub.add_parser("resume"); sub.add_parser("open")
     a = p.parse_args()
+    if a.cmd == "mission":
+        if a.action == "create" and (not a.title or not a.objective or not a.criterion):
+            p.error("mission create needs a title, --objective, and at least one --criterion")
+        if a.action in ("show", "cancel"):
+            try:
+                a.id = int(a.title)
+            except (TypeError, ValueError):
+                p.error(f"mission {a.action} needs a numeric mission id")
     if a.cmd in (None, "help"):
         print(__doc__.strip())
     elif a.cmd == "autopilot":

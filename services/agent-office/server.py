@@ -107,6 +107,7 @@ class TaskIn(BaseModel):
     after: int | None = None
     created_by: str | None = None
     repo: str = ""
+    mission_id: int | None = None
 
 
 @app.post("/api/tasks")
@@ -117,7 +118,7 @@ async def add_task(t: TaskIn, request: Request):
         if sum(1 for x in recent if x["created_by"] in ("manager", "meeting")) >= 40:
             bad("manager task limit reached (40 per hour) — ask the owner before assigning more")
     try:
-        return await office.add_task(t.agent, t.title, t.body, t.project, by, t.after, t.repo)
+        return await office.add_task(t.agent, t.title, t.body, t.project, by, t.after, t.repo, t.mission_id)
     except ValueError as e:
         bad(e)
 
@@ -131,6 +132,45 @@ async def repos():
 @app.get("/api/tasks")
 async def tasks(agent: str | None = None, status: str | None = None, limit: int = 100):
     return store.tasks(agent=agent, status=status, limit=min(limit, 1000))
+
+
+# ---------------------------------------------------------------- missions
+class MissionIn(BaseModel):
+    agent: str
+    title: str
+    objective: str
+    criteria: list[str]
+    project: str = ""
+    repo: str = ""
+
+
+@app.post("/api/missions")
+async def add_mission(m: MissionIn):
+    try:
+        return await office.add_mission(m.agent, m.title, m.objective, m.criteria, m.project, m.repo)
+    except ValueError as e:
+        bad(e)
+
+
+@app.get("/api/missions")
+async def missions(limit: int = 100):
+    return store.missions(limit=min(limit, 500))
+
+
+@app.get("/api/missions/{mid}")
+async def mission(mid: int):
+    m = store.mission(mid, with_tasks=True)
+    if not m:
+        raise HTTPException(404, "no such mission")
+    return m
+
+
+@app.post("/api/missions/{mid}/cancel")
+async def cancel_mission(mid: int):
+    try:
+        return await office.cancel_mission(mid)
+    except ValueError as e:
+        bad(e)
 
 
 @app.get("/api/tasks/{tid}")

@@ -10,8 +10,16 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL DEFAULT 'queued', created_by TEXT DEFAULT 'operator',
   depends_on INTEGER, attempts INTEGER DEFAULT 0, repo TEXT DEFAULT '',
   created_at REAL, started_at REAL, finished_at REAL,
-  result TEXT DEFAULT '', error TEXT DEFAULT '', steps INTEGER DEFAULT 0, tokens INTEGER DEFAULT 0
+  result TEXT DEFAULT '', error TEXT DEFAULT '', steps INTEGER DEFAULT 0, tokens INTEGER DEFAULT 0,
+  mission_id INTEGER
 );
+CREATE TABLE IF NOT EXISTS missions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL, objective TEXT NOT NULL, project TEXT DEFAULT '', repo TEXT DEFAULT '',
+  criteria TEXT DEFAULT '[]', status TEXT NOT NULL DEFAULT 'queued', created_by TEXT DEFAULT 'operator',
+  created_at REAL, started_at REAL, finished_at REAL, summary TEXT DEFAULT '', error TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS tasks_mission ON tasks(mission_id, id);
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   thread TEXT NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL, ts REAL, meta TEXT DEFAULT '{}'
@@ -32,7 +40,9 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 
 TASK_FIELDS = ("agent", "title", "body", "project", "status", "created_by", "depends_on",
                "attempts", "created_at", "started_at", "finished_at", "result", "error",
-               "steps", "tokens", "repo")
+               "steps", "tokens", "repo", "mission_id")
+MISSION_FIELDS = ("title", "objective", "project", "repo", "criteria", "status", "created_by",
+                  "created_at", "started_at", "finished_at", "summary", "error")
 
 
 class Store:
@@ -43,6 +53,8 @@ class Store:
         self.db.executescript(SCHEMA)
         if "repo" not in {r[1] for r in self.db.execute("PRAGMA table_info(tasks)")}:   # older databases
             self.db.execute("ALTER TABLE tasks ADD COLUMN repo TEXT DEFAULT ''")
+        if "mission_id" not in {r[1] for r in self.db.execute("PRAGMA table_info(tasks)")}:
+            self.db.execute("ALTER TABLE tasks ADD COLUMN mission_id INTEGER")
 
     # ---- key/value ----
     def get(self, key, default=None):
@@ -60,10 +72,12 @@ class Store:
         self.db.execute("DELETE FROM kv WHERE key LIKE ?", (prefix.replace("%", r"\%") + "%",))
 
     # ---- tasks ----
-    def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None, repo=""):
+    def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None, repo="",
+                 mission_id=None):
         cur = self.db.execute(
-            "INSERT INTO tasks(agent,title,body,project,created_by,depends_on,created_at,repo) VALUES(?,?,?,?,?,?,?,?)",
-            (agent, title, body, project, created_by, depends_on, time.time(), repo))
+            "INSERT INTO tasks(agent,title,body,project,created_by,depends_on,created_at,repo,mission_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (agent, title, body, project, created_by, depends_on, time.time(), repo, mission_id))
         return self.task(cur.lastrowid)
 
     def task(self, tid):
@@ -93,6 +107,39 @@ class Store:
     def next_queued(self, agent):
         return [dict(r) for r in self.db.execute(
             "SELECT * FROM tasks WHERE agent=? AND status='queued' ORDER BY id", (agent,))]
+
+    # ---- missions ----
+    @staticmethod
+    def _mission(row):
+        return dict(row, criteria=json.loads(row["criteria"] or "[]")) if row else None
+
+    def add_mission(self, title, objective, criteria=None, project="", repo="", created_by="operator"):
+        cur = self.db.execute(
+            "INSERT INTO missions(title,objective,criteria,project,repo,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
+            (title, objective, json.dumps(criteria or []), project, repo, created_by, time.time()))
+        return self.mission(cur.lastrowid)
+
+    def mission(self, mid, with_tasks=False):
+        row = self.db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone()
+        out = self._mission(row)
+        if out is not None and with_tasks:
+            out["tasks"] = [dict(r) for r in self.db.execute(
+                "SELECT * FROM tasks WHERE mission_id=? ORDER BY id", (mid,))]
+        return out
+
+    def missions(self, limit=100):
+        return [self._mission(r) for r in self.db.execute(
+            "SELECT * FROM missions ORDER BY id DESC LIMIT ?", (limit,))]
+
+    def update_mission(self, mid, **kw):
+        bad = set(kw) - set(MISSION_FIELDS)
+        if bad:
+            raise ValueError(f"unknown mission fields {bad}")
+        if "criteria" in kw and not isinstance(kw["criteria"], str):
+            kw["criteria"] = json.dumps(kw["criteria"])
+        sets = ",".join(f"{k}=?" for k in kw)
+        self.db.execute(f"UPDATE missions SET {sets} WHERE id=?", (*kw.values(), mid))
+        return self.mission(mid, with_tasks=True)
 
     # ---- messages ----
     def add_message(self, thread, sender, text, meta=None):

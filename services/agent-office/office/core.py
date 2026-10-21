@@ -333,6 +333,7 @@ class Office:
             "roster": self.roster(),
             "agents": [self.agent_state(a) for a in self.rt],
             "tasks": self.store.tasks(limit=150),
+            "missions": self.store.missions(limit=100),
             "meeting": self.store.active_meeting(),
             "settings": self.settings(),
             "quota_until": self.quota_until,
@@ -438,20 +439,96 @@ class Office:
             s += f". Queued next: " + "; ".join(f"#{t['id']} {t['title']}" for t in q[:3])
         return s
 
-    # ------------------------------------------------------------------ tasks
-    async def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None, repo=""):
+    # ------------------------------------------------------------------ missions and tasks
+    async def add_mission(self, agent, title, objective, criteria=None, project="", repo="",
+                          created_by="operator"):
+        if agent not in self.agents:
+            raise ValueError(f"unknown agent '{agent}'. Agents: {', '.join(self.agents)}")
+        title, objective = title.strip(), objective.strip()
+        if not title or not objective:
+            raise ValueError("a mission needs a title and objective")
+        criteria = [str(x).strip() for x in (criteria or []) if str(x).strip()]
+        if not criteria:
+            raise ValueError("a mission needs at least one acceptance criterion")
+        if len(criteria) > 20 or any(len(x) > 500 for x in criteria):
+            raise ValueError("use at most 20 acceptance criteria, each under 500 characters")
+        project = _slug(project, 40) if project else ""
+        repo = self.repos.resolve(repo) if repo else ""
+        m = self.store.add_mission(title, objective, criteria, project, repo, created_by)
+        checklist = "\n".join(f"- [ ] {x}" for x in criteria)
+        body = (f"MISSION #{m['id']}\n\nObjective:\n{objective}\n\nAcceptance criteria:\n{checklist}\n\n"
+                "Complete the objective within the assigned repository scope. Verify every criterion with "
+                "concrete evidence. In the final report, list each criterion as PASS or FAIL with the command, "
+                "file, output, or observation that supports it. Do not claim success when a criterion is unverified.")
+        try:
+            t = await self.add_task(agent, title, body, project, created_by, None, repo, m["id"])
+        except Exception:
+            self.store.update_mission(m["id"], status="failed", finished_at=time.time(),
+                                      error="could not create the mission's first task")
+            raise
+        m = self.store.mission(m["id"], with_tasks=True)
+        await self.broadcast({"type": "mission", "mission": m})
+        return m
+
+    async def _sync_mission(self, mid):
+        if not mid:
+            return None
+        m = self.store.mission(mid, with_tasks=True)
+        if not m:
+            return None
+        states = [t["status"] for t in m["tasks"]]
+        now, update = time.time(), {}
+        if any(s == "running" for s in states):
+            status = "running"
+            if not m["started_at"]:
+                update["started_at"] = now
+        elif states and all(s == "done" for s in states):
+            status = "succeeded"
+            update["finished_at"] = m["finished_at"] or now
+            update["summary"] = "\n\n".join(t["result"] for t in m["tasks"] if t["result"])[-20000:]
+            update["error"] = ""
+        elif any(s == "failed" for s in states):
+            status = "failed"
+            update["finished_at"] = m["finished_at"] or now
+            update["error"] = "; ".join(t["error"] for t in m["tasks"] if t["status"] == "failed" and t["error"])[-4000:]
+        elif states and all(s in ("done", "cancelled") for s in states) and any(s == "cancelled" for s in states):
+            status = "cancelled"
+            update["finished_at"] = m["finished_at"] or now
+        else:
+            status = "queued"
+            update["finished_at"] = None
+        if m["status"] != status or update:
+            m = self.store.update_mission(mid, status=status, **update)
+            await self.broadcast({"type": "mission", "mission": m})
+        return m
+
+    async def cancel_mission(self, mid):
+        m = self.store.mission(mid, with_tasks=True)
+        if not m:
+            raise ValueError("no such mission")
+        for t in m["tasks"]:
+            if t["status"] in ("queued", "blocked", "running"):
+                await self.cancel_task(t["id"])
+        return await self._sync_mission(mid)
+
+    async def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None, repo="",
+                       mission_id=None):
         if agent not in self.agents:
             raise ValueError(f"unknown agent '{agent}'. Agents: {', '.join(self.agents)}")
         if not title.strip():
             raise ValueError("a task needs a title")
         if depends_on and not self.store.task(int(depends_on)):
             raise ValueError(f"task #{depends_on} does not exist")
+        if mission_id and not self.store.mission(int(mission_id)):
+            raise ValueError(f"mission #{mission_id} does not exist")
         project = _slug(project, 40) if project else ""
         repo = self.repos.resolve(repo) if repo else ""
         t = self.store.add_task(agent, title.strip(), body.strip(), project, created_by,
-                                int(depends_on) if depends_on else None, repo)
+                                int(depends_on) if depends_on else None, repo,
+                                int(mission_id) if mission_id else None)
         await self.broadcast({"type": "task", "task": t})
         await self.activity(agent, "assign", f"New task #{t['id']}: {t['title']}", t["id"])
+        await self._sync_mission(t.get("mission_id"))
         self.kick()
         return t
 
@@ -465,6 +542,7 @@ class Office:
             t = self.store.update_task(tid, status="cancelled", finished_at=time.time())
             await self.broadcast({"type": "task", "task": t})
             await self.push_agent(t["agent"])
+        await self._sync_mission(t.get("mission_id"))
         return self.store.task(tid)
 
     async def retry_task(self, tid):
@@ -473,6 +551,7 @@ class Office:
             raise ValueError("only failed or cancelled tasks can be retried")
         t = self.store.update_task(tid, status="queued", error="", finished_at=None)
         await self.broadcast({"type": "task", "task": t})
+        await self._sync_mission(t.get("mission_id"))
         self.kick()
         return t
 
@@ -512,6 +591,7 @@ class Office:
                     t = self.store.update_task(t["id"], status="failed", finished_at=time.time(),
                                                error=f"blocked: task #{d['id']} {d['status']}")
                     await self.broadcast({"type": "task", "task": t})
+                    await self._sync_mission(t.get("mission_id"))
                     continue
                 if d and d["status"] != "done":
                     continue
@@ -539,12 +619,14 @@ class Office:
             self._spawn(self.activity(aid, "info", f"Working on {self._label(pid)} while "
                                                    f"{self._label(self.settings()['provider'])} is out of quota", t["id"]))
         self.task_runs[t["id"]] = run
+        self._spawn(self._sync_mission(t.get("mission_id")))
         self._spawn(self._run_task(t, run))
 
     async def _run_task(self, t, run):
         aid, tid = t["agent"], t["id"]
         name = self.agents[aid]["name"]
         await self.broadcast({"type": "task", "task": t})
+        await self._sync_mission(t.get("mission_id"))
         await self.push_agent(aid)
         try:
             r = await run.wait()
@@ -601,6 +683,7 @@ class Office:
                             {"task": tid, "kind": "failure"})
             await self.toast(f"{name}: task #{tid} failed", "error", aid)
         await self.broadcast({"type": "task", "task": t})
+        await self._sync_mission(t.get("mission_id"))
         await self.push_agent(aid)
         if study and t["status"] in ("done", "failed", "cancelled"):
             await self.study.finished(t, t["status"] == "done")
