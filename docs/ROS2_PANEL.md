@@ -7,13 +7,16 @@ does the panel's actions from the keyboard.
 ## What it shows
 
 - **Header**: distro, domain, node count, "recording" while a bag records.
+  A persistent Dynamic Island activity remains until recording stops, including
+  when the panel is closed. It opens a recording card linking back to ROS 2.
   The top-bar icon turns red while the panel records a bag, orange while
   `/diagnostics` reports an error.
 - **Search** (under the header): narrows every section to what matches a
   node, topic, service, action, type or namespace; the section headings say
   "3 of 40". Escape clears it.
 - **Setup**: domain ID (click to change), discovery range (localhost only or
-  the LAN), middleware, and the workspace overlay (click to choose). By default
+  the LAN), middleware, and the workspace overlay (searchable dropdown with None, discovered workspaces,
+  and Choose path for a custom built colcon workspace). By default
   these follow the login shell's startup files (`~/.zshenv`, `~/.zprofile`,
   `~/.zshrc` for Zsh; `~/.profile`, `~/.bash_profile`, `~/.bashrc` for bash):
   `export ROS_DOMAIN_ID=…`, `ROS_LOCALHOST_ONLY`, `RMW_IMPLEMENTATION`, and
@@ -24,8 +27,14 @@ does the panel's actions from the keyboard.
   - If ROS processes started outside the panel run on another domain,
     discovery range or middleware, the card says so and **Watch them**
     switches to it.
+  - **Package**: All packages or any package from the selected workspace's
+    source manifests. This filters launch files and installed executable nodes;
+    the running graph stays complete because DDS does not expose package identity.
+    Executables come from that workspace's merged or isolated install tree.
+    Launch, config, world and executable choices use bounded, searchable dropdowns.
+    Workspace launch discovery includes every matching file, rather than twelve recent files.
   - **Setups**: the current domain, discovery, middleware and workspace saved
-    under a name (a robot, a bench); a chip applies one, the one in use is
+    under a name (a robot, a bench); a dropdown applies one, the one in use is
     lit.
   - When Project Context's active project is, holds (`proj/.build/<distro>`)
     or sits in a colcon workspace the panel does not use, the card offers
@@ -61,7 +70,8 @@ does the panel's actions from the keyboard.
 - **Nodes**: every visible node with what it has. Expanding a node shows its
   topics (type, the nodes on the other end, QoS, Hz, Preview), services and
   clients, actions, its enclave, and:
-  - its parameters: a click on a value edits it in its own type (`2` for a
+  - its parameters: names first, forty rows per page; Read value fetches just
+    that parameter. A click on the value edits it in its own type (`2` for a
     double is 2.0; lists as `[1, 2]`); Enter arms the change, a second Enter
     sends it. Arrays longer than 64 items are shown cut and not editable;
   - its lifecycle state, with the transitions it can take (Configure,
@@ -69,9 +79,11 @@ does the panel's actions from the keyboard.
   Clicking any type shows its definition (`.msg`, `.srv`, `.action`).
 - **Topics**, **Services**, **Actions**: the whole graph by name, folded by
   default, forty rows at a time (Show more), each row expandable the same
-  way. A topic's Preview shows the next message (an image as a thumbnail, and
+  way. Folding a topic, node or parent section cancels in-flight Hz/Preview
+  subscriptions and discards their pending replies. A topic's Preview shows the next message (an image as a thumbnail, and
   its age from the header stamp); **Publish one message…**, **Call it…** and
-  **Send a goal…** open the fields of an empty message of the type, as YAML,
+  **Send a goal…** open a form generated from the request type (nested scalar fields, boolean
+  dropdowns, and JSON array inputs),
   and send them after a confirming click, showing the response, the goal's
   result or how many subscribers got the message. A goal without a result in
   30 s is cancelled.
@@ -81,6 +93,8 @@ does the panel's actions from the keyboard.
   reported in Health.
 - **Controllers**: ros2_control controllers and their state when a
   controller_manager runs, with Configure, Activate or Deactivate (confirmed).
+  Load accepts a configured controller name; inactive or unconfigured controllers
+  also offer Unload. All operations require confirmation.
 
 Hidden names (a leading `_` in any part) are left out, as `ros2 node list`
 does, and so is a topic only hidden nodes use. The panel's own node is hidden
@@ -154,6 +168,7 @@ in an entry of the list.
 
 ```sh
 python3 scripts/verify-ros-panel.py        # helper against real nodes, ~40 s
+python3 scripts/verify-ros-controllers.py  # sourced ROS + controller_manager_msgs required
 scripts/verify-shell-nested.sh --extra scripts/verify-ros-nested.sh
 python3 scripts/verify-feature-logic.py    # the palette's ros mode
 ```
@@ -187,5 +202,11 @@ the nested check drives the panel in a real GNOME Shell, writes included.
   localhost only) while nodes ran on domain 0 from `~/.zshrc`, and showed an
   empty graph. A workspace inside a dot-folder (`proj/.build/humble`) is not
   in the two-level scan; the one in use is added to the list, named `proj`.
-- `controller_manager_msgs` is not installed here, so listing and switching
-  ros2_control controllers is written but untested.
+- `controller_manager_msgs` is not installed system-wide here. Controller load,
+  configure, activate, deactivate, unload and rejection handling pass using the
+  genuine Humble service types from an extracted package prefix and a local
+  fixture manager on private domain 89. This verifies the wire protocol, not
+  hardware plugins. The selected runtime workspace must supply that package
+  to use controller operations live; the UI reports its absence.
+- A custom workspace must have `install/setup.bash`; unbuilt source trees cannot
+  supply ROS interfaces or executable nodes. None disables the workspace overlay.

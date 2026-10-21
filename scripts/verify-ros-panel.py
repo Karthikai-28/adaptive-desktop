@@ -145,6 +145,7 @@ def main():
     (ws / "install").mkdir(parents=True)
     (ws / "install" / "setup.bash").write_text("# an empty overlay\n")
     (ws / "src" / "bringup" / "config").mkdir(parents=True)
+    (ws / "src" / "bringup" / "package.xml").write_text("<package><name>bringup</name></package>")
     (ws / "src" / "bringup" / "config" / "robot.rviz").write_text("Panels: []\n")
     (ws / "src" / "bringup" / "worlds").mkdir(parents=True)
     (ws / "src" / "bringup" / "worlds" / "yard.sdf").write_text("<sdf/>\n")
@@ -155,6 +156,10 @@ def main():
         "from launch.actions import ExecuteProcess\n\n\n"
         "def generate_launch_description():\n"
         "    return LaunchDescription([ExecuteProcess(cmd=['sleep', '60'])])\n")
+    executable = ws / "install" / "bringup" / "lib" / "bringup" / "fixture_node"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\nexec sleep 60\n")
+    executable.chmod(0o755)
     (home / ".bashrc").write_text(
         f"[ -f {setup} ] && source {setup}\n"
         f"export ROS_DOMAIN_ID={DOMAIN}   # comment\n"
@@ -167,6 +172,12 @@ def main():
 
     # ---------------------------------------------------------- setup
     status = helper(env, "status")
+    check([p["name"] for p in status.get("packages", [])] == ["bringup"], "workspace: package manifest names are listed")
+    check(status["packages"][0]["executables"] == [{"name": "fixture_node", "path": str(executable)}],
+          "workspace: installed executable nodes are scoped to the package")
+    check(helper(env, "launch", "node", str(executable)).get("ok"), "workspace: selected executable starts")
+    check(helper(env, "stop", "node").get("ok"), "workspace: selected executable stops")
+    check(not helper(env, "launch", "node", "/bin/sh").get("ok"), "workspace: arbitrary executables are rejected")
     check(status.get("installed") is True, "status: ROS 2 is found")
     check(status.get("domain") == DOMAIN and status["from"]["domain"] == "shell"
           and status.get("shell_rc") == "~/.bashrc",
@@ -179,11 +190,19 @@ def main():
     check([w["name"] for w in status.get("worlds", [])] == ["yard.sdf"], "status: worlds are found")
     check([f["name"] for f in status.get("launch_files", [])] == ["robot.launch.py"],
           "status: launch files in the workspace are found")
+    extra_launches = [robot_launch.parent / f"extra_{i}.launch.py" for i in range(20)]
+    for file in extra_launches:
+        file.write_text("# launch discovery fixture\n")
+    check(len(helper(env, "status", "refresh")["launch_files"]) == 21,
+          "workspace: launch discovery is not capped at twelve")
+    for file in extra_launches:
+        file.unlink()
+    helper(env, "status", "refresh")
     (ws / "src" / "bringup" / "config" / "arm.rviz").write_text("Panels: []\n")
     check(len(helper(env, "status")["rviz_configs"]) == 1 and len(helper(env, "status", "refresh")["rviz_configs"]) == 2,
           "status: the file search is kept a while, and refresh walks again")
     check(status["tools"]["rviz2"]["installed"] is True, "status: RViz2 is installed")
-    check(not status["tools"]["demo"]["pids"], "status: nothing of ours is running yet")
+    check(not status["tools"]["demo"]["owned_pids"], "status: nothing of ours is running yet")
 
     check(helper(env, "set", "domain", "500").get("ok") is False, "set: a domain over 232 is refused")
     check(helper(env, "set", "rmw", "rmw_nonexistent").get("ok") is False, "set: a missing middleware is refused")
@@ -312,6 +331,7 @@ def main():
 
         detail = watch.ask("node", name="/talker")
         names = [p["name"] for p in detail.get("parameters") or []]
+        check(all("value" not in p for p in detail.get("parameters", [])), "node: names precede values")
         check("use_sim_time" in names, "node: parameters are read", detail.get("error") or names)
         check(detail.get("qos", {}).get("publishers:/chatter") == {"reliability": "reliable", "durability": "volatile"},
               "node: QoS of what it publishes", detail.get("qos"))
@@ -327,6 +347,17 @@ def main():
         check(watch.ask("interface", type="no_such_msgs/msg/Nothing").get("error") == "Not found in this setup",
               "interface: an unknown type says so")
 
+        template = watch.ask("template", kind="service", type="example_interfaces/srv/AddTwoInts")
+        check([f["path"] for f in template.get("fields", [])] == [["a"], ["b"]], "forms: typed request fields")
+        nested = watch.ask("template", kind="topic", type="geometry_msgs/msg/PoseStamped")
+        check(any(f["path"] == ["pose", "position", "x"] for f in nested.get("fields", [])), "forms: nested fields are flattened with paths")
+        rid = watch.next_id
+        watch.next_id += 1
+        watch.proc.stdin.write(json.dumps({"id": rid, "cmd": "hz", "name": "/chatter"}) + "\n")
+        watch.proc.stdin.flush()
+        check(watch.ask("cancel", ids=[rid]).get("ok"), "cancel: active measurement accepts cancellation")
+        watch.read(lambda: rid in watch.replies, 2.5)
+        check(rid not in watch.replies, "cancel: no late measurement reply")
         topic = watch.ask("topic", name="/chatter")
         check([p["node"] for p in topic.get("publishers", [])] == ["/talker"], "topic: who publishes it, with QoS")
         rate = watch.ask("hz", name="/chatter", timeout=8)
@@ -365,13 +396,13 @@ def main():
               "health: QoS mismatches across the graph")
 
         fixture_params = {p["name"]: p for p in watch.ask("node", name="/fixture").get("parameters") or []}
-        gain = fixture_params.get("gain", {})
+        gain = watch.ask("parameter", node="/fixture", name="gain")
         check(gain.get("ptype") == 3, "node: parameters carry their type", gain)
         refused = watch.ask("set_parameter", node="/fixture", name="gain", value="fast", ptype=3)
         check("Expected a number" in refused.get("error", ""), "set_parameter: a wrong value is refused here", refused)
         check(watch.ask("set_parameter", node="/fixture", name="gain", value="2", ptype=3).get("ok") is True,
               "set_parameter: '2' is taken for a double parameter")
-        after = {p["name"]: p["value"] for p in watch.ask("node", name="/fixture").get("parameters") or []}
+        after = {name: watch.ask("parameter", node="/fixture", name=name).get("value") for name in ("gain", "last_command")}
         check(after.get("gain") == 2.0 and isinstance(after.get("gain"), float), "set_parameter: the node has 2.0",
               after.get("gain"))
 
@@ -392,7 +423,7 @@ def main():
               "goal: an action goal runs to its result", goal)
         sent = watch.ask("publish", name="/fixture/command", type="std_msgs/msg/String", value="{data: go}")
         time.sleep(0.5)
-        last = {p["name"]: p["value"] for p in watch.ask("node", name="/fixture").get("parameters") or []}
+        last = {name: watch.ask("parameter", node="/fixture", name=name).get("value") for name in ("gain", "last_command")}
         check(sent.get("ok") is True and sent.get("subscribers") == 1 and last.get("last_command") == "go",
               "publish: one message arrives", (sent, last.get("last_command")))
 
@@ -440,10 +471,10 @@ def main():
     check(launched.get("ok") is True and len(launched.get("pids", [])) == 2, "launch: the demo starts", launched)
     time.sleep(1)
     demo = helper(env, "status")["tools"]["demo"]
-    check(len(demo["pids"]) == 2 and sorted(demo["owned_pids"]) == sorted(demo["pids"]),
+    check(len(demo["owned_pids"]) == 2 and set(demo["owned_pids"]) <= set(demo["pids"]),
           "status: the demo is seen running, as started here", demo)
     stopped = helper(env, "stop", "demo")
-    check(stopped.get("stopped") == 2 and not helper(env, "status")["tools"]["demo"]["pids"], "stop: the demo quits")
+    check(stopped.get("stopped") == 2 and not helper(env, "status")["tools"]["demo"]["owned_pids"], "stop: the demo quits")
     ended = [h for h in helper(env, "runs")["history"] if h["tool"] == "demo"]
     check(len(ended) == 2 and all(h["stopped"] and not h["crashed"] for h in ended),
           "runs: a stopped run is not called a crash", ended)

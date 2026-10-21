@@ -107,10 +107,10 @@ seen="$(ros_wait_for "'Succeeded', 'sequence'")"
 [ "$seen" = true ]; check $? "ros: the confirmed goal runs to its result$([ "$seen" = true ] || echo " ($seen)")"
 
 seen="$(ros_text "const n = ros._graph.nodes.find(x => x.name === '/talker');
-    const p = ros._details.get('node:/talker').data.parameters.find(x => x.name === 'use_sim_time');
+    const p = await new Promise(resolve => ros._request('parameter', {node: '/talker', name: 'use_sim_time'}, resolve));
     ros._setParameter(n, p, 'true'); ros._setParameter(n, p, 'true');
     for (let i = 0; i < 40; i++) { const d = ros._details.get('node:/talker');
-        const now = d && d.data && d.data.parameters.find(x => x.name === 'use_sim_time');
+        const now = await new Promise(resolve => ros._request('parameter', {node: '/talker', name: 'use_sim_time'}, resolve));
         if (now && now.value === true) return true; await sleep(250); }
     return JSON.stringify(ros._notes);")"
 [ "$seen" = true ]; check $? "ros: a parameter is set in its own type$([ "$seen" = true ] || echo " ($seen)")"
@@ -118,15 +118,38 @@ seen="$(ros_text "const n = ros._graph.nodes.find(x => x.name === '/talker');
 # Recording lights the top-bar icon until it is stopped and listed.
 seen="$(ros_text "ros._recordTopics(); ros._recordTopics();
     for (let i = 0; i < 40; i++) { if (ros._runs && ros._runs.recording &&
-        ros._icon.has_style_class_name('adaptive-ros-recording')) return true; await sleep(250); }
+        ros._icon.has_style_class_name('adaptive-ros-recording') &&
+        Main._dynamicIsland.backend.getMultiActivitySlots().primary?.type === 'ros') return true; await sleep(250); }
     return JSON.stringify(ros._notes.bag);")"
 [ "$seen" = true ]; check $? "ros: Record starts a bag and the icon shows it$([ "$seen" = true ] || echo " ($seen)")"
 sleep 2
 seen="$(ros_text "ros._stop('bag');
     for (let i = 0; i < 40; i++) { if (!(ros._runs && ros._runs.recording) && ros._status.bags.length === 1 &&
-        !ros._icon.has_style_class_name('adaptive-ros-recording')) return true; await sleep(250); }
+        !ros._icon.has_style_class_name('adaptive-ros-recording') &&
+        Main._dynamicIsland.backend.getMultiActivitySlots().primary?.type !== 'ros') return true; await sleep(250); }
     return JSON.stringify(ros._status.bags);")"
 [ "$seen" = true ]; check $? "ros: Stop saves the bag, lists it and clears the icon$([ "$seen" = true ] || echo " ($seen)")"
+
+# Stress the selectors with multiple packages and enough files to scroll.
+seen="$(ros_text "
+    await sleep(1000);
+    ros._layoutTestLoadStatus = ros._loadStatus; ros._loadStatus = () => {};
+    const saved = ros._status;
+    const root = '/fixture/ros2_ws/src';
+    ros._status = {...saved, workspace: '/fixture/ros2_ws',
+        workspaces: [{name: 'ros2_ws', path: '/fixture/ros2_ws'}],
+        packages: ['alpha', 'beta'].map(name => ({name, path: root + '/' + name, executables: []})),
+        launch_files: Array.from({length: 32}, (_, i) => ({name: 'demo_' + i + '.launch.py',
+            path: root + (i % 2 ? '/alpha/' : '/beta/') + 'demo_' + i + '.launch.py'}))};
+    ros._packagePath = root + '/alpha';
+    ros._expanded.add('select:Files'); ros._renderNow(); await sleep(300);
+    const text = labels(ros._list).join('|');
+    const filtered = text.includes('demo_31.launch.py') && !text.includes('demo_30.launch.py');
+    const children = ros._blocks.get('launch').actor.get_children();
+    const noOverlap = children.every((a, i) => i === 0 || a.y >= children[i - 1].y + children[i - 1].height - 1);
+    ros._layoutTestSaved = saved;
+    return filtered && noOverlap ? true : JSON.stringify({filtered, noOverlap, text, rows: children.map(a => [a.y, a.height])});")"
+[ "$seen" = true ]; check $? "ros: package selection scopes long dropdowns and expanded lists do not overlap$([ "$seen" = true ] || echo " ($seen)")"
 
 if [ -n "${ADAPTIVE_ROS_SHOT:-}" ]; then
     probe "const { Gio, Shell } = imports.gi; return new Promise(resolve => {
@@ -134,6 +157,10 @@ if [ -n "${ADAPTIVE_ROS_SHOT:-}" ]; then
         new Shell.Screenshot().screenshot(false, stream, (shot, result) => {
             shot.screenshot_finish(result); stream.close(null); resolve(true); }); });" >/dev/null
 fi
+
+ros_text "ros._status = ros._layoutTestSaved; delete ros._layoutTestSaved;
+    ros._loadStatus = ros._layoutTestLoadStatus; delete ros._layoutTestLoadStatus;
+    ros._packagePath = ''; ros._expanded.delete('select:Files'); ros._renderNow(); return true;" >/dev/null
 
 # A node that leaves disappears from the dropdown by itself.
 ros_stop_nodes

@@ -356,6 +356,12 @@ var DynamicIslandBackend = class DynamicIslandBackend {
     }
 
     // ----------------------------------------------------------------- Multi-Activity Decoupling
+    setRosRecording(recording) {
+        if (JSON.stringify(this._rosRecording || null) === JSON.stringify(recording || null)) return;
+        this._rosRecording = recording;
+        this.notifyStateChange();
+    }
+
     getMultiActivitySlots() {
         const activeTasks = this.tasks.getActiveTasks();
         const media = this.media.getCurrentTrack();
@@ -365,6 +371,11 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         let secondary = null;
 
         const candidates = [];
+        if (this._rosRecording) {
+            candidates.push({ type: 'ros', rank: 0,
+                title: this._isScreenSharing ? 'Recording active' : 'ROS 2 · recording',
+                data: this._isScreenSharing ? { recording: true } : this._rosRecording });
+        }
 
         if (activeTasks.length > 0) {
             candidates.push({

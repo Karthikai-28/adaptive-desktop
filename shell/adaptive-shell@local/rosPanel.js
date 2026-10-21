@@ -333,6 +333,9 @@ var RosPanel = class RosPanel {
         if (!this._icon)
             return;
         const recording = !!(this._runs && this._runs.recording);
+        const backend = Main._dynamicIsland && Main._dynamicIsland.backend;
+        if (backend && backend.setRosRecording)
+            backend.setRosRecording(recording ? this._runs.recording : null);
         const alarmed = this._diagnosticSignature && this._diagnosticSignature !== '[]';
         this._icon.remove_style_class_name('adaptive-ros-recording');
         this._icon.remove_style_class_name('adaptive-ros-attention');
@@ -722,7 +725,7 @@ var RosPanel = class RosPanel {
             return;
         }
         const id = this._nextId++;
-        const pending = { done, timeoutId: 0 };
+        const pending = { done, cmd, fields, timeoutId: 0 };
         pending.timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
             if (this._pending.get(id) === pending) {
                 this._pending.delete(id);
@@ -776,6 +779,18 @@ var RosPanel = class RosPanel {
     _toggle(key, onOpen = null) {
         if (this._expanded.has(key)) {
             this._expanded.delete(key);
+            const ids = [];
+            for (const [id, request] of this._pending) {
+                if (!['hz', 'sample'].includes(request.cmd)) continue;
+                // A parent section/node can contain any of the measured topics.
+                if (key.startsWith('section:') || key.startsWith('node:') || key === `topic:${request.fields.name}`) {
+                    ids.push(id);
+                    GLib.source_remove(request.timeoutId);
+                    this._pending.delete(id);
+                    (request.cmd === 'hz' ? this._rates : this._samples).delete(request.fields.name);
+                }
+            }
+            if (ids.length) this._request('cancel', { ids }, () => {});
         } else {
             this._expanded.add(key);
             if (onOpen)
@@ -994,6 +1009,7 @@ var RosPanel = class RosPanel {
 
     _switchController(controller, op) {
         this._confirmed(`controller:${controller.manager}:${controller.name}:${op}`, () => {
+            this._controllerDraft = null;
             this._notes.controllers = { text: `${title(op)} ${controller.name}…` };
             this._request('controller', { manager: controller.manager, name: controller.name, op }, reply => {
                 this._notes.controllers = reply.error ? { text: reply.error, error: true } : null;
@@ -1013,8 +1029,12 @@ var RosPanel = class RosPanel {
         const composer = { text: '', busy: false, reply: null };
         this._composers.set(key, composer);
         this._request('template', { kind, type }, reply => {
-            if (this._composers.get(key) === composer && !composer.text)
-                composer.text = reply.error ? '' : reply.text;
+            if (this._composers.get(key) === composer && !composer.text) {
+                composer.text = reply.error ? '' : JSON.stringify(reply.values || {});
+                composer.fields = reply.fields || [];
+                composer.values = reply.values || {};
+                composer.error = reply.error || '';
+            }
             this._render();
         });
         this._render();
@@ -1022,8 +1042,8 @@ var RosPanel = class RosPanel {
 
     _send(key, cmd, name, type) {
         const composer = this._composers.get(key);
-        if (!composer || composer.busy)
-            return;
+        if (!composer || composer.busy || !composer.fields) return;
+        if (composer.error) { this._render(); return; }
         this._confirmed(`send:${key}`, () => {
             composer.busy = true;
             composer.reply = null;
@@ -1089,7 +1109,7 @@ var RosPanel = class RosPanel {
         return JSON.stringify([
             [...this._expanded].sort(), map(this._details), map(this._interfaces), map(this._rates),
             map(this._samples), map(this._composers), map(this._pages), this._notes, this._searchText,
-            this._parameterDraft, this._armed && this._armed.key,
+            this._parameterDraft, this._packagePath, this._armed && this._armed.key,
             this._status && this._status.favorites,
         ]);
     }
@@ -1186,8 +1206,10 @@ var RosPanel = class RosPanel {
 
     // Buttons in a row; `armed` ones ask for the confirming click.
     _buttons(items) {
-        const box = new St.BoxLayout({ style_class: 'adaptive-ros-buttons' });
-        for (const item of items.filter(Boolean)) {
+        const actions = items.filter(Boolean);
+        const box = new St.BoxLayout({ style_class: 'adaptive-ros-buttons',
+            vertical: actions.reduce((n, item) => n + item.label.length, 0) > 54 });
+        for (const item of actions) {
             box.add_child(this._smallButton(item.label, item.onClick,
                 item.armed ? 'adaptive-ros-armed' : ''));
         }
@@ -1247,26 +1269,45 @@ var RosPanel = class RosPanel {
         return entry;
     }
 
-    // Recent files as chips under their row.
+    // Inline dropdowns reserve their full height; choices never float over neighbours.
+    _dropdown(label, items, onSelect, selected = '') {
+        const box = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'adaptive-ros-dropdown' });
+        const key = `select:${label}`;
+        const open = this._expanded.has(key);
+        const toggle = this._smallButton(`${label} · ${selected || `${items.length} choices`}  ${open ? '▴' : '▾'}`,
+            () => this._toggle(key), 'adaptive-ros-select');
+        toggle.x_expand = true;
+        toggle.get_child().x_align = Clutter.ActorAlign.START;
+        toggle.get_child().ellipsize = Pango.EllipsizeMode.MIDDLE;
+        box.add_child(toggle);
+        if (!open)
+            return box;
+        const list = new St.BoxLayout({ vertical: true, x_expand: true });
+        const scroll = new St.ScrollView({ style_class: 'adaptive-ros-options', x_expand: true,
+            overlay_scrollbars: true, hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC });
+        scroll.add_actor(list);
+        const fill = text => {
+            list.destroy_all_children();
+            for (const item of items.filter(i => `${i.name} ${i.path || ''}`.toLowerCase().includes(text.toLowerCase()))) {
+                const button = new St.Button({ label: item.name, x_expand: true, can_focus: true,
+                    style_class: 'adaptive-ros-option', accessible_name: item.path || item.name });
+                button.get_child().x_align = Clutter.ActorAlign.START;
+                button.get_child().ellipsize = Pango.EllipsizeMode.MIDDLE;
+                button.connect('clicked', () => { this._expanded.delete(key); onSelect(item); this._render(); });
+                list.add_child(button);
+            }
+        };
+        if (items.length > 6)
+            box.add_child(this._textEntry({ hint: 'Filter choices…', onChange: fill }));
+        fill('');
+        box.add_child(scroll);
+        return box;
+    }
+
     _addFiles(files, label, onClick, active = null) {
-        if (!files.length)
-            return;
-        const flow = new St.Widget({
-            style_class: 'adaptive-ros-chips',
-            layout_manager: new Clutter.FlowLayout({ column_spacing: 6, row_spacing: 6, homogeneous: false }),
-            x_expand: true,
-        });
-        flow.add_child(new St.Label({ text: label, style_class: 'adaptive-ros-hint adaptive-ros-chip-label' }));
-        for (const file of files) {
-            const chip = new St.Button({
-                style_class: active && active(file) ? 'adaptive-ros-chip adaptive-ros-chip-active' : 'adaptive-ros-chip',
-                label: file.name,
-                can_focus: true,
-            });
-            chip.connect('clicked', () => onClick(file.path, file));
-            flow.add_child(chip);
-        }
-        this._out.add_child(flow);
+        if (files.length)
+            this._out.add_child(this._dropdown(label, files, file => onClick(file.path, file),
+                active ? (files.find(active) || {}).name : ''));
     }
 
     // -------------------------------------------------------------- setup
@@ -1275,7 +1316,7 @@ var RosPanel = class RosPanel {
     // saved setups; the active project's workspace.
     _setup(status) {
         const box = new St.BoxLayout({
-            style_class: 'adaptive-cc-form adaptive-network-facts',
+            style_class: 'adaptive-cc-form adaptive-network-facts adaptive-ros-setup',
             vertical: true,
             x_expand: true,
         });
@@ -1342,22 +1383,31 @@ var RosPanel = class RosPanel {
             });
         }
 
-        line('Discovery', status.localhost ? 'This computer only' : 'Whole network',
-            hint('localhost'), () => this._set('localhost', status.localhost ? '0' : '1'));
+        box.add_child(this._dropdown('Discovery', [{name: 'This computer only', path: '1'},
+            {name: 'Whole network', path: '0'}], item => this._set('localhost', item.path),
+        status.localhost ? 'This computer only' : 'Whole network'));
+        box.add_child(this._dropdown('Middleware', status.middlewares.map(m => ({name: m.name, path: m.id})),
+            item => this._set('rmw', item.path), status.rmw_name));
 
-        const middlewares = status.middlewares.map(m => m.id);
-        line('Middleware', status.rmw_name, hint('rmw'), middlewares.length > 1 ? () => {
-            const next = middlewares[(middlewares.indexOf(status.rmw) + 1) % middlewares.length];
-            this._set('rmw', next);
-        } : null);
-
-        const choices = ['none', ...status.workspaces.map(w => w.path)];
-        const current = status.workspace || 'none';
         const named = status.workspaces.find(w => w.path === status.workspace);
-        line('Workspace', named ? named.name : 'None', hint('workspace'),
-            choices.length > 1 ? () => {
-                this._set('workspace', choices[(choices.indexOf(current) + 1) % choices.length]);
-            } : null);
+        box.add_child(this._dropdown('Workspace', [{ name: 'None', path: 'none' }, ...status.workspaces, {name: 'Choose path…', path: 'custom'}], item => {
+            if (item.path === 'custom') { this._expanded.add('workspace:path'); return; }
+            this._packagePath = '';
+            this._set('workspace', item.path);
+        }, named ? named.name : 'None'));
+        if (this._expanded.has('workspace:path'))
+            box.add_child(this._textEntry({ hint: 'Workspace path… (Enter to use)', focus: true,
+                onActivate: text => { this._packagePath = ''; this._expanded.delete('workspace:path'); this._set('workspace', text.trim()); },
+                onEscape: () => this._toggle('workspace:path') }));
+        const packages = status.packages || [];
+        if (!packages.some(p => p.path === this._packagePath))
+            this._packagePath = '';
+        if (status.workspace) {
+            box.add_child(this._dropdown('Package', [{ name: 'All packages', path: '' }, ...packages], item => {
+                this._packagePath = item.path;
+                this._launchDraft = null;
+            }, (packages.find(p => p.path === this._packagePath) || {}).name || 'All packages'));
+        }
 
         this._addSetups(box, status);
 
@@ -1427,25 +1477,13 @@ var RosPanel = class RosPanel {
             (item.rmw || '') === (status.rmw_set ? status.rmw : '') &&
             (item.workspace || '') === (status.workspace || '');
         const current = setups.find(same);
-        const flow = new St.Widget({
-            style_class: 'adaptive-ros-setups',
-            layout_manager: new Clutter.FlowLayout({ column_spacing: 6, row_spacing: 6, homogeneous: false }),
+        const flow = new St.BoxLayout({
+            style_class: 'adaptive-ros-setups', vertical: true,
             x_expand: true,
         });
-        flow.add_child(new St.Label({ text: 'Setups', style_class: 'adaptive-ros-hint adaptive-ros-chip-label' }));
-        for (const item of setups) {
-            const chip = new St.Button({
-                style_class: item === current ? 'adaptive-ros-chip adaptive-ros-chip-active' : 'adaptive-ros-chip',
-                label: item.name,
-                can_focus: true,
-                accessible_name: `Use the saved setup ${item.name}`,
-            });
-            chip.connect('clicked', () => {
-                if (item !== current)
-                    this._applySetup(['use-setup', item.name]);
-            });
-            flow.add_child(chip);
-        }
+        if (setups.length)
+            flow.add_child(this._dropdown('Saved setups', setups, item => this._applySetup(['use-setup', item.name]),
+                current ? current.name : 'Choose…'));
         if (this._setupDraft === null) {
             flow.add_child(this._smallButton(current ? `Forget ${current.name}` : 'Save this setup', () => {
                 if (current) {
@@ -1532,6 +1570,18 @@ var RosPanel = class RosPanel {
 
         if (status.tools.launch.installed)
             this._addLaunchFiles(status);
+        const executables = (status.packages || []).filter(p => !this._packagePath || p.path === this._packagePath)
+            .flatMap(p => p.executables.map(e => ({ ...e, name: `${p.name} / ${e.name}` })));
+        this._addFiles(executables, 'Executable nodes', file => this._launch('node', file));
+        if (status.workspace && !executables.length)
+            this._out.add_child(this._note('No installed executable nodes in this selection'));
+        const nodeRuns = (status.runs || {}).node || [];
+        if (nodeRuns.length)
+            this._out.add_child(CC.makeRow({ icon: 'system-run-symbolic', title: 'Workspace nodes',
+                subtitle: nodeRuns.map(r => r.meta.name).join(', '), actions: [
+                    { label: 'Log', onClick: () => this._terminal('open-log', 'node') },
+                    { label: 'Stop', onClick: () => this._stop('node') },
+                ] }));
         this._addCrashes(status);
         if (status.tools.bag.installed)
             this._addBags(status);
@@ -1567,8 +1617,9 @@ var RosPanel = class RosPanel {
     // its arguments, and can be saved with them.
     _addLaunchFiles(status) {
         const runs = (status.runs || {}).launch || [];
-        const saved = status.saved_launches || [];
-        const files = status.launch_files || [];
+        const saved = (status.saved_launches || []).filter(item => !this._packagePath || item.file.startsWith(`${this._packagePath}/`));
+        const files = (status.launch_files || []).filter(f => !this._packagePath || f.path.startsWith(`${this._packagePath}/`))
+            .map(f => ({ ...f, name: status.workspace ? f.path.replace(`${status.workspace}/src/`, '') : f.name }));
         if (!runs.length && !saved.length && !files.length)
             return;
         const note = this._notes.launch;
@@ -2210,12 +2261,26 @@ var RosPanel = class RosPanel {
             layout_manager: new Clutter.GridLayout({ column_spacing: 10, row_spacing: 1 }),
             x_expand: true,
         });
-        parameters.forEach((parameter, row) => {
+        const pageKey = `parameters:${node.name}`;
+        const count = this._pages.get(pageKey) || 40;
+        parameters.slice(0, count).forEach((parameter, row) => {
             const key = new St.Label({ text: parameter.name, style_class: 'adaptive-ros-param-key' });
             key.clutter_text.ellipsize = Pango.EllipsizeMode.MIDDLE;
             grid.layout_manager.attach(key, 0, row, 1, 1);
             const draftKey = `${node.name}:${parameter.name}`;
-            if (this._parameterDraft && this._parameterDraft.key === draftKey) {
+            if (parameter.ptype === undefined) {
+                grid.layout_manager.attach(this._smallButton(parameter.loading ? 'Reading…' : 'Read value', () => {
+                    if (parameter.loading) return;
+                    parameter.loading = true;
+                    this._request('parameter', { node: node.name, name: parameter.name }, reply => {
+                        parameter.loading = false;
+                        if (!reply.error) Object.assign(parameter, reply);
+                        else this._notes[`op:${node.name}`] = { text: reply.error, error: true };
+                        this._render();
+                    });
+                    this._render();
+                }), 1, row, 1, 1);
+            } else if (this._parameterDraft && this._parameterDraft.key === draftKey) {
                 const armed = this._isArmed(`parameter:${node.name}:${parameter.name}`);
                 grid.layout_manager.attach(this._textEntry({
                     text: this._parameterDraft.text,
@@ -2264,6 +2329,11 @@ var RosPanel = class RosPanel {
                 grid.layout_manager.attach(value, 1, row, 1, 1);
             }
         });
+        if (count < parameters.length)
+            grid.layout_manager.attach(this._smallButton(`Show more · ${count} of ${parameters.length}`, () => {
+                this._pages.set(pageKey, count + 40);
+                this._render();
+            }), 0, count, 2, 1);
         return grid;
     }
 
@@ -2407,17 +2477,39 @@ var RosPanel = class RosPanel {
     _composer(key, cmd, name, type, verb) {
         const composer = this._composers.get(key);
         const box = new St.BoxLayout({ style_class: 'adaptive-ros-composer', vertical: true, x_expand: true });
-        box.add_child(new St.Label({ text: `${verb} · fields as YAML`, style_class: 'adaptive-ros-group' }));
-        box.add_child(this._textEntry({
-            text: composer.text,
-            hint: '{field: value}',
-            multiline: true,
-            extraClass: 'adaptive-ros-composer-entry',
-            onChange: text => {
-                composer.text = text;
-            },
-            onEscape: () => this._toggleComposer(key),
-        }));
+        box.add_child(new St.Label({ text: `${verb} · request fields`, style_class: 'adaptive-ros-group' }));
+        if (!composer.fields)
+            box.add_child(this._note('Loading fields…'));
+        for (const field of composer.fields || []) {
+            box.add_child(this._note(`${field.path.join('.')} · ${field.type}`));
+            const isString = /^(w?string)(<|$)/.test(field.type);
+            const update = value => {
+                let target = composer.values;
+                for (const part of field.path.slice(0, -1)) target = target[part];
+                target[field.path[field.path.length - 1]] = value;
+                composer.text = JSON.stringify(composer.values);
+                this._disarm();
+            };
+            if (field.type === 'boolean' || field.type === 'bool') {
+                box.add_child(this._dropdown(field.path.join('.'), [{ name: 'false' }, { name: 'true' }],
+                    item => { field.value = item.name === 'true'; update(field.value); }, String(field.value)));
+            } else {
+                box.add_child(this._textEntry({ text: field.input === undefined ?
+                    (isString ? String(field.value) : JSON.stringify(field.value)) : field.input,
+                    hint: field.type.includes('sequence') || field.type.includes('[') ? '[value, …]' : field.type,
+                    onChange: text => {
+                        field.input = text;
+                        try {
+                            const value = isString ? text : JSON.parse(text);
+                            field.invalid = false;
+                            update(value);
+                        } catch (_) { field.invalid = true; }
+                        composer.error = composer.fields.some(f => f.invalid) ? 'Enter a valid value for each field' : '';
+                    },
+                }));
+            }
+        }
+        if (composer.error) box.add_child(this._note(composer.error, true));
         const armed = this._isArmed(`send:${key}`);
         box.add_child(this._buttons([
             {
@@ -2549,6 +2641,13 @@ var RosPanel = class RosPanel {
                     subtitle: controllers.error,
                 }));
             }
+            for (const manager of [...new Set([...(controllers.managers || []), ...list.map(c => c.manager)])]) {
+                this._out.add_child(this._textEntry({ hint: `Load controller on ${manager} (name, Enter twice)`,
+                    text: this._controllerDraft && this._controllerDraft.manager === manager ? this._controllerDraft.name : '',
+                    focus: !!(this._controllerDraft && this._controllerDraft.manager === manager),
+                    onChange: name => { this._controllerDraft = { manager, name }; },
+                    onActivate: name => { if (name.trim()) this._switchController({ manager, name: name.trim() }, 'load'); } }));
+            }
             for (const controller of list) {
                 const op = CONTROLLER_NEXT[controller.state];
                 const armed = op && this._isArmed(`controller:${controller.manager}:${controller.name}:${op}`);
@@ -2557,11 +2656,14 @@ var RosPanel = class RosPanel {
                     title: controller.name,
                     subtitle: `${title(controller.state)} · ${controller.type} · ${controller.manager}`,
                     active: controller.state === 'active',
-                    action: op ? {
+                    actions: [op ? {
                         label: armed ? `Confirm ${op}` : title(op),
                         quiet: !armed,
                         onClick: () => this._switchController(controller, op),
-                    } : null,
+                    } : null, controller.state !== 'active' ? {
+                        label: this._isArmed(`controller:${controller.manager}:${controller.name}:unload`) ? 'Confirm unload' : 'Unload',
+                        onClick: () => this._switchController(controller, 'unload'),
+                    } : null].filter(Boolean),
                 }));
             }
             const note = this._notes.controllers;

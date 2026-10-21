@@ -3484,3 +3484,14 @@
 .adaptive-island-scrubber:focus {
     box-shadow: inset 0 0 0 2px rgba(10, 132, 255, 0.80);
 }
+
+/* ROS selectors participate in vertical layout, including expanded lists. */
+.adaptive-ros-dropdown { spacing: 6px; padding: 5px 8px; }
+.adaptive-ros-options { max-height: 176px; }
+.adaptive-ros-option { text-align: left; padding: 8px 10px; border-radius: 6px; }
+.adaptive-ros-option:hover, .adaptive-ros-option:focus { background-color: rgba(10, 132, 255, 0.18); }
+.adaptive-ros-setups { spacing: 6px; }
+
+.adaptive-ros-setup { spacing: 3px; }
+.adaptive-ros-select { text-align: left; color: #F5F5F7; padding: 5px 6px; }
+.adaptive-ros-dropdown { padding: 2px 0; }

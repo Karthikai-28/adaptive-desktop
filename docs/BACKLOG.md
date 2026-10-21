@@ -821,17 +821,22 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
 - 🔬 **Gazebo**: installed now (`ros_gz_sim`, so the panel starts
   `ros2 launch ros_gz_sim gz_sim.launch.py`); opening a world from the panel
   has not been tried live.
-- 🔬 **ros2_control controllers**: listing and Configure / Activate /
-  Deactivate are written; untested, `controller_manager_msgs` is not
-  installed here. Loading and unloading controllers is not offered.
-- 🔬 **Island alerts**: checked through the bus (`verify-dynamic-island.js`,
-  privacy included) and the panel's events in the nested shell; how they look
-  live is not.
-- Not done from the audit: names-first parameter reading (the first 200 are
-  read with their values), cancelling a running Hz or preview when its row
-  folds (each ends after two seconds anyway), a recording indicator as an
-  island activity (the top-bar icon and island events stand in), and forms
-  per field for calls and goals (a YAML template of the type stands in).
+- ✅ **Controller service operations**: Load / Configure / Activate / Deactivate /
+  Unload and rejection handling pass against real Humble message types with an
+  isolated fixture manager (`verify-ros-controllers.py`, domain 89). No hardware
+  controller plugins have been exercised. `controller_manager_msgs` remains
+  absent from the system installation; live use needs it in the selected setup.
+- ✅ **ROS panel cleanup**: searchable inline dropdowns replace wrapping file
+  chips; workspace selection includes None, discovered workspaces and a custom
+  path. Package selection scopes launch files and installed executable nodes.
+  Names-first parameters fetch one value on demand, paged forty at a time.
+  Calls/goals/messages have typed per-field editors; arrays use JSON inputs.
+  Folding a row cancels active Hz/Preview subscriptions. Recording has a
+  persistent island activity with screen-sharing privacy.
+- 🔬 **Physical session**: source changes pass helper checks and ROS interaction
+  checks in a nested shell; appearance and hardware behavior still need live
+  verification after the next shell restart. The wider nested desktop check
+  also reported an unrelated project-indicator git-status failure.
 
 ## Immediate next work
 

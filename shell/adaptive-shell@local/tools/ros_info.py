@@ -6,8 +6,8 @@
     ros_info.py set <key> <value>...   domain | localhost | rmw | workspace | follow_project;
                                        "" follows the shell (`set all ""` for all); several pairs
     ros_info.py launch <tool> [file] [name:=value...]
-                                       rviz2 | gazebo | rqt | rqt_graph | demo | launch; file is
-                                       a .rviz config, a world or a launch file
+                                       rviz2 | gazebo | rqt | rqt_graph | demo | launch | node; file is
+                                       a .rviz config, world, launch file or workspace executable
     ros_info.py launch-saved <name>    a saved launch (file and arguments)
     ros_info.py save-launch <name> <file> [name:=value...] | forget-launch <name>
     ros_info.py stop <tool>            ask what the panel started of it to quit
@@ -42,7 +42,7 @@ lines: {"type": "graph", ...} whenever the graph changes, {"type": "reply",
 "id": n, ...} for each request, {"type": "error", "error": ...} if ROS cannot
 start. Requests come on stdin, one JSON object a line:
 
-    {"id": 1, "cmd": "node", "name": "/ns/talker"}   parameters, lifecycle state, QoS
+    {"id": 1, "cmd": "node", "name": "/ns/talker"}   parameter names, lifecycle state, QoS
     {"id": 2, "cmd": "topic", "name": "/chatter"}    every endpoint with its QoS
     {"id": 3, "cmd": "interface", "type": "std_msgs/msg/String"}
     {"id": 4, "cmd": "hz", "name": "/chatter"}       rate and bandwidth over two seconds
@@ -50,6 +50,8 @@ start. Requests come on stdin, one JSON object a line:
     {"cmd": "tf"}                                    the TF tree, rates and stale frames
     {"cmd": "health"}                                QoS mismatches across every topic
     {"cmd": "template", "kind": "service", "type": "example_interfaces/srv/AddTwoInts"}
+    {"cmd": "parameter", "node": ..., "name": ...}     fetch one typed value
+    {"cmd": "cancel", "ids": [4]}                      cancel pending Hz/Preview requests
     {"cmd": "set_parameter", "node": ..., "name": ..., "value": "1.5", "ptype": 3}
     {"cmd": "lifecycle", "node": ..., "transition": "configure"}
     {"cmd": "call", "name": ..., "type": ..., "value": "{a: 1}"}       a service
@@ -113,7 +115,6 @@ IDLE_GRAPH_EVERY_S = 10.0
 # Between full scans only the name lists are compared; a change in them, or
 # this long, means asking every node again.
 FULL_SCAN_EVERY_S = 5.0
-MAX_PARAMETERS = 200
 MAX_ARRAY_ITEMS = 64
 MAX_ACTIVE_SAMPLES = 3
 MAX_ACTIVE_MEASURES = 4
@@ -126,7 +127,7 @@ TF_WINDOW_S = 1.5
 TF_STALE_S = 1.0
 THUMB_WIDTH = 240
 HISTORY_KEEP = 20
-TOOLS = ("rviz2", "gazebo", "rqt", "rqt_graph", "demo", "launch", "bag")
+TOOLS = ("rviz2", "gazebo", "rqt", "rqt_graph", "demo", "launch", "bag", "node")
 LAUNCH_SUFFIXES = (".launch.py", ".launch.xml", ".launch.yaml")
 LAUNCH_ARG = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*:=.*$", re.S)
 SAVED_NAME = re.compile(r"^[\w][\w .:+-]{0,40}$")
@@ -266,6 +267,36 @@ def workspaces():
             if (path / "install" / "setup.bash").is_file():
                 found.append({"name": str(path.relative_to(HOME)), "path": str(path)})
     return found
+
+
+def workspace_packages(workspace):
+    """Source packages plus installed executables; package names come from manifests."""
+    import xml.etree.ElementTree as ET
+    if not workspace:
+        return []
+    root = Path(workspace)
+    found = []
+    for directory, dirs, files in os.walk(root / "src"):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
+        if "COLCON_IGNORE" in files or "AMENT_IGNORE" in files:
+            dirs[:] = []
+            continue
+        if "package.xml" not in files:
+            continue
+        try:
+            name = ET.parse(Path(directory) / "package.xml").getroot().findtext("name", "").strip()
+        except (OSError, ET.ParseError):
+            continue
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name):
+            continue
+        executables = set()
+        for lib in (root / "install" / name / "lib" / name, root / "install" / "lib" / name):
+            if lib.is_dir():
+                executables.update(str(f) for f in lib.iterdir() if f.is_file() and os.access(f, os.X_OK))
+        found.append({"name": name, "path": directory,
+                      "executables": [{"name": Path(f).name, "path": f} for f in sorted(executables)]})
+        dirs[:] = []
+    return sorted(found, key=lambda item: item["name"])
 
 
 def workspace_name(path):
@@ -546,7 +577,7 @@ def is_world(path):
 def discovered_files(spaces, refresh=False):
     """RViz configs, worlds and launch files: a walk of the home folder and every
     workspace's src, so it is kept for a few minutes (per set of workspaces)."""
-    key = sorted(w["path"] for w in spaces)
+    key = ["workspace-files-v2", *sorted(w["path"] for w in spaces)]
     cached = read_json(DISCOVERY)
     if (not refresh and cached.get("key") == key
             and 0 <= time.time() - cached.get("at", 0) < DISCOVERY_TTL_S):
@@ -556,7 +587,7 @@ def discovered_files(spaces, refresh=False):
         "rviz_configs": recent_files(roots, lambda p: p.endswith(".rviz")),
         "worlds": recent_files(roots, is_world),
         "launch_files": recent_files([(Path(w["path"]) / "src", 8) for w in spaces],
-                                     lambda p: p.endswith(LAUNCH_SUFFIXES), limit=12),
+                                     lambda p: p.endswith(LAUNCH_SUFFIXES), limit=None),
     }
     try:
         write_json(DISCOVERY, {"key": key, "at": time.time(), "files": files})
@@ -601,6 +632,7 @@ def status(refresh=False):
         "rmw_name": RMW_NAMES.get(setup["rmw"], setup["rmw"]),
         "middlewares": [{"id": m, "name": RMW_NAMES[m]} for m in middlewares(distro)],
         "workspaces": spaces,
+        "packages": workspace_packages(setup["workspace"]),
         "tools": {name: {
             "installed": ok,
             "pids": procs.get(name, []),
@@ -611,7 +643,7 @@ def status(refresh=False):
         } for name, ok in tools.items()},
         "gazebo_flavour": flavour,
         "gazebo_install": f"sudo apt install ros-{distro}-ros-gz",
-        **discovered_files(spaces, refresh),
+        **discovered_files([w for w in spaces if w["path"] == setup["workspace"]], refresh),
         "saved_launches": read_json(SAVED_LAUNCHES, list),
         "setups": read_json(SETUPS, list),
         "project": {"name": project[0], "path": project[1], "workspace": project_ws} if project else None,
@@ -753,6 +785,12 @@ def launch(tool, file=None, args=(), saved=None):
     elif tool == "demo":
         lib = base / "lib" / "demo_nodes_cpp"
         argv = [[str(lib / "talker")], [str(lib / "listener")]]
+    elif tool == "node" and file:
+        allowed = {e["path"] for p in workspace_packages(setup["workspace"]) for e in p["executables"]}
+        if file not in allowed:
+            return {"ok": False, "error": "Choose an installed executable from this workspace"}
+        argv = [[file]]
+        meta = {"file": file, "name": Path(file).name}
     elif tool == "launch" and file:
         command, error = launch_argv(file, list(args))
         if error:
@@ -1081,6 +1119,7 @@ def set_values(pairs):
                     return {"ok": False, "error": f"{value} is not installed"}
                 config[key] = value
             elif key == "workspace":
+                value = str(Path(value).expanduser().resolve()) if value != "none" else value
                 if value != "none" and not (Path(value) / "install" / "setup.bash").is_file():
                     return {"ok": False, "error": f"{value} has no install/setup.bash"}
                 config[key] = "" if value == "none" else value
@@ -1529,7 +1568,8 @@ class Watcher:
                     self.node.destroy_client(client)
                     del self.controller_jobs[service]
             if not self.controller_jobs:
-                self.controllers = {"list": sorted(found, key=lambda c: c["name"])}
+                self.controllers = {"list": sorted(found, key=lambda c: c["name"]),
+                                    "managers": [m.rsplit("/", 1)[0] for m in managers]}
                 if errors:
                     self.controllers["error"] = "; ".join(errors)
                 return True
@@ -1550,6 +1590,15 @@ class Watcher:
                 emit({"type": "reply", "id": rid, **self.topic_detail(request["name"])})
             elif cmd == "node":
                 self.node_detail(rid, request["name"])
+            elif cmd == "parameter":
+                self.parameter(rid, request["node"], request["name"])
+            elif cmd == "cancel":
+                for job in list(self.jobs):
+                    if job.rid in request.get("ids", []) and job.kind in ("measure", "sample"):
+                        if job.cleanup:
+                            job.cleanup()
+                        self.jobs.remove(job)
+                emit({"type": "reply", "id": rid, "ok": True})
             elif cmd == "hz":
                 self.measure(rid, request["name"])
             elif cmd == "sample":
@@ -1632,7 +1681,19 @@ class Watcher:
         except (AttributeError, ModuleNotFoundError, ValueError):
             return {"error": f"{type_name} is not in this setup"}
         text, _ = message_text(message)
-        return {"text": text}
+        from rosidl_runtime_py.convert import message_to_ordereddict
+        values = message_to_ordereddict(message)
+        fields = []
+        def walk(msg, value, path):
+            types = msg.get_fields_and_field_types()
+            for key, val in value.items():
+                child = getattr(msg, key)
+                if hasattr(child, "get_fields_and_field_types"):
+                    walk(child, val, path + [key])
+                else:
+                    fields.append({"path": path + [key], "type": types[key], "value": val})
+        walk(message, values, [])
+        return {"text": text, "fields": fields, "values": values}
 
     def node_detail(self, rid, full):
         ns, name = split_name(full)
@@ -1650,45 +1711,15 @@ class Watcher:
         waiting = []
 
         if info["parameter_services"]:
-            from rcl_interfaces.srv import GetParameters, ListParameters
-            from rclpy.parameter import parameter_value_to_python
+            from rcl_interfaces.srv import ListParameters
             lister = self.node.create_client(ListParameters, f"{full}/list_parameters")
-            getter = self.node.create_client(GetParameters, f"{full}/get_parameters")
-            state = {"names": None, "values": None, "total": 0}
-            listed = lister.call_async(ListParameters.Request())
+            state = {"values": None, "total": 0}
             waiting.append(lister)
-            waiting.append(getter)
-
             def on_list(future):
-                if future.result() is None:
-                    return
-                all_names = sorted(future.result().result.names)
-                state["total"] = len(all_names)
-                names = all_names[:MAX_PARAMETERS]
-                state["names"] = names
-                request = GetParameters.Request()
-                request.names = names
-                getter.call_async(request).add_done_callback(on_values)
-
-            # Long arrays are cut short (and not editable here): the rest would
-            # only cross the pipe to be ellipsized.
-            def on_values(future):
-                if future.result() is None:
-                    return
-                values = []
-                for key, value in zip(state["names"], future.result().values):
-                    try:
-                        python = parameter_value_to_python(value)
-                    except Exception:
-                        python = None
-                    item = {"name": key, "value": python, "ptype": value.type}
-                    if isinstance(python, (list, tuple, bytes)) and len(python) > MAX_ARRAY_ITEMS:
-                        item.update(value=list(python[:MAX_ARRAY_ITEMS]), truncated=len(python))
-                    elif isinstance(python, bytes):
-                        item["value"] = list(python)
-                    values.append(item)
-                state["values"] = values
-            listed.add_done_callback(on_list)
+                if future.result() is not None:
+                    names = sorted(future.result().result.names)
+                    state.update(total=len(names), values=[{"name": name} for name in names])
+            lister.call_async(ListParameters.Request()).add_done_callback(on_list)
         else:
             state = {"values": []}
 
@@ -1722,6 +1753,23 @@ class Watcher:
             emit({"type": "reply", "id": rid, **result})
             return True
         self.jobs.append(Job(rid, finish))
+
+    def parameter(self, rid, node, name):
+        from rcl_interfaces.srv import GetParameters
+        from rclpy.parameter import parameter_value_to_python
+        def result(reply):
+            if not reply.values:
+                return {"error": "Parameter no longer exists"}
+            value = reply.values[0]
+            python = parameter_value_to_python(value)
+            item = {"name": name, "ptype": value.type, "value": python}
+            if isinstance(python, (list, tuple, bytes)):
+                item["value"] = list(python[:MAX_ARRAY_ITEMS])
+                if len(python) > MAX_ARRAY_ITEMS:
+                    item["truncated"] = len(python)
+            return item
+        self.call(rid, self.node.create_client(GetParameters, f"{node}/get_parameters"),
+                  GetParameters.Request(names=[name]), result, "parameter")
 
     def busy(self, kind, limit):
         return sum(job.kind == kind for job in self.jobs) >= limit
@@ -1760,14 +1808,15 @@ class Watcher:
         def finish():
             if time.monotonic() < end:
                 return False
-            self.node.destroy_subscription(sub)
             span = stamps[-1] - stamps[0] if len(stamps) > 1 else 0
             emit({"type": "reply", "id": rid, "count": len(stamps), "window": HZ_WINDOW_S,
                   "hz": (len(stamps) - 1) / span if span > 0 else 0.0,
                   "bytes_per_s": sum(sizes) / HZ_WINDOW_S,
                   "size": sum(sizes) / len(sizes) if sizes else 0})
             return True
-        self.jobs.append(Job(rid, finish, "measure"))
+        job = Job(rid, finish, "measure")
+        job.cleanup = lambda: self.node.destroy_subscription(sub)
+        self.jobs.append(job)
 
     def sample(self, rid, topic):
         """The next message on a topic, its age, and for images a thumbnail."""
@@ -1792,7 +1841,6 @@ class Watcher:
         def finish():
             if got["message"] is None and time.monotonic() < deadline:
                 return False
-            self.node.destroy_subscription(sub)
             message = got["message"]
             if message is None:
                 emit({"type": "reply", "id": rid, "error": f"No message arrived in {HZ_WINDOW_S:g} s"})
@@ -1822,7 +1870,9 @@ class Watcher:
                 reply["text"], reply["truncated"] = message_text(message, 20000)
             emit(reply)
             return True
-        self.jobs.append(Job(rid, finish, "sample"))
+        job = Job(rid, finish, "sample")
+        job.cleanup = lambda: self.node.destroy_subscription(sub)
+        self.jobs.append(job)
 
     def tf_tree(self, rid):
         """Listen to /tf and /tf_static a moment: every frame's parent, rate and
@@ -2073,15 +2123,17 @@ class Watcher:
 
     def controller(self, rid, manager, name, op):
         """ros2_control: configure, activate or deactivate one controller."""
-        if op == "configure":
+        if op in ("configure", "load", "unload"):
             try:
-                from controller_manager_msgs.srv import ConfigureController as Configure
+                from controller_manager_msgs import srv
+                Configure = getattr(srv, {"configure": "ConfigureController", "load": "LoadController",
+                                          "unload": "UnloadController"}[op])
             except ImportError:
                 emit({"type": "reply", "id": rid, "error": "controller_manager_msgs is not in this setup"})
                 return
             request = Configure.Request(name=name)
-            self.call(rid, self.node.create_client(Configure, f"{manager}/configure_controller"), request,
-                      lambda r: {"ok": True} if r.ok else {"error": f"{name} did not configure"}, "controller")
+            self.call(rid, self.node.create_client(Configure, f"{manager}/{op}_controller"), request,
+                      lambda r: {"ok": True} if r.ok else {"error": f"{name} did not {op}"}, "controller")
             return
         if op not in ("activate", "deactivate"):
             emit({"type": "reply", "id": rid, "error": f"unknown controller operation {op}"})

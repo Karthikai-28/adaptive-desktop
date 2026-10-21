@@ -506,7 +506,11 @@ var IslandAnchor = class IslandAnchor {
     }
 
     _renderSlotCompact(slot, quota) {
-        if (slot.type === "task") {
+        if (slot.type === "ros") {
+            this._compactIconLabel.text = "●";
+            this._compactTextLabel.text = slot.title;
+            this._compactSecondaryLabel.text = "";
+        } else if (slot.type === "task") {
             this._compactIconLabel.text = "⟳";
             this._compactTextLabel.text = slot.title || "AI Task";
             this._compactSecondaryLabel.text = (slot.data && slot.data.progress) ? (" (" + slot.data.progress + "%)") : "";
@@ -526,7 +530,9 @@ var IslandAnchor = class IslandAnchor {
     }
 
     _renderSatelliteSlot(slot) {
-        if (slot.type === "timer") {
+        if (slot.type === "ros") {
+            this._satelliteIconLabel.text = "●";
+        } else if (slot.type === "timer") {
             this._satelliteIconLabel.text = "⏱";
         } else if (slot.type === "media") {
             this._satelliteIconLabel.text = "♫";
@@ -707,6 +713,14 @@ var IslandOverlay = class IslandOverlay {
         this._buildTasksCard();
         this._buildMediaCard();
         this._buildTimerCard();
+        this._rosCard = new St.BoxLayout({ vertical: true, style_class: 'adaptive-island-card-body' });
+        this._rosRecordingLabel = new St.Label({ text: 'ROS 2 recording active', style_class: 'adaptive-island-timer-note' });
+        this._rosCard.add_child(this._rosRecordingLabel);
+        this._rosCard.add_child(_button('Open ROS 2', 'adaptive-island-btn', 'Manage the recording', () => {
+            const panel = Main.panel.statusArea['adaptive-ros'];
+            if (panel) panel.menu.open();
+        }));
+        this._cardContentBox.add_child(this._rosCard);
 
         mainLayout.add_child(this._cardContentBox);
         this._actor.add_child(mainLayout);
@@ -1062,6 +1076,7 @@ var IslandOverlay = class IslandOverlay {
         }
         if (card === "overview" && !this._embedded)
             card = "quota";
+
         this._activeCardType = card;
 
         if (!this._actor) return;
@@ -1087,13 +1102,19 @@ var IslandOverlay = class IslandOverlay {
         this._tasksCard.visible = card === "tasks";
         this._mediaCard.visible = card === "media";
         this._timerCard.visible = card === "timer";
+        this._rosCard.visible = card === "ros";
 
         // Let the active card determine its height; fixed heights clip controls.
         this._actor.remove_style_class_name("caution");
         this._actor.remove_style_class_name("critical");
 
         // Update card data
-        if (card === "overview") {
+        if (card === "ros") {
+            this._titleIcon.text = '●';
+            this._titleLabel.text = 'ROS 2';
+            this._badgeLabel.text = 'RECORDING';
+            this._rosRecordingLabel.text = state.isScreenSharing ? 'Recording active' : 'Rosbag is recording. Open ROS 2 to stop and save it.';
+        } else if (card === "overview") {
             this._renderOverviewData(state);
         } else if (card === "quota") {
             this._renderQuotaData(state);

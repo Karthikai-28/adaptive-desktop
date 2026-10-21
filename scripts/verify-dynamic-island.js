@@ -395,6 +395,14 @@ async function main() {
     check(multi.secondary.type === 'media', 'bus: multi-activity Secondary satellite slot occupied by Media');
 
     // Clean teardown
+    island.setRosRecording({ topics: ['/private_topic'], started: 123 });
+    check(island.getMultiActivitySlots().primary.type === 'ros', 'ROS recording remains a primary activity');
+    island.dismissCurrentEvent();
+    check(island.getMultiActivitySlots().primary.type === 'ros', 'dismissing an event keeps the recording activity');
+    island.setScreenSharing(true);
+    check(!JSON.stringify(island.getMultiActivitySlots()).includes('private_topic'), 'recording activity hides topics during sharing');
+    island.setRosRecording(null);
+    check(island.getMultiActivitySlots().primary?.type !== 'ros', 'stopping removes the recording activity');
     island.destroy();
     check(island._destroyed === true, 'bus: clean destroy with zero lingering resources');
 
