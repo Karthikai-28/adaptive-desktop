@@ -15,6 +15,8 @@ REPO="$ADAPTIVE_REPO"
 PREFIX="$REPO/.local/adaptive-nautilus"
 EXT_DIR="$PREFIX/share/nautilus-python/extensions"
 CSS_DIR="$PREFIX/share/adaptive-files"
+ICON_SRC="$REPO/icons/AdaptiveFilesIcons"
+ICON_DIR="$PREFIX/share/icons/AdaptiveFilesIcons"
 
 test -d "$PREFIX" || {
     echo "Fork prefix missing: $PREFIX" >&2
@@ -36,6 +38,11 @@ mkdir -p "$EXT_DIR/adaptive_files"
 install -m 0644 "$REPO"/extension/adaptive_files/*.py "$EXT_DIR/adaptive_files/"
 install -m 0644 "$REPO/extension/preview.css" "$CSS_DIR/preview.css"
 install -m 0644 "$REPO/extension/adaptive-dark.xml" "$CSS_DIR/adaptive-dark.xml"
+mkdir -p "$(dirname "$ICON_DIR")"
+rsync -a --delete "$ICON_SRC/" "$ICON_DIR/"
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -f "$ICON_DIR" 2>/dev/null || true
+fi
 rm -rf "$EXT_DIR/__pycache__"
 
 echo "Installed:"
@@ -43,3 +50,4 @@ echo "  $EXT_DIR/adaptive_preview.py"
 echo "  $EXT_DIR/adaptive_files/"
 echo "  $CSS_DIR/preview.css"
 echo "  $CSS_DIR/adaptive-dark.xml"
+echo "  $ICON_DIR/"

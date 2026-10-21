@@ -171,17 +171,38 @@ def inner(sandbox, check):
 
     # Exercise the embedded terminal: renderer settings and Zsh spawning
     # otherwise remain untested by browsing the inspector alone.
-    terminal_state = sandbox / "terminal-state.txt"
+    xdo("windowfocus", "--sync", window)
     xdo("key", "F4")
-    time.sleep(1)
-    xdo("type", "--clearmodifiers", "--delay", "1",
-        f"printf '%s\\n' \"${{ZSH_VERSION:+zsh}}|$KARTHI_SHELL_MODE\" > '{terminal_state}'")
-    xdo("key", "Return")
+    shell_pid = ""
     for _ in range(20):
-        if terminal_state.exists():
+        children = subprocess.run(["pgrep", "-P", str(nautilus.pid), "-x", "zsh"],
+                                  capture_output=True, text=True).stdout.strip()
+        if children:
+            shell_pid = children.splitlines()[0]
             break
         time.sleep(0.25)
-    check(terminal_state.exists() and terminal_state.read_text().strip() == "zsh|modern",
+    # Some X servers reserve a function key before GTK sees it. The product
+    # also registers Ctrl+grave, so exercise that route before declaring the
+    # drawer broken.
+    if not shell_pid:
+        xdo("key", "ctrl+grave")
+        for _ in range(20):
+            children = subprocess.run(["pgrep", "-P", str(nautilus.pid), "-x", "zsh"],
+                                      capture_output=True, text=True).stdout.strip()
+            if children:
+                shell_pid = children.splitlines()[0]
+                break
+            time.sleep(0.25)
+    check(bool(shell_pid), "the embedded Terminal launches its Zsh child")
+    child_env = b""
+    child_exe = ""
+    if shell_pid:
+        try:
+            child_env = Path(f"/proc/{shell_pid}/environ").read_bytes()
+            child_exe = os.readlink(f"/proc/{shell_pid}/exe")
+        except OSError:
+            pass
+    check(child_exe.endswith("/zsh") and b"KARTHI_SHELL_MODE=modern\0" in child_env,
           "the embedded Terminal starts Zsh in KTERM modern mode")
     xdo("key", "F4")
 

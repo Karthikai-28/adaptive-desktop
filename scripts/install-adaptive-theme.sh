@@ -89,7 +89,8 @@ echo "  $ICONS_DST"
 
 # Nautilus reads its icons from the fork prefix too, so keep that copy in step.
 FORK_ICONS="${REPO}/.local/adaptive-nautilus/share/icons/AdaptiveFilesIcons"
-if [ -d "$FORK_ICONS" ]; then
+if [ -d "$(dirname "$FORK_ICONS")" ]; then
+    mkdir -p "$FORK_ICONS"
     rsync -a --delete "${ICONS_SRC}/" "${FORK_ICONS}/"
     echo "  $FORK_ICONS"
 fi
