@@ -373,6 +373,8 @@ part of `verify-all.sh --quick`). **None is verified live yet.**
   surfaced events.
 - ✅ AI usage refreshes as soon as its card opens and watches the active Codex
   rollout, its session directory and Claude's local usage cache for changes.
+  Claude windows missing from that cache are filled from Agent Office's live
+  Claude + GPT usage report, including the five-hour window.
   Visible fallback polling is 15 seconds for Gemini and missed file events,
   then switches to five minutes while the card and alert are hidden.
   A fresh lower reading automatically clears a previously sticky critical or

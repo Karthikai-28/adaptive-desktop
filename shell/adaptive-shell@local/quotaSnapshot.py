@@ -6,7 +6,7 @@ Never opens account credentials and never calls a remote API. Each provider come
    "windows": [{"label": "5h" | "Weekly" | ..., "used": 0-100, "resetsAt": <unix>, "expired": bool}]}
 
   codex   the rate_limits Codex writes into its session rollouts (~/.codex/sessions)
-  claude  the plan usage Claude Code caches in ~/.claude.json (cachedUsageUtilization)
+  claude  Claude Code's cached usage, completed with Claude + GPT rows from Agent Office
   gemini  agy's /usage, as the Agent Office serves it on its loopback port
 
 A window whose reset time has passed is marked expired: the record says nothing about it since, so
@@ -105,15 +105,59 @@ CLAUDE_WINDOWS = (('five_hour', '5h'), ('seven_day', 'Weekly'),
                   ('seven_day_opus', 'Weekly Opus'), ('seven_day_sonnet', 'Weekly Sonnet'))
 
 
-def claude_snapshot(config, now=None):
-    """Only the cachedUsageUtilization entry is used; nothing else in the file is kept or returned."""
+def _office_family_snapshot(data, family, stale_key, now, unavailable):
+    if not isinstance(data, dict) or not isinstance(data.get('rows'), list):
+        return _empty(unavailable)
+    stamp = data.get('ts') if _num(data.get('ts')) else 0
+    result = {'ts': stamp, 'stale': not stamp or now - stamp > STALE_S[stale_key],
+              'error': '', 'windows': []}
+    for row in data['rows']:
+        if row.get('family', 'gemini') != family:
+            continue
+        try:
+            left = row.get('percent')
+            if not _num(left):
+                left = float(str(row.get('remaining', '')).rstrip('%'))
+        except (ValueError, AttributeError):
+            continue
+        label = 'Weekly' if row.get('window') == 'week' else str(row.get('window', ''))
+        w = _window(label, 100 - left, _iso(row.get('resets')), now)
+        if w:
+            result['windows'].append(w)
+    result['windows'].sort(key=lambda w: w['label'].startswith('Weekly'))
+    if not result['windows']:
+        result['error'] = 'Waiting for the first usage report'
+    return result
+
+
+def _merge_windows(primary, fallback):
+    """Keep provider-specific rows, filling missing windows from the shared usage source."""
+    if not fallback['windows']:
+        return primary
+    if not primary['windows']:
+        return fallback
+    windows = {w['label']: w for w in fallback['windows']}
+    windows.update({w['label']: w for w in primary['windows']})
+    stamps = [p['ts'] for p in (primary, fallback) if p['ts']]
+    return {'ts': min(stamps) if stamps else 0,
+            'stale': primary['stale'] or fallback['stale'],
+            'error': '',
+            'windows': sorted(windows.values(), key=lambda w: w['label'].startswith('Weekly'))}
+
+
+def claude_snapshot(config, now=None, office=None):
+    """Read only cachedUsageUtilization, then fill absent windows from Agent Office."""
     now = time.time() if now is None else now
     try:
         cached = json.loads(config.read_text()).get('cachedUsageUtilization')
     except (OSError, ValueError, AttributeError):
-        return _empty('Claude Code settings not found')
+        local = _empty('Claude Code settings not found')
+        return _merge_windows(local, _office_family_snapshot(
+            office, 'claude-gpt', 'claude', now, 'The Agent Office is not running'))
     if not isinstance(cached, dict) or not isinstance(cached.get('utilization'), dict):
-        return _empty('Claude Code has not fetched plan usage yet')
+        local = _empty('Claude Code has not fetched plan usage yet')
+        return _merge_windows(local, _office_family_snapshot(
+            office, 'claude-gpt', 'claude', now, 'The Agent Office is not running'))
     stamp = cached.get('fetchedAtMs')
     stamp = stamp / 1000 if _num(stamp) else 0
     result = {'ts': stamp, 'stale': now - stamp > STALE_S['claude'], 'error': '', 'windows': []}
@@ -123,33 +167,15 @@ def claude_snapshot(config, now=None):
             w = _window(label, window.get('utilization'), _iso(window.get('resets_at')), now)
             if w:
                 result['windows'].append(w)
-    return result
+    office_result = _office_family_snapshot(
+        office, 'claude-gpt', 'claude', now, 'The Agent Office is not running')
+    return _merge_windows(result, office_result)
 
 
 def gemini_snapshot(data, now=None):
     now = time.time() if now is None else now
-    if not isinstance(data, dict) or not isinstance(data.get('rows'), list):
-        return _empty('The Agent Office is not running')
-    stamp = data.get('ts') if _num(data.get('ts')) else 0
-    result = {'ts': stamp, 'stale': not stamp or now - stamp > STALE_S['gemini'],
-              'error': 'Waiting for the first usage report' if not data['rows'] else '', 'windows': []}
-    for row in data['rows']:
-        # Newer Office responses also carry the shared Claude/GPT subscription limits.
-        # Rows from older servers had no family and were all Gemini.
-        if row.get('family', 'gemini') != 'gemini':
-            continue
-        try:
-            left = row.get('percent')
-            if not _num(left):
-                left = float(str(row.get('remaining', '')).rstrip('%'))
-        except (ValueError, AttributeError):
-            continue
-        w = _window('Weekly' if row.get('window') == 'week' else str(row.get('window', '')), 100 - left,
-                    _iso(row.get('resets')), now)
-        if w:
-            result['windows'].append(w)
-    result['windows'].sort(key=lambda w: w['label'].startswith('Weekly'))   # 5h first, like the others
-    return result
+    return _office_family_snapshot(
+        data, 'gemini', 'gemini', now, 'The Agent Office is not running')
 
 
 def snapshot(refresh=False):
@@ -174,7 +200,7 @@ def snapshot(refresh=False):
         # directory lets the shell discover it without waiting for a timer.
         watch['codexDirectory'] = str(codex_sources[0].parent)
     return {'codex': codex,
-            'claude': claude_snapshot(claude_config),
+            'claude': claude_snapshot(claude_config, office=office),
             'gemini': gemini_snapshot(office),
             '_watch': watch}
 

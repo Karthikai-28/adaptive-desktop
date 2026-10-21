@@ -83,6 +83,25 @@ class SnapshotTests(unittest.TestCase):
             'five_hour': {'utilization': 50, 'resets_at': '2026-10-12T06:29:59+00:00'}}})
         self.assertTrue(quota.claude_snapshot(path, now=1791763200 + 7200)['stale'])
 
+    def test_claude_missing_5h_is_filled_from_office(self):
+        path = self.claude_config({'fetchedAtMs': 1791763200000, 'utilization': {
+            'seven_day': {'utilization': 31.5, 'resets_at': '2026-10-16T13:59:59+00:00'}}})
+        office = {'ts': 1791763260, 'rows': [
+            {'family': 'claude-gpt', 'window': '5h', 'percent': 75,
+             'resets': '2026-10-12T06:29:59Z'},
+            {'family': 'claude-gpt', 'window': 'week', 'percent': 10,
+             'resets': '2026-10-16T20:18:26Z'}]}
+        data = quota.claude_snapshot(path, now=1791763260, office=office)
+        self.assertEqual([(w['label'], w['used']) for w in data['windows']],
+                         [('5h', 25), ('Weekly', 31.5)])
+
+    def test_claude_office_fills_all_windows_without_local_cache(self):
+        office = {'ts': 1791763260, 'rows': [
+            {'family': 'claude-gpt', 'window': '5h', 'remaining': '100%',
+             'resets': '2026-10-12T06:29:59Z'}]}
+        data = quota.claude_snapshot(self.root / 'nope.json', now=1791763260, office=office)
+        self.assertEqual([(w['label'], w['used']) for w in data['windows']], [('5h', 0)])
+
     # ---- Gemini: agy's /usage as the Agent Office serves it (remaining -> used)
     def test_gemini_used(self):
         data = quota.gemini_snapshot({'ts': 1791763200, 'error': '', 'rows': [
