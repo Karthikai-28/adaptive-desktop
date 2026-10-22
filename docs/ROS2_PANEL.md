@@ -293,14 +293,22 @@ static transform and a number on `/level` for the group, TF lookup and plot.
 - rqt_plot is in the distro's `lib/rqt_plot/`, not on PATH.
 - `ros2 topic pub`'s own node is hidden (`_ros2cli_…`), so a topic only it
   publishes is not listed; the plot still subscribes to it by name.
-- A wrapped `St.Label` must also have `ellipsize = NONE` (`wrapped()` in
-  `rosPanel.js`). St.Label ellipsizes by default, and a wrapped, ellipsized label
-  asks for one line as its minimum. The scrolled list hands out minimum sizes when
-  it is taller than the dropdown, so a call's reply or a preview showed only `{`
-  and drew the rest over the rows below. The nested check compares every wrapped
-  label's height with what it asks for.
+- A scrolled St list lays its children out at their *minimum* heights once it
+  is taller than the dropdown. Anything that can shrink was squeezed: a wrapped
+  (and, by default, ellipsized) label to one line, so a call's reply showed only
+  `{`; a dropdown's choices to nothing, so a plot field could not be picked.
+  Each block is a `Block`, which asks for its full height as its minimum;
+  wrapped labels also get `ellipsize = NONE` (`wrapped()`).
+- A click often renders twice in a row (now, and when its reply comes: Call
+  it…, Preview, Hz, Plot). The second render came before the first had put the
+  scroll back, read the reset position and jumped the list to the top, so
+  whatever was just opened was out of sight. `_renderNow` keeps the position
+  while a restore is pending.
 - The plot and the graph view are drawn below the setup and the launchers, so
   opening one scrolls to its block once the list is laid out, not to the top.
+- The nested check clicks with a real (virtual) pointer and checks the list
+  stays where it was; emitting `clicked` on a button skips what a person's
+  click goes through, and calling `_startPlot` skipped the field list.
 - The plot strip spans at least 2% of the values' size (or 0.001), so a steady
   value with noise (a drone hovering at 1.2000-1.2001 m) draws a level line.
 - Previews and replies print a list of plain values on one line, so an

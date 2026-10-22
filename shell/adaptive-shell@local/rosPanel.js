@@ -17,7 +17,7 @@
 
 /* exported RosPanel */
 
-const { Clutter, Gio, GLib, Pango, St } = imports.gi;
+const { Clutter, Gio, GLib, GObject, Pango, St } = imports.gi;
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 
@@ -139,6 +139,17 @@ function title(text) {
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
 }
 
+// One block of the list, which asks for its whole height as its minimum too.
+// A scrolled St list lays its children out at their minimum heights once it is
+// taller than the dropdown, and that squeezed whatever can shrink: wrapped text
+// to its first line, a dropdown's choices (the plot's field list) to nothing.
+const Block = GObject.registerClass(class AdaptiveRosBlock extends St.BoxLayout {
+    vfunc_get_preferred_height(forWidth) {
+        const [, natural] = super.vfunc_get_preferred_height(forWidth);
+        return [natural, natural];
+    }
+});
+
 // Text that keeps every line. St.Label ellipsizes by default, and a wrapped,
 // ellipsized label asks for one line only, so the scrolled list squeezed a
 // reply or a preview to its first line and drew the rest over its neighbours.
@@ -221,6 +232,7 @@ var RosPanel = class RosPanel {
         // The focused graph view: { kind, name, back: [...] }.
         this._focus = null;
         this._scrollToBlock = null;     // a block just opened (plot, graph view): scroll to it
+        this._keptScroll = null;        // the position a pending scroll restore puts back
         this._searchText = '';
         // Sections folded by hand during this search.
         this._searchFolded = new Set();
@@ -1211,7 +1223,12 @@ var RosPanel = class RosPanel {
         if (!this._button || !this._button.menu.isOpen)
             return;
         const adjustment = this._scroll.vscroll.adjustment;
-        const scrolled = adjustment.value;
+        // A click often renders twice in a row (now, and when its reply comes:
+        // Call it…, Preview, Hz, Plot). The second render comes before the first
+        // has put the scroll back, when the rebuilt list has reset it to the top,
+        // so it keeps the position the first one saw.
+        const scrolled = this._scrollId && this._keptScroll !== null ? this._keptScroll : adjustment.value;
+        this._keptScroll = scrolled;
         const status = this._status;
         const view = this._viewKey();
         const used = new Set();
@@ -1225,7 +1242,7 @@ var RosPanel = class RosPanel {
             if (!cached || cached.sig !== sig) {
                 if (cached)
                     cached.actor.destroy();
-                this._out = new St.BoxLayout({ vertical: true, x_expand: true });
+                this._out = new Block({ vertical: true, x_expand: true });
                 build();
                 cached = { sig, actor: this._out };
                 this._blocks.set(id, cached);
@@ -1272,6 +1289,7 @@ var RosPanel = class RosPanel {
             const target = this._scrollToBlock && this._blocks.get(this._scrollToBlock);
             if (!target) {
                 this._scrollToBlock = null;
+                this._keptScroll = null;
                 adjustment.value = Math.min(scrolled, adjustment.upper - adjustment.page_size);
                 return GLib.SOURCE_REMOVE;
             }
@@ -1288,8 +1306,10 @@ var RosPanel = class RosPanel {
                     return GLib.SOURCE_CONTINUE;
                 this._scrollId = 0;
                 this._scrollToBlock = null;
+                this._keptScroll = null;
+                // A little above the block, so its title clears the list's top fade.
                 if (actor.get_stage())
-                    adjustment.value = Math.max(0, Math.min(actor.get_y(), adjustment.upper - adjustment.page_size));
+                    adjustment.value = Math.max(0, Math.min(actor.get_y() - 12, adjustment.upper - adjustment.page_size));
                 return GLib.SOURCE_REMOVE;
             });
             return GLib.SOURCE_REMOVE;
