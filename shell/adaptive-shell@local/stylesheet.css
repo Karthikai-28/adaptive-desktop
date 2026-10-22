@@ -2682,6 +2682,13 @@
     icon-size: 12px;
 }
 
+/* below the list: the topics picked for PlotJuggler */
+.adaptive-ros-footer {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
 /* a topic picked for PlotJuggler */
 .adaptive-ros-picked {
     background-color: rgba(10, 132, 255, 0.22);

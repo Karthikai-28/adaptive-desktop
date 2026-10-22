@@ -111,9 +111,12 @@ does the panel's actions from the keyboard.
   going out (and who subscribes), a topic with its publishers and
   subscribers. A click on a neighbour moves the focus there; Back returns.
 - **Plot**: Plot on a topic opens **PlotJuggler** subscribed to that topic
-  alone. The **+** on a topic's row picks it instead; the Topics section then
-  shows **PlotJuggler · N topics** with **Open** (all the picked topics in one
-  PlotJuggler) and **Clear**. PlotJuggler runs like the other tools (Stop, its
+  alone. To plot several together, tap the **+** on their rows (it turns into
+  a tick; the Topics section says so in a line at its top). The picked topics
+  show below the list, where they stay in view however far it is scrolled:
+  **PlotJuggler · N topics** with **Open in PlotJuggler** (all of them in one
+  PlotJuggler) and **Clear**. The list is sized to the screen, so that bar is
+  never pushed off it. PlotJuggler runs like the other tools (Stop, its
   log, Run again). Without PlotJuggler installed, Plot is the panel's own:
   it lists the message's numeric fields, and choosing one draws it live in the
   panel (the last 120 values, with now, low, high and the message count);

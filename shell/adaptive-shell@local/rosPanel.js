@@ -328,6 +328,10 @@ var RosPanel = class RosPanel {
         });
         this._scroll.add_actor(this._list);
         root.add_child(this._scroll);
+        // Below the list, so it stays in view however far the list is scrolled:
+        // the topics picked for PlotJuggler, and Open.
+        this._footer = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'adaptive-ros-footer' });
+        root.add_child(this._footer);
 
         // Just left of Network (or of whatever is leftmost of ours).
         const rightBox = Main.panel._rightBox;
@@ -998,21 +1002,21 @@ var RosPanel = class RosPanel {
             }, picked ? 'adaptive-ros-expand adaptive-ros-picked' : 'adaptive-ros-expand');
     }
 
-    _addPlotJugglerBar() {
+    _plotJugglerBar() {
         const note = this._notes.plotjuggler;
         if (!this._hasPlotJuggler() || (!this._plotTopics.size && !note))
-            return;
+            return null;
         const picked = [...this._plotTopics].sort();
-        this._out.add_child(CC.makeRow({
+        return CC.makeRow({
             icon: 'utilities-system-monitor-symbolic',
             title: picked.length ? `PlotJuggler · ${plural(picked.length, 'topic')}` : 'PlotJuggler',
             subtitle: note ? note.text : names(picked),
             alert: !!(note && note.error),
             actions: picked.length ? [
-                { label: 'Open', onClick: () => this._openPlotJuggler(picked) },
+                { label: 'Open in PlotJuggler', quiet: true, onClick: () => this._openPlotJuggler(picked) },
                 { label: 'Clear', quiet: true, onClick: () => { this._plotTopics.clear(); this._render(); } },
             ] : null,
-        }));
+        });
     }
 
     _favoriteButton(kind, name) {
@@ -1237,7 +1241,7 @@ var RosPanel = class RosPanel {
         if (!service || !service.no_request || !service.servers.length)
             return null;
         const state = this._quickCalls.get(service.name);
-        return { label: state && state.busy ? 'Calling…' : 'Call', onClick: () => this._quickCall(service) };
+        return { label: state && state.busy ? 'Calling…' : 'Call', quiet: true, onClick: () => this._quickCall(service) };
     }
 
     _cancelGoal(composer) {
@@ -1348,6 +1352,11 @@ var RosPanel = class RosPanel {
         };
 
         this._summary.text = this._summaryText();
+        this._footer.destroy_all_children();
+        const bar = status && status.installed ? this._plotJugglerBar() : null;
+        if (bar)
+            this._footer.add_child(bar);
+        this._footer.visible = !!bar;
         this._list.remove_all_children();
         if (!status) {
             block('reading', [], () => this._out.add_child(
@@ -1375,7 +1384,7 @@ var RosPanel = class RosPanel {
         this._out = null;
 
         const [, natural] = this._list.get_preferred_height(-1);
-        this._scroll.set_height(Math.min(natural, LIST_MAX_HEIGHT));
+        this._scroll.set_height(Math.min(natural, this._listRoom()));
         // The rebuilt list is not laid out yet; put the scroll back once it is.
         if (this._scrollId)
             GLib.source_remove(this._scrollId);
@@ -1411,6 +1420,18 @@ var RosPanel = class RosPanel {
             });
             return GLib.SOURCE_REMOVE;
         });
+    }
+
+    // How tall the list may be: 680 px, or less on a short screen, so the footer
+    // (Open in PlotJuggler) below it stays on the screen.
+    _listRoom() {
+        const monitor = Main.layoutManager.findMonitorForActor(this._button) || Main.layoutManager.primaryMonitor;
+        if (!monitor || !this._scroll.is_mapped())
+            return LIST_MAX_HEIGHT;
+        const [, top] = this._scroll.get_transformed_position();
+        const [, footer] = this._footer.visible ? this._footer.get_preferred_height(-1) : [0, 0];
+        const room = monitor.y + monitor.height - top - footer - 24;      // 24: the menu's own bottom edge
+        return Math.max(200, Math.min(LIST_MAX_HEIGHT, Math.floor(room)));
     }
 
     _summaryText() {
@@ -2449,7 +2470,8 @@ var RosPanel = class RosPanel {
 
         block('topics', [filtered.topics, graph.topics.length], () => {
             this._section('topics', countLabel('Topics', filtered.topics.length, graph.topics.length), () => {
-                this._addPlotJugglerBar();
+                if (this._hasPlotJuggler() && filtered.topics.some(t => t.publishers.length))
+                    this._out.add_child(this._note('Tap + on topics to plot several together in PlotJuggler'));
                 const ordered = [...filtered.topics.filter(t => !t.system), ...filtered.topics.filter(t => t.system)];
                 this._paged('topics', ordered, topic => this._addTopic(topic));
             });

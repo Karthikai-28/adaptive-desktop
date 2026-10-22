@@ -249,16 +249,18 @@ globalThis.__rosPointer = globalThis.__rosPointer || Clutter.get_default_backend
 const dev = globalThis.__rosPointer, now = () => GLib.get_monotonic_time();
 const adj = ros._scroll.vscroll.adjustment;
 const textOf = a => (a.get_text ? a.get_text() : null) || (a instanceof St.Button ? a.label || a.accessible_name : null) || "";
-const find = (text, exact, root = ros._list) => { let hit = null; (function walk(a) { if (hit) return; const t = textOf(a);
+const find = (text, exact, root = null) => { let hit = null; const walk = a => { if (hit) return; const t = textOf(a);
     if (t && (exact ? t === text : t.startsWith(text)) && a.is_mapped()) { hit = a; return; }
-    a.get_children().forEach(walk); })(root); return hit; };
+    a.get_children().forEach(walk); }; (root ? [root] : [ros._list, ros._footer]).forEach(walk); return hit; };
 /* within: the title of the row to look in (its whole row button) */
 const rowOf = title => { let a = find(title, true); while (a && !(a instanceof St.Button && a.style_class && a.style_class.includes("adaptive-cc-row"))) a = a.get_parent(); return a; };
 const press = async (text, exact, within = "") => {
+    /* a render just made puts the scroll back on the next frames: let it, as a person waits to see the list */
+    for (let i = 0; i < 40 && ros._scrollId; i++) await sleep(50);
     let a = null; for (let i = 0; i < 40; i++) { const root = within ? rowOf(within) : ros._list;
         if (root && (a = find(text, exact, root))) break; await sleep(250); }
     if (!a) return { found: false };
-    for (let i = 0; i < 4; i++) {   /* onto the screen, inside the list */
+    for (let i = 0; i < 4 && ros._list.contains(a); i++) {   /* onto the screen, inside the list */
         const [, sy] = ros._scroll.get_transformed_position(); const [, sh] = ros._scroll.get_transformed_size();
         const top = Math.max(sy, 0) + 30, bottom = Math.min(sy + sh, global.stage.height) - 30;
         const [, ay] = a.get_transformed_position(); const mid = ay + Math.min(a.get_height(), 30) / 2;
@@ -374,16 +376,22 @@ seen="$(ros_text "const last = ros._plotJuggler[ros._plotJuggler.length - 1];
 ros_reopen
 ros_text "ros._expanded.delete('topic:/chatter'); ros._render(); return true;" >/dev/null
 seen="$(ros_press 'Add /chatter to the PlotJuggler set' true)"; [ "$seen" = true ]; check $? "ros: a topic is picked for PlotJuggler on its row, in place ($seen)"
+# The second one far down the list: the set and Open stay in view below the list.
+ros_text "const adj = ros._scroll.vscroll.adjustment; adj.value = adj.upper - adj.page_size; await sleep(300); return true;" >/dev/null
 seen="$(ros_press 'Add /lifecycle_chatter to the PlotJuggler set' true)"; [ "$seen" = true ]; check $? "ros: a second topic is picked, in place ($seen)"
-seen="$(ros_wait_for "'PlotJuggler · 2 topics', '/chatter and /lifecycle_chatter', 'Open', 'Clear'")"
-[ "$seen" = true ]; check $? "ros: the Topics section shows the picked set$([ "$seen" = true ] || echo " ($seen)")"
-probe "$SLEEP $ROS $PRESS return (async () => JSON.stringify(await press('Open', true, 'PlotJuggler · 2 topics')))();" >/dev/null
+seen="$(ros_text "for (let i = 0; i < 20; i++) { const t = labels(ros._footer).join('|');
+        const [, y] = ros._footer.get_transformed_position();
+        if (ros._footer.visible && ros._footer.is_mapped() && y > 0 && y + ros._footer.height <= global.stage.height &&
+            ['PlotJuggler · 2 topics', '/chatter and /lifecycle_chatter', 'Open in PlotJuggler', 'Clear'].every(w => t.includes(w))) return true;
+        await sleep(250); } return labels(ros._footer).join('|') + ' visible ' + ros._footer.visible;")"
+[ "$seen" = true ]; check $? "ros: the picked set and Open stay in view below the list$([ "$seen" = true ] || echo " ($seen)")"
+probe "$SLEEP $ROS $PRESS return (async () => JSON.stringify(await press('Open in PlotJuggler', true, 'PlotJuggler · 2 topics')))();" >/dev/null
 seen="$(ros_text "await sleep(300); const last = ros._plotJuggler[ros._plotJuggler.length - 1];
     return JSON.stringify(last) === JSON.stringify(['/chatter', '/lifecycle_chatter']) || JSON.stringify(ros._plotJuggler);")"
 [ "$seen" = true ]; check $? "ros: Open sends exactly the picked topics to PlotJuggler$([ "$seen" = true ] || echo " ($seen)")"
 ros_reopen
 probe "$SLEEP $ROS $PRESS return (async () => JSON.stringify(await press('Clear', true, 'PlotJuggler · 2 topics')))();" >/dev/null
-seen="$(ros_text "await sleep(300); return !ros._plotTopics.size && !labels(ros._list).join('|').includes('PlotJuggler · ') || JSON.stringify([...ros._plotTopics]);")"
+seen="$(ros_text "await sleep(300); return !ros._plotTopics.size && !ros._footer.visible || JSON.stringify([...ros._plotTopics]);")"
 [ "$seen" = true ]; check $? "ros: Clear empties the set and the bar goes$([ "$seen" = true ] || echo " ($seen)")"
 ros_text "ros._helper = ros._helperReal; delete ros._helperReal; ros._expanded = ros._savedExpanded; delete ros._savedExpanded;
     ros._loadStatus(); ros._render(); return true;" >/dev/null
