@@ -110,11 +110,15 @@ does the panel's actions from the keyboard.
   graph on it: a node with the topics coming in (and who publishes them) and
   going out (and who subscribes), a topic with its publishers and
   subscribers. A click on a neighbour moves the focus there; Back returns.
-- **Plot**: Plot on a topic lists the message's numeric fields; choosing one
-  draws it live in the panel (the last 120 values, scaled to their own low and
-  high, with now, low, high and the message count). **Open in rqt_plot** opens
-  the larger plot in its own window. One plot at a time; it stops after ten
-  minutes, when the panel closes, or on Stop.
+- **Plot**: Plot on a topic opens **PlotJuggler** subscribed to that topic
+  alone. The **+** on a topic's row picks it instead; the Topics section then
+  shows **PlotJuggler · N topics** with **Open** (all the picked topics in one
+  PlotJuggler) and **Clear**. PlotJuggler runs like the other tools (Stop, its
+  log, Run again). Without PlotJuggler installed, Plot is the panel's own:
+  it lists the message's numeric fields, and choosing one draws it live in the
+  panel (the last 120 values, with now, low, high and the message count);
+  **Open in rqt_plot** opens a larger plot. One such plot at a time; it stops
+  after ten minutes, when the panel closes, or on Stop.
 - **Nodes**: every visible node with what it has. Expanding a node shows its
   topics (type, the nodes on the other end, QoS, Hz, Preview), services and
   clients, actions, its enclave, and:
@@ -140,7 +144,11 @@ does the panel's actions from the keyboard.
   **Send a goal…** open a form generated from the request type (nested scalar fields, boolean
   dropdowns, and JSON array inputs),
   and send them after a confirming click, showing the response, the goal's
-  result or how many subscribers got the message. A goal shows its feedback
+  result or how many subscribers got the message. A service whose request has
+  no fields (`std_srvs/Trigger` or `Empty`: take off, land, reset) has **Call**
+  on its row and in Favourites: one tap calls it, and the row then shows the
+  reply's message (`✓ Taking off to 1.20 m`, or `✗` and the reason when it says
+  `success: false`). Its form's Call needs no confirming click either. A goal shows its feedback
   as it arrives and can be cancelled (**Cancel goal**); one without a result
   in 30 s is cancelled.
 - **TF tree**: read on demand (1.5 s of `/tf` and `/tf_static`): each frame
@@ -291,6 +299,17 @@ static transform and a number on `/level` for the group, TF lookup and plot.
 - `ros2 service call` waits for ever for a service that is not there, so the
   bag's pause service is looked for in `ros2 service list` first.
 - rqt_plot is in the distro's `lib/rqt_plot/`, not on PATH.
+- PlotJuggler's ROS 2 subscriber always asks which topics to take and has no
+  option to skip that. The helper sets the two settings PlotJuggler itself
+  saves after a choice (`MainWindow.previousStreamingPlugin` and
+  `[DataStreamROS2] default_topics` in `~/.config/PlotJuggler/
+  io.plotjuggler.PlotJuggler.ini`, every other line kept), starts it with
+  `--start_streamer` (a switch: it starts the streamer last chosen), and
+  presses Return on that dialog. It does so only when the dialog belongs to the
+  PlotJuggler it started and has the keyboard (X11, xdotool); otherwise the
+  dialog stays, with the topics already ticked. A layout naming the streamer
+  asks "Start the previously used streaming plugin?", and a layout with curves
+  warns that they cannot be found before data arrives, so no layout is used.
 - `ros2 topic pub`'s own node is hidden (`_ros2cli_…`), so a topic only it
   publishes is not listed; the plot still subscribes to it by name.
 - A scrolled St list lays its children out at their *minimum* heights once it

@@ -329,6 +329,8 @@ def main():
         ("/usr/bin/python3", str(HELPER), "run", "demo", "{}", "--", "/opt/ros/humble/lib/demo_nodes_cpp/talker"): None,
         ("/usr/bin/python3", "/opt/ros/humble/bin/ros2", "topic", "echo", "/x"): None,
         ("vim", "rviz2.txt"): None,
+        ("/opt/ros/humble/lib/plotjuggler/plotjuggler", "-n", "--start_streamer"): "plotjuggler",
+        ("/usr/bin/python3", "/opt/ros/humble/bin/ros2", "run", "plotjuggler", "plotjuggler"): "plotjuggler",
     }
     wrong = {argv: ros_info.tool_of(list(argv)) for argv, tool in samples.items()
              if ros_info.tool_of(list(argv)) != tool}
@@ -336,6 +338,14 @@ def main():
     check(ros_info.plot_path("pose/position/x") == ["pose", "position", "x"] and ros_info.plot_path("ranges[2]") == ["ranges", 2]
           and ros_info.plot_path("a b") is None, "plot: field paths with indexes")
     check(ros_info.quaternion_rpy(0, 0, 0.7071068, 0.7071068) == [0.0, 0.0, 90.0], "tf: a quarter turn is yaw 90°")
+    kept = "[General]\na=1\n\n[DataStreamROS2]\nmax_array_size=100\ndefault_topics=/old\n\n[Other]\nx=2\n"
+    edited = ros_info.ini_set(ros_info.ini_set(kept, "General", "MainWindow.previousStreamingPlugin", "ROS2 Topic Subscriber"),
+                              "DataStreamROS2", "default_topics", "/odom, /imu")
+    check(edited == "[General]\na=1\nMainWindow.previousStreamingPlugin=ROS2 Topic Subscriber\n\n[DataStreamROS2]\n"
+          "max_array_size=100\ndefault_topics=/odom, /imu\n\n[Other]\nx=2\n",
+          "plotjuggler: its settings get the streamer and the topics, every other line kept", edited)
+    check(ros_info.plotjuggler(["/odom", "not a topic"]).get("ok") is False and ros_info.plotjuggler([]).get("ok") is False,
+          "plotjuggler: only topic names, and at least one")
     odom = {"header": {"frame_id": "odom"}, "pose": {"covariance": [0.0] * 36}, "points": [{"x": 1}], "none": [],
             "text": 'a "b"\nc'}
     text = ros_info.compact_json(odom)

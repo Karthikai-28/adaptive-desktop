@@ -18,6 +18,7 @@
     ros_info.py log-tail <tool> [text] [all|warning|error]   a run's log, filtered
     ros_info.py run-control <tool> pause|resume   build | launch | node
     ros_info.py plot </topic/field>    rqt_plot on one numeric field
+    ros_info.py plotjuggler <topic>...  PlotJuggler subscribed to exactly these topics
     ros_info.py bag-start --all | <topic>...   bag-play <dir> [rate] [loop] [clock]
     ros_info.py bag-control pause|resume   the bag started here (playback; recording from Iron)
     ros_info.py save-setup <name> | use-setup <name> | forget-setup <name>
@@ -112,6 +113,9 @@ SETUPS = CONFIG.parent / "ros-setups.json"
 ROBOT_PROFILES = CONFIG.parent / "ros-robot-profiles.json"
 PARAMETER_PROFILES = CONFIG.parent / "ros-parameter-profiles"
 BAGS = Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local" / "share") / "adaptive-desktop" / "rosbags"
+# PlotJuggler's own settings (QSettings): its streamer and the topics it preselects
+PLOTJUGGLER_SETTINGS = (Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "PlotJuggler" /
+                        "io.plotjuggler.PlotJuggler.ini")
 ROS_ROOT = Path(os.environ.get("ADAPTIVE_ROS_ROOT", "/opt/ros"))
 SHELL_FILES = {"zsh": (".zshenv", ".zprofile", ".zshrc"),
                "bash": (".profile", ".bash_profile", ".bashrc")}
@@ -154,7 +158,7 @@ HISTORY_KEEP = 20
 PLOT_EVERY_S = 0.25
 PLOT_MAX_S = 600.0
 PLOT_KEEP = 200
-TOOLS = ("rviz2", "gazebo", "rqt", "rqt_graph", "demo", "launch", "bag", "node", "build", "plot")
+TOOLS = ("rviz2", "gazebo", "rqt", "rqt_graph", "demo", "launch", "bag", "node", "build", "plot", "plotjuggler")
 LAUNCH_SUFFIXES = (".launch.py", ".launch.xml", ".launch.yaml")
 LAUNCH_ARG = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*:=.*$", re.S)
 SAVED_NAME = re.compile(r"^[\w][\w .:+-]{0,40}$")
@@ -582,6 +586,8 @@ def tool_of(argv):
         return "rviz2"
     if exe in ("rqt", "rqt_graph"):
         return exe
+    if exe == "plotjuggler" or (exe == "ros2" and rest[:2] == ["run", "plotjuggler"]):
+        return "plotjuggler"
     if exe in ("gzserver", "gzclient", "gazebo"):
         return "gazebo"
     if exe in ("gz", "ign") and rest[:1] in (["sim"], ["gazebo"]):
@@ -730,6 +736,7 @@ def status(refresh=False):
         "bag": (base / "share" / "ros2bag").is_dir(),
         "build": shutil.which("colcon") is not None,
         "plot": (base / "lib" / "rqt_plot" / "rqt_plot").is_file() or shutil.which("rqt_plot") is not None,
+        "plotjuggler": (base / "lib" / "plotjuggler" / "plotjuggler").is_file(),
     }
     spaces = workspaces()
     if setup["workspace"] and all(w["path"] != setup["workspace"] for w in spaces):
@@ -1175,6 +1182,104 @@ def plot_topic(expression):
         return {"ok": False, "error": f"rqt_plot is not installed: sudo apt install ros-{setup['distro']}-rqt-plot"}
     return start("plot", [[str(command), expression]], ros_env(setup),
                  {"name": f"Plot {expression}", "expression": expression})
+
+
+TOPIC_NAME = re.compile(r"(/[A-Za-z0-9_~{}]+)+")
+
+
+def ini_set(text, section, key, value):
+    """One key of a Qt INI file set; every other line is kept as it was."""
+    lines = text.splitlines()
+    head = next((i for i, line in enumerate(lines) if line.strip() == f"[{section}]"), None)
+    if head is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        return "\n".join(lines + [f"[{section}]", f"{key}={value}"]) + "\n"
+    end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+    for i in range(head + 1, end):
+        if lines[i].split("=", 1)[0].strip() == key:
+            lines[i] = f"{key}={value}"
+            break
+    else:
+        at = end
+        while at > head + 1 and not lines[at - 1].strip():
+            at -= 1
+        lines.insert(at, f"{key}={value}")
+    return "\n".join(lines) + "\n"
+
+
+def plotjuggler(topics):
+    """PlotJuggler streaming exactly these topics. Its ROS 2 subscriber always asks
+    which topics to take; it is set as the streamer, with these topics preselected,
+    the way PlotJuggler itself remembers the last choice, and the question is
+    answered in the background (plotjuggler_confirm)."""
+    topics = list(dict.fromkeys(topics))
+    bad = [t for t in topics if not TOPIC_NAME.fullmatch(t)]
+    if not topics or bad:
+        return {"ok": False, "error": f"Not a topic name: {bad[0]}" if bad else "Choose a topic to plot"}
+    setup = settings()
+    command = ROS_ROOT / setup["distro"] / "lib" / "plotjuggler" / "plotjuggler"
+    if not command.is_file():
+        return {"ok": False, "error": f"PlotJuggler is not installed: sudo apt install ros-{setup['distro']}-plotjuggler-ros"}
+    try:
+        text = PLOTJUGGLER_SETTINGS.read_text()
+    except FileNotFoundError:
+        text = ""
+    except OSError as e:
+        return {"ok": False, "error": f"Cannot read PlotJuggler's settings: {e}"}
+    text = ini_set(text, "General", "MainWindow.previousStreamingPlugin", "ROS2 Topic Subscriber")
+    text = ini_set(text, "DataStreamROS2", "default_topics", ", ".join(topics))
+    PLOTJUGGLER_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PLOTJUGGLER_SETTINGS.with_name(f"{PLOTJUGGLER_SETTINGS.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    tmp.replace(PLOTJUGGLER_SETTINGS)
+    started = start("plotjuggler", [[str(command), "-n", "--start_streamer"]], ros_env(setup),
+                    {"name": f"PlotJuggler · {', '.join(topics)}", "topics": topics})
+    if started.get("ok"):
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "plotjuggler-confirm", str(started["pids"][0])],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    return {**started, "topics": topics}
+
+
+def plotjuggler_confirm(pgid, wait_s=45.0):
+    """Press OK on the topic dialog of the PlotJuggler started in process group pgid.
+    Only when that very dialog has the keyboard: a Return sent anywhere else could
+    land in a terminal. Otherwise it is left open, the topics already ticked."""
+    if not os.environ.get("DISPLAY") or not shutil.which("xdotool"):
+        return {"ok": False, "error": "No X11 display or xdotool: press OK in PlotJuggler"}
+
+    def xdo(*args):
+        try:
+            p = subprocess.run(["xdotool", *args], capture_output=True, text=True, timeout=5)
+            return p.stdout.split() if p.returncode == 0 else []
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except OSError:
+            return {"ok": False, "error": "PlotJuggler quit"}
+        for wid in xdo("search", "--name", "^Select ROS messages$"):
+            pid = xdo("getwindowpid", wid)
+            try:
+                if not pid or os.getpgid(int(pid[0])) != pgid:
+                    continue
+            except (OSError, ValueError):
+                continue
+            time.sleep(1.0)                       # it fills its topic list as they are discovered
+            xdo("windowactivate", "--sync", wid)
+            time.sleep(0.3)
+            if wid not in xdo("getwindowfocus") + xdo("getactivewindow"):
+                xdo("windowfocus", "--sync", wid)       # no window manager to ask (a bare X server)
+                time.sleep(0.3)
+            if wid not in xdo("getwindowfocus") + xdo("getactivewindow"):
+                return {"ok": False, "error": "The topic dialog did not get the keyboard; left for the user"}
+            xdo("key", "--clearmodifiers", "Return")
+            return {"ok": True}
+        time.sleep(0.3)
+    return {"ok": False, "error": "No topic dialog appeared"}
 
 
 def supervise(tool, meta_text, argv):
@@ -1837,6 +1942,21 @@ def quaternion_rpy(x, y, z, w):
     return [round(math.degrees(a), 3) for a in (roll, pitch, yaw)]
 
 
+REQUEST_EMPTY = {}
+
+
+def request_is_empty(type_name):
+    """True when a service's request has no fields (std_srvs/Trigger, Empty): the panel
+    calls those with one tap. None when the type is not in this setup."""
+    if type_name not in REQUEST_EMPTY:
+        from rosidl_runtime_py.utilities import get_service
+        try:
+            REQUEST_EMPTY[type_name] = not get_service(type_name).Request.get_fields_and_field_types()
+        except (AttributeError, ModuleNotFoundError, ValueError):
+            REQUEST_EMPTY[type_name] = None
+    return REQUEST_EMPTY[type_name]
+
+
 def compact_json(value, depth=0):
     """JSON with each field on its own line but a list of plain values on one,
     so an Odometry's two 36-number covariances take two lines, not 72."""
@@ -2090,7 +2210,8 @@ class Watcher:
                 continue
             services.append({"name": name, "types": types,
                              "servers": ends["services"].get(name, []),
-                             "clients": ends["clients"].get(name, [])})
+                             "clients": ends["clients"].get(name, []),
+                             "no_request": request_is_empty(types[0]) if types else None})
         actions = [{"name": name, "types": types,
                     "servers": ends["action_servers"].get(name, []),
                     "clients": ends["action_clients"].get(name, [])}
@@ -2751,7 +2872,13 @@ class Watcher:
 
         def answer(response):
             text, truncated = message_text(response)
-            return {"ok": True, "text": text, "truncated": truncated}
+            out = {"ok": True, "text": text, "truncated": truncated}
+            # std_srvs-style replies say whether the server did it, and why not
+            if isinstance(getattr(response, "success", None), bool):
+                out["success"] = response.success
+            if isinstance(getattr(response, "message", None), str):
+                out["message"] = response.message
+            return out
         self.call(rid, self.node.create_client(service, name), request, answer, "call", CALL_TIMEOUT_S)
 
     def send_goal(self, rid, name, type_name, text):
@@ -3007,6 +3134,10 @@ def run_command(command, args, program="ros_info.py"):
             return control_run(args[0], args[1])
         if command == "plot" and len(args) == 1:
             return plot_topic(args[0])
+        if command == "plotjuggler":
+            return plotjuggler(args)
+        if command == "plotjuggler-confirm" and len(args) == 1:
+            return plotjuggler_confirm(int(args[0]))
         if command == "stop" and args:
             return stop(args[0])
         if command == "runs":

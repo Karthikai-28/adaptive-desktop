@@ -2682,6 +2682,12 @@
     icon-size: 12px;
 }
 
+/* a topic picked for PlotJuggler */
+.adaptive-ros-picked {
+    background-color: rgba(10, 132, 255, 0.22);
+    color: #0A84FF;
+}
+
 .adaptive-ros-detail {
     margin: 0 4px 6px 44px;
     padding: 4px 0 6px 10px;

@@ -59,10 +59,11 @@ const LIFECYCLE_NEXT = {
 };
 const CONTROLLER_NEXT = { unconfigured: 'configure', inactive: 'activate', active: 'deactivate' };
 // Tools with a window: once one opens, the menu gets out of its way.
-const WINDOWED = new Set(['rviz2', 'gazebo', 'rqt', 'rqt_graph']);
+const WINDOWED = new Set(['rviz2', 'gazebo', 'rqt', 'rqt_graph', 'plotjuggler']);
 const TOOL_NAMES = {
     rviz2: 'RViz2', gazebo: 'Gazebo', rqt: 'rqt', rqt_graph: 'rqt_graph',
     demo: 'The demo', launch: 'Launch', bag: 'Rosbag', node: 'Node', build: 'Build', plot: 'rqt_plot',
+    plotjuggler: 'PlotJuggler',
 };
 const PAUSABLE = new Set(['build', 'launch', 'node']);
 // Sections a search unfolds, so what matches is seen, not only counted.
@@ -203,6 +204,8 @@ var RosPanel = class RosPanel {
         this._health = null;
         // 'call:/x', 'goal:/x', 'publish:/x' -> { text, busy, reply }.
         this._composers = new Map();
+        this._quickCalls = new Map();     // service name -> { busy, reply }: one-tap calls
+        this._plotTopics = new Set();     // topics picked to open together in PlotJuggler
         // Section -> how many rows it shows.
         this._pages = new Map();
         // The list is rebuilt in blocks; one whose inputs did not change is kept.
@@ -962,6 +965,56 @@ var RosPanel = class RosPanel {
         });
     }
 
+    _hasPlotJuggler() {
+        const tool = this._status && this._status.tools.plotjuggler;
+        return !!(tool && tool.installed);
+    }
+
+    // PlotJuggler subscribed to exactly these topics: one from a topic's Plot,
+    // or the ones picked on their rows.
+    _openPlotJuggler(topics) {
+        this._notes.plotjuggler = { text: `Opening PlotJuggler with ${names(topics)}…` };
+        this._render();
+        this._helper(['plotjuggler', ...topics], reply => {
+            this._notes.plotjuggler = reply.ok ? null : { text: reply.error, error: true };
+            if (reply.ok)
+                this._button.menu.close();
+            this._loadStatus();
+            this._pollRuns();
+            this._render();
+        });
+    }
+
+    // Picks a topic for PlotJuggler; the Topics section opens the picked ones together.
+    _plotPickButton(name) {
+        const picked = this._plotTopics.has(name);
+        return CC.makeRoundButton(picked ? 'object-select-symbolic' : 'list-add-symbolic',
+            picked ? `Take ${name} out of the PlotJuggler set` : `Add ${name} to the PlotJuggler set`, () => {
+                if (picked)
+                    this._plotTopics.delete(name);
+                else
+                    this._plotTopics.add(name);
+                this._render();
+            }, picked ? 'adaptive-ros-expand adaptive-ros-picked' : 'adaptive-ros-expand');
+    }
+
+    _addPlotJugglerBar() {
+        const note = this._notes.plotjuggler;
+        if (!this._hasPlotJuggler() || (!this._plotTopics.size && !note))
+            return;
+        const picked = [...this._plotTopics].sort();
+        this._out.add_child(CC.makeRow({
+            icon: 'utilities-system-monitor-symbolic',
+            title: picked.length ? `PlotJuggler · ${plural(picked.length, 'topic')}` : 'PlotJuggler',
+            subtitle: note ? note.text : names(picked),
+            alert: !!(note && note.error),
+            actions: picked.length ? [
+                { label: 'Open', onClick: () => this._openPlotJuggler(picked) },
+                { label: 'Clear', quiet: true, onClick: () => { this._plotTopics.clear(); this._render(); } },
+            ] : null,
+        }));
+    }
+
     _favoriteButton(kind, name) {
         const active = this._isFavorite(kind, name);
         return CC.makeRoundButton(active ? 'starred-symbolic' : 'non-starred-symbolic',
@@ -1130,7 +1183,12 @@ var RosPanel = class RosPanel {
         const composer = this._composers.get(key);
         if (!composer || composer.busy || !composer.fields) return;
         if (composer.error) { this._render(); return; }
-        this._confirmed(`send:${key}`, () => {
+        // A call with nothing to fill in (std_srvs/Trigger: take off, land) goes on
+        // the first tap; anything carrying values is confirmed first.
+        const confirm = cmd === 'call' && !composer.fields.length
+            ? (_key, action) => { this._disarm(); action(); this._render(); }
+            : (k, action) => this._confirmed(k, action);
+        confirm(`send:${key}`, () => {
             composer.busy = true;
             composer.reply = null;
             const timeout = cmd === 'goal' ? GOAL_REPLY_TIMEOUT_MS : CALL_REPLY_TIMEOUT_MS;
@@ -1144,6 +1202,42 @@ var RosPanel = class RosPanel {
                 this._queueRender();
             });
         });
+    }
+
+    // One tap calls a service whose request has no fields (std_srvs/Trigger or
+    // Empty: take off, land, reset) straight from its row; the row says how it went.
+    _quickCall(service) {
+        const state = this._quickCalls.get(service.name);
+        if (state && state.busy)
+            return;
+        this._quickCalls.set(service.name, { busy: true, reply: state ? state.reply : null });
+        this._render();
+        this._request('call', { name: service.name, type: service.types[0], value: '' }, reply => {
+            this._quickCalls.set(service.name, { busy: false, reply });
+            this._queueRender();
+        }, CALL_REPLY_TIMEOUT_MS);
+    }
+
+    // [subtitle, failed] for a service row: the last one-tap call, or null.
+    _quickCallText(name) {
+        const state = this._quickCalls.get(name);
+        if (!state)
+            return null;
+        if (state.busy)
+            return ['Calling…', false];
+        const reply = state.reply || {};
+        if (reply.error)
+            return [`✗ ${reply.error}`, true];
+        if (reply.success === false)
+            return [`✗ ${reply.message || 'The service refused'}`, true];
+        return [`✓ ${reply.message || 'Called'}`, false];
+    }
+
+    _quickCallAction(service) {
+        if (!service || !service.no_request || !service.servers.length)
+            return null;
+        const state = this._quickCalls.get(service.name);
+        return { label: state && state.busy ? 'Calling…' : 'Call', onClick: () => this._quickCall(service) };
     }
 
     _cancelGoal(composer) {
@@ -1162,6 +1256,8 @@ var RosPanel = class RosPanel {
             this._launch('launch', meta.file, meta.args || []);
         else if (entry.tool === 'bag' && meta.play)
             this._playBag(meta.play);
+        else if (entry.tool === 'plotjuggler' && meta.topics)
+            this._openPlotJuggler(meta.topics);
         else
             this._launch(entry.tool, meta.file || null);
         this._dismissed.add(`${entry.pgid}:${entry.ended}`);
@@ -1208,7 +1304,8 @@ var RosPanel = class RosPanel {
         const map = m => [...m.entries()];
         return JSON.stringify([
             [...this._expanded].sort(), map(this._details), map(this._interfaces), map(this._rates),
-            map(this._samples), map(this._composers), map(this._pages), this._notes, this._searchText,
+            map(this._samples), map(this._composers), map(this._quickCalls), [...this._plotTopics], map(this._pages),
+            this._notes, this._searchText,
             this._parameterDraft, this._packagePath, this._armed && this._armed.key,
             this._status && this._status.favorites,
             this._paramProfileDraft, this._paramDiff, this._profileDraft, this._logView, this._bagDraft,
@@ -1988,6 +2085,8 @@ var RosPanel = class RosPanel {
                 this._buildWorkspace(meta.packages || [], !!meta.up_to);
             else if (run.tool === 'plot')
                 this._openRqtPlot(meta.expression);
+            else if (run.tool === 'plotjuggler')
+                this._openPlotJuggler(meta.topics || []);
             else
                 this._restart({ tool: run.tool, meta, pgid: run.pgid, ended: 0 });
         });
@@ -2350,6 +2449,7 @@ var RosPanel = class RosPanel {
 
         block('topics', [filtered.topics, graph.topics.length], () => {
             this._section('topics', countLabel('Topics', filtered.topics.length, graph.topics.length), () => {
+                this._addPlotJugglerBar();
                 const ordered = [...filtered.topics.filter(t => !t.system), ...filtered.topics.filter(t => t.system)];
                 this._paged('topics', ordered, topic => this._addTopic(topic));
             });
@@ -2505,13 +2605,18 @@ var RosPanel = class RosPanel {
                 } else {
                     subtitle = found.servers.length ? `${title(item.kind)} · served by ${names(found.servers)}`
                         : `${title(item.kind)} · no server`;
+                    const called = item.kind === 'service' ? this._quickCallText(item.name) : null;
+                    if (called)
+                        subtitle = called[0];
                 }
+                const quick = item.kind === 'service' && found ? this._quickCallAction(found) : null;
                 const row = CC.makeRow({
                     icon: 'starred-symbolic',
                     title: item.name,
                     subtitle,
-                    alert: !found,
+                    alert: !found || !!(item.kind === 'service' && (this._quickCallText(item.name) || [])[1]),
                     actions: [
+                        quick,
                         item.kind === 'topic' && found && found.publishers.length
                             ? { label: 'Hz', quiet: true, onClick: () => this._measure(item.name) } : null,
                         found ? { label: 'Find', quiet: true, onClick: () => this._find(item.kind, item.name) } : null,
@@ -3125,8 +3230,10 @@ var RosPanel = class RosPanel {
             top.add_child(this._rateButton(name));
         if (sample)
             top.add_child(this._sampleButton(name));
-        if (sample && types.length)
-            top.add_child(this._smallButton('Plot', () => this._preparePlot(name, types[0]), 'adaptive-ros-rate'));
+        if (sample && types.length) {
+            top.add_child(this._smallButton('Plot', () => this._hasPlotJuggler()
+                ? this._openPlotJuggler([name]) : this._preparePlot(name, types[0]), 'adaptive-ros-rate'));
+        }
         box.add_child(top);
 
         const bottom = new St.BoxLayout({ style_class: 'adaptive-ros-entry-meta', x_expand: true });
@@ -3457,6 +3564,8 @@ var RosPanel = class RosPanel {
                 `${plural(topic.subscribers.length, 'subscriber')}`,
             onActivate: () => this._toggle(key, fetch),
         });
+        if (topic.publishers.length && this._hasPlotJuggler())
+            row.get_child().add_child(this._plotPickButton(topic.name));
         row.get_child().add_child(this._favoriteButton('topic', topic.name));
         this._out.add_child(this._expandable(key, row, fetch));
         if (!this._expanded.has(key))
@@ -3509,11 +3618,14 @@ var RosPanel = class RosPanel {
         parts.push(item.servers.length ? `${servedBy} ${names(item.servers)}` : 'no server');
         if (item.clients.length)
             parts.push(plural(item.clients.length, 'client'));
+        const called = kind === 'service' ? this._quickCallText(item.name) : null;
+        const quick = kind === 'service' ? this._quickCallAction(item) : null;
         const row = CC.makeRow({
             icon,
             title: item.name,
-            subtitle: parts.join(' · '),
-            alert: !item.servers.length,
+            subtitle: called ? called[0] : parts.join(' · '),
+            alert: !item.servers.length || !!(called && called[1]),
+            actions: quick ? [quick] : null,
             onActivate: () => this._toggle(key),
         });
         row.get_child().add_child(this._favoriteButton(kind, item.name));

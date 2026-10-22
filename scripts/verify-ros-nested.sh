@@ -206,6 +206,7 @@ seen="$(ros_wait_for "'Succeeded', 'sequence'")"
 cat > "$SANDBOX/trigger_fixture.py" <<'PY'
 import rclpy
 from rclpy.node import Node
+from example_interfaces.srv import AddTwoInts
 from std_msgs.msg import Float64
 from std_srvs.srv import Trigger
 class Fixture(Node):
@@ -213,8 +214,17 @@ class Fixture(Node):
         super().__init__('trigger_fixture')
         self.calls = 0
         self.create_service(Trigger, '/trigger_test', self.on_call)
+        self.create_service(Trigger, '/trigger_refuse', self.on_refuse)
+        self.create_service(AddTwoInts, '/add_test', self.on_add)
         self.altitude = self.create_publisher(Float64, '/altitude', 10)
         self.create_timer(0.1, lambda: self.altitude.publish(Float64(data=1.2 + 0.0001 * (self.calls % 2))))
+    def on_refuse(self, request, response):
+        response.success, response.message = False, 'No /odom yet'
+        return response
+    def on_add(self, request, response):
+        print('ADDED', flush=True)
+        response.sum = request.a + request.b
+        return response
     def on_call(self, request, response):
         self.calls += 1
         response.success, response.message = True, f'Taking off ({self.calls})'
@@ -238,12 +248,15 @@ globalThis.__rosPointer = globalThis.__rosPointer || Clutter.get_default_backend
     .create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
 const dev = globalThis.__rosPointer, now = () => GLib.get_monotonic_time();
 const adj = ros._scroll.vscroll.adjustment;
-const textOf = a => (a.get_text ? a.get_text() : null) || (a instanceof St.Button ? a.label : null) || "";
-const find = (text, exact) => { let hit = null; (function walk(a) { if (hit) return; const t = textOf(a);
+const textOf = a => (a.get_text ? a.get_text() : null) || (a instanceof St.Button ? a.label || a.accessible_name : null) || "";
+const find = (text, exact, root = ros._list) => { let hit = null; (function walk(a) { if (hit) return; const t = textOf(a);
     if (t && (exact ? t === text : t.startsWith(text)) && a.is_mapped()) { hit = a; return; }
-    a.get_children().forEach(walk); })(ros._list); return hit; };
-const press = async (text, exact) => {
-    let a = null; for (let i = 0; i < 40 && !(a = find(text, exact)); i++) await sleep(250);
+    a.get_children().forEach(walk); })(root); return hit; };
+/* within: the title of the row to look in (its whole row button) */
+const rowOf = title => { let a = find(title, true); while (a && !(a instanceof St.Button && a.style_class && a.style_class.includes("adaptive-cc-row"))) a = a.get_parent(); return a; };
+const press = async (text, exact, within = "") => {
+    let a = null; for (let i = 0; i < 40; i++) { const root = within ? rowOf(within) : ros._list;
+        if (root && (a = find(text, exact, root))) break; await sleep(250); }
     if (!a) return { found: false };
     for (let i = 0; i < 4; i++) {   /* onto the screen, inside the list */
         const [, sy] = ros._scroll.get_transformed_position(); const [, sh] = ros._scroll.get_transformed_size();
@@ -258,9 +271,9 @@ const press = async (text, exact) => {
     dev.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED); await sleep(1500);
     return { found: true, before, after: Math.round(adj.value), open: ros._button.menu.isOpen };
 };'
-ros_press() {  # ros_press <label> [exact]: true when found, clicked and the list stayed where it was
+ros_press() {  # ros_press <label> [exact] [row title]: true when found, clicked and the list stayed where it was
     local r
-    r="$(probe "$SLEEP $ROS $PRESS return (async () => { const r = await press('$1', ${2:-false});
+    r="$(probe "$SLEEP $ROS $PRESS return (async () => { const r = await press('$1', ${2:-false}, '${3:-}');
         return r.found && r.open && Math.abs(r.after - r.before) <= 2 ? true : JSON.stringify(r); })();")"
     echo "$r"
 }
@@ -277,20 +290,51 @@ seen="$(ros_text "for (let i = 0; i < 60; i++) { if (ros._graph.services.some(s 
     ros._graph.topics.some(t => t.name === '/altitude')) return true; await sleep(250); } return false;")"
 [ "$seen" = true ]; check $? "ros: a Trigger service is listed with its server"
 ros_text "ros._expanded.add('section:services'); ros._render(); return true;" >/dev/null
+# A request without fields (std_srvs/Trigger: take off, land) is called with one
+# tap on its row; the row says how it went and does not unfold.
+seen="$(ros_wait_for "'/trigger_test', 'Call'")"
+[ "$seen" = true ]; check $? "ros: a service without request fields has Call on its row$([ "$seen" = true ] || echo " ($seen)")"
+seen="$(ros_press 'Call' true '/trigger_test')"; [ "$seen" = true ]; check $? "ros: one tap on Call, in place ($seen)"
+seen="$(ros_wait_for "'✓ Taking off (1)'")"
+[ "$seen" = true ]; check $? "ros: the row shows the reply's message$([ "$seen" = true ] || echo " ($seen)")"
+sleep 1; grep -q "CALLED 1" "$SANDBOX/trigger.log" && ! grep -q "CALLED 2" "$SANDBOX/trigger.log"
+check $? "ros: one tap made exactly one call"
+[ "$(ros_text "return !ros._expanded.has('service:/trigger_test');")" = true ]
+check $? "ros: tapping Call does not unfold the row"
+seen="$(ros_text "for (let i = 0; i < 40; i++) { const b = ros._graph.services.find(x => x.name === '/trigger_refuse');
+        if (b) { ros._quickCall(b); break; } await sleep(250); }
+    for (let i = 0; i < 40; i++) { const t = labels(ros._list).join('|'); if (t.includes('✗ No /odom yet')) return true; await sleep(250); }
+    return labels(ros._list).filter(t => t.includes('trigger_refuse') || t.includes('✓') || t.includes('✗')).join('|');")"
+[ "$seen" = true ]; check $? "ros: a refusal (success: false) shows its message as a problem$([ "$seen" = true ] || echo " ($seen)")"
+# Unfolded, the request form's Call also goes on the first tap when there is nothing to fill in.
 seen="$(ros_press '/trigger_test' true)"; [ "$seen" = true ]; check $? "ros: clicking the service opens it, in place ($seen)"
 seen="$(ros_press 'Call it')"; [ "$seen" = true ]; check $? "ros: Call it… opens the request, in place ($seen)"
 seen="$(ros_wait_for "'This request has no fields'")"
 [ "$seen" = true ]; check $? "ros: a request without fields says so$([ "$seen" = true ] || echo " ($seen)")"
-seen="$(ros_press 'Call' true)"; [ "$seen" = true ]; check $? "ros: the first click on Call arms it, in place ($seen)"
-seen="$(ros_wait_for "'Confirm: call /trigger_test'")"
-[ "$seen" = true ]; check $? "ros: the armed button says what the next click does"
-seen="$(ros_press 'Confirm: call')"; [ "$seen" = true ]; check $? "ros: the confirming click stays in place ($seen)"
-seen="$(ros_wait_for "'\"success\": true', 'Taking off (1)'")"
-[ "$seen" = true ]; check $? "ros: the confirming click calls it and shows the reply$([ "$seen" = true ] || echo " ($seen)")"
-grep -q "CALLED 1" "$SANDBOX/trigger.log" && ! grep -q "CALLED 2" "$SANDBOX/trigger.log"
-check $? "ros: the service got exactly one call"
+seen="$(ros_text "const { St } = imports.gi; const box = ros._list; let hit = null;
+    (function walk(a) { if (hit) return; if (a instanceof St.Label && a.text === 'This request has no fields') { hit = a.get_parent(); return; }
+        a.get_children().forEach(walk); })(box);
+    if (!hit) return 'no form'; let call = null; (function walk(a) { if (call) return; if (a instanceof St.Button && a.label === 'Call') { call = a; return; }
+        a.get_children().forEach(walk); })(hit);
+    if (!call) return 'no Call in the form'; call.emit('clicked', 1);
+    for (let i = 0; i < 40; i++) { if (labels(box).join('|').includes('Taking off (2)')) return true; await sleep(250); }
+    return labels(box).filter(t => t.includes('Confirm') || t.includes('Taking off')).join('|');")"
+[ "$seen" = true ]; check $? "ros: the form's Call sends on the first tap too$([ "$seen" = true ] || echo " ($seen)")"
+grep -q "CALLED 2" "$SANDBOX/trigger.log" && ! grep -q "CALLED 3" "$SANDBOX/trigger.log"
+check $? "ros: and makes exactly one call"
 seen="$(ros_full_height)"
 [ "$seen" = true ]; check $? "ros: the reply is shown whole, not squeezed to a line$([ "$seen" = true ] || echo " ($seen)")"
+# A request that carries values is still confirmed first, and has no one-tap Call.
+seen="$(ros_text "const s = ros._graph.services.find(x => x.name === '/add_test');
+    if (!s) return 'no /add_test'; if (s.no_request !== false || ros._quickCallAction(s)) return 'offered one tap: ' + JSON.stringify(s);
+    ros._composers.clear(); ros._toggleComposer('call:/add_test', 'service', s.types[0]);
+    for (let i = 0; i < 40 && !(ros._composers.get('call:/add_test') || {}).fields; i++) await sleep(100);
+    ros._send('call:/add_test', 'call', '/add_test', s.types[0]); await sleep(300);
+    const armed = ros._isArmed('send:call:/add_test'); const c = ros._composers.get('call:/add_test');
+    ros._disarm(); ros._composers.clear(); ros._render();
+    return armed && !c.busy && !c.reply ? true : JSON.stringify({ armed, busy: c.busy, reply: c.reply });")"
+[ "$seen" = true ]; check $? "ros: a request with fields still asks for a confirming click$([ "$seen" = true ] || echo " ($seen)")"
+! grep -q "ADDED" "$SANDBOX/trigger.log"; check $? "ros: and nothing was sent before it"
 # Only /chatter open, so its Preview is the one clicked; what was open comes back after.
 ros_text "ros._composers.clear(); ros._savedExpanded = new Set(ros._expanded); ros._expanded.clear();
     ros._expanded.add('section:topics'); ros._expanded.add('topic:/chatter'); ros._render(); return true;" >/dev/null
@@ -299,8 +343,9 @@ seen="$(ros_wait_for "'std_msgs/msg/String', 'Hello World'")"
 [ "$seen" = true ]; check $? "ros: Preview shows the next message$([ "$seen" = true ] || echo " ($seen)")"
 seen="$(ros_full_height)"
 [ "$seen" = true ]; check $? "ros: the preview is shown whole, not squeezed to a line$([ "$seen" = true ] || echo " ($seen)")"
-# A plot picked the way a person does: Plot, the field list, a field.
-ros_text "ros._samples.clear(); ros._expanded.delete('topic:/chatter'); ros._expanded.add('topic:/altitude'); ros._render(); return true;" >/dev/null
+# Without PlotJuggler, Plot is the panel's own: Plot, the field list, a field.
+ros_text "ros._hasPlotJuggler = () => false;
+    ros._samples.clear(); ros._expanded.delete('topic:/chatter'); ros._expanded.add('topic:/altitude'); ros._render(); return true;" >/dev/null
 seen="$(ros_press 'Plot' true)"; [ "$seen" = true ]; check $? "ros: Plot offers the fields, in place ($seen)"
 seen="$(ros_press 'Plot field /altitude')"; [ "$seen" = true ]; check $? "ros: the field list opens, in place ($seen)"
 seen="$(ros_text "const { St } = imports.gi; let hit = null; (function walk(a) { if (hit) return;
@@ -313,7 +358,35 @@ seen="$(ros_text "for (let i = 0; i < 40; i++) { const b = ros._blocks.get('plot
             b.actor.get_y() >= adj.value && b.actor.get_y() < adj.value + adj.page_size) return true; await sleep(250); }
     return JSON.stringify({ plot: ros._plot && ros._plot.field, values: ros._plot && ros._plot.values.length });")"
 [ "$seen" = true ]; check $? "ros: choosing a field plots it, scrolled into view$([ "$seen" = true ] || echo " ($seen)")"
-ros_text "ros._stopPlot(); ros._expanded = ros._savedExpanded; delete ros._savedExpanded; ros._render(); return true;" >/dev/null
+ros_text "ros._stopPlot(); delete ros._hasPlotJuggler; ros._render(); return true;" >/dev/null
+# With PlotJuggler: Plot opens it on that one topic; topics picked on their rows open together.
+# The helper's answer is stood in for, so no PlotJuggler window opens in the sandbox.
+ros_text "ros._helperReal = ros._helper; ros._plotJuggler = [];
+    ros._helper = (args, done) => { if (args[0] !== 'plotjuggler') return ros._helperReal(args, done);
+        ros._plotJuggler.push(args.slice(1)); done({ ok: true, pids: [], topics: args.slice(1) }); };
+    ros._status.tools.plotjuggler = { installed: true, pids: [], owned_pids: [], external_pids: [] };
+    ros._expanded.delete('topic:/altitude'); ros._expanded.add('topic:/chatter'); ros._render(); return true;" >/dev/null
+ros_reopen() { ros_text "Main.panel.statusArea['adaptive-ros'].menu.open(); await sleep(600); return true;" >/dev/null; }
+seen="$(ros_press 'Plot' true)"
+seen="$(ros_text "const last = ros._plotJuggler[ros._plotJuggler.length - 1];
+    return JSON.stringify(last) === JSON.stringify(['/chatter']) && !ros._button.menu.isOpen || JSON.stringify({ calls: ros._plotJuggler, open: ros._button.menu.isOpen });")"
+[ "$seen" = true ]; check $? "ros: Plot opens PlotJuggler on exactly that topic$([ "$seen" = true ] || echo " ($seen)")"
+ros_reopen
+ros_text "ros._expanded.delete('topic:/chatter'); ros._render(); return true;" >/dev/null
+seen="$(ros_press 'Add /chatter to the PlotJuggler set' true)"; [ "$seen" = true ]; check $? "ros: a topic is picked for PlotJuggler on its row, in place ($seen)"
+seen="$(ros_press 'Add /lifecycle_chatter to the PlotJuggler set' true)"; [ "$seen" = true ]; check $? "ros: a second topic is picked, in place ($seen)"
+seen="$(ros_wait_for "'PlotJuggler · 2 topics', '/chatter and /lifecycle_chatter', 'Open', 'Clear'")"
+[ "$seen" = true ]; check $? "ros: the Topics section shows the picked set$([ "$seen" = true ] || echo " ($seen)")"
+probe "$SLEEP $ROS $PRESS return (async () => JSON.stringify(await press('Open', true, 'PlotJuggler · 2 topics')))();" >/dev/null
+seen="$(ros_text "await sleep(300); const last = ros._plotJuggler[ros._plotJuggler.length - 1];
+    return JSON.stringify(last) === JSON.stringify(['/chatter', '/lifecycle_chatter']) || JSON.stringify(ros._plotJuggler);")"
+[ "$seen" = true ]; check $? "ros: Open sends exactly the picked topics to PlotJuggler$([ "$seen" = true ] || echo " ($seen)")"
+ros_reopen
+probe "$SLEEP $ROS $PRESS return (async () => JSON.stringify(await press('Clear', true, 'PlotJuggler · 2 topics')))();" >/dev/null
+seen="$(ros_text "await sleep(300); return !ros._plotTopics.size && !labels(ros._list).join('|').includes('PlotJuggler · ') || JSON.stringify([...ros._plotTopics]);")"
+[ "$seen" = true ]; check $? "ros: Clear empties the set and the bar goes$([ "$seen" = true ] || echo " ($seen)")"
+ros_text "ros._helper = ros._helperReal; delete ros._helperReal; ros._expanded = ros._savedExpanded; delete ros._savedExpanded;
+    ros._loadStatus(); ros._render(); return true;" >/dev/null
 kill "$TRIGGER" 2>/dev/null
 
 seen="$(ros_text "const n = ros._graph.nodes.find(x => x.name === '/talker');
