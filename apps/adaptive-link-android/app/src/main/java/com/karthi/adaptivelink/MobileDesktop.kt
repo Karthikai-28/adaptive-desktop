@@ -72,7 +72,7 @@ private val NativeApps = listOf(
     ShellApp("native:workspaces", "Desktop workspaces", Page.Apps, Icons.Default.Dashboard), ShellApp("native:camera", "Camera & microphone", Page.Camera, Icons.Default.Videocam),
     ShellApp("native:scanner", "Scanner", Page.Scan, Icons.Default.DocumentScanner), ShellApp("native:presenter", "Presentation remote", Page.Presenter, Icons.Default.Slideshow),
     ShellApp("native:trackpad", "Laptop trackpad", Page.Trackpad, Icons.Default.TouchApp), ShellApp("native:controls", "Global controls", Page.Controls, Icons.Default.SmartButton),
-    ShellApp("native:drawing", "Drawing input", Page.Screen, Icons.Default.Draw), ShellApp("native:media", "Media", Page.Media, Icons.Default.PlayCircle),
+    ShellApp("native:drawing", "Ink Studio", Page.Ink, Icons.Default.Draw), ShellApp("native:media", "Media", Page.Media, Icons.Default.PlayCircle),
     ShellApp("native:run", "Run a command", Page.Run, Icons.Default.Terminal), ShellApp("native:windows", "Laptop windows", Page.Windows, Icons.Default.WebAsset),
     ShellApp("native:gamepad", "Game pad", Page.Gamepad, Icons.Default.SportsEsports),
     // The full set of laptop tools, with the computers paired and pairing another.

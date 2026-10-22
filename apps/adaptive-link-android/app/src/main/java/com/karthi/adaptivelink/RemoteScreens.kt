@@ -66,6 +66,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Keyboard
@@ -177,7 +178,7 @@ fun touchToScreen(touch: Offset, box: IntSize, picture: IntSize): Pair<Float, Fl
  * swipe in from an edge brings them back for a moment), the picture drawn
  * past the camera's cutout, and the screen kept on - it is a display.
  */
-private fun fullScreen(activity: Activity, on: Boolean) {
+internal fun fullScreen(activity: Activity, on: Boolean) {
     val window = activity.window
     val bars = WindowCompat.getInsetsController(window, window.decorView)
     if (on) {
@@ -706,62 +707,37 @@ internal fun zoomed(zoom: Float, shift: Offset, box: IntSize, by: Float, between
 // ---------------------------------------------------------------- trackpad
 
 @Composable
-fun TrackpadPage(client: LinkClient, workspaceId: String = "", onBack: () -> Unit) {
+fun TrackpadPage(activity: Activity, client: LinkClient, workspaceId: String = "", onInk: () -> Unit = {}, onBack: () -> Unit) {
     val input = remember(workspaceId) { InputSocket(client, if (workspaceId.isEmpty()) "/v1/input" else "/v1/input?workspace=$workspaceId") }
     DisposableEffect(Unit) { onDispose { input.close() } }
-    var keyboard by remember { mutableStateOf(true) }
+    var keyboard by remember { mutableStateOf(false) }
     // Aim the phone like a pointer, instead of dragging on it.
     var air by remember { mutableStateOf(false) }
     val context = LocalContext.current
     if (air) AirMouse { input.send(it) }
 
-    Column(Modifier.fillMaxSize().imePadding()) {
-        TopBar("Trackpad", onBack) {
+    DisposableEffect(Unit) { fullScreen(activity, true); onDispose { fullScreen(activity, false) } }
+    BackHandler { onBack() }
+    Box(Modifier.fillMaxSize().background(Color(0xFF101012)).imePadding()) {
+      Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.Close, "Exit trackpad") }
+            Text("Trackpad", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             if (hasGyroscope(context)) FilterChip(selected = air, onClick = { air = !air }, label = { Text("Air") },
                 modifier = Modifier.padding(end = 4.dp))
+            IconButton(onClick = onInk) { Icon(Icons.Filled.Edit, "Open Ink Studio") }
             IconButton(onClick = { keyboard = !keyboard }) { Icon(Icons.Filled.Keyboard, "Keyboard") }
         }
-        Row(Modifier.weight(1f).fillMaxWidth().padding(12.dp)) {
+        Row(Modifier.weight(1f).fillMaxWidth()) {
             Box(
-                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp))
+                Modifier.weight(1f).fillMaxHeight()
                     .background(MaterialTheme.colorScheme.surface)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { input.send(Protocol.click(1)) },
-                            onDoubleTap = { input.send(Protocol.doubleClick()) },
-                            onLongPress = { input.send(Protocol.click(3)) },
-                        )
-                    }
-                    .pointerInput(Unit) {
-                        detectDragGestures { _, drag -> input.send(Protocol.relative(drag.x * 1.6f, drag.y * 1.6f)) }
-                    },
+                    .adaptiveTrackpad(input),
                 contentAlignment = Alignment.Center,
-            ) { Muted("Drag to move · tap to click · hold for right-click") }
-            Spacer(Modifier.width(10.dp))
-            // A scroll strip, like the edge of a laptop trackpad.
-            Box(
-                Modifier.width(46.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .pointerInput(Unit) {
-                        var carried = 0f
-                        detectDragGestures(onDragStart = { carried = 0f }) { _, drag ->
-                            carried += drag.y
-                            val steps = (carried / 36f).toInt()
-                            if (steps != 0) {
-                                input.send(Protocol.scroll(0, steps))
-                                carried -= steps * 36f
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.SwapVert, "Scroll", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            ) { Muted("1 finger move · tap click · 2 fingers scroll/right-click · 3 fingers middle-click") }
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            BigButton("Left", Modifier.weight(1f)) { input.send(Protocol.click(1)) }
-            BigButton("Right", Modifier.weight(1f)) { input.send(Protocol.click(3)) }
-        }
-        Spacer(Modifier.height(8.dp))
         if (keyboard) KeyboardBar(input::send)
+      }
     }
 }
 

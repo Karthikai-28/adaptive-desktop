@@ -10,6 +10,10 @@ drives, network, Bluetooth, displays, sound, services, windows.
 Two parts: a daemon on the computer (`services/adaptive-link/`) and an Android
 app (`apps/adaptive-link-android/`).
 
+[Full-Screen Trackpad and Ink Studio](PHONE_TRACKPAD_AND_INK.md) specifies and tracks
+the new full-screen gestures, tablet drawing, editable ink, export, and staged
+text/formula recognition work.
+
 ## Who can connect
 
 The devices you pair - a phone, a tablet; up to five. Nothing else.

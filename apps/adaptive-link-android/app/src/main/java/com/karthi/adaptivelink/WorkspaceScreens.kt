@@ -263,7 +263,7 @@ private fun AppWorkspace(activity: MainActivity, client: LinkClient, store: Stor
     @Composable fun content(modifier: Modifier) {
         Box(modifier) {
             if (!foreground) Text("Workspace paused") else when (mode) {
-                "Trackpad" -> TrackpadPage(client, id) { mode = "Live" }
+                "Trackpad" -> TrackpadPage(activity, client, id) { mode = "Live" }
                 "Tasks" -> when (initial.optString("adapter")) {
                     "files" -> FilesPage(activity, client) { mode = "Live" }
                     "terminal" -> RunPage(client, store) { mode = "Live" }

@@ -53,7 +53,7 @@ import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.launch
 
 enum class Page {
-    Home, Apps, Screen, Trackpad, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
+    Home, Apps, Screen, Trackpad, Ink, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
     Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More, Office,
 }
 
@@ -298,7 +298,8 @@ private fun Pages(
             Page.Home -> Unit
             Page.Apps -> AppsPage(activity, client, store) { go(Page.Home) }
             Page.Screen -> ScreenPage(activity, client, store) { go(Page.Home) }
-            Page.Trackpad -> TrackpadPage(client) { go(Page.Home) }
+            Page.Trackpad -> TrackpadPage(activity, client, onInk = { go(Page.Ink) }) { go(Page.Home) }
+            Page.Ink -> InkStudioPage(activity, client, onMirror = { go(Page.Screen) }) { go(Page.Home) }
             Page.Media -> MediaPage(client) { go(Page.Home) }
             Page.Presenter -> PresenterPage(activity, client) { go(Page.Home) }
             Page.Run -> RunPage(client, store) { go(Page.Home) }

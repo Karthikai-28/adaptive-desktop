@@ -382,6 +382,7 @@ private fun tileGradient(page: Page): Pair<Color, Color> = when (page) {
     Page.Office -> Color(0xFFD97757) to Color(0xFFA9533A)
     Page.Screen -> Color(0xFF007AFF) to Color(0xFF0051C6)
     Page.Trackpad -> Color(0xFF48484A) to Color(0xFF2C2C2E)
+    Page.Ink -> Color(0xFF0A84FF) to Color(0xFF004A8F)
     Page.Media -> Color(0xFFFF2D55) to Color(0xFFD6183C)
     Page.Presenter -> Color(0xFF5856D6) to Color(0xFF3634A3)
     Page.Apps -> Color(0xFF0A84FF) to Color(0xFF0058D0)
