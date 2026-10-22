@@ -218,7 +218,11 @@ What that means for the computer:
   relay, so nobody else carries the traffic. The cost is that a few networks
   make a direct connection impossible (some mobile carriers and locked-down
   office Wi-Fi put every device behind an address that changes per
-  destination). On those the app says a direct connection could not be made.
+  destination). On those the app says a direct connection could not be made,
+  and how its checks went over IPv4 and IPv6. The computer keeps both sides'
+  view of every attempt in `~/.local/state/adaptive-desktop/link.log`
+  (`tunnel-state` is what reached the computer, `tunnel-phone` what the phone
+  saw), counts and kinds of address only.
   If you need to get through from such a network, run a relay of your own -
   see *A relay of your own* below.
 - Google's public STUN server is asked one question by each end - "what

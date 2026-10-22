@@ -1845,6 +1845,15 @@ async def daemon_checks(sandbox, check):
         await asyncio.sleep(1.5)
         check(await me.get(f"signals/{cid}/old") is None, "tunnel: a stale request is cleared away, not answered")
 
+        logged = home / ".local/state/adaptive-desktop/link.log"
+        await me.put(f"signals/{cid}/{session}", {"report": "on cellular; IPv6: 9 sent, 0 answered, 0 from the computer",
+                                                  "at": time.time()})
+        check(await until(lambda: "IPv6: 9 sent" in logged.read_text(), 5)
+              and await me.get(f"signals/{cid}/{session}") is None,
+              "tunnel: the phone's account of a failed connection is kept in the log, and cleared away")
+        check('"tunnel-state", "detail": "connected: heard from the phone' in logged.read_text(),
+              "tunnel: the log says what the computer heard from the phone, and the way it connected")
+
         # ------------------------------------------- auto-approve, sign-out
         control.call("POST", "/configure", {"auto_approve_account": True})
         new_pid = cloud.device_id(I.check_phone_certificate(new_cert)[2])

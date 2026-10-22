@@ -4,12 +4,15 @@ import android.content.Context
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
+import org.webrtc.RTCStats
+import org.webrtc.RTCStatsReport
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
@@ -107,8 +110,15 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
 
         val connected = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { opened.await(20, TimeUnit.SECONDS) }
         if (!connected) {
+            // What this side saw, for the screen and for the computer's log:
+            // the computer only knows what reached it.
+            val seen = runCatching { describe(connection) }.getOrDefault("")
+            if (seen.isNotEmpty()) runCatching {
+                cloud.put(path, JSONObject().put("report", seen).put("at", System.currentTimeMillis() / 1000.0))
+            }
             close()
-            throw IllegalStateException("A direct connection could not be made on this network.")
+            throw IllegalStateException("A direct connection could not be made on this network" +
+                (if (seen.isNotEmpty()) " ($seen)." else "."))
         }
 
         val listener = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
@@ -177,6 +187,38 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
             runCatching { channel.close() }
             runCatching { channel.dispose() }
         }
+    }
+
+    /**
+     * How the checks went, by kind of address and without any address: how
+     * many this phone sent, how many the computer answered, and how many of
+     * the computer's own arrived here.
+     */
+    private suspend fun describe(connection: PeerConnection): String {
+        val report = withTimeoutOrNull(2_000) {
+            suspendCancellableCoroutine<RTCStatsReport> { continuation ->
+                connection.getStats { continuation.resume(it) }
+            }
+        } ?: return ""
+        val stats = report.statsMap
+        fun address(of: RTCStats?) = (of?.members?.get("address") ?: of?.members?.get("ip")) as? String
+        fun count(of: RTCStats, name: String) = (of.members[name] as? Number)?.toLong() ?: 0L
+        val families = sortedMapOf<String, LongArray>()
+        for (pair in stats.values.filter { it.type == "candidate-pair" }) {
+            val remote = stats[pair.members["remoteCandidateId"] as? String]
+            if (remote?.members?.get("protocol") != "udp") continue
+            val family = if (address(remote)?.contains(':') == true) "IPv6" else "IPv4"
+            val counts = families.getOrPut(family) { LongArray(3) }
+            counts[0] += count(pair, "requestsSent")
+            counts[1] += count(pair, "responsesReceived")
+            counts[2] += count(pair, "requestsReceived")
+        }
+        val local = stats.values.filter { it.type == "local-candidate" }
+        val networks = local.mapNotNull { it.members["networkType"] as? String }.distinct().joinToString("/")
+        val words = families.map { (family, c) -> "$family: ${c[0]} sent, ${c[1]} answered, ${c[2]} from the computer" }
+            .toMutableList()
+        if (local.none { address(it)?.contains(':') == true }) words += "no IPv6 here"
+        return (if (networks.isNotEmpty()) "on $networks; " else "") + words.joinToString("; ")
     }
 
     fun close() {

@@ -29,6 +29,7 @@ import pydeps  # noqa: F401 - the peer-to-peer library and what it needs, first 
 
 from identity import TUNNEL_SOURCE  # noqa: E402
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription  # noqa: E402
+from aioice.ice import CandidatePair  # noqa: E402
 
 # Tells each device its own public address; it carries none of the traffic.
 STUN = "stun:stun.l.google.com:19302"
@@ -84,6 +85,61 @@ def _relation(offer, answer):
     # Which networks it is on, by the start of each address only.
     where = sorted({".".join(a.split(".")[:2]) + ".x" for a in _addresses(offer, "host") if "." in a})
     return "the phone is on another network" + (f" ({', '.join(where)})" if where else "")
+
+
+def _family(address):
+    return "IPv6" if ":" in address else "IPv4"
+
+
+class _Checks:
+    """What happens on one connection's way through, from this side.
+
+    It also answers a phone's check at once. This computer starts checking
+    as soon as it has made its answer, before the phone has even read it, so
+    its first checks are lost at the phone's router (nothing has left the
+    phone yet to let them in) and it then waits longer and longer between
+    tries. When a check from the phone does arrive, the way through is open
+    now: aioice would leave a check it has under way to its next try, up to
+    sixteen seconds later, by when the phone may have given up. It is
+    started again at once instead (RFC 8445, 7.3.1.4).
+    """
+
+    def __init__(self, peer):
+        self.heard = {}
+        transport = peer.sctp.transport.transport if peer.sctp else None
+        self.connection = getattr(transport, "_connection", None)
+        if self.connection is None:
+            return
+        connection, original = self.connection, self.connection.check_incoming
+
+        def check_incoming(message, addr, protocol):
+            family = _family(addr[0])
+            self.heard[family] = self.heard.get(family, 0) + 1
+            for pair in connection._check_list:
+                if (pair.protocol is protocol and pair.remote_addr == tuple(addr[:2])
+                        and pair.state == CandidatePair.State.IN_PROGRESS and pair.task is not None):
+                    pair.task.cancel()
+                    pair.task = None
+                    pair.state = CandidatePair.State.WAITING
+            original(message, addr, protocol)
+
+        connection.check_incoming = check_incoming
+
+    def describe(self):
+        """In words, without any address: what was heard from the phone,
+        which of this computer's checks it answered, and the way in use."""
+        if self.connection is None:
+            return ""
+        heard = ", ".join(f"{count} over {family}" for family, count in sorted(self.heard.items()))
+        answered = sorted({_family(pair.remote_candidate.host) for pair in self.connection._check_list
+                           if pair.state == CandidatePair.State.SUCCEEDED})
+        words = [f"heard from the phone {heard}" if heard else "heard nothing from the phone",
+                 f"it answered over {' and '.join(answered)}" if answered else "it answered none of this computer's checks"]
+        chosen = self.connection._nominated.get(1)
+        if chosen is not None:
+            words.append(f"through {_family(chosen.remote_candidate.host)} "
+                         f"({chosen.local_candidate.type} to {chosen.remote_candidate.type})")
+        return "; ".join(words)
 
 
 async def _send_all(channel, data):
@@ -162,14 +218,18 @@ class TunnelServer:
             channel.on("message", lambda message: early.append(message) if isinstance(message, bytes) else None)
             asyncio.ensure_future(self._serve(channel, early))
 
+        checks = None
+
         @peer.on("connectionstatechange")
         async def changed():
             if peer.connectionState in ("connected", "failed"):
-                self._report(peer.connectionState)
+                detail = checks.describe() if checks is not None else ""
+                self._report(peer.connectionState + (f": {detail}" if detail else ""))
             if peer.connectionState in ("failed", "closed"):
                 await self._drop(peer)
 
         await peer.setRemoteDescription(RTCSessionDescription(sdp=offer_sdp, type="offer"))
+        checks = _Checks(peer)
         await peer.setLocalDescription(await peer.createAnswer())
         self._report(f"phone offers {_kinds(offer_sdp)}; this computer {_kinds(peer.localDescription.sdp)}; "
                      f"{_relation(offer_sdp, peer.localDescription.sdp)}")

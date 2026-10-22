@@ -1890,6 +1890,13 @@ class Link:
     async def _on_signals(self, path, data):
         """A phone of the account asks for a direct connection."""
         for session, value in self._entries(path, data).items():
+            if isinstance(value, dict) and isinstance(value.get("report"), str):
+                # The phone's side of a connection that could not be made:
+                # this side only knows what reached it.
+                if abs(time.time() - float(value.get("at") or 0)) <= SIGNAL_FRESH_S:
+                    self.audit.write("account", "tunnel-phone", value["report"][:300])
+                await self._cloud_try(self.account.delete(f"signals/{self.cloud_id}/{session}"))
+                continue
             if not isinstance(value, dict) or session in self._answered:
                 continue
             self._answered.add(session)

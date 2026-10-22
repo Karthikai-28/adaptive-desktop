@@ -720,8 +720,13 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   without root it handed every allowed port to the computer's loopback, so
   services bound to localhost became reachable from the other devices.
   Checked against a stand-in for Google in `verify-link.py`, and with the
-  app's own code and screens on an emulator. 🔬 Google's real sign-in, and a
-  direct connection from mobile data, are the remaining checks.
+  app's own code and screens on an emulator. Google's real sign-in works on the
+  owner's phone. 🔬 A direct connection from mobile data: the first live tries
+  (2026-10-22, Jio mobile to Jio Fiber) reached the computer through the
+  account but no check arrived over IPv4 or IPv6. The computer now answers a
+  phone's check at once instead of at its next backed-off try, and both sides
+  log how the checks went (`tunnel-state`, `tunnel-phone` in link.log) for the
+  next try.
 - ✅ **The machine itself, from the phone.** Tasks (processes, priority,
   battery, temperatures, power profile), Devices (USB on and off, drives
   mounted, unmounted and safely removed), Network (Wi-Fi, joining, VPNs),
