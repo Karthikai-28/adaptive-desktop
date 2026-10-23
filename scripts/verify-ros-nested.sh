@@ -460,7 +460,12 @@ seen="$(ros_text "const bag = ros._status.bags[0].path; const db3 = imports.gi.G
             return true; await sleep(250); }
     const t = labels(ros._list).join('|'); return t.slice(t.indexOf('Rosbag'), t.indexOf('Rosbag') + 600);")"
 [ "$seen" = true ]; check $? "ros: an opened bag shows its play form with what it holds$([ "$seen" = true ] || echo " ($seen)")"
-ros_text "ros._bagDraft = null; ros._render(); return true;" >/dev/null
+seen="$(ros_press 'Start playback' true)"; [ "$seen" = true ]; check $? "ros: Start playback, in place ($seen)"
+seen="$(ros_wait_for "'Playing ', 'Stop'")"
+[ "$seen" = true ]; check $? "ros: the opened bag plays$([ "$seen" = true ] || echo " ($seen)")"
+# Stopping reloads the status; let that land before the next check swaps in its own.
+ros_text "ros._stop('bag'); for (let i = 0; i < 40 && labels(ros._list).join('|').includes('Playing '); i++) await sleep(250);
+    await sleep(2500); ros._bagDraft = null; ros._render(); return true;" >/dev/null
 
 # Stress the selectors with multiple packages and enough files to scroll.
 seen="$(ros_text "

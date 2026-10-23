@@ -596,15 +596,15 @@ def main():
         db3 = next(recorded_bag.glob("*.db3"))
         found = home / "Downloads" / "flights" / "run_1"
         _shutil.copytree(recorded_bag, found)
-        listed = {b["path"]: b for b in helper(env, "status", "refresh").get("bags", [])}
+        listed = {b["path"]: b for b in helper(env, "status").get("bags", [])}   # no rescan: not cached
         check(listed.get(str(found), {}).get("origin") == "found" and listed[str(found)].get("topics") == 1,
-              "bag: a bag in ~/Downloads is listed by itself", list(listed))
+              "bag: a bag just put in ~/Downloads is listed by itself", list(listed))
         info = helper(env, "bag-info", str(db3), "remember")
         check(info.get("ok") and info.get("path") == str(recorded_bag) and info.get("playable") == 1
               and info.get("skipped") == [] and info.get("duration_s", 0) > 0,
               "bag: a .db3 inside a bag folder opens the folder; every topic can play", info)
         check(helper(env, "bag-info", str(home / "no_such_bag")).get("ok") is False, "bag: a path that is no bag is refused")
-        alien = home / "alien_bag"
+        alien = home / "work" / "flights" / "alien_bag"   # deeper than the home-folder scan looks
         _shutil.copytree(recorded_bag, alien)
         meta = (alien / "metadata.yaml").read_text().replace("std_msgs/msg/String", "not_installed_msgs/msg/Thing")
         (alien / "metadata.yaml").write_text(meta)

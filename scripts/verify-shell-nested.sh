@@ -374,7 +374,20 @@ for tool in xvfb-run dbus-run-session gnome-shell gdbus; do
 done
 
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/adaptive-nested.XXXXXX")"
+touch "$SANDBOX/.started"           # the run's start; the folder's own time moves as it fills
 cleanup() {
+    # The nested shell's Xwayland takes free X displays (:0, :2, ...) and dies
+    # without releasing them; the next run's shell then failed "to initialize
+    # X11 display" and crashed. Remove only displays this run made (newer than
+    # its start, ours) whose process is gone - never the desktop's own.
+    local lock pid
+    for lock in /tmp/.X*-lock; do
+        [ -O "$lock" ] && [ "$lock" -nt "$SANDBOX/.started" ] || continue
+        pid="$(tr -d ' ' <"$lock" 2>/dev/null)"
+        [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null || continue
+        lock="${lock#/tmp/.X}"
+        rm -f "/tmp/.X${lock}" "/tmp/.X11-unix/X${lock%-lock}"
+    done
     if [ "$KEEP" = 1 ]; then
         echo "Sandbox kept: $SANDBOX"
     else

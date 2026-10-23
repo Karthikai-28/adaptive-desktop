@@ -398,6 +398,14 @@ static transform and a number on `/level` for the group, TF lookup and plot.
   scroll back, read the reset position and jumped the list to the top, so
   whatever was just opened was out of sight. `_renderNow` keeps the position
   while a restore is pending.
+- Putting the scroll back on the idle after a render is not always late
+  enough: a block rebuilt then (Launch, on every status reload, which node
+  names coming and going trigger) can still be unmeasured, the list's height
+  short of the old position, and the clamp threw the list to the top. The
+  Rosbag play form sits at the bottom of Launch, so on a live graph it jumped
+  away before Start playback could be pressed. The restore now waits a few
+  frames for the height. Bags found in ~/Downloads are not part of the
+  five-minute file cache either, so one just downloaded is listed at once.
 - The plot and the graph view are drawn below the setup and the launchers, so
   opening one scrolls to its block once the list is laid out, not to the top.
 - The nested check clicks with a real (virtual) pointer and checks the list

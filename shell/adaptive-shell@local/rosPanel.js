@@ -356,7 +356,8 @@ var RosPanel = class RosPanel {
                 this._paramProfileDraft = null;
                 this._paramDiff = null;
                 this._profileDraft = null;
-                this._bagDraft = null;
+                // The bag's play form stays: the file chooser closes the dropdown, and
+                // a form that vanished with it looked like the bag would not load.
                 this._stopPlot();
                 this._disarm();
                 this._scrollToBlock = null;
@@ -1152,14 +1153,19 @@ var RosPanel = class RosPanel {
             if (reply.ok) {
                 this._expanded.delete('bag:open');
                 const { topic_list: _topics, ...info } = reply;
-                this._button.menu.open();
                 this._bagDraft = { path: reply.path, rate: '1', start: '0', loop: false, clock: false, info };
-                this._loadStatus();
             } else if (!reply.cancelled) {
-                this._button.menu.open();
                 this._notes.bag = { text: reply.error, error: true };
-                this._render();
             }
+            // Once the chooser's window is gone and focus is back, or the dropdown
+            // would close again at once.
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+                if (this._button) {
+                    this._button.menu.open();
+                    this._loadStatus();
+                }
+                return GLib.SOURCE_REMOVE;
+            });
         });
     }
 
@@ -1443,9 +1449,23 @@ var RosPanel = class RosPanel {
                 return GLib.SOURCE_REMOVE;
             const target = this._scrollToBlock && this._blocks.get(this._scrollToBlock);
             if (!target) {
-                this._scrollToBlock = null;
-                this._keptScroll = null;
-                adjustment.value = Math.min(scrolled, adjustment.upper - adjustment.page_size);
+                // A rebuilt block can still be unmeasured at idle, the list's height
+                // short of where it was scrolled; clamping then threw the list to the
+                // top (the Rosbag play form, at the bottom of Launch, went with it
+                // whenever a status reload rebuilt that block). Wait a few frames for
+                // the height; a list that really shrank is clamped after that.
+                let tries = 0;
+                const restore = () => {
+                    if (adjustment.upper - adjustment.page_size < scrolled - 1 && ++tries < 20)
+                        return GLib.SOURCE_CONTINUE;
+                    this._scrollId = 0;
+                    this._scrollToBlock = null;
+                    this._keptScroll = null;
+                    adjustment.value = Math.min(scrolled, adjustment.upper - adjustment.page_size);
+                    return GLib.SOURCE_REMOVE;
+                };
+                if (restore() === GLib.SOURCE_CONTINUE)
+                    this._scrollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, restore);
                 return GLib.SOURCE_REMOVE;
             }
             // The plot and the graph view sit below the setup and the launchers:

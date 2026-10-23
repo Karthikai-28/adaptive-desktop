@@ -708,7 +708,7 @@ def is_world(path):
 def discovered_files(spaces, refresh=False):
     """RViz configs, worlds and launch files: a walk of the home folder and every
     workspace's src, so it is kept for a few minutes (per set of workspaces)."""
-    key = ["workspace-files-v3", *sorted(w["path"] for w in spaces)]
+    key = ["workspace-files-v4", *sorted(w["path"] for w in spaces)]
     cached = read_json(DISCOVERY)
     if (not refresh and cached.get("key") == key
             and 0 <= time.time() - cached.get("at", 0) < DISCOVERY_TTL_S):
@@ -719,9 +719,6 @@ def discovered_files(spaces, refresh=False):
         "worlds": recent_files(roots, is_world),
         "launch_files": recent_files([(Path(w["path"]) / "src", 8) for w in spaces],
                                      lambda p: p.endswith(LAUNCH_SUFFIXES), limit=None),
-        # bag folders someone downloaded or copied in: their metadata.yaml
-        "found_bags": [str(Path(f["path"]).parent) for f in
-                       recent_files([(HOME / "Downloads", 4), (HOME, 2)], is_bag_metadata, limit=12)],
     }
     try:
         write_json(DISCOVERY, {"key": key, "at": time.time(), "files": files})
@@ -781,7 +778,7 @@ def status(refresh=False):
         } for name, ok in tools.items()},
         "gazebo_flavour": flavour,
         "gazebo_install": f"sudo apt install ros-{distro}-ros-gz",
-        **(found := discovered_files([w for w in spaces if w["path"] == setup["workspace"]], refresh)),
+        **discovered_files([w for w in spaces if w["path"] == setup["workspace"]], refresh),
         "saved_launches": read_json(SAVED_LAUNCHES, list),
         "setups": read_json(SETUPS, list),
         "project": {"name": project[0], "path": project[1], "workspace": project_ws} if project else None,
@@ -790,7 +787,7 @@ def status(refresh=False):
                          "paused": bool(e.get("paused"))}
                         for e in entries] for name, entries in owned.items()},
         "recording": recording(owned.get("bag", [])),
-        "bags": recent_bags(found.get("found_bags", [])),
+        "bags": recent_bags(found_bags()),
         "bag_dir": str(BAGS),
         "bag_free": free_space(BAGS),
         "favorites": read_json(FAVORITES, list),
@@ -1521,6 +1518,14 @@ def is_bag_metadata(path):
             return f.read(64).lstrip().startswith("rosbag2_bagfile_information")
     except OSError:
         return False
+
+
+def found_bags():
+    """Bag folders someone downloaded or copied in (their metadata.yaml). Not
+    cached with the other files: a bag just downloaded is listed the next time
+    the panel opens, and the walk takes a millisecond."""
+    return [str(Path(f["path"]).parent) for f in
+            recent_files([(HOME / "Downloads", 4), (HOME, 2)], is_bag_metadata, limit=12)]
 
 
 def recent_bags(found=(), limit=10):
