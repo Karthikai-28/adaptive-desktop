@@ -50,6 +50,8 @@ const P = {
   play: '<path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7"/>',
   reset: '<path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>',
   chart: '<path d="M3 3v18h18"/><path d="M7 16v-5M12 16V8M17 16v-8"/>',
+  pause: '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
+  resume: '<path d="M7 4.5v15l12-7.5z"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24">${P[n]}</svg>`;
 const iconEl = (n) => { const s = document.createElement('span'); s.style.display = 'inline-flex'; s.innerHTML = icon(n); return s.firstChild; };
@@ -191,7 +193,7 @@ function handle(m) {
     case 'mission': S.missions.set(m.mission.id, m.mission); refreshMissions(); refreshMissionDetail(m.mission); return;
     case 'meeting': return onMeeting(m);
     case 'toast': return toast(m.text, m.level, m.agent);
-    case 'settings': S.settings = m.settings; S.quotaUntil = m.quota_until; renderQuota(); return;
+    case 'settings': S.settings = m.settings; S.quotaUntil = m.quota_until; renderQuota(); renderTop(); return;
     case 'usage': S.usage = m; renderQuota(); return;
     case 'providers': S.providers = m.providers; renderQuota(); if (S.view.kind === 'home') renderPanel(); return;
     case 'study': S.studies = m.studies; if (S.view.kind === 'agent' && S.tab === 'learning') renderBody(); return;
@@ -299,13 +301,14 @@ function renderMeetingBar() {
 
 // ------------------------------------------------------------------ top bar
 function renderTop() {
-  const counts = { working: 0, thinking: 0, idle: 0, quota: 0 };
+  const counts = { working: 0, thinking: 0, idle: 0, quota: 0, paused: 0 };
   for (const id of S.order) { const a = S.agents[id]; if (a) counts[a.status] = (counts[a.status] || 0) + 1; }
   const parts = [];
   if (counts.working) parts.push(`${counts.working} working`);
   if (counts.thinking) parts.push(`${counts.thinking} replying`);
   if (counts.idle) parts.push(`${counts.idle} free`);
   if (counts.quota) parts.push(`${counts.quota} waiting on quota`);
+  if (counts.paused) parts.push(`${counts.paused} paused`);
   const queued = [...S.tasks.values()].filter(t => t.status === 'queued').length;
   if (queued) parts.push(`${queued} queued`);
   $('#summary').textContent = parts.join(' · ');
@@ -317,6 +320,11 @@ function renderTop() {
   $('#btnTasks').innerHTML = `${icon('clip')}<span class="lbl">Tasks</span>${queued ? `<span class="badge" style="background:#5865f2">${queued}</span>` : ''}`;
   $('#btnFiles').innerHTML = `${icon('folder')}<span class="lbl">Files</span>`;
   $('#btnTokens').innerHTML = `${icon('chart')}<span class="lbl">Tokens</span>`;
+  const paused = !!S.settings?.paused;
+  $('#btnPause').innerHTML = `${icon(paused ? 'resume' : 'pause')}<span class="lbl">${paused ? 'Resume' : 'Pause'}</span>`;
+  $('#btnPause').classList.toggle('resume', paused);
+  $('#btnPause').title = paused ? 'Every agent is paused. Resume lets them continue where they stopped.'
+    : 'Pause every agent: running tasks stop and continue where they left off when you resume, even after a restart.';
   $('#btnVoice').innerHTML = icon(prefs.voice ? 'vol' : 'mute');
   $('#btnVoice').classList.toggle('on', prefs.voice);
   $('#btnVoice').title = prefs.voice ? 'Replies are read aloud (click to mute)' : 'Replies are muted (click to read aloud)';
@@ -337,7 +345,8 @@ function renderQuota() {
     q.append(h('span', { class: `q ${state[0]}`, title: `${p.label}: ${p.model} on Ollama ${p.version || ''} · ${state[1]}` },
       h('span', { class: `dot ${state[0] ? 'quota' : ''}` }), `${p.label} · ${p.model}`));
   }
-  if (S.settings?.paused) q.append(h('span', { class: 'q out' }, 'Work paused'));
+  if (S.settings?.paused) q.append(h('span', { class: 'q paused', title: 'Nothing runs until you press Resume. Tasks, replies and meeting turns are kept and continue then.' },
+    h('span', { class: 'dot paused' }), 'Office paused' + (S.settings.paused_at ? ` since ${new Date(S.settings.paused_at * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : '')));
   for (const r of S.usage?.rows || []) {
     // Older servers only sent `remaining`; keep those payloads working while preferring the parsed number.
     const parsed = Number.parseInt(r.remaining, 10);
@@ -402,7 +411,7 @@ const prettyModel = (m) => (m || '').replace(/^gemini-/, 'Gemini ').replace(/-(h
 function statusText(a, id) {
   if (!a) return ['idle', 'Free'];
   if (a.in_meeting && a.status !== 'working') return ['meeting', 'In meeting'];
-  return ({ working: ['working', 'Working'], thinking: ['thinking', id === MGR ? 'Thinking' : 'Replying'], quota: ['quota', 'Out of quota'], idle: ['idle', 'Free'] })[a.status] || ['idle', a.status];
+  return ({ working: ['working', 'Working'], thinking: ['thinking', id === MGR ? 'Thinking' : 'Replying'], quota: ['quota', 'Out of quota'], paused: ['paused', 'Paused'], idle: ['idle', 'Free'] })[a.status] || ['idle', a.status];
 }
 function memberRow(id) {
   const p = S.roster[id], a = S.agents[id];
@@ -1293,7 +1302,7 @@ function openSettings() {
   const body = h('div', null,
     h('div', { class: 'section' }, 'Company'),
     sw('Autopilot', 'Codex plans follow-ups; Claude verifies them, dispatches corrections and reports back.', S.settings.autopilot, v => api('POST', '/api/settings', { autopilot: v }).then(s => { S.settings = s; })),
-    sw('Pause all work', 'Queued tasks and study sessions wait; running tasks finish. Chats and meetings still work.', S.settings.paused, v => api('POST', '/api/settings', { paused: v }).then(s => { S.settings = s; renderQuota(); })),
+    sw('Pause the office', 'Every agent stops: running tasks, replies, meetings and Claude wait, and continue where they stopped when you resume, even after a restart.', S.settings.paused, v => setPaused(v)),
     h('label', { class: 'switch' }, h('div', null, 'Agents working at the same time', h('small', null, 'More is faster but spends Gemini quota quicker.')), par),
     h('label', { class: 'switch' }, h('div', null, 'Agents run on', h('small', null, 'Gemini on your AI Pro plan, or a local model through Ollama (private, free, much slower and weaker).')), prov),
     h('label', { class: 'switch' }, h('div', null, 'When Gemini runs out', h('small', null, 'Carry on with this provider until the quota resets, or pause.')), fall),
@@ -1353,6 +1362,12 @@ $('#btnFiles').onclick = () => openFiles('');
 $('#btnTokens').onclick = () => tokens.open();
 $('#btnVoice').onclick = () => { prefs.voice = !prefs.voice; savePrefs(); setMuted(!prefs.voice); renderTop(); toast(prefs.voice ? 'Replies will be read aloud' : 'Muted', 'info'); };
 $('#btnSettings').onclick = openSettings;
+function setPaused(v) {
+  $('#btnPause').disabled = true;
+  return api('POST', '/api/settings', { paused: v }).then(s => { S.settings = s; renderQuota(); renderTop(); })
+    .catch(e => toast(e.message, 'error')).finally(() => { $('#btnPause').disabled = false; });
+}
+$('#btnPause').onclick = () => setPaused(!S.settings?.paused);
 setInterval(() => { renderQuota(); if (S.view.kind === 'agent') renderAgentHeader(); }, 30000);
 
 renderTop(); renderPanel(); connect();

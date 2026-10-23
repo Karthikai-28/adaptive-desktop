@@ -44,10 +44,11 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 
 | | |
 |---|---|
-| **Watch the team** | Each agent sits at a desk. The name-tag dot shows their state: green free, amber working, violet replying, blue in a meeting, red out of quota. The bubble shows what they are doing now (typing, running a command, browsing, generating an image). Hover over someone for details, or click them for their card. Free agents wander to the kitchen and lounge. |
+| **Watch the team** | Each agent sits at a desk. The name-tag dot shows their state: green free, amber working, violet replying, blue in a meeting, red out of quota, grey paused. The bubble shows what they are doing now (typing, running a command, browsing, generating an image). Hover over someone for details, or click them for their card. Free agents wander to the kitchen and lounge. |
 | **Talk to anyone** | Click an agent, or walk up to them (WASD / arrows / click) and press **E**. They reply right away, even mid-task. Click the mic to speak; it sends when you pause. Replies are read aloud in each agent's own voice (🔊). |
 | **Ask Claude** | Tell Claude what you want. A tool-free Codex turn drafts the plan; Claude verifies and corrects it, then assigns useful work across the whole available team (chaining dependencies), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
 | **Meetings and calls** | **Call meeting** → pick people → everyone walks to the meeting room. Type or talk; agents answer out loud. Say a name ("Arjun, …") to ask one person. **Hands-free** keeps listening and pauses while agents speak. With Claude in the room, it chairs the meeting, writes minutes at the end and assigns the agreed action items. **Call** on an agent's card starts a 1:1 call. |
+| **Pause and resume** | **Pause** in the top bar stops every agent at once: running tasks, replies, meeting turns, study sessions and Claude. Nothing starts again until you press **Resume**; then each task continues its own conversation where it stopped. The pause survives a restart or reboot. Same as `office pause` / `office resume`. |
 | **Tasks** | Kanban board of every task with live activity, full reports, cancel and retry. |
 | **Missions** | Outcome-based work with an objective, measurable acceptance criteria (C1, C2, ...), a writable-repository boundary, linked tasks, cancellation, and one evidence report. A mission **succeeds** only when the report has a `C<n>: PASS - <evidence>` line for every criterion; a `FAIL` line makes it **failed**, and a report without a verdict for each criterion leaves it **unverified**. Open **Missions** in the top bar or use `office mission`. |
 | **Work capsules** | Save the exact repository revision, dirty files, dependency-lock fingerprints, runtime, command, launch arguments, parameters, datasets and results for a mission. A capsule is readable JSON under `data/mission-control/capsules/`, where agents can't reach it; create one from a mission or with `office capsule`. |
@@ -227,6 +228,25 @@ the rules below took 60-100k:
 Graphs for repos with no hub graph are built code-only (no model calls) with
 `GRAPHIFY_OUT=~/Obsidian/graphify-out/<repo> graphify update ~/projects/<repo>`. Never run that over a hub
 graph that was built with semantic extraction: it replaces the document and rationale nodes.
+
+## Pause and resume (`Office.pause` / `Office.resume` in `office/core.py`)
+
+The owner's pause is separate from the quota pause and only the owner ends it. The office's own `office`
+calls are refused: the manager can't pause or resume. While paused:
+
+- a running task is interrupted and goes back to the queue with its attempt not counted. Its conversation,
+  steps and tokens are kept in kv `resume:<task id>`. On resume it continues that conversation with a short
+  "carry on where you stopped" prompt. On another provider, or if the conversation can't be resumed, it
+  starts over with a note to continue from the partial work in the workspace;
+- direct messages are held in kv `held_chats` and answered on resume. Manager jobs (your messages,
+  autopilot reviews) are held in kv `mgr_held`. Meeting turns are skipped, and on resume every attendee
+  answers what was said in the meantime;
+- the scheduler, study programs and the quota watchdog start nothing.
+
+Everything lives in the database, so a restart while paused comes back paused with the same held work.
+A server shutdown that isn't a pause keeps running tasks the same way, so they continue their
+conversation after the restart instead of being cancelled. A manager meeting turn or minutes request
+that someone is waiting for is the one thing held only in memory.
 
 ## When the quota runs out (`office/quota.py`)
 

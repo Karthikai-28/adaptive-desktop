@@ -104,6 +104,9 @@ async def main(tmp):
                 return ev(f"(() => {{ const b = [...document.querySelectorAll({json.dumps(selector)})].find(x => x.innerText.includes({json.dumps(text)})); if (!b) return false; b.click(); return true; }})()")
 
             modal = "document.querySelector('#modal').innerText"
+            # the office is paused: the top bar offers Resume and says so (not clicked: that would start agents)
+            await wait_for("document.querySelector('#btnPause').classList.contains('resume') && "
+                           "document.querySelector('#quota').innerText.includes('Office paused')", "paused top bar")
             # mission detail shows numbered criteria, risk and author
             assert await click("#btnMissions", "")
             await wait_for("!!document.querySelector('.mission-card')", "mission list")

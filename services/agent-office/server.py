@@ -514,7 +514,9 @@ class SettingsIn(BaseModel):
 
 
 @app.post("/api/settings")
-async def settings(s: SettingsIn):
+async def settings(s: SettingsIn, request: Request):
+    if s.paused is not None and (await caller(request))[0] == "manager":
+        raise HTTPException(403, "only the owner can pause or resume the office")
     try:
         return await office.update_settings(**s.model_dump())
     except ValueError as e:

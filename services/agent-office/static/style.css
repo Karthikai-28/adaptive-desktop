@@ -30,6 +30,9 @@ nav { display: flex; gap: 8px; }
 .btn.primary:hover { background: var(--accent2); }
 .btn.icon { width: 36px; padding: 0; justify-content: center; }
 .btn.on { color: #9fe3c4; }
+#btnPause.resume { background: var(--accent); border-color: var(--accent); color: #fff; }
+#btnPause:disabled { opacity: .6; }
+.q.paused { color: #e8eaf6; background: #4a4f6e; font-weight: 600; }
 .btn .badge, .tab .badge { background: var(--err); color: #fff; font-size: 11px; border-radius: 999px; padding: 1px 6px; }
 
 /* ---------------- layout */
@@ -62,7 +65,7 @@ main { display: flex; height: calc(100% - 56px); }
 .back:hover { color: var(--accent); }
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); flex: none; }
-.dot.working { background: var(--warn); } .dot.thinking { background: var(--think); } .dot.quota { background: var(--err); } .dot.meeting { background: var(--meet); }
+.dot.working { background: var(--warn); } .dot.thinking { background: var(--think); } .dot.quota { background: var(--err); } .dot.paused { background: #94a3b8; } .dot.meeting { background: var(--meet); }
 .doing { margin-top: 10px; font-size: 13px; background: var(--soft); border-radius: 10px; padding: 8px 10px; color: #3a3f5a; line-height: 1.4; }
 .doing .muted { color: var(--muted); font-size: 12px; }
 .actions { display: flex; gap: 8px; margin-top: 12px; }
@@ -94,7 +97,7 @@ main { display: flex; height: calc(100% - 56px); }
 .member .a { color: #4a4f6a; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .pill { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap; }
 .pill.working { background: #fff4e0; color: #b7791f; } .pill.thinking { background: #eef0ff; color: #5865f2; }
-.pill.quota { background: #ffe9ea; color: var(--err); } .pill.meeting { background: #e2f6fe; color: #0b7aa8; } .pill.idle { background: #e7f8f0; color: #1f8a5b; }
+.pill.quota { background: #ffe9ea; color: var(--err); } .pill.paused { background: #eceef4; color: #5b6078; } .pill.meeting { background: #e2f6fe; color: #0b7aa8; } .pill.idle { background: #e7f8f0; color: #1f8a5b; }
 .pill.queued { background: #eef0f6; color: #59607d; } .pill.running { background: #fff4e0; color: #b7791f; } .pill.done { background: #e7f8f0; color: #1f8a5b; }
 .pill.failed { background: #ffe9ea; color: var(--err); } .pill.cancelled { background: #f1f1f4; color: #888; }
 

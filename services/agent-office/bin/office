@@ -124,7 +124,7 @@ def cmd_status(a):
             print(f"  {p['label']}: Ollama {p.get('version') or ''} {p['model']} - {state}")
     flags = [f"autopilot {'on' if s['autopilot'] else 'off'}", f"max parallel {s['max_parallel']}"]
     if s["paused"]:
-        flags.append("WORK PAUSED")
+        flags.append("OFFICE PAUSED - nothing runs until `office resume`")
     if st["quota_until"] > time.time():
         flags.append(f"Gemini quota pause for {int((st['quota_until'] - time.time()) / 60)} more min")
     print("  " + ", ".join(flags))

@@ -212,6 +212,94 @@ async def main():
 
 asyncio.run(main())
 PY
+# pausing the office stops a running task, holds replies and manager jobs, survives a restart, and the
+# resume continues the task's own conversation (fake runs: no agent is started)
+OFFICE_STATE="$TMP/pause" OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 PYTHONPATH="$REPO/.local/office-pydeps:$APP" python3 - "$APP" <<'PY' || fail "office pause and resume"
+import asyncio
+from office import agy, config
+from office.config import DATA
+from office.core import Office
+from office.store import Store
+
+runs = []
+class FakeRun:
+    def __init__(self, prompt, conv):
+        self.prompt, self.conv, self.done, self.result = prompt, conv, asyncio.Event(), agy.AgyResult()
+        runs.append(self)
+    async def wait(self):
+        await self.done.wait()
+        return self.result
+    def cancel(self):
+        self.result.cancelled, self.result.conv_id, self.result.steps, self.result.tokens = True, "conv-1", 3, 100
+        self.done.set()
+    def finish(self, text):
+        self.result.status, self.result.text, self.result.conv_id, self.result.steps = "SUCCESS", text, "conv-1", 2
+        self.done.set()
+
+def office(store):
+    o = Office(config.load(), store)
+    o.provider_paused = lambda pid, tools=True: False
+    def run(aid, pid, prompt, conv, *a, **k):
+        r = FakeRun(prompt, conv); r.provider = pid; return r
+    o._run = run
+    o.study.start = o.quota.start = o.graphs.start = o.ledger.start = lambda: None
+    o._provider_loop = lambda: asyncio.sleep(0)
+    async def plan(prompt, kind): return "NO_WORK_PLAN\nnothing to dispatch", ""
+    async def turn(prompt, kind): return "manager reply", ""
+    o.manager._codex_plan, o.manager._turn = plan, turn
+    return o
+
+async def settle(cond):
+    for _ in range(100):
+        if cond():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("timed out")
+
+async def main():
+    store = Store(DATA / "office.db")
+    o = office(store)
+    await o.start()
+    agent = next(iter(o.agents))
+    t = await o.add_task(agent, "Long job", "do it")
+    await settle(lambda: runs and store.task(t["id"])["status"] == "running")
+    await o.update_settings(paused=True)
+    await settle(lambda: store.task(t["id"])["status"] == "queued")
+    row = store.task(t["id"])
+    assert row["attempts"] == 0 and row["steps"] == 3, row
+    assert store.get(f"resume:{t['id']}")["conv"] == "conv-1"
+    assert o.agent_state(agent)["status"] == "paused" and o.settings()["paused_at"]
+    o.kick(); await asyncio.sleep(0.1)
+    assert len(runs) == 1 and store.task(t["id"])["status"] == "queued", "a task started while paused"
+    await o.dm(agent, "are you there?")
+    await settle(lambda: store.get("held_chats", {}).get(agent))
+    o.manager.chat("plan the week")
+    await settle(lambda: store.get("mgr_held"))
+    assert not store.messages("manager"), "the manager answered while paused"
+
+    o2 = office(store)                              # the machine restarts while paused
+    o2._chat_worker = lambda aid: asyncio.sleep(0)
+    await o2.start()
+    assert o2.settings()["paused"] and o2.manager.pending == 1 and store.get("held_chats", {}).get(agent)
+    o2.kick(); await asyncio.sleep(0.1)
+    assert len(runs) == 1, "a task started after a restart while paused"
+    await o2.update_settings(paused=False)
+    await settle(lambda: len(runs) == 2)
+    assert runs[1].conv == "conv-1" and "has now resumed" in runs[1].prompt, (runs[1].conv, runs[1].prompt)
+    assert o2.chat_q[agent].qsize() == 1 and not store.get("held_chats")
+    await settle(lambda: any(m["text"] == "manager reply" for m in store.messages("manager")))
+    assert not store.get("mgr_held")
+    runs[1].finish("C1 done")
+    await settle(lambda: store.task(t["id"])["status"] == "done")
+    row = store.task(t["id"])
+    assert row["steps"] == 5 and row["attempts"] == 1 and not store.get(f"resume:{t['id']}"), row
+    t2 = await o2.add_task(agent, "Interrupted by a shutdown", "do it")
+    await settle(lambda: len(runs) == 3 and store.task(t2["id"])["status"] == "running")
+    await o2.shutdown()                             # not paused: the task still continues after the restart
+    assert store.task(t2["id"])["status"] == "queued" and store.get(f"resume:{t2['id']}")["conv"] == "conv-1"
+
+asyncio.run(main())
+PY
 PORT=8799
 OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 \
     PYTHONPATH="$REPO/.local/office-pydeps" \

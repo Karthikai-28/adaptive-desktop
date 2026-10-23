@@ -13,6 +13,11 @@ config.json). When that provider is out of quota and a "fallback" is set, agents
 until the quota resets. A provider can name its own "fallback" in config.json, which makes a chain:
 Gemini -> Codex -> Claude Haiku -> local; each turn runs on the first provider in the chain that can take work.
 Meetings can have their own: "meeting_provider" (e.g. Codex) answers every agent's meeting turn, and only those; while it is out of quota, meetings use the agent's usual provider.
+
+Pause: the owner can stop the whole office (settings "paused"). Running tasks are interrupted and go back in
+the queue with their conversation kept (kv "resume:<task id>"), so on resume they continue where they
+stopped; replies, meeting turns and the manager's jobs are held in the database too. Nothing starts again
+until the owner resumes, and a restart comes back paused. A server shutdown keeps running tasks the same way.
 """
 import asyncio
 import datetime as dt
@@ -74,6 +79,8 @@ class Office:
         self.chat_q = {aid: asyncio.Queue() for aid in self.agents}
         self.meet_locks = {aid: asyncio.Lock() for aid in self.agents}
         self.meet_runs = {}                 # agent id -> AgyRun
+        self.held_runs = set()              # task ids interrupted by a pause or shutdown: queued again, not cancelled
+        self._stopping = False
         self.quota_until = store.get("quota_until", 0)
         self.paused_until = store.get("paused_until", {})   # provider id -> out of quota until (not agy)
         self.manager = Manager(self)
@@ -107,12 +114,16 @@ class Office:
             await asyncio.get_running_loop().run_in_executor(None, Graphs.configure_agy)
         if not os.environ.get("OFFICE_NO_REPO_SCAN"):
             self._spawn(self.repos.loop(lambda: agy.write_agy_settings(self.repos.paths)))
+        paused = self.settings()["paused"]
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             self.store.update_task(t["id"], status="queued")
-            self.store.add_event(t["agent"], "info", "Resuming after an office restart", t["id"])
+            self.store.add_event(t["agent"], "info", "Office restarted while paused; this task waits for the resume"
+                                 if paused else "Resuming after an office restart", t["id"])
             await self._sync_mission(t.get("mission_id"))
         for aid in self.agents:
             self._spawn(self._chat_worker(aid))
+        if not paused:
+            self._release_chats()
         self.manager.start()
         self.study.start()
         self.quota.start()
@@ -135,6 +146,7 @@ class Office:
             "autopilot": self.store.get("autopilot", self.mgr.get("autopilot", True)),
             "max_parallel": self.store.get("max_parallel", self.cfg.get("max_parallel_tasks", 3)),
             "paused": self.store.get("paused", False),
+            "paused_at": self.store.get("paused_at"),
             "provider": prov if prov in self.providers else self.main_agy,
             "fallback": fb if fb in self.providers else "",
         }
@@ -144,17 +156,62 @@ class Office:
             v = kw.get(k)
             if v is not None and v != "" and v not in self.providers:
                 raise ValueError(f"unknown provider '{v}'. Providers: {', '.join(self.providers)}")
-        for k in ("autopilot", "max_parallel", "paused", "provider", "fallback"):
+        for k in ("autopilot", "max_parallel", "provider", "fallback"):
             if k in kw and kw[k] is not None:
                 v = kw[k]
                 if k == "max_parallel":
                     v = max(1, min(8, int(v)))
                 self.store.set(k, v)
+        if kw.get("paused") is not None and bool(kw["paused"]) != self.settings()["paused"]:
+            await (self.pause() if kw["paused"] else self.resume())
         if kw.get("clear_quota") and self.quota_until:
             await self.quota.resume()
         await self.broadcast({"type": "settings", "settings": self.settings(), "quota_until": self.quota_until})
         self.kick()
         return self.settings()
+
+    # ------------------------------------------------------------------ pause / resume
+    async def pause(self):
+        """Stop every agent until the owner resumes: running tasks go back in the queue with their conversation,
+        and replies, meeting turns and the manager's jobs are held. Stored, so a restart stays paused."""
+        self.store.set("paused", True)
+        self.store.set("paused_at", time.time())
+        for tid, run in list(self.task_runs.items()):
+            self.held_runs.add(tid)
+            run.cancel()
+        for run in [*self.chat_runs.values(), *self.meet_runs.values()]:
+            run.cancel()
+        self.manager.hold()
+        await self.broadcast({"type": "settings", "settings": self.settings(), "quota_until": self.quota_until})
+        for aid in self.rt:
+            await self.push_agent(aid)
+        await self.toast("Office paused. Every agent stops and waits until you resume.", "info")
+
+    async def resume(self):
+        self.store.set("paused", False)
+        self.store.delete("paused_at")
+        self._release_chats()
+        self.manager.release()
+        await self.broadcast({"type": "settings", "settings": self.settings(), "quota_until": self.quota_until})
+        for aid in self.rt:
+            await self.push_agent(aid)
+        m = self.store.active_meeting()
+        if m:                                # answer what was said in the meeting while the office was paused
+            self._spawn(asyncio.gather(*(self._meeting_turn(m, a) for a in m["attendees"] if a in self.agents)))
+        await self.toast("Office resumed. Agents continue where they stopped.", "ok")
+        self.kick()
+
+    def _hold_chats(self, aid, batch):
+        held = self.store.get("held_chats", {})
+        held.setdefault(aid, []).extend([m, s] for m, s in batch)
+        self.store.set("held_chats", held)
+
+    def _release_chats(self):
+        for aid, items in self.store.get("held_chats", {}).items():
+            for m, s in items:
+                if aid in self.chat_q:
+                    self.chat_q[aid].put_nowait((m, s))
+        self.store.delete("held_chats")
 
     # ------------------------------------------------------------------ providers
     def provider_paused(self, pid, tools=True):
@@ -303,12 +360,15 @@ class Office:
         rt = self.rt[aid]
         meeting = self.store.active_meeting()
         in_meeting = bool(meeting and aid in meeting["attendees"])
+        paused = self.settings()["paused"]
         if aid == self.mgr["id"]:
-            status = "working" if self.manager.busy else "idle"
+            status = "paused" if paused else "working" if self.manager.busy else "idle"
             queued = self.manager.pending
         else:
             queued = len(self.store.next_queued(aid))
-            if self.provider_paused(self.provider_for(aid)) and not rt["task"]:
+            if paused:
+                status = "paused"
+            elif self.provider_paused(self.provider_for(aid)) and not rt["task"]:
                 status = "quota"
             elif rt["task"]:
                 status = "working"
@@ -656,9 +716,22 @@ class Office:
 
         study = self.study.program_of(t)
         key = self._conv_key(t, pid)
-        run = self._run(aid, pid, self.study.prompt(t) if study else self._task_prompt(t),
-                        self.store.get(key) if key else None, self.cfg.get("task_timeout_min", 45), on_event,
+        prompt = self.study.prompt(t) if study else self._task_prompt(t)
+        conv = self.store.get(key) if key else None
+        carry = self.store.get(f"resume:{t['id']}")      # interrupted by a pause or shutdown
+        self.store.delete(f"resume:{t['id']}")
+        if carry and carry.get("conv") and carry.get("provider") == pid:
+            conv = carry["conv"]                          # the same conversation: just carry on
+            prompt = (f"[The office was paused or restarted while you were working on task #{t['id']} \"{t['title']}\" and has "
+                      "now resumed. Continue from exactly where you stopped: check what you already wrote in the "
+                      "workspace, don't redo finished steps, and finish the task. Then reply with the report the "
+                      "task asked for.]")
+        elif carry:
+            prompt += ("\nNote: this task was interrupted part-way when the office was paused. Check the workspace "
+                       "for partial work and continue from there rather than starting over.")
+        run = self._run(aid, pid, prompt, conv, self.cfg.get("task_timeout_min", 45), on_event,
                         repo=t.get("repo") or "")
+        run.carry = carry or {}
         if pid != self.settings()["provider"] and not self.agents[aid].get("provider"):
             self._spawn(self.activity(aid, "info", f"Working on {self._label(pid)} while "
                                                    f"{self._label(self.settings()['provider'])} is out of quota", t["id"]))
@@ -680,6 +753,34 @@ class Office:
         finally:
             self.task_runs.pop(tid, None)
             self.rt[aid]["task"] = None
+        carry = getattr(run, "carry", {})
+        r.steps += carry.get("steps", 0)                 # work done before a pause counts for the task
+        r.tokens += carry.get("tokens", 0)
+        held = tid in self.held_runs and not r.ok
+        self.held_runs.discard(tid)
+        if held:
+            # paused or shutting down: back in the queue untouched, continuing this conversation on resume
+            self.store.set(f"resume:{tid}", {"provider": run.provider, "conv": r.conv_id,
+                                             "steps": r.steps, "tokens": r.tokens})
+            t = self.store.update_task(tid, status="queued", attempts=max(0, t["attempts"] - 1),
+                                       steps=r.steps, tokens=r.tokens)
+            await self.activity(aid, "info", f"Stopped task #{tid} for the restart; it continues from here afterwards"
+                                if self._stopping else f"Paused task #{tid}; it continues from here when the office "
+                                "resumes", tid)
+            await self.broadcast({"type": "task", "task": t})
+            await self._sync_mission(t.get("mission_id"))
+            await self.push_agent(aid)
+            return
+        if carry.get("conv") and carry.get("provider") == run.provider and not r.ok and not r.cancelled \
+                and not r.quota and t["attempts"] < 3:
+            # the interrupted conversation could not be continued: start the task over, with the partial work
+            self.store.set(f"resume:{tid}", {"steps": r.steps, "tokens": r.tokens})
+            t = self.store.update_task(tid, status="queued", attempts=max(0, t["attempts"] - 1), error=r.error)
+            await self.activity(aid, "error", f"Could not continue task #{tid}'s conversation; starting it again "
+                                "from the partial work", tid)
+            await self.broadcast({"type": "task", "task": t})
+            self.kick()
+            return
         study = self.study.program_of(t)
         key = self._conv_key(t, run.provider)
         if key:
@@ -755,6 +856,9 @@ class Office:
             batch = [(m, sender)]
             while not self.chat_q[aid].empty():           # answer several quick messages at once
                 batch.append(self.chat_q[aid].get_nowait())
+            if self.settings()["paused"]:                 # answered when the owner resumes the office
+                self._hold_chats(aid, batch)
+                continue
             who = lambda s: self.operator if s == "operator" else ("Claude (manager)" if s == self.mgr["id"] else s)
             lines = "\n".join(f"{who(s)}: {mm['text']}" for mm, s in batch)
             body = ("=== DIRECT MESSAGE ===\n" + lines +
@@ -797,6 +901,10 @@ class Office:
             finally:
                 self.chat_runs.pop(aid, None)
                 self.rt[aid]["chatting"] = False
+            if r.cancelled and (self.settings()["paused"] or self._stopping):   # cut off: reply after the resume
+                self._hold_chats(aid, batch)
+                await self.push_agent(aid)
+                continue
             if ckey and r.conv_id and r.tokens < CHAT_ROTATE_TOKENS:
                 self.store.set(ckey, r.conv_id)
             elif ckey and r.conv_id:
@@ -891,6 +999,8 @@ class Office:
         async with self.meet_locks[aid]:
             if not self.store.active_meeting() or self.store.active_meeting()["id"] != m["id"]:
                 return
+            if self.settings()["paused"]:              # resume() gives everyone a turn on what they missed
+                return
             seen_key = f"meetseen:{m['id']}:{aid}"
             seen = self.store.get(seen_key, 0)
             lines = self._transcript(m["id"], after_id=seen)
@@ -921,6 +1031,9 @@ class Office:
             finally:
                 self.meet_runs.pop(aid, None)
                 self.rt[aid]["meeting_busy"] = False
+            if r.cancelled and self.settings()["paused"]:   # not heard yet: answered on resume
+                await self.push_agent(aid)
+                return
             self.store.set(seen_key, lines[-1][0])
             if r.conv_id:
                 self.store.set(mkey, r.conv_id)
@@ -1021,6 +1134,12 @@ class Office:
             self.manager.cancel()
 
     async def shutdown(self):
+        self._stopping = True
+        self.held_runs.update(self.task_runs)            # running tasks continue their conversation after a restart
         for run in [*self.task_runs.values(), *self.chat_runs.values(), *self.meet_runs.values()]:
             run.cancel()
         self.manager.cancel()
+        for _ in range(40):                              # let them be queued again (agy is killed after 5 s)
+            if not self.task_runs:
+                break
+            await asyncio.sleep(0.2)

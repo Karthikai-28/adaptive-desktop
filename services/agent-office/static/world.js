@@ -3,7 +3,7 @@ import { T, W, H, objects, desks, meetingSeats, idleSpots, labels, spots, buildF
 import { sprite } from './sprites.js';
 
 const SPEED = 52;                       // px per second
-const STATUS_COL = { idle: '#3ecf8e', working: '#f5a524', thinking: '#8b9cff', quota: '#ef4444', meeting: '#38bdf8', you: '#3ecf8e' };
+const STATUS_COL = { idle: '#3ecf8e', working: '#f5a524', thinking: '#8b9cff', quota: '#ef4444', paused: '#94a3b8', meeting: '#38bdf8', you: '#3ecf8e' };
 const ICON = { write: '⌨', edit: '⌨', run: '▶', search: '🔍', web: '🌐', image: '🎨', read: '📄', think: '…', tool: '⚙', assign: '📋', error: '⚠', done: '✓', start: '…', info: '…' };
 
 let cv, ctx, floorLayer, hooks;
@@ -328,8 +328,8 @@ function draw(now) {
 
     // speech bubble, or a small activity bubble
     if (c.bubble && (now < c.bubble.until || c.speaking)) speech(x, y - th / 2 - 4, c.bubble.text, nf);
-    else if (c.kind !== 'you' && (c.status === 'working' || c.busy || c.status === 'quota')) {
-      const icon = c.status === 'quota' ? 'z' : c.busy && c.status !== 'working' ? '•••' : (ICON[c.actKind] || '…');
+    else if (c.kind !== 'you' && (c.status === 'working' || c.busy || c.status === 'quota' || c.status === 'paused')) {
+      const icon = c.status === 'paused' ? '❚❚' : c.status === 'quota' ? 'z' : c.busy && c.status !== 'working' ? '•••' : (ICON[c.actKind] || '…');
       const bx = x + tw / 2 + 2, by = y - th * 0.9;
       const dots = icon === '•••' || icon === '…';
       const txt = dots ? '•••'.slice(0, 1 + Math.floor(now / 350) % 3).padEnd(3, ' ') : icon;

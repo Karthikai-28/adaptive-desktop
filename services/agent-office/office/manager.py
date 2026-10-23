@@ -60,13 +60,36 @@ class Manager:
         self._cancelled = False
         self._limit_tries = {}      # prompt -> attempts while Claude's usage limit is hit
         self._rotate = 0            # context size that made the session due for a fresh start
+        self.held = []              # jobs waiting while the office is paused (store "mgr_held" keeps them)
+        self._held_now = False      # the running turn was cut off by a pause
 
     @property
     def pending(self):
-        return self.q.qsize()
+        return self.q.qsize() + len(self.held)
 
     def start(self):
+        self.held = [(p, k, None) for p, k in self.o.store.get("mgr_held", [])]
+        if not self.o.settings()["paused"]:
+            self.release()
         self.o._spawn(self._worker())
+
+    # ------------------------------------------------------------------ office pause
+    def hold(self):
+        """The office paused: stop the running turn; it waits, with every queued job, for release()."""
+        if self.busy:
+            self._held_now = True
+            self.cancel()
+
+    def _hold(self, job):
+        self.held.append(job)
+        # a turn someone awaits (meeting, minutes) can't outlive a restart; owner chats and reviews can
+        self.o.store.set("mgr_held", [[p, k] for p, k, f in self.held if f is None])
+
+    def release(self):
+        held, self.held = self.held, []
+        self.o.store.delete("mgr_held")
+        for job in held:
+            self.q.put_nowait(job)
 
     # ------------------------------------------------------------------ entry points
     def chat(self, text):
@@ -130,8 +153,12 @@ class Manager:
     # ------------------------------------------------------------------ worker
     async def _worker(self):
         while True:
-            prompt, kind, fut = await self.q.get()
-            self.busy, self._cancelled = True, False
+            job = await self.q.get()
+            if self.o.settings()["paused"]:
+                self._hold(job)
+                continue
+            prompt, kind, fut = job
+            self.busy, self._cancelled, self._held_now = True, False, False
             work_plan = prompt.startswith(PLAN_GATE) and f"\n{WORK_PLAN}\n" in prompt
             try:
                 if kind in PLAN_KINDS and not prompt.startswith(PLAN_GATE):
@@ -173,6 +200,11 @@ class Manager:
             except Exception as e:
                 text, err = "", f"office error: {e}"
             self.busy = False
+            if self._held_now:                  # paused mid-turn: the whole job runs again after the resume
+                self._held_now = False
+                self._hold(job)
+                await self.o.activity(self.id, "info", "Paused - this picks up again when the office resumes")
+                continue
             if not text and _usage_limited(err) and kind in ("chat", "autopilot", "minutes"):
                 # Claude's own usage limit: keep the job and try again later, by itself
                 tries = self._limit_tries.get(prompt, 0) + 1
