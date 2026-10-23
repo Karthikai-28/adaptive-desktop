@@ -3,6 +3,8 @@ package com.karthi.adaptivelink
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.view.OrientationEventListener
+import android.view.Surface
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -33,6 +35,7 @@ class CameraStreamer(
     private val executor = Executors.newSingleThreadExecutor()
     private var socket: WebSocket? = null
     private var provider: ProcessCameraProvider? = null
+    private var orientationListener: OrientationEventListener? = null
 
     fun start(owner: LifecycleOwner, preview: PreviewView, front: Boolean) {
         val opened = client.socket("/v1/camera", object : WebSocketListener() {
@@ -54,6 +57,25 @@ class CameraStreamer(
             val analysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
+
+            val listener = object : OrientationEventListener(context) {
+                override fun onOrientationChanged(orientation: Int) {
+                    if (orientation == ORIENTATION_UNKNOWN) return
+                    val rotation = when (orientation) {
+                        in 45 until 135 -> Surface.ROTATION_270
+                        in 135 until 225 -> Surface.ROTATION_180
+                        in 225 until 315 -> Surface.ROTATION_90
+                        else -> Surface.ROTATION_0
+                    }
+                    analysis.targetRotation = rotation
+                    view.targetRotation = rotation
+                }
+            }
+            if (listener.canDetectOrientation()) {
+                listener.enable()
+            }
+            orientationListener = listener
+
             analysis.setAnalyzer(executor) { image ->
                 try {
                     // Up to about one megabyte waiting to go: more than that
@@ -77,6 +99,8 @@ class CameraStreamer(
     }
 
     fun stop() {
+        orientationListener?.disable()
+        orientationListener = null
         provider?.unbindAll()
         provider = null
         socket?.close(1000, null)

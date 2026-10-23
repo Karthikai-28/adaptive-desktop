@@ -46,8 +46,8 @@ def pipeline_description(device):
     return (
         "appsrc name=src is-live=true do-timestamp=true format=time "
         "caps=image/jpeg "
-        "! jpegdec ! videoconvert ! videoscale ! videorate "
-        f"! video/x-raw,format=YUY2,width={WIDTH},height={HEIGHT},framerate={RATE}/1 "
+        "! jpegdec ! videoconvert ! videoscale add-borders=true ! videorate "
+        f"! video/x-raw,format=YUY2,width={WIDTH},height={HEIGHT},framerate={RATE}/1,pixel-aspect-ratio=1/1 "
         f"! v4l2sink device={device} sync=false"
     )
 
