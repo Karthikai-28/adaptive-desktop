@@ -29,6 +29,12 @@
                                        a node's parameters kept, compared, loaded back
     ros_info.py favorite <kind> <name> star or unstar a node, topic, service or action
     ros_info.py open-log <tool>        a terminal following that tool's log
+    ros_info.py pkg-catalog            templates, dependencies (installed or not) and defaults
+                                       for the New package dialog
+    ros_info.py pkg-create <json>      a new package in ~/ros2_ws/src from a template: {"name",
+                                       "template", "location", "dependencies", "node_name", ...,
+                                       "build": true, "use_workspace": true}
+    ros_info.py pkg-install-deps <path>   a terminal on rosdep install for that package
     ros_info.py say <command> [args]   any of these, answering with a sentence (the palette)
     ros_info.py terminal               a terminal with the same ROS setup as the panel
     ros_info.py install-gazebo         a terminal on the apt command (the password is typed there)
@@ -1081,14 +1087,15 @@ def launch_arguments(file):
     return {"ok": True, "arguments": parse_show_args(proc.stdout)}
 
 
-def workspace_build(packages=(), up_to=False):
+def workspace_build(packages=(), up_to=False, workspace=None):
     """colcon build of the workspace (or the chosen packages, and with `up_to`
     what they depend on), the way it was built last, in the distro's
-    environment without the overlay itself."""
+    environment without the overlay itself. `workspace` builds another one
+    than the panel's (a package just made in ~/ros2_ws)."""
     setup = settings()
-    if not setup.get("workspace"):
+    if not (workspace or setup.get("workspace")):
         return {"ok": False, "error": "Choose a workspace first"}
-    workspace = Path(setup["workspace"])
+    workspace = Path(workspace or setup["workspace"])
     layout = workspace_layout(workspace)
     if not any(source.is_dir() for source in layout["sources"]):
         return {"ok": False, "error": "The workspace has no src folder to build"}
@@ -1777,6 +1784,595 @@ def set_values(pairs):
 
 def set_value(key, value):
     return set_values([(key, value)])
+
+
+# ------------------------------------------------------------------ new packages
+
+# `pkg-catalog` feeds the New package dialog; `pkg-create` makes the package with
+# `ros2 pkg create` and then finishes the template (a real node, a component,
+# interfaces, a launch package). Packages are only ever made under ~/ros2_ws/src.
+ROS_WS = HOME / "ros2_ws"
+NEW_PACKAGE_PREFS = CONFIG.parent / "ros-new-package.json"
+PACKAGE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+CODE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+$")
+LICENSES = ["Apache-2.0", "BSD-3-Clause", "BSD-2-Clause", "MIT", "MIT-0", "BSL-1.0", "GPL-3.0-only",
+            "LGPL-3.0-only", "Proprietary"]
+PACKAGE_TEMPLATES = [
+    {"id": "cpp_node", "title": "C++ node", "language": "C++", "build_type": "ament_cmake",
+     "subtitle": "An rclcpp node with a timer, ready to run", "icon": "text-x-script-symbolic",
+     "required": ["rclcpp"], "suggested": ["std_msgs"], "fields": ["node_name"]},
+    {"id": "python_node", "title": "Python node", "language": "Python", "build_type": "ament_python",
+     "subtitle": "An rclpy node with a timer, ready to run", "icon": "text-x-python-symbolic",
+     "required": ["rclpy"], "suggested": ["std_msgs"], "fields": ["node_name"]},
+    {"id": "cpp_component", "title": "C++ component", "language": "C++", "build_type": "ament_cmake",
+     "subtitle": "A composable node: runs alone or in a container", "icon": "application-x-addon-symbolic",
+     "required": ["rclcpp", "rclcpp_components"], "suggested": ["std_msgs"], "fields": ["node_name"]},
+    {"id": "cpp_library", "title": "C++ library", "language": "C++", "build_type": "ament_cmake",
+     "subtitle": "A shared library other packages link against", "icon": "folder-documents-symbolic",
+     "required": [], "suggested": ["rclcpp"], "fields": ["library_name"]},
+    {"id": "interfaces", "title": "Interfaces", "language": "IDL", "build_type": "ament_cmake",
+     "subtitle": "Your own messages, services and actions", "icon": "mail-attachment-symbolic",
+     "required": ["rosidl_default_generators", "rosidl_default_runtime"], "suggested": [],
+     "fields": ["interfaces"]},
+    {"id": "bringup", "title": "Launch & config", "language": "Launch", "build_type": "ament_cmake",
+     "subtitle": "Launch files and parameters that start a robot", "icon": "media-playback-start-symbolic",
+     "required": ["launch", "launch_ros", "ament_index_python"], "suggested": [], "fields": []},
+    {"id": "empty_cmake", "title": "Empty CMake package", "language": "C++", "build_type": "ament_cmake",
+     "subtitle": "Only package.xml and CMakeLists.txt", "icon": "document-new-symbolic",
+     "required": [], "suggested": [], "fields": []},
+    {"id": "empty_python", "title": "Empty Python package", "language": "Python", "build_type": "ament_python",
+     "subtitle": "Only package.xml, setup.py and the module", "icon": "document-new-symbolic",
+     "required": [], "suggested": [], "fields": []},
+]
+INTERFACE_STARTERS = {
+    "msg": ("msg/Status.msg", "# A status report\nstring name\nbool ok\nstring message\n"),
+    "srv": ("srv/Command.srv", "# Request\nstring command\n---\n# Response\nbool success\nstring message\n"),
+    "action": ("action/Task.action", "# Goal\nint32 target\n---\n# Result\nbool success\n---\n"
+                                     "# Feedback\nfloat32 progress\n"),
+}
+# The packages most ROS 2 work depends on, by area, so they are offered (and
+# described) even before they are installed. Everything else installed is listed
+# under "Other installed".
+DEPENDENCY_CATALOG = {
+    "Core": {
+        "rclcpp": "C++ client library: nodes, topics, services, parameters",
+        "rclpy": "Python client library: nodes, topics, services, parameters",
+        "rclcpp_components": "Composable C++ nodes loaded into containers",
+        "rclcpp_lifecycle": "Managed (lifecycle) C++ nodes",
+        "rclcpp_action": "Action clients and servers in C++",
+        "rcl_interfaces": "Parameter and logging interfaces",
+        "builtin_interfaces": "Time and Duration",
+        "ament_index_cpp": "Find a package's share folder from C++",
+        "ament_index_python": "Find a package's share folder from Python",
+        "launch": "The launch system",
+        "launch_ros": "ROS actions for launch files: Node, ComposableNode",
+        "pluginlib": "Load plugins (classes) at run time",
+    },
+    "Messages": {
+        "std_msgs": "Basic types: String, Bool, Int32, Float64, Header",
+        "std_srvs": "Trigger, SetBool and Empty services",
+        "geometry_msgs": "Poses, twists, transforms, points",
+        "sensor_msgs": "Images, laser scans, IMU, point clouds, joint states",
+        "nav_msgs": "Odometry, paths, occupancy grids",
+        "trajectory_msgs": "Joint and multi-DOF trajectories",
+        "visualization_msgs": "Markers for RViz",
+        "diagnostic_msgs": "Diagnostic status reports",
+        "action_msgs": "Goal status for actions",
+        "example_interfaces": "AddTwoInts, Fibonacci and other examples",
+        "control_msgs": "Controller commands and states",
+        "ackermann_msgs": "Ackermann steering commands",
+        "vision_msgs": "Detections and classifications",
+    },
+    "TF & robot model": {
+        "tf2": "Coordinate frame transforms",
+        "tf2_ros": "TF listeners, broadcasters and buffers",
+        "tf2_geometry_msgs": "Transform geometry_msgs types",
+        "tf2_eigen": "Transform Eigen types",
+        "tf2_msgs": "TF messages",
+        "urdf": "Parse URDF robot descriptions",
+        "xacro": "Macros for URDF files",
+        "robot_state_publisher": "Publish TF from a URDF and joint states",
+        "joint_state_publisher": "Publish joint states for a URDF",
+        "kdl_parser": "Build a KDL tree from a URDF",
+        "angles": "Angle normalisation helpers",
+        "eigen3_cmake_module": "Find Eigen from CMake",
+    },
+    "Perception": {
+        "cv_bridge": "Convert between ROS images and OpenCV",
+        "image_transport": "Compressed and raw image topics",
+        "image_geometry": "Camera models",
+        "camera_info_manager": "Load and serve camera calibration",
+        "pcl_conversions": "Convert between ROS and PCL point clouds",
+        "pcl_ros": "PCL filters as ROS nodes",
+        "laser_geometry": "Laser scans to point clouds",
+        "message_filters": "Synchronise messages by time stamp",
+    },
+    "Navigation": {
+        "nav2_msgs": "Navigation 2 messages and actions",
+        "nav2_util": "Navigation 2 helpers",
+        "nav2_core": "Plugin interfaces for planners and controllers",
+        "nav2_costmap_2d": "2D costmaps",
+        "nav2_common": "Launch helpers for Navigation 2",
+        "slam_toolbox": "2D SLAM",
+        "robot_localization": "Sensor fusion (EKF/UKF)",
+    },
+    "Control": {
+        "controller_interface": "Write a ros2_control controller",
+        "hardware_interface": "Write a ros2_control hardware interface",
+        "controller_manager": "Load and switch controllers",
+        "realtime_tools": "Realtime-safe publishers and buffers",
+        "joy": "Joystick input",
+        "teleop_twist_keyboard": "Drive a robot from the keyboard",
+    },
+    "Manipulation": {
+        "moveit_core": "MoveIt core: kinematics, planning scene",
+        "moveit_ros_planning_interface": "MoveGroup interface from C++ and Python",
+        "moveit_msgs": "MoveIt messages and actions",
+    },
+    "Simulation": {
+        "gazebo_ros": "Gazebo Classic with ROS",
+        "gazebo_msgs": "Gazebo Classic messages",
+        "ros_gz_sim": "Gazebo (new) with ROS",
+        "ros_gz_bridge": "Bridge Gazebo and ROS topics",
+    },
+    "Visualization": {
+        "rviz2": "3D visualiser",
+        "rviz_common": "Write RViz plugins",
+        "rviz_default_plugins": "RViz's standard displays",
+        "interactive_markers": "Clickable markers in RViz",
+    },
+    "Logging & tools": {
+        "rosbag2_cpp": "Read and write bags from C++",
+        "rosbag2_py": "Read and write bags from Python",
+        "diagnostic_updater": "Publish diagnostics from a node",
+        "rcutils": "Logging macros and C utilities",
+    },
+    "Testing": {
+        "ament_cmake_gtest": "C++ unit tests with GoogleTest",
+        "ament_cmake_pytest": "Python tests from CMake",
+        "launch_testing": "Tests that start nodes",
+        "launch_testing_ament_cmake": "Register launch tests from CMake",
+        "ament_lint_auto": "Run the linters as tests",
+        "ament_lint_common": "The usual linters",
+    },
+}
+
+
+def installed_packages(roots):
+    """Package name -> its share folder, from the ament index of each prefix."""
+    found = {}
+    for root in roots:
+        for index in [root / "share" / "ament_index" / "resource_index" / "packages",
+                      *root.glob("*/share/ament_index/resource_index/packages")]:
+            try:
+                names = [p.name for p in index.iterdir()]
+            except OSError:
+                continue
+            for name in names:
+                found.setdefault(name, index.parents[2] / name)
+    return found
+
+
+def manifest_description(share):
+    import xml.etree.ElementTree as ET
+    try:
+        text = ET.parse(share / "package.xml").getroot().findtext("description", "")
+    except (OSError, ET.ParseError):
+        return ""
+    text = " ".join(text.split())
+    return text if len(text) <= 140 else text[:139] + "…"
+
+
+def has_cmake_config(share, name):
+    return any((share / "cmake" / f).is_file() for f in (f"{name}Config.cmake", f"{name}-config.cmake"))
+
+
+def package_locations():
+    """Where a new package may go: ~/ros2_ws/src, and folders under it that
+    already hold packages (src/<project>/packages)."""
+    src = ROS_WS / "src"
+    found = [{"name": "src", "path": str(src)}]
+    if not src.is_dir():
+        return found
+    for directory, dirs, files in os.walk(src):
+        rel = Path(directory).relative_to(src)
+        if "package.xml" in files or "COLCON_IGNORE" in files or len(rel.parts) >= 3:
+            dirs[:] = []
+            continue
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
+        if rel.parts and any((Path(directory) / d / "package.xml").is_file() for d in dirs):
+            found.append({"name": str(Path("src") / rel), "path": directory})
+    return found
+
+
+def new_package_defaults():
+    """The last choices, else a maintainer from the account. The git identity is
+    left alone: its global config can be a work account."""
+    prefs = read_json(NEW_PACKAGE_PREFS)
+    try:
+        account = pwd.getpwuid(os.getuid())
+        full = account.pw_gecos.split(",")[0].strip() or account.pw_name
+    except KeyError:
+        full = os.environ.get("USER", "")
+    return {"maintainer_name": prefs.get("maintainer_name") or full,
+            "maintainer_email": prefs.get("maintainer_email", ""),
+            "license": prefs.get("license") if prefs.get("license") in LICENSES else "Apache-2.0",
+            "location": prefs.get("location", "src"), "template": prefs.get("template", "cpp_node")}
+
+
+def package_catalog():
+    setup = settings()
+    distro = setup.get("distro")
+    if not distro:
+        return {"ok": False, "error": "ROS 2 is not installed"}
+    roots = [ROS_ROOT / distro, ROS_WS / "install"]
+    if setup.get("workspace"):
+        roots.append(Path(setup["workspace"]) / "install")
+    installed = installed_packages(roots)
+    in_workspace = {p["name"] for p in workspace_packages(str(ROS_WS))} if (ROS_WS / "src").is_dir() else set()
+    rows, seen = [], set()
+    for category, entries in DEPENDENCY_CATALOG.items():
+        for name, description in entries.items():
+            share = installed.get(name)
+            rows.append({"name": name, "category": category, "description": description,
+                         "installed": share is not None, "cmake": bool(share and has_cmake_config(share, name))})
+            seen.add(name)
+    for name in sorted(in_workspace - seen):
+        rows.append({"name": name, "category": "This workspace", "description": "In ~/ros2_ws/src",
+                     "installed": True, "workspace": True, "cmake": True})
+        seen.add(name)
+    for name, share in sorted(installed.items()):
+        if name not in seen:
+            rows.append({"name": name, "category": "Other installed", "description": manifest_description(share),
+                         "installed": True, "cmake": has_cmake_config(share, name)})
+    return {"ok": True, "distro": distro, "workspace": str(ROS_WS), "workspace_exists": ROS_WS.is_dir(),
+            "panel_workspace": setup.get("workspace") or "", "locations": package_locations(),
+            "taken": sorted(in_workspace), "shadowed": sorted(n for n in installed if n not in in_workspace),
+            "templates": PACKAGE_TEMPLATES, "categories": [*DEPENDENCY_CATALOG, "This workspace", "Other installed"],
+            "packages": rows, "licenses": LICENSES, "defaults": new_package_defaults(),
+            "colcon": shutil.which("colcon") is not None, "rosdep": shutil.which("rosdep") is not None}
+
+
+def pascal(name):
+    return "".join(part[:1].upper() + part[1:] for part in name.split("_") if part) or "Node"
+
+
+def xml_add(text, lines, after=None, before=("  <test_depend>", "  <export>")):
+    """Add manifest lines after the last `after` line, else before the first of
+    `before` there is: package.xml's schema fixes the order of its elements."""
+    block = "".join(f"  {line}\n" for line in lines)
+    if after and after in text:
+        at = text.index("\n", text.rindex(after)) + 1
+        return text[:at] + block + text[at:]
+    for marker in before:
+        if marker in text:
+            at = text.index(marker)
+            return text[:at] + block + "\n" + text[at:]
+    return text.replace("</package>", block + "</package>")
+
+
+def cmake_add(text, block):
+    """Add a CMake block before the tests (or ament_package())."""
+    marker = "if(BUILD_TESTING)" if "if(BUILD_TESTING)" in text else "ament_package()"
+    at = text.index(marker)
+    return text[:at] + block.rstrip() + "\n\n" + text[at:]
+
+
+def cpp_node_source(node, publish):
+    cls = pascal(node)
+    return f"""#include <chrono>
+#include <memory>
+{'#include <string>' + chr(10) if publish else ''}
+#include "rclcpp/rclcpp.hpp"
+{'#include "std_msgs/msg/string.hpp"' + chr(10) if publish else ''}
+using namespace std::chrono_literals;
+
+class {cls} : public rclcpp::Node
+{{
+public:
+  {cls}()
+  : Node("{node}")
+  {{
+{'    publisher_ = create_publisher<std_msgs::msg::String>("~/status", 10);' + chr(10) if publish else ''}    timer_ = create_wall_timer(1s, [this]() {{tick();}});
+  }}
+
+private:
+  void tick()
+  {{
+{'''    std_msgs::msg::String message;
+    message.data = "running";
+    publisher_->publish(message);
+''' if publish else ''}    RCLCPP_INFO(get_logger(), "{node} is running");
+  }}
+
+{'  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;' + chr(10) if publish else ''}  rclcpp::TimerBase::SharedPtr timer_;
+}};
+
+int main(int argc, char ** argv)
+{{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<{cls}>());
+  rclcpp::shutdown();
+  return 0;
+}}
+"""
+
+
+def cpp_component_source(package, node, publish):
+    cls = pascal(node)
+    return f"""#include <chrono>
+#include <memory>
+
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_components/register_node_macro.hpp"
+{'#include "std_msgs/msg/string.hpp"' + chr(10) if publish else ''}
+using namespace std::chrono_literals;
+
+namespace {package}
+{{
+
+class {cls} : public rclcpp::Node
+{{
+public:
+  explicit {cls}(const rclcpp::NodeOptions & options)
+  : Node("{node}", options)
+  {{
+{'    publisher_ = create_publisher<std_msgs::msg::String>("~/status", 10);' + chr(10) if publish else ''}    timer_ = create_wall_timer(1s, [this]() {{tick();}});
+  }}
+
+private:
+  void tick()
+  {{
+{'''    std_msgs::msg::String message;
+    message.data = "running";
+    publisher_->publish(message);
+''' if publish else ''}    RCLCPP_INFO(get_logger(), "{node} is running");
+  }}
+
+{'  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;' + chr(10) if publish else ''}  rclcpp::TimerBase::SharedPtr timer_;
+}};
+
+}}  // namespace {package}
+
+RCLCPP_COMPONENTS_REGISTER_NODE({package}::{cls})
+"""
+
+
+def python_node_source(node, publish):
+    cls = pascal(node)
+    return f'''"""The {node} node."""
+
+import rclpy
+from rclpy.node import Node
+{'from std_msgs.msg import String' + chr(10) if publish else ''}
+
+class {cls}(Node):
+    """Says it is running, once a second."""
+
+    def __init__(self):
+        super().__init__('{node}')
+{"        self.publisher = self.create_publisher(String, '~/status', 10)" + chr(10) if publish else ''}        self.timer = self.create_timer(1.0, self.tick)
+
+    def tick(self):
+        """Run once a second."""
+{"        self.publisher.publish(String(data='running'))" + chr(10) if publish else ''}        self.get_logger().info('{node} is running')
+
+
+def main(args=None):
+    """Spin the node until Ctrl+C."""
+    rclpy.init(args=args)
+    node = {cls}()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
+    main()
+'''
+
+
+def finish_template(template, path, name, spec, cmake_deps):
+    """Turn what `ros2 pkg create` wrote into the chosen template."""
+    tid, node = template["id"], spec.get("node_name") or f"{name}_node"
+    publish = "std_msgs" in spec["dependencies"]
+    manifest, cmake = path / "package.xml", path / "CMakeLists.txt"
+    if tid == "cpp_node":
+        (path / "src" / f"{node}.cpp").write_text(cpp_node_source(node, publish))
+    elif tid == "python_node":
+        (path / name / f"{node}.py").write_text(python_node_source(node, publish))
+    elif tid == "cpp_component":
+        (path / "src").mkdir(exist_ok=True)
+        (path / "src" / f"{node}.cpp").write_text(cpp_component_source(name, node, publish))
+        cmake.write_text(cmake_add(cmake.read_text(), f"""
+add_library({node}_component SHARED src/{node}.cpp)
+target_compile_features({node}_component PUBLIC cxx_std_17)
+ament_target_dependencies({node}_component {' '.join(f'"{d}"' for d in cmake_deps)})
+rclcpp_components_register_node({node}_component
+  PLUGIN "{name}::{pascal(node)}"
+  EXECUTABLE {node})
+install(TARGETS {node}_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+"""))
+    elif tid == "interfaces":
+        kinds = [k for k in INTERFACE_STARTERS if k in (spec.get("interfaces") or ["msg"])] or ["msg"]
+        files = []
+        for kind in kinds:
+            rel, body = INTERFACE_STARTERS[kind]
+            (path / rel).parent.mkdir(exist_ok=True)
+            (path / rel).write_text(body)
+            files.append(rel)
+        deps = [d for d in spec["dependencies"] if d not in template["required"]]
+        if "action" in kinds and "action_msgs" not in deps:
+            deps.append("action_msgs")
+        finds = "".join(f"find_package({d} REQUIRED)\n" for d in deps)
+        cmake.write_text(cmake_add(cmake.read_text(), f"""
+find_package(rosidl_default_generators REQUIRED)
+{finds}rosidl_generate_interfaces(${{PROJECT_NAME}}
+{''.join(f'  "{f}"{chr(10)}' for f in files)}{f'  DEPENDENCIES {" ".join(deps)}{chr(10)}' if deps else ''})
+ament_export_dependencies(rosidl_default_runtime)
+"""))
+        text = xml_add(manifest.read_text(), ["<buildtool_depend>rosidl_default_generators</buildtool_depend>"],
+                       after="<buildtool_depend>")
+        text = xml_add(text, [*(f"<depend>{d}</depend>" for d in deps),
+                              "<exec_depend>rosidl_default_runtime</exec_depend>"])
+        text = xml_add(text, ["<member_of_group>rosidl_interface_packages</member_of_group>"],
+                       before=("  <export>",))
+        manifest.write_text(text)
+    elif tid == "bringup":
+        (path / "launch").mkdir(exist_ok=True)
+        (path / "config").mkdir(exist_ok=True)
+        (path / "launch" / f"{name}.launch.py").write_text(f'''"""Start what {name} brings up."""
+
+import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch_ros.actions import Node  # noqa: F401
+
+
+def generate_launch_description():
+    share = get_package_share_directory('{name}')
+    config = os.path.join(share, 'config', 'params.yaml')  # noqa: F841
+    return LaunchDescription([
+        # The nodes this package starts, for example:
+        # Node(package='my_robot', executable='driver', parameters=[config]),
+    ])
+''')
+        (path / "config" / "params.yaml").write_text(
+            f"# Parameters for the nodes {name} starts, by node name.\n/**:\n  ros__parameters: {{}}\n")
+        cmake.write_text(cmake_add(cmake.read_text(), """
+install(DIRECTORY launch config
+  DESTINATION share/${PROJECT_NAME})
+"""))
+
+
+def create_package(spec):
+    """`ros2 pkg create` under ~/ros2_ws/src, the template finished, then
+    optionally built and made the panel's workspace."""
+    if not isinstance(spec, dict):
+        return {"ok": False, "error": "The package description is not valid"}
+    setup = settings()
+    if not setup.get("distro"):
+        return {"ok": False, "error": "ROS 2 is not installed"}
+    template = next((t for t in PACKAGE_TEMPLATES if t["id"] == spec.get("template")), None)
+    if not template:
+        return {"ok": False, "error": "Choose a template"}
+    name = str(spec.get("name", "")).strip()
+    if not PACKAGE_NAME.match(name) or "__" in name or name.endswith("_") or len(name) > 64:
+        return {"ok": False, "error": "A package name is lowercase letters, digits and single underscores, "
+                                      "starting with a letter"}
+    if template["build_type"] == "ament_python":
+        import keyword
+        if keyword.iskeyword(name):
+            return {"ok": False, "error": f"{name} is a Python keyword"}
+    src = (ROS_WS / "src").resolve() if (ROS_WS / "src").exists() else ROS_WS / "src"
+    location = Path(os.path.expanduser(str(spec.get("location") or src)))
+    location = (ROS_WS / location if not location.is_absolute() else location).resolve()
+    if location != src and src not in location.parents:
+        return {"ok": False, "error": "New packages go in ~/ros2_ws/src"}
+    if location == src:
+        src.mkdir(parents=True, exist_ok=True)
+    elif not location.is_dir():
+        return {"ok": False, "error": f"{location} does not exist"}
+    target = location / name
+    if target.exists() or os.path.lexists(target):
+        return {"ok": False, "error": f"{str(target).replace(str(HOME), '~')} already exists"}
+    if name in {p["name"] for p in workspace_packages(str(ROS_WS))}:
+        return {"ok": False, "error": f"~/ros2_ws already has a package named {name}"}
+    for field in ("node_name", "library_name"):
+        value = str(spec.get(field) or "")
+        if value and not CODE_NAME.match(value):
+            return {"ok": False, "error": f"{field.replace('_', ' ').capitalize()} must be a C/Python identifier"}
+    email = str(spec.get("maintainer_email") or "").strip()
+    if email and not EMAIL.match(email):
+        return {"ok": False, "error": "The maintainer email does not look like an address"}
+    license_name = spec.get("license") if spec.get("license") in LICENSES else "Apache-2.0"
+    deps = []
+    for dep in [*template["required"], *(spec.get("dependencies") or [])]:
+        dep = str(dep).strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", dep):
+            return {"ok": False, "error": f"{dep or 'An empty name'} is not a package name"}
+        if dep not in deps and dep != name:
+            deps.append(dep)
+    spec = {**spec, "dependencies": deps}
+
+    installed = installed_packages([ROS_ROOT / setup["distro"], ROS_WS / "install"])
+    in_workspace = {p["name"] for p in workspace_packages(str(ROS_WS))}
+    missing = [d for d in deps if d not in installed and d not in in_workspace]
+    cmake_template = template["build_type"] == "ament_cmake"
+    # CMake finds only packages with a CMake config; the rest are run-time dependencies.
+    cmake_deps = [d for d in deps if d in in_workspace or d in missing
+                  or has_cmake_config(installed[d], d)] if cmake_template else deps
+    run_deps = [d for d in deps if d not in cmake_deps]
+    if template["id"] == "interfaces":
+        cmake_deps, run_deps = [], []
+    argv = ["ros2", "pkg", "create", name, "--build-type", template["build_type"],
+            "--destination-directory", str(location), "--license", license_name,
+            "--description", str(spec.get("description") or "").strip() or f"The {name} package",
+            "--maintainer-name", str(spec.get("maintainer_name") or "").strip() or os.environ.get("USER", "maintainer")]
+    if email:
+        argv += ["--maintainer-email", email]
+    if template["id"] in ("cpp_node", "python_node"):
+        argv += ["--node-name", str(spec.get("node_name") or f"{name}_node")]
+    if template["id"] == "cpp_library":
+        argv += ["--library-name", str(spec.get("library_name") or name)]
+    if cmake_deps:
+        argv += ["--dependencies", *cmake_deps]
+    env = ros_env({**setup, "workspace": ""})
+    done = subprocess.run(argv, cwd=str(location), env=env, capture_output=True, text=True, timeout=60)
+    if done.returncode != 0 or not (target / "package.xml").is_file():
+        if target.is_dir():
+            shutil.rmtree(target)
+        return {"ok": False, "error": (done.stderr or done.stdout).strip()[-400:] or "ros2 pkg create failed"}
+    try:
+        finish_template(template, target, name, spec, cmake_deps)
+        if run_deps:
+            manifest = target / "package.xml"
+            manifest.write_text(xml_add(manifest.read_text(), [f"<exec_depend>{d}</exec_depend>" for d in run_deps]))
+    except (OSError, ValueError) as e:
+        shutil.rmtree(target)
+        return {"ok": False, "error": f"Finishing the {template['title']} template failed: {e}"}
+
+    with file_lock(NEW_PACKAGE_PREFS.with_suffix(".lock")):
+        write_json(NEW_PACKAGE_PREFS, {
+            "maintainer_name": str(spec.get("maintainer_name") or "").strip(), "maintainer_email": email,
+            "license": license_name, "template": template["id"],
+            "location": str(location.relative_to(src.parent)) if location != src else "src"})
+    files = sorted(str(p.relative_to(target)) for p in target.rglob("*") if p.is_file())
+    reply = {"ok": True, "name": name, "path": str(target), "files": files, "missing": missing,
+             "command": " ".join(shlex.quote(a) for a in argv)}
+    if spec.get("use_workspace") and setup.get("workspace") != str(ROS_WS.resolve()):
+        used = set_value("workspace", str(ROS_WS))
+        reply["workspace_set"] = used.get("ok") is not False
+    if spec.get("build"):
+        reply["build"] = workspace_build([name], workspace=str(ROS_WS))
+    return reply
+
+
+def install_package_dependencies(path):
+    """A terminal on rosdep for a package in ~/ros2_ws (the password is typed there)."""
+    target = Path(path).expanduser().resolve()
+    src = (ROS_WS / "src").resolve()
+    if src not in target.parents or not (target / "package.xml").is_file():
+        return {"ok": False, "error": "That is not a package in ~/ros2_ws/src"}
+    distro = settings()["distro"]
+    if not distro:
+        return {"ok": False, "error": "ROS 2 is not installed"}
+    if shutil.which("rosdep") is None:
+        return {"ok": False, "error": "rosdep is not installed (sudo apt install python3-rosdep)"}
+    command = (f"rosdep install --from-paths {shlex.quote(str(target))} --ignore-src -y -r "
+               f"--rosdistro {shlex.quote(distro)}")
+    script = (f"echo {shlex.quote('$ ' + command)}; {command} || echo 'If rosdep is not set up yet: "
+              f"sudo rosdep init; rosdep update'; echo; read -rp 'Press Enter to close. '")
+    return open_terminal(f"Dependencies of {target.name}", ["bash", "-c", script])
 
 
 # ------------------------------------------------------------------ thumbnails
@@ -3171,6 +3767,12 @@ def run_command(command, args, program="ros_info.py"):
             return parameter_profile(args[0], args[1], args[2])
         if command == "open-log" and len(args) == 1:
             return open_log(args[0])
+        if command == "pkg-catalog":
+            return package_catalog()
+        if command == "pkg-create" and len(args) == 1:
+            return create_package(json.loads(args[0]))
+        if command == "pkg-install-deps" and len(args) == 1:
+            return install_package_dependencies(args[0])
         return {"ok": False, "error": f"usage: see the top of {program}"}
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as e:
         return {"ok": False, "error": str(e)}
@@ -3193,6 +3795,8 @@ def sentence(command, result):
         return f"Playing {Path(result.get('path', '')).name}"
     if command == "build":
         return "Building"
+    if command == "pkg-create":
+        return f"Created {result.get('name')} in {result.get('path', '').replace(str(HOME), '~')}"
     if command in ("run-control", "bag-control"):
         return "Paused" if result.get("paused") else "Resumed"
     if command == "use-robot-profile" and result.get("profile"):

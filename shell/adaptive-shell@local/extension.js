@@ -996,6 +996,7 @@ class AdaptiveShellV16 {
                 snapshots: this._snapshots,
                 screenText: this._screenText,
                 dropdown: this._dropdown,
+                rosNewPackage: () => this._rosPanel && this._rosPanel.newPackage(),
             });
             this._shellActions.attach();
         } catch (e) {

@@ -845,6 +845,13 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   Calls/goals/messages have typed per-field editors; arrays use JSON inputs.
   Folding a row cancels active Hz/Preview subscriptions. Recording has a
   persistent island activity with screen-sharing privacy.
+- ✅ **New package dialog** (sandbox-verified, not yet live): `ros2 pkg create`
+  as a four-step wizard (template, configure, two-column dependencies, review)
+  that only writes under `~/ros2_ws/src`. `verify-ros-package-create.py` makes
+  one package from each of the eight templates, builds them all with colcon and
+  runs the nodes, component, interfaces and launch file; `verify-ros-nested.sh`
+  clicks through the dialog in a real GNOME Shell; `ros new` in the palette
+  opens it.
 - ✅ **Workflow: build → launch → inspect → stop** (`verify-ros-panel.py`, a
   real colcon build included; `verify-ros-nested.sh` drives each in the panel):
   workspace build of all or one package the way it was built last (a
@@ -910,7 +917,8 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
    Then Gazebo with a world, Record and Stop (watch the icon and the island),
    a launch file with an argument, and `ros` in the command palette. Then
    Build on `robotics_learning_lab` (its `.build/humble` tree), a plot, the
-   graph view, and a parameter profile restore.
+   graph view, and a parameter profile restore. Then **New package…**: a C++
+   node with `std_msgs`, built, and run from Executable nodes.
 0. `./install.sh --status`, then `./install.sh`, then
    `./scripts/reload-adaptive-shell.sh --restart-shell`. As of Milestone 16
    the live extension is two milestones behind the repository, four

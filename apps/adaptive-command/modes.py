@@ -600,7 +600,12 @@ def ros_rows(rest, status, helper=ROS_HELPER):
     tools = status.get("tools", {})
     distro = (status.get("distro") or "").title()
     rows = [row("ROS 2 terminal", f"{distro} · domain {status['domain']}", ROS_GROUP,
-                "utilities-terminal-symbolic", "Open", ("run", [sys.executable, str(helper), "terminal"], None))]
+                "utilities-terminal-symbolic", "Open", ("run", [sys.executable, str(helper), "terminal"], None)),
+            # The dialog lives in the shell: ask it through the shell's own action bridge.
+            row("New package…", "ros2 pkg create in ~/ros2_ws/src, from a template", ROS_GROUP,
+                "list-add-symbolic", "Create", ("run", ["gdbus", "call", "--session", "-d", "org.gnome.Shell",
+                                                        "-o", "/org/adaptive/Shell", "-m", "org.adaptive.Shell.Run",
+                                                        "ros-new-package"], None))]
     for tool, name in (("rviz2", "RViz2"), ("gazebo", "Gazebo"), ("rqt", "rqt"), ("rqt_graph", "rqt_graph")):
         if tools.get(tool, {}).get("installed"):
             rows.append(row(f"Open {name}", f"On domain {status['domain']}", ROS_GROUP, ROS_ICON, "Open",

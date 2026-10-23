@@ -3533,3 +3533,77 @@
 .adaptive-ros-setup { spacing: 3px; }
 .adaptive-ros-select { text-align: left; color: #F5F5F7; padding: 5px 6px; }
 .adaptive-ros-dropdown { padding: 2px 0; }
+
+/* ROS 2 New package dialog (rosPackageWizard.js) */
+.adaptive-ros-wizard { background-color: #1C1C1E; border: 1px solid rgba(255, 255, 255, 0.10); }
+.adaptive-ros-wizard .modal-dialog-content-box { padding: 22px 24px 12px 24px; spacing: 12px; }
+.adaptive-ros-wizard-header { spacing: 16px; }
+.adaptive-ros-wizard-title { font-size: 18px; font-weight: 700; color: #F5F5F7; }
+.adaptive-ros-wizard-subtitle { font-size: 12px; color: #98989D; }
+.adaptive-ros-wizard-steps { spacing: 4px; }
+.adaptive-ros-wizard-step { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #8E8E93; }
+.adaptive-ros-wizard-step:checked { background-color: #0A84FF; color: #FFFFFF; }
+.adaptive-ros-wizard-step-done { color: #F5F5F7; }
+.adaptive-ros-wizard-body { spacing: 10px; }
+.adaptive-ros-wizard-heading { font-size: 13px; font-weight: 700; color: #F5F5F7; padding-top: 4px; }
+.adaptive-ros-wizard-hint { font-size: 12px; color: #98989D; }
+.adaptive-ros-wizard-warning { font-size: 12px; color: #FF9F0A; }
+.adaptive-ros-wizard-error { font-size: 12px; color: #FF453A; }
+.adaptive-ros-wizard-grid { spacing: 10px; }
+.adaptive-ros-wizard-grid-row { spacing: 10px; }
+.adaptive-ros-wizard-card {
+    min-height: 118px; padding: 14px; border-radius: 12px; text-align: left;
+    background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.adaptive-ros-wizard-card:hover, .adaptive-ros-wizard-card:focus { background-color: rgba(255, 255, 255, 0.09); }
+.adaptive-ros-wizard-card:checked { background-color: rgba(10, 132, 255, 0.16); border: 2px solid #0A84FF; }
+.adaptive-ros-wizard-card StBoxLayout { spacing: 6px; }
+.adaptive-ros-wizard-card-icon { icon-size: 26px; color: #0A84FF; }
+.adaptive-ros-wizard-card-title { font-size: 14px; font-weight: 700; color: #F5F5F7; }
+.adaptive-ros-wizard-card-subtitle { font-size: 11px; color: #98989D; }
+.adaptive-ros-wizard-badge {
+    font-size: 10px; font-weight: 700; color: #C7C7CC; padding: 1px 7px; border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.10);
+}
+.adaptive-ros-wizard-badge-warn { color: #FF9F0A; background-color: rgba(255, 159, 10, 0.14); }
+.adaptive-ros-wizard-form { spacing: 12px; padding-right: 8px; }
+.adaptive-ros-wizard-field { spacing: 14px; }
+.adaptive-ros-wizard-field > StBoxLayout { spacing: 5px; }
+.adaptive-ros-wizard-label { width: 120px; font-size: 12px; font-weight: 600; color: #C7C7CC; padding-top: 7px; }
+.adaptive-ros-wizard-pair { spacing: 8px; }
+.adaptive-ros-wizard-chip {
+    padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #C7C7CC;
+    background-color: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.adaptive-ros-wizard-chip:hover, .adaptive-ros-wizard-chip:focus { background-color: rgba(255, 255, 255, 0.12); color: #F5F5F7; }
+.adaptive-ros-wizard-chip:checked { background-color: rgba(10, 132, 255, 0.22); border-color: #0A84FF; color: #FFFFFF; }
+.adaptive-ros-wizard-chip-small { padding: 3px 9px; font-size: 11px; }
+.adaptive-ros-wizard-columns { spacing: 14px; }
+.adaptive-ros-wizard-column { spacing: 8px; }
+.adaptive-ros-wizard-selected {
+    width: 300px; padding: 10px; border-radius: 12px; background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.adaptive-ros-wizard-chips { spacing: 6px; }
+.adaptive-ros-wizard-chip-row { spacing: 6px; }
+.adaptive-ros-wizard-scroll { border-radius: 8px; }
+.adaptive-ros-wizard-dep { spacing: 10px; padding: 6px 8px; border-radius: 8px; }
+.adaptive-ros-wizard-dep:hover { background-color: rgba(255, 255, 255, 0.05); }
+.adaptive-ros-wizard-dep-top { spacing: 6px; }
+.adaptive-ros-wizard-dep-name { font-size: 13px; font-weight: 600; color: #F5F5F7; font-family: monospace; }
+.adaptive-ros-wizard-dep-about { font-size: 11px; color: #98989D; }
+.adaptive-ros-wizard-dep-button {
+    padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #0A84FF;
+    background-color: rgba(10, 132, 255, 0.14);
+}
+.adaptive-ros-wizard-dep-button:hover, .adaptive-ros-wizard-dep-button:focus { background-color: rgba(10, 132, 255, 0.28); }
+.adaptive-ros-wizard-fact { spacing: 14px; }
+.adaptive-ros-wizard-value { font-size: 13px; color: #F5F5F7; }
+.adaptive-ros-wizard-file { font-family: monospace; font-size: 12px; color: #C7C7CC; }
+.adaptive-ros-wizard-file-root { color: #F5F5F7; font-weight: 700; }
+.adaptive-ros-wizard-command {
+    font-family: monospace; font-size: 11px; color: #C7C7CC; padding: 8px; border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.30);
+}
+.adaptive-ros-wizard-done { font-size: 20px; font-weight: 700; color: #30D158; }
+.adaptive-ros-wizard .modal-dialog-linked-button:insensitive { color: rgba(255, 255, 255, 0.30); }

@@ -24,6 +24,7 @@ const PanelMenu = imports.ui.panelMenu;
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const CC = Me.imports.ccUtil;
 const Sparkline = Me.imports.sparkline;
+const PackageWizard = Me.imports.rosPackageWizard;
 
 const HELPER = Me.dir.get_child('tools').get_child('ros_info.py').get_path();
 const LIST_MAX_HEIGHT = 680;
@@ -1825,6 +1826,7 @@ var RosPanel = class RosPanel {
         toggle.x_expand = true;
         toggle.get_child().x_align = Clutter.ActorAlign.START;
         heading.add_child(toggle);
+        heading.add_child(this._smallButton('＋ New', () => this.newPackage()));
         if (packages.length && status.tools.build.installed) {
             heading.add_child(this._smallButton(`${this._buildUpTo ? '✓' : '○'} With dependencies`, () => {
                 this._buildUpTo = !this._buildUpTo;
@@ -1862,6 +1864,28 @@ var RosPanel = class RosPanel {
                 ].filter(Boolean),
             }));
         }
+    }
+
+    // The New package dialog; the panel closes while it is open. Also the
+    // palette's `ros new` (shellActions.js, ros-new-package).
+    newPackage() {
+        this._button.menu.close();
+        if (this._packageDialog)
+            return;
+        const dialog = new PackageWizard.PackageWizard({
+            helper: (args, done) => this._helper(args, done),
+            openFolder: path => this._openFolder(path),
+            onCreated: reply => {
+                const where = reply.path.replace(GLib.get_home_dir(), '~');
+                this._notes.package = { text: `Created ${reply.name} in ${where}` +
+                    `${reply.build && reply.build.ok ? ' · building' : ''}` };
+                this._loadStatus();
+                this._pollRuns();
+            },
+        });
+        this._packageDialog = dialog;
+        dialog.connect('destroy', () => { this._packageDialog = null; });
+        dialog.open();
     }
 
     _buildWorkspace(packages, upTo = false) {
@@ -1951,6 +1975,15 @@ var RosPanel = class RosPanel {
         heading.add_child(label);
         heading.add_child(this._smallButton('Rescan files', () => this._loadStatus(null, true)));
         this._out.add_child(heading);
+
+        const created = this._notes.package;
+        this._out.add_child(CC.makeRow({
+            icon: 'list-add-symbolic',
+            title: 'New package',
+            subtitle: created ? created.text : 'ros2 pkg create in ~/ros2_ws/src, from a template',
+            alert: !!(created && created.error),
+            action: { label: 'Create…', onClick: () => this.newPackage() },
+        }));
 
         this._out.add_child(this._toolRow(status, 'rviz2', 'video-display-symbolic', 'RViz2',
             'Topics, TF and robot models in 3D'));

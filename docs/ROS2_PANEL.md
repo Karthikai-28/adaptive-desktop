@@ -66,6 +66,42 @@ does the panel's actions from the keyboard.
     or sits in a colcon workspace the panel does not use, the card offers
     **Use it** or **Always follow** (the workspace then follows the active
     project, "from the active project").
+- **New package** (top of Launch, **Create…**; also **＋ New** on the
+  Packages heading and `ros new` in the palette): `ros2 pkg create` as a
+  four-step dialog, the way an IDE starts a project. Packages are only ever
+  made under `~/ros2_ws/src` (or a folder there that already holds packages,
+  like `src/<project>/packages`); the helper refuses anything else, a symlink
+  out included.
+  1. **Template**: C++ node, Python node, C++ component (composable, also runs
+     alone), C++ library, Interfaces (starter `msg/Status.msg`,
+     `srv/Command.srv`, `action/Task.action`), Launch & config (`launch/`,
+     `config/params.yaml`, installed), empty CMake or Python package. A second
+     click on the chosen card moves on.
+  2. **Configure**: name (checked as it is typed: lowercase, digits and single
+     underscores; taken in `~/ros2_ws`; a Python keyword; a name ROS already
+     has only warns), node or library name (follows the package name until
+     edited), location, description, maintainer and licence. The last
+     maintainer, licence, location and template are remembered in
+     `~/.config/adaptive-desktop/ros-new-package.json`; the git identity is
+     never read (its global config can be a work account).
+  3. **Dependencies**: two columns. Left, everything that can be added:
+     Recommended for the template, the curated areas (Core, Messages, TF &
+     robot model, Perception, Navigation, Control, Manipulation, Simulation,
+     Visualization, Logging & tools, Testing; packages not installed are
+     listed and marked), This workspace, and every other installed package; a
+     search spans them all and Enter adds the first match; a name not listed
+     can be added as typed. Right, what the package will depend on; the
+     template's own are fixed.
+  4. **Review**: the facts, the files it will hold, the `ros2 pkg create`
+     line, and what happens after: **Build it now** (colcon, this package
+     only, in `~/ros2_ws`, shown in the run manager), **Use ~/ros2_ws in the
+     ROS 2 panel**, **Open the folder**.
+  Then a result page, with **Install with rosdep** when a dependency is not
+  installed (a terminal on `rosdep install --from-paths <pkg> --ignore-src`).
+  For CMake templates a dependency without a CMake config (`launch_ros`) is
+  an `<exec_depend>` and stays out of `find_package`, so the build does not
+  fail on it; a C++ or Python node publishes `~/status` when `std_msgs` is
+  chosen.
 - **Launch**: RViz2 (and recent `.rviz` configs), Gazebo (and the worlds in
   your workspaces), rqt, rqt_graph, a terminal with the same ROS setup.
   Terminal uses the KTERM modern Zsh profile, sources the user's `.zshrc`,
@@ -243,6 +279,8 @@ in an entry of the list.
 
 ```sh
 python3 scripts/verify-ros-panel.py        # helper against real nodes, ~70 s
+python3 scripts/verify-ros-package-create.py   # every New package template created, built and run, ~2 min
+node scripts/verify-ros-package-model.js   # the dialog's name checks, dependency lists, review
 python3 scripts/verify-ros-controllers.py  # sourced ROS + controller_manager_msgs required
 scripts/verify-shell-nested.sh --extra scripts/verify-ros-nested.sh
 python3 scripts/verify-feature-logic.py    # the palette's ros mode
@@ -258,6 +296,19 @@ panel in a real GNOME Shell, writes included, with a second lifecycle node, a
 static transform and a number on `/level` for the group, TF lookup and plot.
 
 ## Gotchas
+
+- GNOME 42's dialog presses its default button on the Return key's
+  *release*, also while an entry has focus, so Return in a form moves on by
+  itself. On Dependencies Next is not the default: Return there adds the
+  search's first match.
+- `ModalDialog` keeps its own `this._state`; the New package dialog keeps its
+  form in `_form`, or opening it breaks.
+- `Clutter.FlowLayout` gives every child the widest one's cell and collapses
+  to nothing inside a scroll view, so the dialog's chips wrap in plain rows
+  (`chipRows`).
+- A test that stops `ros2 run` by timing out kills bash, not the node: run it
+  in its own session and signal the group, or a node outlives the test and
+  the next check on that domain counts one node too many.
 
 - The watcher outlives a closed dropdown by a minute. A setup change made
   elsewhere (`~/.zshrc`, `~/.bashrc`, `ros2.json`) restarts it the next time the panel

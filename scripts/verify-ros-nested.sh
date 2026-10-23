@@ -502,6 +502,63 @@ seen="$(ros_text "ros._forgetRobotProfile('Bench rig');
     return labels(ros._list).join('|');")"
 [ "$seen" = true ]; check $? "ros: Forget removes the robot profile$([ "$seen" = true ] || echo " ($seen)")"
 
+# New package: the dialog, step by step, makes a real package in the sandbox's ~/ros2_ws.
+# ADAPTIVE_ROS_WIZARD_SHOTS=<dir> also saves a picture of each step.
+WIZ='const wiz = () => ros._packageDialog; const find = (a, test) => { let hit = null; (function walk(x) { if (hit) return;
+    if (test(x)) { hit = x; return; } x.get_children().forEach(walk); })(a); return hit; };
+const button = text => find(wiz(), x => x instanceof imports.gi.St.Button && (x.label === text || x.accessible_name === text));
+const shot = name => new Promise(resolve => { const dir = "'"${ADAPTIVE_ROS_WIZARD_SHOTS:-}"'"; if (!dir) { resolve(); return; }
+    const { Gio, Shell } = imports.gi; const stream = Gio.File.new_for_path(dir + "/" + name + ".png").replace(null, false, Gio.FileCreateFlags.NONE, null);
+    new Shell.Screenshot().screenshot(false, stream, (s, r) => { s.screenshot_finish(r); stream.close(null); resolve(); }); });
+const until = async (words, tries = 40) => { for (let i = 0; i < tries; i++) { const t = wiz() ? labels(wiz()).join("|") : "";
+    if (words.every(w => t.includes(w))) return true; await sleep(250); } return wiz() ? labels(wiz()).join("|").slice(0, 600) : "no dialog"; };'
+wiz_text() { ros_text "$WIZ $1"; }
+[ -n "${ADAPTIVE_ROS_WIZARD_SHOTS:-}" ] && mkdir -p "$ADAPTIVE_ROS_WIZARD_SHOTS"
+seen="$(ros_wait_for "'New package', 'Create…'")"
+[ "$seen" = true ]; check $? "ros: Launch offers New package$([ "$seen" = true ] || echo " ($seen)")"
+seen="$(wiz_text "ros.newPackage(); const r = await until(['1  Template', 'C++ node', 'Python node', 'C++ component', 'Interfaces', 'Launch & config']);
+    await sleep(400); await shot('1-template'); return r === true && !ros._button.menu.isOpen ? true : r;")"
+[ "$seen" = true ]; check $? "ros: New package opens the dialog on its templates, the panel closed$([ "$seen" = true ] || echo " ($seen)")"
+seen="$(wiz_text "button('Python node').emit('clicked', 0); button('Next').emit('clicked', 0);
+    const r = await until(['2  Configure', 'Package name', 'Node name', 'Location', '~/ros2_ws/src', 'Licence', 'Apache-2.0']);
+    if (r !== true) return r; const next = button('Next'); if (next.reactive) return 'Next works without a name';
+    find(wiz(), x => x instanceof imports.gi.St.Entry && x.hint_text === 'my_robot_driver').set_text('Bad-Name');
+    await sleep(200); if (!labels(wiz()).includes('Start with a lowercase letter')) return labels(wiz()).join('|');
+    find(wiz(), x => x instanceof imports.gi.St.Entry && x.hint_text === 'my_robot_driver').set_text('nested_pkg');
+    await sleep(200); const t = labels(wiz()).join('|');
+    if (!t.includes('~/ros2_ws/src/nested_pkg') || !button('Next').reactive) return t;
+    if (find(wiz(), x => x instanceof imports.gi.St.Entry && x.hint_text === 'my_node').get_text() !== 'nested_pkg_node') return 'node name';
+    await shot('2-configure'); return true;")"
+[ "$seen" = true ]; check $? "ros: Configure checks the name as it is typed and names the node after it$([ "$seen" = true ] || echo " ($seen)")"
+seen="$(wiz_text "button('Next').emit('clicked', 0);
+    const r = await until(['3  Dependencies', 'The package depends on · 2', 'rclpy', 'std_msgs', 'Recommended', 'geometry_msgs']);
+    if (r !== true) return r; await shot('3-dependencies');
+    button('Add geometry_msgs').emit('clicked', 0);
+    const r2 = await until(['The package depends on · 3']); if (r2 !== true) return r2;
+    if (button('Remove rclpy')) return 'the template dependency can be removed';
+    button('Remove std_msgs').emit('clicked', 0); return await until(['The package depends on · 2']);")"
+[ "$seen" = true ]; check $? "ros: Dependencies moves packages between the two lists; the template's stay$([ "$seen" = true ] || echo " ($seen)")"
+seen="$(wiz_text "button('Next').emit('clicked', 0);
+    const r = await until(['4  Review', 'nested_pkg/', 'nested_pkg/nested_pkg_node.py', 'ros2 pkg create nested_pkg', 'geometry_msgs']);
+    if (r !== true) return r; await shot('4-review');
+    const build = find(wiz(), x => x instanceof imports.gi.St.Button && (x.label || '').includes('Build it now'));
+    if (build && build.label.startsWith('✓')) build.emit('clicked', 0);
+    await sleep(200);
+    // The panel keeps its workspace, so the checks after this one see the same setup.
+    const use = find(wiz(), x => x instanceof imports.gi.St.Button && (x.label || '').includes('Use ~/ros2_ws'));
+    if (use && use.label.startsWith('✓')) use.emit('clicked', 0);
+    await sleep(200); button('Create').emit('clicked', 0);
+    const done = await until(['nested_pkg is ready'], 120); await shot('5-done'); return done;")"
+[ "$seen" = true ]; check $? "ros: Create makes the package and says so$([ "$seen" = true ] || echo " ($seen)")"
+grep -q '<depend>geometry_msgs</depend>' "$HOME/ros2_ws/src/nested_pkg/package.xml" 2>/dev/null &&
+    ! grep -q '<depend>std_msgs</depend>' "$HOME/ros2_ws/src/nested_pkg/package.xml"
+check $? "ros: the package is in ~/ros2_ws/src with exactly the chosen dependencies"
+seen="$(wiz_text "button('Done').emit('clicked', 0); for (let i = 0; i < 20 && wiz(); i++) await sleep(200);
+    Main.panel.statusArea['adaptive-ros'].menu.open(); await sleep(400);
+    return !wiz() && labels(ros._list).join('|').includes('Created nested_pkg in ~/ros2_ws/src/nested_pkg') ? true
+        : labels(ros._list).join('|').slice(0, 400);")"
+[ "$seen" = true ]; check $? "ros: Done closes the dialog and the panel names the new package$([ "$seen" = true ] || echo " ($seen)")"
+
 # A node that leaves disappears from the dropdown by itself.
 ros_stop_nodes
 seen="$(ros_text "for (let i = 0; i < 60; i++) { if (ros._graph && ros._graph.nodes.length === 0) return true; await sleep(250); }

@@ -1,0 +1,23 @@
+Start the bounded india-av planning and research project requested by the operator. The long-term objective is an autonomous car for real Indian roads; this cycle produces the research and feasibility plan only.
+
+Review the research plan appended to this message as the source brief. Its repository copy is docs/INDIA_AV_RESEARCH_PLAN.md in adaptive-desktop. It contains the initial legal reading, primary sources, failure cases, ODD proposal, gates and acceptance criteria. Treat its legal findings as preliminary, not a permission to test. The operator shortlisted Bengaluru, Karnataka, and Chennai, Tamil Nadu; compare both before recommending one. Vehicle, budget, exact site and human team remain undecided. The appended content lets you review and dispatch through your normal office commands without reading repository files yourself.
+
+Run the normal planning and manager verification gate. Check existing tasks first and avoid duplicate assignments with the following story IDs under project india-av. Do not resume or assign any unrelated work or former company study. Account for all eight staff, respecting the existing three-task concurrency setting and provider/quota policy.
+
+Create one bounded research story for each:
+IAV-001 Maya: charter, operating design domain, Bengaluru-versus-Chennai and use-case comparison, cost/runway and staged roadmap.
+IAV-002 Ravi: Indian legal/insurance/approval matrix with separate Karnataka/Bengaluru and Tamil Nadu/Chennai requirements, current Gazette and state applicability, counsel and test-agency questions.
+IAV-003 Arjun: architecture options, sensors/vehicle/stack tradeoffs, independent stopping safeguards and engineering evidence requirements.
+IAV-004 Priya: documented failures and commercial lessons, data/privacy policy, truthful capability and incident-reporting documentation.
+IAV-005 Zoe: operator modes, engagement and attention checks, emergency and recovery workflows.
+IAV-006 Lena: telemetry, replay and evidence interface specification; no live controller or hosted app.
+IAV-007 Max: local-only reproducibility and readiness audit, scenario/evaluation checklist; read only the supplied plan and relevant adaptive-desktop public tooling, never unrelated repositories or code hosts.
+IAV-008 Omar: independent hazard and validation plan, then final review of IAV-001 through IAV-007.
+
+Copy the detailed acceptance criteria from the source brief into each actual task. Give agents the necessary brief excerpts and source URLs so no one needs unrelated repository context. No writable repository is needed: reports go to the normal company workspace projects/india-av/ using the numbered filenames in the plan. Initial research can run independently; queue the final review after the other reports are complete. Maintain a readiness checklist and return the actual assigned task IDs and states for every staff member.
+
+Research rules: cite primary sources and distinguish law, drafts, guidance, facts, assumptions and recommendations. Record publication/effective/access dates; mark inaccessible evidence and unresolved points. No invented tests, measurements, quotes, permissions, budgets or completed certifications. Check current official materials, including state-specific law when the state is known. No private/work information may be read, reused or transmitted.
+
+Scope: planning and research only. Do not modify vehicle hardware, access vehicle controls, launch ROS nodes, test on roads, buy or download equipment/large datasets, install tools, contact outsiders, publish, commit, push or create recurring studies. Do not inspect credentials. A public-road pilot remains blocked until the exact legal route, authorizations, insurer coverage and independent engineering safety review are established. A private test site also needs its own applicability review. Use the current provider policy; do not change models, budgets or global office settings. Keep revisions within these eight stories and stop at the integrated feasibility report. Do not generate an open-ended stream of follow-up tasks.
+
+Final report: one evidence-backed go/no-go recommendation for simulation, a consolidated roadmap with owners and exit evidence, a risk and uncertainty register, source links, cost assumptions, operator decisions needed, and actual task status. Report anything not completed honestly. Do not interpret a successful research report as approval for physical testing.

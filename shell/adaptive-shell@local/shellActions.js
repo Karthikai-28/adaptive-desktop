@@ -86,6 +86,7 @@ var ShellActions = class ShellActions {
         this._snapshots = services.snapshots || null;
         this._screenText = services.screenText || null;
         this._dropdown = services.dropdown || null;
+        this._rosNewPackage = services.rosNewPackage || null;
     }
 
     attach() {
@@ -112,6 +113,7 @@ var ShellActions = class ShellActions {
             'window-to-workspace-left': () => this._workspace(Meta.MotionDirection.LEFT, true),
             'window-to-workspace-right': () => this._workspace(Meta.MotionDirection.RIGHT, true),
             'dropdown-terminal': () => this._dropdown && this._dropdown.toggle(),
+            'ros-new-package': () => this._rosNewPackage && this._rosNewPackage(),
         }[action];
 
         if (!handler)
