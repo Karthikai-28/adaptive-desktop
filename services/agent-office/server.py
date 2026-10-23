@@ -168,7 +168,7 @@ async def add_task(t: TaskIn, request: Request):
 
 @app.get("/api/repos")
 async def repos():
-    """Every repo agents can read; a task may name one of them as writable."""
+    """Repository index used to scope tasks; agents can access non-secret files throughout home."""
     return {"enabled": office.repos.enabled, "repos": office.repos.paths, "scanned_at": office.repos.scanned_at}
 
 

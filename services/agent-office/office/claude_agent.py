@@ -6,12 +6,12 @@ the office never reads it.
 
 The operator's Claude settings, hooks, plugins, MCP servers and memory are left out (--setting-sources
 project, --strict-mcp-config, auto memory off): an agent gets only what is listed here.
-- File tools: Read only inside the workspace, the studied repos and the knowledge graphs; Edit/Write only
-  inside the workspace. Only Bash, Read, Edit, Write and the web tools exist (--tools); Glob and Grep would
+- File tools: Read/Edit/Write throughout the non-secret home folder. Only Bash, Read, Edit, Write and the web tools
+  exist (--tools); Glob and Grep would
   search anywhere, so agents search with grep/find in Bash.
 - Bash runs in Claude Code's sandbox (bubblewrap), which must be available (failIfUnavailable) and can't
-  be bypassed (allowUnsandboxedCommands false): the home folder is unreadable except the workspace, the
-  studied repos, the graphs and the developer tools; only the workspace and /tmp are writable. Agents
+  be bypassed (allowUnsandboxedCommands false): the non-secret home folder and /tmp are writable, while
+  credential paths and private Office records are denied. Agents
   that must learn code only from local copies get no web tools.
 - dontAsk: anything not allowed above is denied, never asked.
 
@@ -70,23 +70,27 @@ class ClaudeRun:
     def _settings(self):
         tools_ro = [str(HOME / p) for p in agy.HOME_TOOLS if (HOME / p).exists()] + [str(AGENT_BIN)]
         no_remote = [f"Bash(git {c}:*)" for c in REMOTE_GIT] + ["Bash(/usr/bin/git:*)"]
+        protected = agy.protected_paths(self.hidden)
+        file_denies = [rule for p in protected for tool in ("Read", "Edit", "Write")
+                       for rule in (f"{tool}(/{p})", f"{tool}(/{p}/**)")]
         return {
-            "permissions": {"deny": [f"Read(/{f})" for f in self.hidden] + no_remote},
+            "permissions": {"deny": file_denies + no_remote},
             "autoMemoryEnabled": False,
             "sandbox": {
                 "enabled": True, "failIfUnavailable": True, "autoAllowBashIfSandboxed": True,
                 "allowUnsandboxedCommands": False,
-                "filesystem": {"denyRead": [str(HOME)] + self.hidden, "allowRead": self._readable() + tools_ro,
-                               "allowWrite": [str(COMPANY), "/tmp", *self.rw_dirs]},
+                "filesystem": {"denyRead": protected, "allowRead": [str(HOME), *self._readable(), *tools_ro],
+                               "denyWrite": protected, "allowWrite": [str(HOME), str(COMPANY), "/tmp",
+                                                                         *self.rw_dirs]},
             },
         }
 
     def _allowed(self):
         if not self.tools:
             return []
-        allowed = ["Bash", f"Edit(/{COMPANY}/**)", f"Write(/{COMPANY}/**)"]   # "//abs/path" rules
+        allowed = ["Bash", f"Edit(/{HOME}/**)", f"Write(/{HOME}/**)"]   # "//abs/path" rules
         allowed += [f"{t}(/{d}/**)" for d in self.rw_dirs for t in ("Edit", "Write")]
-        allowed += [f"Read(/{d}/**)" for d in self._readable()]
+        allowed += [f"Read(/{HOME}/**)", *(f"Read(/{d}/**)" for d in self._readable())]
         if not self.offline:
             allowed += ["WebSearch", "WebFetch"]
         return allowed

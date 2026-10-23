@@ -27,7 +27,7 @@ import re
 import time
 
 from . import agy, claude_agent, codex, local
-from .config import COMPANY
+from .config import COMPANY, HOME
 from .manager import Manager
 from .quota import QuotaGuard
 from .graphs import Graphs
@@ -109,11 +109,11 @@ class Office:
                 await asyncio.get_running_loop().run_in_executor(None, self.repos.scan)
             except Exception as e:
                 print(f"repo scan: {e}", flush=True)
-        agy.write_agy_settings(self.repos.paths)
+        agy.write_agy_settings(self.repos.paths, self.repos.hidden)
         if not os.environ.get("OFFICE_NO_STUDY"):   # throwaway test servers never alter agy's MCP settings
             await asyncio.get_running_loop().run_in_executor(None, Graphs.configure_agy)
         if not os.environ.get("OFFICE_NO_REPO_SCAN"):
-            self._spawn(self.repos.loop(lambda: agy.write_agy_settings(self.repos.paths)))
+            self._spawn(self.repos.loop(lambda: agy.write_agy_settings(self.repos.paths, self.repos.hidden)))
         paused = self.settings()["paused"]
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             self.store.update_task(t["id"], status="queued")
@@ -425,7 +425,8 @@ class Office:
             f"{a['brief']}\n"
             f"Team: {self._team_line()}; manager: Claude.\n"
             f"Workspace: your current directory {COMPANY} is the company's shared workspace; teammates' files "
-            f"are here too. Write only inside it. Projects live in projects/<project-name>/, meeting notes in meetings/.\n"
+            f"are here too. You may read and write non-secret files throughout {HOME}; credentials and private "
+            f"Office records are inaccessible. Projects live in projects/<project-name>/, meeting notes in meetings/.\n"
             + self._repos_line()
             + self.study.persona_line(a["id"])
             + self._efficiency(a["id"])
@@ -434,9 +435,9 @@ class Office:
     def _repos_line(self):
         if not self.repos.enabled:
             return ""
-        return ("Repositories: every git repo on this laptop is readable at its own path (REPOS.md in the workspace "
-                "lists them); read them, never change them unless your task names one as writable. Never push, pull, "
-                "fetch or clone - the office's git refuses it.\n")
+        return ("Home access: non-secret files throughout the owner's home folder are readable and writable. "
+                "REPOS.md lists the git repositories. Only change files needed for the assigned task, and never "
+                "push, pull, fetch or clone - the office's git refuses it.\n")
 
     def _conv_key(self, t, pid):
         """Tasks of the same project continue one conversation per provider; anything else starts fresh.
@@ -459,11 +460,11 @@ class Office:
                 "head, tail or wc). Don't re-read what you already read in this session; write short notes instead.\n")
 
     def _run_opts(self, aid, repo=""):
-        """Sandbox options for every run of this agent: every repo on the laptop and the ones it studies
-        (read-only), secret files inside them hidden, the task's own repo writable, and the guarded
+        """Sandbox options for every run: non-secret home files writable, secrets hidden, and the guarded
         profile for agents that must learn code only from local copies."""
         ro = list(dict.fromkeys(self.repos.paths + self.study.repo_paths(aid)))
-        return {"ro_dirs": ro, "rw_dirs": [repo] if repo else [], "hidden": self.repos.hidden,
+        rw = list(dict.fromkeys([str(HOME), *([repo] if repo else [])]))
+        return {"ro_dirs": ro, "rw_dirs": rw, "hidden": agy.protected_paths(self.repos.hidden),
                 "offline": bool(self.agents[aid].get("code_local_only")), "graph": self.graphs.path_for(aid)}
 
     def _task_prompt(self, t):
@@ -478,7 +479,7 @@ class Office:
         if t["project"]:
             p.append(f"Project: {t['project']} — keep its files in projects/{t['project']}/")
         if t.get("repo"):
-            p.append(f"Writable repository: {t['repo']} — make this task's changes there, directly in its files. "
+            p.append(f"Assigned repository: {t['repo']} — keep this task's changes there, directly in its files. "
                      "Don't commit, switch branches or rewrite history unless the task asks; never push. Say in your "
                      "report exactly which files you changed so the owner can review the diff.")
         if t["body"]:

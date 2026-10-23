@@ -1,4 +1,4 @@
-"""Every git repository on the laptop, readable by every agent; one of them writable when a task names it.
+"""Discover every git repository on the laptop for Agent Office navigation and task scoping.
 
 config.json "repos": {"all": true, "roots": ["~"], "skip": []}. The scan walks the roots, skips hidden
 folders (tool state, credentials, the office's own state), caches and node_modules, and keeps the
@@ -9,7 +9,7 @@ are hidden from agents, and so is a .git/config whose remote URL carries a passw
 a remote: the git on their PATH refuses push/pull/fetch/clone/ls-remote/remote changes, every git they
 run has protocol.allow=never, and no credential or SSH agent reaches their sandbox.
 
-REPOS.md in the workspace lists the repos for the agents.
+Agents can read and write non-secret files throughout home; REPOS.md is their repository index.
 """
 import asyncio
 import fnmatch
@@ -29,7 +29,7 @@ SECRET_NAMES = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "
                 "client_secret*.json", "*.kdbx", "secrets.yaml", "secrets.yml", "secrets.json",
                 "local.properties", "keystore.properties", "google-services.json")
 NOT_SECRET = (".env.example", ".env.sample", ".env.template", ".env.dist", "*.pub")
-SECRET_PRUNE = PRUNE | {".git", ".venv", ".tox", ".mypy_cache", ".pytest_cache", ".gradle", ".idea"}
+SECRET_PRUNE = PRUNE | {".git", ".cache", ".venv", ".tox", ".mypy_cache", ".pytest_cache", ".gradle", ".idea"}
 URL_PASSWORD = re.compile(rb"://[^/\s@:]+:[^/\s@]+@")
 
 # git subcommands that talk to (or change) a remote; the agents' git refuses them
@@ -141,16 +141,18 @@ class Repos:
             self.paths, self.hidden = [], []
             return
         paths = find_repos(self.cfg["roots"], self.cfg.get("skip", ()))
-        hidden = [h for r in paths for h in find_secrets(r)]
+        # Home access is broader than the repository index, so secret-looking files must be hidden even
+        # when they live in Documents, Downloads or another non-repository folder.
+        hidden = find_secrets(HOME)
         self.paths, self.hidden, self.scanned_at = paths, hidden, time.time()
         self._write_list()
 
     def _write_list(self):
         home = str(HOME)
         lines = ["# Repositories on this laptop", "",
-                 "Every git repository here is readable at its own path (read-only). A task that names a repo",
-                 "makes that one writable for the task. Agents never push, pull, fetch or clone: work on these",
-                 "local copies. Files that usually hold secrets (.env, keys) are hidden.", ""]
+                 "Agents can read and write non-secret files throughout the owner's home folder. This is the",
+                 "repository index for task scoping. Agents never push, pull, fetch or clone: work on these local",
+                 "copies. Files that usually hold secrets (.env, keys) are hidden.", ""]
         lines += [f"- {p.replace(home, '~', 1)}" for p in self.paths]
         out = COMPANY / "REPOS.md"
         text = "\n".join(lines) + "\n"

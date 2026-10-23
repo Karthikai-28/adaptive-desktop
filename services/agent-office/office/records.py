@@ -1,6 +1,6 @@
 """Where Mission Control keeps its own records: workflows, work capsules and audit exports.
 
-They live in DATA, which no agent sandbox mounts (agy and local runs get an empty home, Codex and Claude
+They live in DATA, whose private record paths every agent sandbox masks (agy and local runs get a filtered home; Codex and Claude
 agents a profile without it), so an agent can neither rewrite a workflow's risk class nor edit evidence
 after the fact. Earlier versions kept them in the shared workspace; those files are moved here once.
 """

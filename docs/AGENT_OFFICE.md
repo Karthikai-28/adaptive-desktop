@@ -161,32 +161,28 @@ office autopilot on|off · office pause · office resume · office open
   boundary: a run may repeat it but never name another, and a workflow saved without one never gets
   one. Role allowlists are enforced, and the mission records its risk, workflow, allowed agents and
   who approved it. Tasks added to a mission stay inside its repository and roles, and a finished
-  mission takes no new tasks. The agents still receive only the one repository named by the mission
-  as writable.
+  mission takes no new tasks. The named repository remains the mission's enforced task/evidence boundary;
+  general home-folder access does not authorize work outside that mission.
 - **Retention is inspectable.** Retention covers audit exports, capsules saved without a mission, and
   leftover temporary files. It previews paths and byte counts by default, accepts 1–3650 days, and
   never deletes a mission's capsules, mission/task history or project source.
 
-- Every agent runs inside **bubblewrap**: the system is read-only and the home folder is replaced
-  by an empty one holding only developer tools (read-only), agy's own home, the company workspace
-  and **every git repository on the laptop, read-only** (`office/repos.py`: config.json `"repos":
-  {"all": true, "roots": ["~"], "skip": []}`; rescanned every 15 min; hidden folders are skipped;
-  `office repos` and `REPOS.md` in the workspace list them). Files inside the repos that usually hold
-  secrets (`.env`, keys, keystores, cloud credential files, a `.git/config` with a password in a URL)
-  are hidden. Credentials, dot-folders and non-repo folders simply don't exist for agents; `/tmp` is
-  the office's own. The environment is rebuilt from scratch, so no API key or SSH agent leaks in (an
-  inherited `GEMINI_API_KEY` would also switch agy to paid API billing).
-- **Writing to a repo** happens only when a task names it: `office assign ... --repo <path|name>`
-  (or the Repo field in the app). That repo is mounted writable for that task only; Codex gets it as a
-  `write` entry in its permission profile, Claude Haiku as Edit/Write rules plus a sandbox write path.
-  The task brief says not to commit or branch unless the task asks. Agent commits are authored
-  `Karthi Labs <office@karthi-labs.local>` (never the owner's identities). Codex keeps `.git` read-only
-  inside a writable root, so the profile grants `<repo>/.git` write explicitly.
+- Every worker agent runs inside **bubblewrap** or its provider's equivalent sandbox: the operating system
+  is read-only and the operator's home folder is readable and writable. Credential stores, shell history,
+  cloud/SSH/Git credentials, secret-looking project files (`.env`, private keys, keystores and service-account
+  files), and private Office records are denied in both the outer sandbox and each provider's file-tool policy.
+  `/tmp` is the Office's own. The environment is rebuilt from scratch, so no API key or SSH agent leaks in.
+- **Repository assignment is task scope, not the filesystem permission boundary.** `office assign ... --repo
+  <path|name>` (or the Repo field in the app) tells the agent, mission checks and evidence system where the
+  requested change belongs. Agents can technically write other non-secret home files, but their brief requires
+  them to change only what the task needs. The task brief says not to commit or branch unless the task asks.
+  Agent commits are authored `Karthi Labs <office@karthi-labs.local>` (never the owner's identities).
 - **No remotes, ever.** Agents' `git` is a wrapper (`$OFFICE_STATE/bin/git`, first on PATH) that
   refuses push/pull/fetch/clone/ls-remote/remote/submodule; every git they run also has
   `protocol.allow=never`, so `/usr/bin/git push` fails too; agy and Claude have matching deny rules;
   and no credential, token or SSH agent socket is in their sandbox to push with.
-- **Claude** can only run `office` and read files (`--permission-mode dontAsk`). Its brief says
+- **Claude manager** can run `office` and read/write non-secret home files (`--permission-mode dontAsk`);
+  credential/private paths are explicitly denied. Its brief says
   never to publish, push, buy or send anything off the machine unless you ask.
 - The **server** listens on 127.0.0.1 only and rejects cross-site requests and foreign Host
   headers. Agent-written pages are served in a sandboxed origin, so they can't call the office API.
@@ -328,21 +324,17 @@ Every Codex turn uses the operator's own `~/.codex` login, which the office neve
 Codex config, rules and AGENTS.md are ignored. Apps, plugins, browser, computer use and hooks are off.
 - **Meetings** (`"meeting_provider": "codex"`) are talk only: no shell or exec tools; live web search on.
 - **Work turns** (tasks, direct messages, study) run shell commands and file edits under a Codex permission
-  profile that lists everything they may see: system folders, developer tools, the studied repos and the
-  graphs (read), the workspace and a temp dir (write). The home folder is not in it, so `~/.codex`, `~/.ssh`
-  and the operator's files don't exist for the agent; only Codex's own program folders
-  (`~/.codex/packages`, `~/.codex/tmp/arg0`, read-only) are added so its sandbox helper starts. `/run` is
-  left out (session bus, keyring) apart from the DNS resolver. `code_local_only` agents get no network and
-  no web search. Checked on 12 Oct 2026 through `codex exec`: a file elsewhere in the home folder is "No
-  such file or directory", and an edit outside the workspace is rejected.
+  profile that grants the non-secret home folder read/write access, explicitly denies credential and private
+  Office paths, and keeps system folders read-only. `/run` is left out (session bus, keyring) apart from the
+  DNS resolver. `code_local_only` agents get no network and no web search.
 
 #### Claude Haiku (`office/claude_agent.py`)
 
 Haiku runs through Claude Code (`claude -p`) on the operator's own Claude login (the same one the manager
 uses). The operator's Claude settings, hooks, plugins, MCP servers and memory are left out. Agents get only
-Bash, Read, Edit, Write and the web tools, in dontAsk mode: Read inside the workspace, the studied repos and
-the graphs; Edit/Write in the workspace; Bash in Claude Code's bubblewrap sandbox with the home folder
-unreadable apart from those (`failIfUnavailable`, no unsandboxed escape). Haiku shares the operator's
+Bash, Read, Edit, Write and the web tools, in dontAsk mode: Read/Edit/Write cover the non-secret home folder;
+Bash runs in Claude Code's bubblewrap sandbox with the same credential/private-path exclusions
+(`failIfUnavailable`, no unsandboxed escape). Haiku shares the operator's
 Claude limits with the manager, and Claude Code's own prompt is large (a study session was ~8.6M tokens,
 mostly cached).
 

@@ -3,7 +3,7 @@
 
   office status                                   team status, queues, quota
   office assign <agent> "<title>" [--body TEXT] [--project NAME] [--after ID] [--repo PATH|NAME]
-  office repos                              repos every agent can read (--repo makes one writable for a task)
+  office repos                              repository index for the agents' home-folder access
   office tasks [--agent A] [--status queued,running,done,failed] [-n N]
   office show <task id>                           full task with its report and activity
   office cancel <task id> | office retry <task id>

@@ -446,14 +446,15 @@ OFFICE_ACTOR=manager sh -c 'env OFFICE_ACTOR=operator "$@" 2>&1; true' sh "${OFF
 # agents reach the API over loopback, but nothing private: no key, no records, no approvals
 mkdir -p "$SBX/state/company" "$SBX/state/data/mission-control/workflows"
 echo secret > "$SBX/state/data/operator.key"
+echo private > "$SBX/state/data/mission-control/workflows/private.json"
 python3 - "$APP" "$SBX/state" "$B" <<'PY' || fail "agents can see or use operator-only things"
 import os, subprocess, sys
 os.environ["OFFICE_STATE"] = sys.argv[2]
 sys.path.insert(0, sys.argv[1])
 from office import agy
 from office.config import COMPANY, DATA
-probe = (f"test -d {COMPANY} && echo WORKSPACE; test -e {DATA}/operator.key && echo LEAK; "
-         f"test -e {DATA}/mission-control && echo LEAK; "
+probe = (f"test -d {COMPANY} && echo WORKSPACE; grep -q secret {DATA}/operator.key 2>/dev/null && echo LEAK; "
+         f"find {DATA}/mission-control -type f -print -quit 2>/dev/null | grep -q . && echo LEAK; "
          f"curl -s -o /dev/null -w 'HTTP%{{http_code}}' -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' "
          f"-d '{{\"approved\":true}}' {sys.argv[3]}/api/workflows/move-robot/run")
 r = subprocess.run(agy._bwrap_prefix([]) + ["sh", "-c", probe], capture_output=True, text=True, env=agy._env("probe"))
@@ -478,20 +479,33 @@ loc = [p for p in d["providers"] if p["id"] == "local"]
 assert loc and loc[0]["total"] == 120 and loc[0]["calls"] == 1, d["providers"]
 assert d["totals"]["total"] == 120 and d["claude"]["calls"] == 0, d["totals"]
 assert all(p["total"] == 0 for p in d["providers"] if p["id"] not in ("local", "claude")), "local usage leaked into another provider"' || fail "token ledger per provider"
-# the sandbox: an empty home with only tools, the workspace and assigned repos; nothing personal
-python3 - "$APP" "$SBX/state" <<'PY' || fail "agent sandbox exposes too much"
+# the sandbox: non-secret home files are writable; credentials/private state stay hidden; system stays read-only
+mkdir -p "$SBX/home/Documents" "$SBX/home/.ssh" "$SBX/state/data"
+echo original > "$SBX/home/Documents/note.txt"
+echo credential > "$SBX/home/.ssh/id_ed25519"
+echo credential > "$SBX/home/.env"
+echo private > "$SBX/state/data/operator.key"
+python3 - "$APP" "$SBX/state" "$SBX/home" <<'PY' || fail "agent sandbox home access"
 import os, subprocess, sys
 os.environ["OFFICE_STATE"] = sys.argv[2]
+os.environ["HOME"] = sys.argv[3]
 sys.path.insert(0, sys.argv[1])
 from office import agy
 home = os.path.expanduser("~")
-probe = os.path.join(home, "Documents")
-r = subprocess.run(agy._bwrap_prefix([]) + ["sh", "-c", f"echo RAN; ls -A {home}; test -e {probe} && echo LEAK; touch /usr/x 2>/dev/null && echo LEAK; true"],
+doc = os.path.join(home, "Documents/note.txt")
+hidden = [os.path.join(home, ".env")]
+probe = (f"echo RAN; cat {doc}; echo changed >> {doc}; "
+         f"grep -q credential {home}/.ssh/id_ed25519 2>/dev/null && echo LEAK; "
+         f"grep -q credential {home}/.env 2>/dev/null && echo LEAK; "
+         f"grep -q private {sys.argv[2]}/data/operator.key 2>/dev/null && echo LEAK; "
+         "touch /usr/agent-office-write-probe 2>/dev/null && echo LEAK; true")
+r = subprocess.run(agy._bwrap_prefix([], rw_dirs=[home], hidden=hidden) + ["sh", "-c", probe],
                    capture_output=True, text=True)
 out = r.stdout
 assert out.startswith("RAN"), f"the sandbox did not run: {r.stderr}"
 assert "LEAK" not in out, out
-assert not {"Documents", ".ssh", ".claude", ".gnupg"} & set(out.split()), out
+assert "original" in out, out
+assert open(doc).read().splitlines() == ["original", "changed"]
 PY
 # 3. The page itself in headless Chrome (skipped without Chrome)
 if command -v google-chrome >/dev/null; then

@@ -1,12 +1,10 @@
 """Run one Gemini turn through the Antigravity CLI (agy) on the AI Pro subscription.
 
-Every run is wrapped in bubblewrap. The system is read-only; the home folder is replaced by an
-empty one that holds only what an agent needs: its developer tools (read-only), agy's own home,
-the shared company workspace (the only place it can write), and the repositories it was
-assigned to study (read-only). Everything else in the home folder - documents, personal files,
-credentials, other projects - does not exist for agents. /tmp is the office's own. agy's
---sandbox additionally confines shell commands. The environment is rebuilt from scratch so no
-API key can leak in (an inherited GEMINI_API_KEY would also switch agy to paid API billing).
+Every run is wrapped in bubblewrap. The system is read-only and the operator's home folder is
+readable and writable, except for credential stores, secret files and private Office records,
+which are masked before an agent starts. /tmp is the office's own. agy's --sandbox additionally
+confines shell commands. The environment is rebuilt from scratch so no API key can leak in (an
+inherited GEMINI_API_KEY would also switch agy to paid API billing).
 """
 import asyncio
 import json
@@ -17,7 +15,7 @@ from pathlib import Path
 from .config import AGY_HOME, AGY_HOME_LOCAL, COMPANY, DATA, HOME, ROOT, STATE
 from .repos import AGENT_BIN, REMOTE_GIT, git_env
 
-# developer tools agents may use, shown read-only inside their otherwise empty home
+# developer tools agents may use; credential files inside them remain masked
 HOME_TOOLS = [".local/bin", ".local/lib", ".local/share/uv/python", ".local/share/uv/tools", "bin",
               ".cargo/bin", ".rustup", ".nvm", ".npm-global", ".bun", ".deno", "micromamba", ".pyenv"]
 # credential files that can sit inside those tool folders
@@ -28,6 +26,8 @@ SECRET_DIRS = [".ssh", ".gnupg", ".aws", ".codex", ".claude", ".config/gh", ".ge
                ".cache/ask-gemini", ".config/gcloud", ".azure", ".terraform.d"]
 SECRET_FILES = [".netrc", ".git-credentials", ".zshenv", ".claude.json", ".npmrc", ".pypirc",
                 ".bash_history", ".zsh_history", ".python_history"]
+PRIVATE_OFFICE = ["office.db", "office.db-wal", "office.db-shm", "logs", "tts", "operator.key",
+                  "mission-control"]
 KEEP_ENV = ("PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ", "DBUS_SESSION_BUS_ADDRESS",
             "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "SHELL")
 AGENT_TMP = STATE / "tmp"
@@ -37,38 +37,46 @@ CODE_HOSTS = ["bitbucket.org", "api.bitbucket.org", "bitbucket.io", "192.168.1.1
 QUOTA_MARKERS = ("RESOURCE_EXHAUSTED", "quota", "rate limit", "429", "usage limit")
 
 
-def write_agy_settings(repos=()):
-    """Permissions for agents: write inside the company workspace and the repos (the sandbox mounts every
-    repo read-only except a task's own, so that is where a write really lands), never read secrets, never
+def protected_paths(extra=()):
+    """Credential/private paths that no Office agent may read or change."""
+    paths = [*(HOME / p for p in SECRET_DIRS + SECRET_FILES), *(DATA / p for p in PRIVATE_OFFICE), *extra]
+    return list(dict.fromkeys(str(Path(p).expanduser()) for p in paths))
+
+
+def path_is_protected(path, protected):
+    """True for a protected path or anything below a protected directory."""
+    path = Path(path).resolve(strict=False)
+    return any(path == p or p in path.parents for p in (Path(x).resolve(strict=False) for x in protected))
+
+
+def write_agy_settings(repos=(), hidden=()):
+    """Permissions for agents: write throughout the non-secret home folder, never read secrets, never
     run a git command that reaches a remote.
     (Belt and braces: the sandbox already hides the secrets.) Agents that must learn code only from
     the local copies get their own agy home: the web is open for research, but the code hosts
     (Bitbucket, the internal git server) and every git network command are denied."""
     # MCP is allowed: the only server configured in the agents' agy profiles is the scoped knowledge graph
-    deny = [f"read_file({HOME / p})" for p in SECRET_DIRS + SECRET_FILES]
-    # the office's own files (agy's home sits in DATA too and must stay readable: MCP tool schemas live there)
-    deny += [f"read_file({DATA / p})" for p in ("office.db", "office.db-wal", "office.db-shm", "logs", "tts",
-                                                 "operator.key", "mission-control")]
+    deny = [rule for p in protected_paths(hidden) for rule in (f"read_file({p})", f"write_file({p})")]
     for home, offline in ((AGY_HOME, False), (AGY_HOME_LOCAL, True)):
         cfg_dir = home / ".gemini" / "antigravity-cli"
         cfg_dir.mkdir(parents=True, exist_ok=True)
-        allow = ["command(*)", f"write_file({COMPANY})", "read_url(*)", "execute_url(*)", "mcp(*)"]
-        allow += [f"write_file({r})" for r in repos]
+        allow = ["command(*)", f"write_file({HOME})", "read_url(*)", "execute_url(*)", "mcp(*)"]
         d = list(deny) + [f"command(git {c})" for c in REMOTE_GIT]
         if offline:
             for host in CODE_HOSTS:
                 for form in (host, f"https://{host}", f"http://{host}", f"*{host}*"):
                     d += [f"read_url({form})", f"execute_url({form})"]
             d += [f"command({c})" for c in ("curl", "wget", "ssh", "scp", "sftp", "rsync")]
-        settings = {"permissions": {"allow": allow, "deny": d}, "trustedWorkspaces": [str(COMPANY)]}
+        settings = {"permissions": {"allow": allow, "deny": d},
+                    "trustedWorkspaces": [str(COMPANY), str(HOME)]}
         (cfg_dir / "settings.json").write_text(json.dumps(settings, indent=1))
 
 
 def _bwrap_prefix(ro_dirs=(), home=AGY_HOME, rw_dirs=(), hidden=()):
     AGENT_TMP.mkdir(parents=True, exist_ok=True)
     args = ["bwrap", "--ro-bind", "/", "/", "--dev-bind", "/dev", "/dev", "--bind", "/proc", "/proc",
-            "--tmpfs", str(HOME)]                                  # an empty home ...
-    for p in HOME_TOOLS:                                           # ... with the tools ...
+            "--tmpfs", str(HOME)]                                  # an empty mount point for home ...
+    for p in HOME_TOOLS:                                           # ... with the tools initially read-only ...
         path = HOME / p
         if path.exists():
             args += ["--ro-bind", str(path), str(path)]
@@ -83,8 +91,10 @@ def _bwrap_prefix(ro_dirs=(), home=AGY_HOME, rw_dirs=(), hidden=()):
         d = Path(d).expanduser()
         if d.is_dir():
             args += ["--bind", str(d), str(d)]
-    for f in hidden:                                               # ... minus their secret files
-        if os.path.isfile(f) and not os.path.islink(f):
+    for f in protected_paths(hidden):                              # ... minus credentials and private records
+        if os.path.isdir(f) and not os.path.islink(f):
+            args += ["--tmpfs", f]
+        elif os.path.isfile(f) and not os.path.islink(f):
             args += ["--ro-bind", "/dev/null", f]
     if AGENT_BIN.is_dir():                                         # the git that refuses remotes
         args += ["--ro-bind", str(AGENT_BIN), str(AGENT_BIN)]

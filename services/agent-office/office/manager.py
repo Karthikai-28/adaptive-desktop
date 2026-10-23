@@ -16,10 +16,11 @@ import re
 import signal
 import time
 
-from . import codex, operator
-from .config import COMPANY, ROOT
+from . import agy, codex, operator
+from .config import COMPANY, HOME, ROOT
 
-ALLOWED = ["Bash(office:*)", "Bash(office *)", "Read", "Glob", "Grep", "LS"]
+ALLOWED = ["Bash(office:*)", "Bash(office *)", "Read", "Glob", "Grep", "LS",
+           f"Edit(/{HOME}/**)", f"Write(/{HOME}/**)"]
 DROP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
 NOTHING = "NOTHING_TO_REPORT"
 LIMIT_RETRY_S = 10 * 60
@@ -348,7 +349,7 @@ They share the workspace {COMPANY} (your working directory). Projects live in pr
 You manage with the `office` command (run `office help` for everything):
   office status                          who is doing what, queues
   office assign <agent> "<title>" --body "<details, deliverable, acceptance criteria>" --project <name> [--after <task id>] [--repo <path>]
-  office repos                           every git repo on the laptop; all agents can read them
+  office repos                           repository index for agents' home-folder access
   office tasks [--agent a] [--status s]  /  office show <id>  /  office cancel <id>  /  office retry <id>
   office ask <agent> "<question>"        quick question; waits for the reply
   office meeting start "<topic>" --with a,b,c   /  office meeting end
@@ -361,9 +362,9 @@ How to manage well:
   then dispatch the corrected plan. For WORK_PLAN, keep every staff agent occupied with useful work; active study
   and existing running or queued work count. Chain dependent work with --after (e.g. spec -> build -> test).
 - Agents cannot ask questions mid-task, so put everything they need in --body.
-- Every agent can read every git repo on the laptop (`office repos`). Only a task given --repo may change that one
-  repo, and only when the owner asked for changes there; otherwise work goes in the workspace. Nobody pushes,
-  pulls or fetches - the owner does that.
+- Every agent can read and write non-secret files throughout {HOME}; credentials and private Office records are
+  inaccessible. Keep changes within the owner's requested scope and use `office repos` to list repositories.
+  Nobody pushes, pulls or fetches - the owner does that.
 - Coordinate; don't do the team's work yourself. Review their output by reading the files. Send work back with specific fixes when it falls short. Have Omar test or review engineering work before you call it done.
 - Every task spends the owner's Gemini quota: no busywork, no duplicate tasks. Check `office status` before assigning.
 - Codex (GPT) is about as capable as Gemini and has the same tools; tasks continue normally on it.
@@ -465,9 +466,12 @@ You run on {self.model} to keep token use low. Handle routine work yourself: sta
         return text, err
 
     async def _claude(self, prompt, sid, model):
+        protected = agy.protected_paths([operator.KEY_FILE, *self.o.repos.hidden])
+        denied = [rule for p in protected for tool in ("Read", "Edit", "Write", "Glob", "Grep", "LS")
+                  for rule in (f"{tool}(/{p})", f"{tool}(/{p}/**)")]
         cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
                "--permission-mode", "dontAsk", "--allowedTools", *ALLOWED,
-               "--disallowedTools", f"Read(/{operator.KEY_FILE})",
+               "--disallowedTools", *denied,
                "--model", model, "--append-system-prompt", self._brief()]
         if sid:
             cmd += ["--resume", sid]

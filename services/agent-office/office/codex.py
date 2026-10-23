@@ -8,13 +8,10 @@ ignored (--ignore-user-config, --ignore-rules). Apps, plugins, browser, computer
 - Talk only (meetings): the shell and exec tools are off too, so the turn can only think, search the web
   and answer.
 - Work (tasks, direct messages, study): shell commands and file edits run under a Codex permission profile
-  ("office") that lists everything they may see. The home folder is not in it, so ~/.codex (the login),
-  ~/.ssh and the rest of the operator's files don't exist for the agent; only Codex's own program folders
-  are added back, read-only, so its sandbox helper can start. Readable: the system folders, the developer
-  tools, the studied repos and the knowledge graphs; writable: the workspace and a temp dir. /run is left
-  out (it holds the session bus and the keyring) apart from the DNS resolver. Agents that must learn code
-  only from local copies get no network in their shell and no web search. Checked on 12 Oct 2026: a file
-  elsewhere in the home folder is "No such file or directory".
+  ("office") that grants read/write access to the non-secret home folder while denying credentials and
+  private Office records. System folders remain read-only; /run is left out (it holds the session bus and
+  keyring) apart from the DNS resolver. Agents that must learn code only from local copies get no network
+  in their shell and no web search.
 
 Usage is appended to data/usage/<provider>.jsonl in the same shape as local runs, so the token ledger
 counts Codex on its own.

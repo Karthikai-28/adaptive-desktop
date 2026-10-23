@@ -4,11 +4,11 @@ agy brings its own agent loop and tools; Ollama is only a model, so this module 
 conversation with a small tool set, runs the tools the model asks for, and repeats until the model
 answers. The tools give the same reach agy has and no more:
 
-  run_command   a shell command inside the same bubblewrap sandbox agy runs in (empty home, read-only
-                system, the company workspace writable, assigned repositories read-only); agents that must
+  run_command   a shell command inside the same bubblewrap sandbox agy runs in (non-secret home writable,
+                system read-only); agents that must
                 learn code only from local copies get no network at all (--unshare-net)
-  read_file, list_dir, search_files      the workspace, the assigned repositories and the scoped graphs
-  write_file, edit_file                  the workspace, and the repo a task names
+  read_file, list_dir, search_files      the non-secret home folder and the scoped graphs
+  write_file, edit_file                  the non-secret home folder
   fetch_url     a web page as text (not for code-local-only agents)
 
 Conversations are JSON files under data/local/<provider>/, one per thread, so a project's work thread or an
@@ -240,10 +240,10 @@ class LocalRun:
 
     def _system(self):
         roots = ", ".join(str(p) for p in self.read_roots[1:]) or "none"
-        if len(self.read_roots) > 6:     # every repo on the laptop: point at the list instead of spelling it out
-            roots = "every git repository listed in REPOS.md in your working directory"
-        write = (f"Your working directory is {COMPANY}; it is the only place you can write. " if not self.rw_dirs else
-                 f"Your working directory is {COMPANY}; you can write there and in {', '.join(self.rw_dirs)}. ")
+        if len(self.read_roots) > 6:
+            roots = "the owner's non-secret home folder; REPOS.md lists its git repositories"
+        write = (f"Your working directory is {COMPANY}; you can read and write non-secret files throughout "
+                 f"{agy.HOME}. Credentials and private Office records are inaccessible. ")
         net = ("You have no network access." if self.offline else "fetch_url reads web pages.")
         return (f"You are running on a local model ({self.model}) on the owner's computer. " + write +
                 f"Read-only folders you may also read: {roots}. {net} There is no image generation tool. "
@@ -321,7 +321,7 @@ class LocalRun:
         roots = self.write_roots if write else self.read_roots
         if not any(p == r or r in p.parents for r in roots):
             raise ValueError(f"{p} is outside the folders you may {'write' if write else 'read'}")
-        if str(p) in self.hidden:
+        if agy.path_is_protected(p, self.hidden):
             raise ValueError(f"{p} may hold secrets; agents can't open it")
         return p
 
