@@ -61,7 +61,17 @@ class Webcam:
     def start(self):
         self._pipeline = Gst.parse_launch(pipeline_description(self.device))
         self._src = self._pipeline.get_by_name("src")
-        self._pipeline.set_state(Gst.State.PLAYING)
+        res = self._pipeline.set_state(Gst.State.PLAYING)
+        if res == Gst.StateChangeReturn.FAILURE:
+            err_msg = ""
+            bus = self._pipeline.get_bus()
+            if bus is not None:
+                msg = bus.pop_filtered(Gst.MessageType.ERROR)
+                if msg is not None:
+                    err, dbg = msg.parse_error()
+                    err_msg = f": {err.message} ({dbg})"
+            self.stop()
+            raise RuntimeError(f"Could not start camera pipeline on {self.device}{err_msg}")
 
     def push(self, jpeg):
         """One frame from the phone. False if the pipeline has gone."""
@@ -72,7 +82,16 @@ class Webcam:
     def stop(self):
         if self._pipeline is not None:
             if self._src is not None:
-                self._src.emit("end-of-stream")
+                try:
+                    self._src.emit("end-of-stream")
+                except Exception:
+                    pass
             self._pipeline.set_state(Gst.State.NULL)
+            bus = self._pipeline.get_bus()
+            if bus is not None:
+                while bus.pop():
+                    pass
             self._pipeline = None
             self._src = None
+            import gc
+            gc.collect()

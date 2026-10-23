@@ -203,6 +203,9 @@ class Link:
                                            companion.reachable if probing else (lambda _address: False))
         self.phonebook = companion.PhoneBook()
         self._clip_from_phone = ""
+        self._camera_ws = None
+        self._camera_webcam = None
+        self._camera_lock = asyncio.Lock()
         self._texts = {}   # texts the phone has been asked to send: id -> whether it did
         self._phone_screen = None   # a phone's screen being shown here (phone_screen.py)
         # One way in to everything (actions.py), and the situations that come round again (scenes.py).
@@ -711,15 +714,38 @@ class Link:
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=4 * 1024 * 1024)
         await ws.prepare(request)
         self._track(ws)
-        webcam = camera.Webcam(device)
+
+        async with self._camera_lock:
+            if self._camera_ws is not None and not self._camera_ws.closed:
+                try:
+                    await self._camera_ws.close()
+                except Exception:
+                    pass
+            if self._camera_webcam is not None:
+                try:
+                    await asyncio.to_thread(self._camera_webcam.stop)
+                except Exception:
+                    pass
+                self._camera_webcam = None
+
+            webcam = camera.Webcam(device)
+            self._camera_ws = ws
+            self._camera_webcam = webcam
+
         self.audit.write(request["peer"], "camera", device)
         try:
             await asyncio.to_thread(webcam.start)
             async for message in ws:
                 if message.type == WSMsgType.BINARY:
                     webcam.push(message.data)
+        except Exception as error:
+            self.audit.write(request["peer"], "camera-error", str(error))
         finally:
-            await asyncio.to_thread(webcam.stop)
+            async with self._camera_lock:
+                if self._camera_ws is ws:
+                    self._camera_ws = None
+                    self._camera_webcam = None
+                await asyncio.to_thread(webcam.stop)
         return ws
 
     # ------------------------------------------------- media, sound, clipboard
