@@ -468,11 +468,17 @@ def screens(check, adb, device, control, build_env, sandbox):
 
     # ---------------------------------------------------------- trackpad
     tap("Trackpad")
+    time.sleep(2)  # entering the surface rotates the activity to landscape
     sh("shell", "input", "swipe", "300", "700", "600", "900", "300")
     sh("shell", "input", "tap", "400", "800")
-    for label in ("Left", "Right", "Esc", "Enter"):
+    step(has("Show trackpad controls", "Move"), "trackpad: an edge-to-edge landscape surface")
+    tap("Show trackpad controls")
+    for label in ("Left", "Middle", "Right"):
         tap(label, wait=0.8)
-    step(has("Drag to move"), "trackpad: move, tap, both buttons and the key row")
+    tap("Show keyboard")
+    for label in ("Esc", "Enter"):
+        tap(label, wait=0.8)
+    step(has("Trackpad", "Hide keyboard"), "trackpad: pointer, mouse buttons, Air, Ink and keyboard remain available")
     home()
 
     # ------------------------------------------------------------- media

@@ -1,6 +1,7 @@
 package com.karthi.adaptivelink
 
 import android.app.Activity
+import android.content.pm.ActivityInfo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -67,6 +68,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Keyboard
@@ -711,33 +714,71 @@ fun TrackpadPage(activity: Activity, client: LinkClient, workspaceId: String = "
     val input = remember(workspaceId) { InputSocket(client, if (workspaceId.isEmpty()) "/v1/input" else "/v1/input?workspace=$workspaceId") }
     DisposableEffect(Unit) { onDispose { input.close() } }
     var keyboard by remember { mutableStateOf(false) }
+    var palette by remember { mutableStateOf(false) }
     // Aim the phone like a pointer, instead of dragging on it.
     var air by remember { mutableStateOf(false) }
     val context = LocalContext.current
     if (air) AirMouse { input.send(it) }
 
-    DisposableEffect(Unit) { fullScreen(activity, true); onDispose { fullScreen(activity, false) } }
+    DisposableEffect(Unit) {
+        val previousOrientation = activity.requestedOrientation
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        fullScreen(activity, true)
+        onDispose {
+            fullScreen(activity, false)
+            activity.requestedOrientation = previousOrientation
+        }
+    }
     BackHandler { onBack() }
     Box(Modifier.fillMaxSize().background(Color(0xFF101012)).imePadding()) {
-      Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Filled.Close, "Exit trackpad") }
-            Text("Trackpad", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            if (hasGyroscope(context)) FilterChip(selected = air, onClick = { air = !air }, label = { Text("Air") },
-                modifier = Modifier.padding(end = 4.dp))
-            IconButton(onClick = onInk) { Icon(Icons.Filled.Edit, "Open Ink Studio") }
-            IconButton(onClick = { keyboard = !keyboard }) { Icon(Icons.Filled.Keyboard, "Keyboard") }
+        val surface = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).let {
+            if (air) it else it.adaptiveTrackpad(input)
         }
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            Box(
-                Modifier.weight(1f).fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .adaptiveTrackpad(input),
-                contentAlignment = Alignment.Center,
-            ) { Muted("1 finger move · tap click · 2 fingers scroll/right-click · 3 fingers middle-click") }
+        Box(surface, contentAlignment = Alignment.Center) {
+            Muted(if (air) "Air pointer on" else "Move · tap to click · two fingers to scroll or right-click")
         }
-        if (keyboard) KeyboardBar(input::send)
-      }
+
+        if (palette) Surface(
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+            color = Color(0xEB1C1C1E),
+            shape = RoundedCornerShape(18.dp),
+            tonalElevation = 6.dp,
+        ) {
+            Column(Modifier.padding(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack) { Icon(Icons.Filled.Close, "Exit trackpad", tint = Color.White) }
+                    Text("Trackpad", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(8.dp))
+                    if (hasGyroscope(context)) FilterChip(
+                        selected = air,
+                        onClick = { air = !air },
+                        label = { Text("Air") },
+                    )
+                    IconButton(onClick = onInk) { Icon(Icons.Filled.Edit, "Open Ink Studio", tint = Color.White) }
+                    IconButton(onClick = { keyboard = !keyboard }) {
+                        Icon(Icons.Filled.Keyboard, if (keyboard) "Hide keyboard" else "Show keyboard", tint = Color.White)
+                    }
+                    IconButton(onClick = { palette = false }) {
+                        Icon(Icons.Filled.ExpandLess, "Hide trackpad controls", tint = Color.White)
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    TextButton(onClick = { input.send(Protocol.click(1)) }) { Text("Left") }
+                    TextButton(onClick = { input.send(Protocol.click(2)) }) { Text("Middle") }
+                    TextButton(onClick = { input.send(Protocol.click(3)) }) { Text("Right") }
+                }
+            }
+        } else FilledIconButton(
+            onClick = { palette = true },
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(52.dp),
+        ) { Icon(Icons.Filled.ExpandMore, "Show trackpad controls") }
+
+        if (keyboard) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            KeyboardBar(input::send)
+        }
     }
 }
 

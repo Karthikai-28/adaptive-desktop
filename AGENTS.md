@@ -18,7 +18,7 @@ compatibility without keeping GNOME 42 working first.
 | Files (forked Nautilus 42.6) | `extension/adaptive_files/` (inspector side panel, Python), fork build in `.local/adaptive-nautilus*` | routing: `scripts/adaptive-files-dispatch.sh`; architecture rule: `docs/UBUNTU_FILES_PARITY.md` |
 | Settings | `apps/adaptive-settings/` (Adaptive-only sections); rest is skinned gnome-control-center 41.7 | |
 | Project context (D-Bus) | `services/project-context/main.py` | |
-| Phone link | daemon `services/adaptive-link/` (`server.py` + one module per feature; `zero_state.py` records a phone arm request only), Android app `apps/adaptive-link-android/` (Kotlin, Gradle) | `docs/ADAPTIVE_LINK.md` |
+| Phone link | daemon `services/adaptive-link/` (`server.py` + one module per feature; `zero_state.py` records a phone arm request only), Android app `apps/adaptive-link-android/` (Kotlin, Gradle); full-screen trackpad and Ink Studio are in `RemoteScreens.kt` and `InkStudio.kt` | `docs/ADAPTIVE_LINK.md`, `docs/PHONE_TRACKPAD_AND_INK.md` |
 | Device retirement | `scripts/zero-state-protocol.sh`, with guard test `scripts/verify-zero-state-protocol.sh` | `docs/ZERO_STATE_PROTOCOL.md`; external boot only, never remotely erases storage |
 | Agent Office (AI company, :8790) | `services/agent-office/`: `server.py`, `office/*.py` (`manager.py`, providers, `mission_templates.py`, `capsules.py`, `evidence.py`; workflow/audit/retention/ROS comparison in `workflows.py`, `audit_export.py`, `retention.py`, `ros_compare.py`; private records + operator key + manager-call detection + PASS/FAIL judging in `records.py`, `operator.py`, `callers.py`, `verdicts.py`; quota/ledger/graphs/study), UI in `static/`; Mission Control groups checked work over tasks | `docs/AGENT_OFFICE.md` (sections: setup, safety, providers, missions/capsules, ledger, gotchas); page check `scripts/verify-agent-office-ui.py` (headless Chrome). All Agent Office work happens here and nowhere else |
 | ROS 2 panel (top bar, left of Network) | `shell/adaptive-shell@local/rosPanel.js`, helper `shell/adaptive-shell@local/tools/ros_info.py` (setup from the login shell's rc files, supervised launches, colcon builds and rosbag, launch-argument forms, robot and parameter profiles, live `watch` over stdin/stdout with health, confirmed writes and streamed plots/goal feedback); palette `ros` mode in `apps/adaptive-command/modes.py` | `docs/ROS2_PANEL.md`; checks `scripts/verify-ros-panel.py` (real nodes), `scripts/verify-ros-controllers.py` (fixture manager; sourced ROS + controller messages), `scripts/verify-ros-nested.sh` |
@@ -63,4 +63,4 @@ are recorded with `scripts/record-live-verification.py`.
 - Repo conventions (single `master` branch, commit identity, commit cadence, UI palette, Files
   inspector scope) are in this repo's memory: `memctl read`.
 
-<!-- map-check: commit=86a89f40ccf7 time=1792623921 -->
+<!-- map-check: commit=85c547e8890e time=1792718692 -->
