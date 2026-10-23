@@ -1107,16 +1107,64 @@ var RosPanel = class RosPanel {
     }
 
     _playBag(path, options = null) {
-        options = options || { rate: '1', loop: false, clock: false };
+        options = options || { rate: '1', loop: false, clock: false, start: '0' };
         this._notes.bag = { text: 'Starting playback…' };
         this._render();
+        const start = String(options.start || '').trim();
         this._helper(['bag-play', path, String(options.rate || 1),
-            ...(options.loop ? ['loop'] : []), ...(options.clock ? ['clock'] : [])], reply => {
+            ...(options.loop ? ['loop'] : []), ...(options.clock ? ['clock'] : []),
+            ...(start && start !== '0' ? [`start=${start}`] : [])], reply => {
             this._notes.bag = reply.ok ? null : { text: reply.error, error: true };
             this._bagDraft = null;
             this._loadStatus();
             this._pollRuns();
         });
+    }
+
+    // A bag from anywhere: a folder, its metadata.yaml, a .db3 or an .mcap.
+    // The play form opens with what it holds and what will not play.
+    _openBag(path) {
+        this._expanded.delete('bag:open');
+        this._bagDraft = { path, rate: '1', start: '0', loop: false, clock: false, info: null };
+        this._render();
+        this._helper(['bag-info', path, 'remember'], reply => this._bagInfo(reply, path));
+    }
+
+    _bagInfo(reply, path) {
+        if (!this._bagDraft || this._bagDraft.path !== path)
+            return;
+        if (!reply.ok) {
+            this._bagDraft = null;
+            this._notes.bag = { text: reply.error, error: true };
+        } else {
+            const { topic_list: _topics, ...info } = reply;   // the list is long; the form needs the counts
+            this._bagDraft = { ...this._bagDraft, path: reply.path, info };
+            this._notes.bag = null;
+        }
+        this._loadStatus();
+    }
+
+    // The file chooser is a window of its own: the dropdown closes for it and
+    // comes back with the chosen bag's play form.
+    _chooseBag() {
+        this._button.menu.close();
+        this._helper(['bag-choose'], reply => {
+            if (reply.ok) {
+                this._expanded.delete('bag:open');
+                const { topic_list: _topics, ...info } = reply;
+                this._button.menu.open();
+                this._bagDraft = { path: reply.path, rate: '1', start: '0', loop: false, clock: false, info };
+                this._loadStatus();
+            } else if (!reply.cancelled) {
+                this._button.menu.open();
+                this._notes.bag = { text: reply.error, error: true };
+                this._render();
+            }
+        });
+    }
+
+    _forgetBag(path) {
+        this._helper(['bag-forget', path], () => this._loadStatus());
     }
 
     _bagControl(operation) {
@@ -1260,7 +1308,7 @@ var RosPanel = class RosPanel {
         if (entry.tool === 'launch' && meta.file)
             this._launch('launch', meta.file, meta.args || []);
         else if (entry.tool === 'bag' && meta.play)
-            this._playBag(meta.play);
+            this._playBag(meta.play, { rate: meta.rate || 1, loop: meta.loop, clock: meta.clock, start: meta.start || 0 });
         else if (entry.tool === 'plotjuggler' && meta.topics)
             this._openPlotJuggler(meta.topics);
         else
@@ -2348,8 +2396,12 @@ var RosPanel = class RosPanel {
         else if (recording)
             subtitle = `Recording ${this._recordingTopics(recording)} · ${bytes(recording.size || 0)} · ` +
                 `${seconds(Date.now() / 1000 - (recording.started || Date.now() / 1000))}`;
-        else if (playing)
-            subtitle = `Playing ${playing.meta.name}`;
+        else if (playing) {
+            const how = [`${playing.meta.rate || 1}×`, playing.meta.loop ? 'looping' : '',
+                playing.meta.start ? `from ${seconds(playing.meta.start)}` : '',
+                playing.meta.clock ? 'publishing /clock' : ''].filter(Boolean);
+            subtitle = `Playing ${playing.meta.name} · ${how.join(' · ')}`;
+        }
         else
             subtitle = `Records ${this._searchText ? 'the topics the search shows' : 'every topic shown below'}` +
                 `${status.bag_free ? ` · ${bytes(status.bag_free)} free` : ''}`;
@@ -2372,10 +2424,22 @@ var RosPanel = class RosPanel {
                     onClick: () => this._bagControl(paused ? 'resume' : 'pause') } : null,
                 { label: 'Stop', onClick: () => this._stop('bag') },
             ].filter(Boolean) : [
+                { label: 'Open…', quiet: true, onClick: () => this._toggle('bag:open') },
                 { label: 'Topics', quiet: true, onClick: () => this._toggle('bag:topics') },
                 { label: this._isArmed('bag:record') ? 'Confirm' : 'Record', quiet: true, onClick: () => this._recordTopics() },
             ],
         }));
+        if (this._expanded.has('bag:open') && !busy) {
+            this._out.add_child(this._textEntry({ hint: 'A bag folder, metadata.yaml, .db3 or .mcap · Enter to open',
+                focus: true, onActivate: text => text.trim() && this._openBag(text.trim()),
+                onEscape: () => this._toggle('bag:open') }));
+            this._out.add_child(this._buttons([
+                { label: 'Choose a file…', onClick: () => this._chooseBag() },
+                { label: 'Cancel', onClick: () => this._toggle('bag:open') },
+            ]));
+        }
+        if (this._bagDraft && !busy)
+            this._addBagDraft(this._bagDraft);
         if (picking) {
             for (const topic of topics) {
                 const selected = this._bagTopics.has(topic.name);
@@ -2393,8 +2457,12 @@ var RosPanel = class RosPanel {
                 { label: 'What the list shows', onClick: () => { this._bagTopics = null; this._toggle('bag:topics'); } },
             ]));
         }
+        const home = GLib.get_home_dir();
         for (const bag of status.bags || []) {
             const parts = [];
+            if (bag.origin === 'found' || bag.origin === 'opened')
+                parts.push(`${bag.origin === 'found' ? 'in' : 'opened from'} ` +
+                    `${GLib.path_get_dirname(bag.path).replace(home, '~')}`);
             if (bag.duration_s !== undefined)
                 parts.push(seconds(bag.duration_s));
             if (bag.messages !== undefined)
@@ -2406,26 +2474,50 @@ var RosPanel = class RosPanel {
                 icon: 'folder-symbolic',
                 title: bag.name,
                 subtitle: parts.join(' · '),
+                active: !!(this._bagDraft && this._bagDraft.path === bag.path),
                 actions: [
-                    busy ? null : { label: 'Play…', quiet: true, onClick: () => {
-                        this._bagDraft = { path: bag.path, rate: '1', loop: false, clock: false };
-                        this._render();
-                    } },
-                    { label: 'Folder', quiet: true, onClick: () => this._openFolder(bag.path) },
+                    busy ? null : { label: 'Play…', quiet: true, onClick: () => this._openBag(bag.path) },
+                    { label: 'Folder', quiet: true, onClick: () => this._openFolder(
+                        bag.path.match(/\.(db3|mcap)$/) ? GLib.path_get_dirname(bag.path) : bag.path) },
+                    bag.origin === 'opened' ? { label: 'Forget', quiet: true, onClick: () => this._forgetBag(bag.path) } : null,
                 ].filter(Boolean),
             }));
-            if (this._bagDraft && this._bagDraft.path === bag.path) {
-                const draft = this._bagDraft;
-                this._out.add_child(this._textEntry({ text: draft.rate, hint: 'Playback speed · 0.1 to 10',
-                    onChange: text => { draft.rate = text; } }));
-                this._out.add_child(this._buttons([
-                    { label: `${draft.loop ? '✓' : '○'} Loop`, onClick: () => { draft.loop = !draft.loop; this._render(); } },
-                    { label: `${draft.clock ? '✓' : '○'} Publish clock`, onClick: () => { draft.clock = !draft.clock; this._render(); } },
-                    { label: 'Start playback', onClick: () => this._playBag(bag.path, draft) },
-                    { label: 'Cancel', onClick: () => { this._bagDraft = null; this._render(); } },
-                ]));
-            }
         }
+    }
+
+    // The play form: what the bag holds, what will not play (its message
+    // package is not installed, so ROS skips those topics), speed, start
+    // time, loop and /clock.
+    _addBagDraft(draft) {
+        const info = draft.info;
+        const facts = info ? [seconds(info.duration_s || 0), plural(info.messages || 0, 'message'),
+            plural(info.topics || 0, 'topic'), bytes(info.size || 0)] : ['Reading the bag…'];
+        this._out.add_child(CC.makeRow({
+            icon: 'media-playback-start-symbolic',
+            title: `Play ${info ? info.name : GLib.path_get_basename(draft.path)}`,
+            subtitle: facts.join(' · '),
+            active: true,
+        }));
+        if (info && (info.skipped || []).length) {
+            const skipped = info.topics - info.playable;
+            const packages = info.skipped.map(m => m.package).join(', ');
+            this._out.add_child(this._note(info.playable
+                ? `${skipped} of ${plural(info.topics, 'topic')} will not play: ${packages} ` +
+                  `${info.skipped.length === 1 ? 'is' : 'are'} not installed. The other ${info.playable} play; ` +
+                  'choose a workspace that builds those messages to play them too.'
+                : `Nothing here can play: ${packages} ${info.skipped.length === 1 ? 'is' : 'are'} not installed. ` +
+                  'Choose a workspace that builds those messages.', !info.playable));
+        }
+        this._out.add_child(this._textEntry({ text: draft.rate, hint: 'Playback speed · 0.1 to 10',
+            onChange: text => { draft.rate = text; } }));
+        this._out.add_child(this._textEntry({ text: draft.start, hint: 'Start at · seconds into the bag',
+            onChange: text => { draft.start = text; } }));
+        this._out.add_child(this._buttons([
+            { label: `${draft.loop ? '✓' : '○'} Loop`, onClick: () => { draft.loop = !draft.loop; this._render(); } },
+            { label: `${draft.clock ? '✓' : '○'} Publish clock`, onClick: () => { draft.clock = !draft.clock; this._render(); } },
+            info && !info.playable ? null : { label: 'Start playback', onClick: () => this._playBag(draft.path, draft) },
+            { label: 'Cancel', onClick: () => { this._bagDraft = null; this._render(); } },
+        ]));
     }
 
     // --------------------------------------------------------------- graph

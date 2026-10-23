@@ -19,7 +19,11 @@
     ros_info.py run-control <tool> pause|resume   build | launch | node
     ros_info.py plot </topic/field>    rqt_plot on one numeric field
     ros_info.py plotjuggler <topic>...  PlotJuggler subscribed to exactly these topics
-    ros_info.py bag-start --all | <topic>...   bag-play <dir> [rate] [loop] [clock]
+    ros_info.py bag-start --all | <topic>...   bag-play <bag> [rate] [loop] [clock] [start=SECONDS]
+                                       <bag>: a bag folder, its metadata.yaml, a .db3 or an .mcap
+    ros_info.py bag-info <bag> [remember]   length, topics, and which will not play (types not
+                                       installed); remember lists it with the panel's bags
+    ros_info.py bag-choose | bag-forget <bag>   a file chooser for a bag; drop an opened one
     ros_info.py bag-control pause|resume   the bag started here (playback; recording from Iron)
     ros_info.py save-setup <name> | use-setup <name> | forget-setup <name>
                                        saved robot setups: domain, discovery, middleware, workspace
@@ -119,6 +123,8 @@ SETUPS = CONFIG.parent / "ros-setups.json"
 ROBOT_PROFILES = CONFIG.parent / "ros-robot-profiles.json"
 PARAMETER_PROFILES = CONFIG.parent / "ros-parameter-profiles"
 BAGS = Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local" / "share") / "adaptive-desktop" / "rosbags"
+OPENED_BAGS = CONFIG.parent / "ros-bags.json"
+BAG_FILES = {".db3": "sqlite3", ".mcap": "mcap"}
 # PlotJuggler's own settings (QSettings): its streamer and the topics it preselects
 PLOTJUGGLER_SETTINGS = (Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "PlotJuggler" /
                         "io.plotjuggler.PlotJuggler.ini")
@@ -702,7 +708,7 @@ def is_world(path):
 def discovered_files(spaces, refresh=False):
     """RViz configs, worlds and launch files: a walk of the home folder and every
     workspace's src, so it is kept for a few minutes (per set of workspaces)."""
-    key = ["workspace-files-v2", *sorted(w["path"] for w in spaces)]
+    key = ["workspace-files-v3", *sorted(w["path"] for w in spaces)]
     cached = read_json(DISCOVERY)
     if (not refresh and cached.get("key") == key
             and 0 <= time.time() - cached.get("at", 0) < DISCOVERY_TTL_S):
@@ -713,6 +719,9 @@ def discovered_files(spaces, refresh=False):
         "worlds": recent_files(roots, is_world),
         "launch_files": recent_files([(Path(w["path"]) / "src", 8) for w in spaces],
                                      lambda p: p.endswith(LAUNCH_SUFFIXES), limit=None),
+        # bag folders someone downloaded or copied in: their metadata.yaml
+        "found_bags": [str(Path(f["path"]).parent) for f in
+                       recent_files([(HOME / "Downloads", 4), (HOME, 2)], is_bag_metadata, limit=12)],
     }
     try:
         write_json(DISCOVERY, {"key": key, "at": time.time(), "files": files})
@@ -772,7 +781,7 @@ def status(refresh=False):
         } for name, ok in tools.items()},
         "gazebo_flavour": flavour,
         "gazebo_install": f"sudo apt install ros-{distro}-ros-gz",
-        **discovered_files([w for w in spaces if w["path"] == setup["workspace"]], refresh),
+        **(found := discovered_files([w for w in spaces if w["path"] == setup["workspace"]], refresh)),
         "saved_launches": read_json(SAVED_LAUNCHES, list),
         "setups": read_json(SETUPS, list),
         "project": {"name": project[0], "path": project[1], "workspace": project_ws} if project else None,
@@ -781,7 +790,7 @@ def status(refresh=False):
                          "paused": bool(e.get("paused"))}
                         for e in entries] for name, entries in owned.items()},
         "recording": recording(owned.get("bag", [])),
-        "bags": recent_bags(),
+        "bags": recent_bags(found.get("found_bags", [])),
         "bag_dir": str(BAGS),
         "bag_free": free_space(BAGS),
         "favorites": read_json(FAVORITES, list),
@@ -1456,32 +1465,178 @@ def free_space(path):
         return None
 
 
-def bag_summary(path):
-    """Duration, message count and topics from a bag's metadata.yaml."""
-    info = {"name": path.name, "path": str(path), "size": dir_size(path)}
+def bag_metadata(path):
+    """A bag folder's metadata.yaml, or None (missing, or half written while a recording stops)."""
     try:
         import yaml
-        meta = yaml.safe_load((path / "metadata.yaml").read_text())["rosbag2_bagfile_information"]
-        info["duration_s"] = meta["duration"]["nanoseconds"] / 1e9
-        info["messages"] = meta["message_count"]
-        info["topics"] = len(meta.get("topics_with_message_count") or [])
-    except Exception:  # Missing, or half written while the recording stops.
-        pass
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)   # big bags list hundreds of topics
+        return yaml.load((Path(path) / "metadata.yaml").read_text(), Loader=loader)["rosbag2_bagfile_information"]
+    except Exception:
+        return None
+
+
+def bag_target(path):
+    """What `ros2 bag play` gets for a path someone picked: a bag folder, its
+    metadata.yaml or one of its files all mean the folder (a split bag has
+    several); a .db3 or .mcap on its own plays alone with its storage named.
+    {"path", "storage"}, or None when it is no bag."""
+    try:
+        p = Path(path).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if p.is_file() and (p.name == "metadata.yaml" or p.suffix in BAG_FILES) and (p.parent / "metadata.yaml").is_file():
+        p = p.parent
+    if p.is_dir():
+        if (p / "metadata.yaml").is_file():
+            return {"path": p, "storage": None}
+        files = [f for f in p.iterdir() if f.is_file() and f.suffix in BAG_FILES]
+        return {"path": files[0], "storage": BAG_FILES[files[0].suffix]} if len(files) == 1 else None
+    if p.is_file() and p.suffix in BAG_FILES:
+        return {"path": p, "storage": BAG_FILES[p.suffix]}
+    return None
+
+
+def bag_summary(path, origin="recorded"):
+    """Duration, message count and topics from a bag's metadata.yaml (a lone
+    file shows its size until it is opened)."""
+    path = Path(path)
+    info = {"name": path.name, "path": str(path), "origin": origin,
+            "size": dir_size(path) if path.is_dir() else path.stat().st_size}
+    meta = bag_metadata(path) if path.is_dir() else None
+    if meta:
+        try:
+            info["duration_s"] = meta["duration"]["nanoseconds"] / 1e9
+            info["messages"] = meta["message_count"]
+            info["topics"] = len(meta.get("topics_with_message_count") or [])
+        except (KeyError, TypeError):
+            pass
     return info
 
 
-def recent_bags(limit=6):
+def is_bag_metadata(path):
+    if not path.endswith("/metadata.yaml"):
+        return False
     try:
-        bags = [path for path in BAGS.iterdir() if path.is_dir() and (path / "metadata.yaml").is_file()]
+        with open(path, errors="replace") as f:
+            return f.read(64).lstrip().startswith("rosbag2_bagfile_information")
     except OSError:
-        bags = []
-    stamped = []
-    for path in bags:
+        return False
+
+
+def recent_bags(found=(), limit=10):
+    """Bags recorded here, bags opened from anywhere, and bags found in
+    ~/Downloads and the home folder: newest first."""
+    stamped = {}
+
+    def add(path, origin, when=None):
         try:
-            stamped.append((path.stat().st_mtime, path))
+            when = when if when is not None else Path(path).stat().st_mtime
+        except OSError:
+            return
+        key = str(path)
+        if key not in stamped or stamped[key][0] < when:
+            stamped[key] = (when, origin)
+    try:
+        for path in BAGS.iterdir():
+            if path.is_dir() and (path / "metadata.yaml").is_file():
+                add(path, "recorded")
+    except OSError:
+        pass
+    for path in found:
+        add(path, "found")
+    for entry in read_json(OPENED_BAGS, list):
+        target = bag_target(entry.get("path", ""))
+        if target:
+            add(target["path"], "opened", entry.get("at"))
+    newest = sorted(stamped.items(), key=lambda item: item[1][0], reverse=True)[:limit]
+    bags = []
+    for path, (_when, origin) in newest:
+        try:
+            bags.append(bag_summary(path, origin))
         except OSError:
             pass
-    return [bag_summary(path) for _, path in sorted(stamped, reverse=True)[:limit]]
+    return bags
+
+
+def remember_bag(path):
+    with file_lock(OPENED_BAGS.with_suffix(".lock")):
+        opened = [e for e in read_json(OPENED_BAGS, list) if e.get("path") != str(path)]
+        write_json(OPENED_BAGS, [{"path": str(path), "at": time.time()}, *opened][:10])
+
+
+def forget_bag(path):
+    with file_lock(OPENED_BAGS.with_suffix(".lock")):
+        opened = read_json(OPENED_BAGS, list)
+        kept = [e for e in opened if e.get("path") != str(path)]
+        write_json(OPENED_BAGS, kept)
+    return {"ok": True, "forgotten": len(opened) - len(kept)}
+
+
+def bag_topics_from_info(text):
+    """Topics from `ros2 bag info` (a lone file has no metadata.yaml to read)."""
+    topics = []
+    for m in re.finditer(r"Topic:\s*(\S+)\s*\|\s*Type:\s*(\S+)\s*\|\s*Count:\s*(\d+)", text):
+        topics.append({"name": m[1], "type": m[2], "count": int(m[3])})
+    duration = re.search(r"Duration:\s*([\d.]+)s", text)
+    messages = re.search(r"Messages:\s*(\d+)", text)
+    return topics, float(duration[1]) if duration else None, int(messages[1]) if messages else None
+
+
+def bag_details(path, remember=False):
+    """A bag before it plays: length, messages, its topics and which of them
+    will not play because their message package is not installed (ROS
+    skips those with a warning)."""
+    target = bag_target(path)
+    if not target:
+        return {"ok": False, "error": "That is not a ROS 2 bag (a folder with metadata.yaml, a .db3 or an .mcap)"}
+    setup = settings()
+    if not setup.get("distro"):
+        return {"ok": False, "error": "ROS 2 is not installed"}
+    bag = target["path"]
+    if target["storage"]:
+        done = subprocess.run(["ros2", "bag", "info", "-s", target["storage"], str(bag)], env=ros_env(setup),
+                              capture_output=True, text=True, timeout=60)
+        topics, duration, messages = bag_topics_from_info(done.stdout)
+        if done.returncode != 0 and not topics:
+            return {"ok": False, "error": (done.stderr or done.stdout).strip()[-300:] or "ros2 bag info failed"}
+    else:
+        meta = bag_metadata(bag)
+        if not meta:
+            return {"ok": False, "error": f"{bag / 'metadata.yaml'} cannot be read"}
+        topics = [{"name": t["topic_metadata"]["name"], "type": t["topic_metadata"]["type"],
+                   "count": t.get("message_count", 0)} for t in meta.get("topics_with_message_count") or []]
+        duration = meta.get("duration", {}).get("nanoseconds", 0) / 1e9
+        messages = meta.get("message_count")
+    roots = [ROS_ROOT / setup["distro"]] + ([Path(setup["workspace"]) / "install"] if setup.get("workspace") else [])
+    installed = installed_packages(roots)
+    missing = {}
+    for topic in topics:
+        package = topic["type"].split("/")[0]
+        if package not in installed:
+            entry = missing.setdefault(package, {"package": package, "topics": 0, "messages": 0})
+            entry["topics"] += 1
+            entry["messages"] += topic["count"]
+    if remember and not str(bag).startswith(str(BAGS)):
+        remember_bag(bag)
+    return {"ok": True, **bag_summary(bag, "opened"), "storage": target["storage"] or "",
+            "duration_s": duration, "messages": messages, "topics": len(topics),
+            "topic_list": sorted(topics, key=lambda t: t["name"])[:400],
+            "skipped": sorted(missing.values(), key=lambda m: -m["topics"]),
+            "playable": len(topics) - sum(m["topics"] for m in missing.values())}
+
+
+def choose_bag():
+    """A file chooser (zenity) for a bag; the panel shows nothing while it is open."""
+    if shutil.which("zenity") is None:
+        return {"ok": False, "error": "No file chooser (zenity) is installed; type the path instead"}
+    start = HOME / "Downloads" if (HOME / "Downloads").is_dir() else HOME
+    done = subprocess.run(["zenity", "--file-selection", "--title=Open a ROS 2 bag", f"--filename={start}/",
+                           "--file-filter=ROS 2 bags | *.db3 *.mcap metadata.yaml", "--file-filter=All files | *"],
+                          capture_output=True, text=True)
+    path = done.stdout.strip()
+    if done.returncode != 0 or not path:
+        return {"ok": False, "cancelled": True, "error": ""}
+    return bag_details(path, remember=True)
 
 
 def recording(entries):
@@ -1512,10 +1667,11 @@ def bag_start(topics):
     return {**result, "path": str(output), "topics": "all" if every else topics}
 
 
-def bag_play(path, rate=1.0, loop=False, clock=False):
-    bag = Path(path)
-    if not bag.is_dir() or not (bag / "metadata.yaml").is_file():
-        return {"ok": False, "error": "That is not a ROS 2 bag"}
+def bag_play(path, rate=1.0, loop=False, clock=False, start_offset=0.0):
+    target = bag_target(path)
+    if not target:
+        return {"ok": False, "error": "That is not a ROS 2 bag (a folder with metadata.yaml, a .db3 or an .mcap)"}
+    bag = target["path"]
     if owned_runs("bag"):
         return {"ok": False, "error": "A bag started here is already running; stop it first"}
     env = ros_env(settings())
@@ -1525,13 +1681,25 @@ def bag_play(path, rate=1.0, loop=False, clock=False):
         rate = 0
     if not 0.1 <= rate <= 10:
         return {"ok": False, "error": "Playback speed is 0.1 to 10"}
+    try:
+        start_offset = float(start_offset or 0)
+    except ValueError:
+        start_offset = -1
+    if not 0 <= start_offset <= 1e7:
+        return {"ok": False, "error": "Start at is a number of seconds into the bag"}
     argv = ["ros2", "bag", "play", str(bag), "--rate", str(rate)]
+    if target["storage"]:
+        argv += ["-s", target["storage"]]
+    if start_offset:
+        argv += ["--start-offset", str(start_offset)]
     if loop:
         argv.append("--loop")
     if clock:
         argv.append("--clock")
-    result = start("bag", [argv], env, {"play": str(bag), "name": bag.name,
-                                        "rate": rate, "loop": loop, "clock": clock})
+    if not str(bag).startswith(str(BAGS)):
+        remember_bag(bag)
+    result = start("bag", [argv], env, {"play": str(bag), "name": bag.name, "rate": rate, "loop": loop,
+                                        "clock": clock, "start": start_offset})
     return {**result, "path": str(bag)}
 
 
@@ -3747,8 +3915,15 @@ def run_command(command, args, program="ros_info.py"):
         if command == "bag-start" and args:
             return bag_start(args)
         if command == "bag-play" and args:
+            offset = next((a.split("=", 1)[1] for a in args[2:] if a.startswith("start=")), 0)
             return bag_play(args[0], args[1] if len(args) > 1 else 1.0,
-                            "loop" in args[2:], "clock" in args[2:])
+                            "loop" in args[2:], "clock" in args[2:], offset)
+        if command == "bag-info" and args:
+            return bag_details(args[0], remember="remember" in args[1:])
+        if command == "bag-forget" and len(args) == 1:
+            return forget_bag(args[0])
+        if command == "bag-choose":
+            return choose_bag()
         if command == "bag-control" and len(args) == 1:
             return bag_control(args[0])
         if command == "save-setup" and len(args) == 1:

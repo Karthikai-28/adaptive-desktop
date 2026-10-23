@@ -447,6 +447,21 @@ seen="$(ros_wait_for "'✓ /chatter', '✓ /tf_static', 'Records 6 chosen topics
 [ "$seen" = true ]; check $? "ros: topics to record are ticked one by one$([ "$seen" = true ] || echo " ($seen)")"
 ros_text "ros._bagTopics = null; ros._toggle('bag:topics'); return true;" >/dev/null
 
+# Open… takes a bag from anywhere; the play form says what it holds.
+seen="$(ros_press 'Open…' true 'Rosbag')"; [ "$seen" = true ]; check $? "ros: Rosbag has Open…, in place ($seen)"
+seen="$(ros_wait_for "'Choose a file…', 'A bag folder, metadata.yaml, .db3 or .mcap · Enter to open'")"
+[ "$seen" = true ]; check $? "ros: Open… asks for a path or a file$([ "$seen" = true ] || echo " ($seen)")"
+seen="$(ros_text "const bag = ros._status.bags[0].path; const db3 = imports.gi.GLib.build_filenamev([bag,
+        imports.gi.Gio.File.new_for_path(bag).enumerate_children('standard::name', 0, null).next_file(null).get_name()]);
+    const file = db3.endsWith('.db3') ? db3 : bag; ros._openBag(file);
+    for (let i = 0; i < 40; i++) { const t = labels(ros._list).join('|');
+        if (t.includes('Play ' + imports.gi.GLib.path_get_basename(bag)) && t.includes(' messages · ') && t.includes(' topics · ')
+            && t.includes('Start playback') && t.includes('Start at · seconds into the bag') && !t.includes('Reading the bag'))
+            return true; await sleep(250); }
+    const t = labels(ros._list).join('|'); return t.slice(t.indexOf('Rosbag'), t.indexOf('Rosbag') + 600);")"
+[ "$seen" = true ]; check $? "ros: an opened bag shows its play form with what it holds$([ "$seen" = true ] || echo " ($seen)")"
+ros_text "ros._bagDraft = null; ros._render(); return true;" >/dev/null
+
 # Stress the selectors with multiple packages and enough files to scroll.
 seen="$(ros_text "
     await sleep(1000);

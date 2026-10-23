@@ -597,6 +597,12 @@ def ros_rows(rest, status, helper=ROS_HELPER):
                     f"A bag in {status.get('bag_dir', '').replace(str(Path.home()), '~')}", ROS_GROUP,
                     "media-record-symbolic", "Record", act("record", "bag-start", *topics), 300)]
 
+    if first == "play" and len(words) > 1:
+        path = rest.split(None, 1)[1].strip().strip("'\"")
+        if path.startswith(("/", "~")):
+            return [row(f"Play {Path(path).name}", "A bag folder, its metadata.yaml, a .db3 or an .mcap",
+                        ROS_GROUP, "media-playback-start-symbolic", "Play",
+                        act(f"play {Path(path).name}", "bag-play", os.path.expanduser(path)), 300)]
     tools = status.get("tools", {})
     distro = (status.get("distro") or "").title()
     rows = [row("ROS 2 terminal", f"{distro} · domain {status['domain']}", ROS_GROUP,

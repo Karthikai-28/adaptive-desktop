@@ -132,6 +132,23 @@ does the panel's actions from the keyboard.
     own `/rosbag2_player/pause` service; recording pauses only from Iron on
     (Humble's recorder has no pause service, so the button is not offered).
     One bag runs at a time.
+  - **Bags from anywhere**: **Open…** on the Rosbag row takes a path (a bag
+    folder, its `metadata.yaml`, one of its `.db3`/`.mcap` files, or a lone
+    `.db3`/`.mcap`) or **Choose a file…** (a zenity file chooser; the
+    dropdown closes for it and comes back). A file inside a bag folder plays
+    the whole folder (a split bag has several files); a lone file plays with
+    its storage named (`-s sqlite3`/`-s mcap`). Bags under `~/Downloads`
+    (four levels) and the home folder (two) are listed by themselves ("in
+    ~/Downloads/…"); opened ones stay listed ("opened from …", with
+    **Forget**; kept in `~/.config/adaptive-desktop/ros-bags.json`).
+  - **The play form** first says what the bag holds and which topics will
+    not play: a topic whose message package is not installed (in the distro
+    or the panel's workspace) is skipped by `ros2 bag play` with a warning,
+    so the form names those packages and how many topics they cover ("97 of
+    206 topics will not play: as2_msgs, kb_msgs … are not installed").
+    Then speed, **Start at** (seconds into the bag, `--start-offset`), Loop
+    and Publish clock. The row shows how it plays ("1× · from 10 s"). The
+    palette's `ros play <path>` plays any bag too.
 - **Health**: what looks wrong, worst first: duplicate node names, topics
   someone listens to that nobody publishes, services and actions with clients
   but no server, QoS mismatches (a best-effort publisher with a reliable
@@ -348,6 +365,10 @@ static transform and a number on `/level` for the group, TF lookup and plot.
   as skipped, not failed.
 - A stopped (SIGSTOP) process group holds SIGINT until it is continued: Stop
   sends SIGCONT first, or a paused launch would wait out the grace time.
+- `ros2 bag play` on Humble plays a bag whose types are partly missing: it
+  logs "Ignoring a topic …, reason: package '…' not found" per topic and
+  plays the rest. Nothing in its exit says so, which is why the play form
+  counts them first (`bag-info`).
 - Bag playback is not paused by signal: rosbag2's player keeps time with a
   steady clock and would send everything that fell due at once on resume.
 - `ros2 service call` waits for ever for a service that is not there, so the

@@ -11,7 +11,8 @@ diagnostics, node details, type definitions, topic rate, previews (an image
 too), a live plot, the TF tree and one transform, QoS mismatches, every write
 (parameter, parameter profile, lifecycle and a lifecycle group, service call,
 action goal with its feedback, one message), rosbag (playback paused through
-its service), launching, pausing, stopping and how runs ended, a run's log
+its service; bags opened from anywhere, found in ~/Downloads, a lone .db3, and the
+topics that cannot play named first), launching, pausing, stopping and how runs ended, a run's log
 filtered, a real colcon build with its progress, and that the watcher exits
 when its stdin closes. Skips without ROS 2 under /opt/ros. About 70 s.
 """
@@ -586,6 +587,50 @@ def main():
         check(paused.get("ok") is True and helper(env, "runs")["running"]["bag"][0]["paused"] is True,
               "bag: playback pauses through rosbag2's own service", paused)
         check(helper(env, "bag-control", "resume").get("ok") is True, "bag: and resumes")
+        helper(env, "stop", "bag")
+
+        # Bags from anywhere: a folder, its metadata.yaml or a .db3 inside it, a lone .db3,
+        # and bags found in ~/Downloads. Types that are not installed are named before playing.
+        import shutil as _shutil
+        recorded_bag = Path(bags[0]["path"])
+        db3 = next(recorded_bag.glob("*.db3"))
+        found = home / "Downloads" / "flights" / "run_1"
+        _shutil.copytree(recorded_bag, found)
+        listed = {b["path"]: b for b in helper(env, "status", "refresh").get("bags", [])}
+        check(listed.get(str(found), {}).get("origin") == "found" and listed[str(found)].get("topics") == 1,
+              "bag: a bag in ~/Downloads is listed by itself", list(listed))
+        info = helper(env, "bag-info", str(db3), "remember")
+        check(info.get("ok") and info.get("path") == str(recorded_bag) and info.get("playable") == 1
+              and info.get("skipped") == [] and info.get("duration_s", 0) > 0,
+              "bag: a .db3 inside a bag folder opens the folder; every topic can play", info)
+        check(helper(env, "bag-info", str(home / "no_such_bag")).get("ok") is False, "bag: a path that is no bag is refused")
+        alien = home / "alien_bag"
+        _shutil.copytree(recorded_bag, alien)
+        meta = (alien / "metadata.yaml").read_text().replace("std_msgs/msg/String", "not_installed_msgs/msg/Thing")
+        (alien / "metadata.yaml").write_text(meta)
+        info = helper(env, "bag-info", str(alien / "metadata.yaml"), "remember")
+        check(info.get("ok") and info.get("playable") == 0
+              and [m["package"] for m in info.get("skipped", [])] == ["not_installed_msgs"],
+              "bag: topics whose message package is not installed are named as skipped", info)
+        listed = {b["path"]: b for b in helper(env, "status").get("bags", [])}
+        check(listed.get(str(alien), {}).get("origin") == "opened", "bag: an opened bag stays listed", list(listed))
+        check(helper(env, "bag-forget", str(alien)).get("forgotten") == 1
+              and str(alien) not in {b["path"] for b in helper(env, "status").get("bags", [])}, "bag: Forget drops it")
+        lone = home / "lone" / "flight.db3"
+        lone.parent.mkdir()
+        _shutil.copy(db3, lone)
+        info = helper(env, "bag-info", str(lone))
+        check(info.get("ok") and info.get("storage") == "sqlite3" and info.get("topics") == 1,
+              "bag: a lone .db3 is read with ros2 bag info", info)
+        check(helper(env, "bag-play", str(lone), "1", "start=-1").get("ok") is False, "bag: a negative start is refused")
+        played = helper(env, "bag-play", str(lone), "2", "start=0.5")
+        meta = (helper(env, "runs")["running"].get("bag") or [{}])[0].get("meta", {})
+        check(played.get("ok") and meta.get("play") == str(lone) and meta.get("start") == 0.5 and meta.get("rate") == 2,
+              "bag: a lone .db3 plays, from a start time", (played, meta))
+        time.sleep(1.5)
+        tail = helper(env, "log-tail", "bag")
+        check("Opened database" in tail.get("text", "") and "[ERROR]" not in tail.get("text", ""),
+              "bag: the lone file opens without errors", tail)
         helper(env, "stop", "bag")
 
         for proc in nodes:

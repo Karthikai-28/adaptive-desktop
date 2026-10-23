@@ -375,6 +375,10 @@ def palette_modes():
           "ros: build the workspace or one package, not while a build runs")
     check(M.ros_rows("rig", built)[0]["action"][2][-2:] == ["use-robot-profile", "Rig"], "ros: robot profiles")
     check(M.ros_rows("zzz", ros)[0]["action"] is None, "ros: nothing matching says so")
+    play = M.ros_rows("play ~/Downloads/run/bag_0.db3", ros)
+    check(play[0]["title"] == "Play bag_0.db3" and play[0]["action"][2][-2] == "bag-play"
+          and play[0]["action"][2][-1].endswith("/Downloads/run/bag_0.db3") and "~" not in play[0]["action"][2][-1],
+          "ros: play takes the path of any bag")
     new = M.ros_rows("new package", ros)
     check(new[0]["title"] == "New package…" and new[0]["action"][1][-1] == "ros-new-package",
           "ros: new package opens the shell's New package dialog")
