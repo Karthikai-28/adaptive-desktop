@@ -208,7 +208,7 @@ def screens(check, adb, device, control, build_env, sandbox):
             if "adaptivelink" not in focused():
                 sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
                 unlock_app()
-            if has("Pinned", "Recents"):
+            if has("Pinned", "Stage"):
                 return True
             back()
         return False
@@ -254,10 +254,27 @@ def screens(check, adb, device, control, build_env, sandbox):
             time.sleep(0.5)
         return False, ""
 
+    def empty_field():
+        """Tap the first empty text box. A placeholder drawn behind one (the
+        Office chat's "Message") is not in the dump, so it cannot be tapped."""
+        sh("shell", "uiautomator", "dump", "/sdcard/ui.xml")
+        raw = sh("shell", "cat", "/sdcard/ui.xml")
+        try:
+            for node in ET.fromstring(raw[raw.index("<?xml"):]).iter("node"):
+                box = re.findall(r"\d+", node.get("bounds", ""))
+                if node.get("class") == "android.widget.EditText" and not node.get("text") and len(box) == 4:
+                    sh("shell", "input", "tap", str((int(box[0]) + int(box[2])) // 2), str((int(box[1]) + int(box[3])) // 2))
+                    time.sleep(1)
+                    return True
+        except (ValueError, ET.ParseError):
+            pass
+        return False
+
     def type_into(placeholder, text):
-        tap(placeholder, wait=1)
+        if not tap(placeholder, wait=1):
+            empty_field()
         for start in range(0, len(text), 120):   # in pieces: adb drops long input
-            sh("shell", "input", "text", text[start:start + 120])
+            sh("shell", "input", "text", text[start:start + 120].replace(" ", "%s"))   # adb types up to the first space
         sh("shell", "input", "keyevent", "KEYCODE_BACK")   # hide the keyboard
         time.sleep(1)
 
@@ -307,7 +324,7 @@ def screens(check, adb, device, control, build_env, sandbox):
             time.sleep(1)
         step(matched and account == "me@example.com",
              "sign-in: with the computer's account the phone asks without a code, and shows the same six digits")
-        step(has("Connected", "Pinned", "Recents"), "sign-in: approved on the computer, connected, at the mobile desktop")
+        step(has("Connected", "Pinned", "Stage"), "sign-in: approved on the computer, connected, at the mobile desktop")
     else:
         open_app()
         step(has("Use a pairing code instead") or has("Scan pairing code"), "first run: unlocked with the screen lock")
@@ -317,13 +334,13 @@ def screens(check, adb, device, control, build_env, sandbox):
     if not office_only:
         # ------------------------------------------------ the mobile desktop
         # Opening the app lands on the laptop's mobile desktop, not a dashboard.
-        step(shell_home() and has("Home", "Apps", "Recents") and has("Files", "Control Center", "Laptop tools"),
-             "mobile desktop: the app opens at Home, with its pins and Home, Apps and Recents")
-        tap("Apps", wait=3)
-        step(has("Search laptop apps", "All apps", "Favorites"),
+        step(shell_home() and has("Home", "Apps", "Stage") and has("Files", "Control Center", "Laptop tools"),
+             "mobile desktop: the app opens at Home, with its pins and Home, All Apps and Stage")
+        tap("All Apps", wait=3)
+        step(has("Spotlight Search", "All apps", "Favorites"),
              "mobile desktop: the drawer lists the laptop's installed apps beside the phone's own tools")
         # Typed straight in: Back, to hide the keyboard, would leave the drawer.
-        tap("Search laptop apps", wait=1)
+        tap("Spotlight Search…", wait=1)
         sh("shell", "input", "text", "Pocket")
         time.sleep(1.5)
         step(has("Pocket fixture") and not has("Laptop tools"), "mobile desktop: the drawer is searched by name")
@@ -331,7 +348,8 @@ def screens(check, adb, device, control, build_env, sandbox):
         time.sleep(2)
         sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
         time.sleep(2)
-        step(has("Pocket fixture") and has("Search laptop apps"),
+        # The search field's placeholder goes once something is typed; the query itself stays.
+        step(has("Pocket fixture") and any(label == "Pocket" for label, _x, _y in nodes()),
              "navigation: launcher resume keeps the current destination and search")
         sh("shell", "settings", "put", "system", "user_rotation", "1")
         sh("shell", "settings", "put", "system", "accelerometer_rotation", "0")
@@ -351,8 +369,8 @@ def screens(check, adb, device, control, build_env, sandbox):
              "mobile desktop: an app opens in the phone's own session, filling the screen with its controls on demand")
         tap("Controls", wait=2)
         step(has("Edit layouts"), "mobile desktop: an app's saved controls open beside it when asked for")
-        tap("Recents", wait=3)
-        step(has("Pocket fixture", "End session"), "mobile desktop: Recents lists the apps running on the phone")
+        tap("Stage", wait=3)
+        step(has("Pocket fixture", "End session"), "mobile desktop: Stage lists the apps running on the phone")
         tap("Home", wait=2)
         step(has("Phone workspace"), "mobile desktop: Home keeps private phone-session apps separate")
         tap("Control Center", wait=2)
@@ -366,11 +384,11 @@ def screens(check, adb, device, control, build_env, sandbox):
         step("adaptivelink" not in focused(), "navigation: Back at Home backgrounds the task normally")
         sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
         time.sleep(2)
-        tap("Recents", wait=2)
+        tap("Stage", wait=2)
         tap("End session", wait=1.5)
         tap("Close normally", wait=6)
         closed = until((sandbox / "home" / "pocket-closed.txt").exists, 10)
-        tap("Recents", wait=3)
+        tap("Stage", wait=3)
         step(closed and has("No phone applications are open"), "mobile desktop: ending the session closes its apps normally")
         home()
 
@@ -399,7 +417,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(until(lambda: has("Manager", "Team", "Maya", "Claude"), 20), "office: the team, live from the computer, with their states")
     shot("office-team")
     tap("Maya", wait=3)
-    step(has("Chat", "Work", "Message"), "office: an agent's page opens on the conversation")
+    step(has("Chat", "Work", "Speak"), "office: an agent's page opens on the conversation")
     type_into("Message", "Hello from the phone")
     tap("Send", wait=3)
     step(until(lambda: has("Hello from the phone"), 15), "office: a message to an agent is sent and shown")
@@ -410,23 +428,25 @@ def screens(check, adb, device, control, build_env, sandbox):
     back()
     tap("Tasks", wait=2)
     tap("+ New", wait=2)
-    step(has("New task", "Who", "Title"), "office: a task is written on the phone")
+    step(has("New task", "WHO", "WHAT"), "office: a task is written on the phone")
     type_into("Title", "Phone test task")
     tap("Assign to Maya", wait=4)
     tap("All", wait=2)
     step(until(lambda: has("Phone test task"), 15), "office: it is assigned and appears on the board")
     shot("office-tasks")
     tap("Phone test task", exact=False, wait=3)
-    step(has("Task #", "Brief") or has("Task #", "Problem") or has("Task #", "Activity"), "office: a task opens with its report and activity")
+    # Section headings are drawn in capitals.
+    step(has("Task #", "BRIEF") or has("Task #", "PROBLEM") or has("Task #", "ACTIVITY"), "office: a task opens with its report and activity")
     back()
     tap("Meeting", wait=2)
-    step(has("Call a meeting", "Start meeting"), "office: a meeting is called from the phone")
+    step(has("CALL A MEETING", "WHO"), "office: a meeting is called from the phone")
     tap("Zoe", wait=1)
+    reach("Start meeting")   # below the whole team
     tap("Start meeting", wait=4)
     step(until(lambda: has("Meeting started", "End"), 15), "office: it starts, with the room's transcript and hands-free")
     shot("office-meeting")
     tap("End", wait=6)
-    step(until(lambda: has("Call a meeting"), 30), "office: and ends, with notes written")
+    step(until(lambda: has("CALL A MEETING"), 30), "office: and ends, with notes written")
     tap("More", wait=2)
     step(has("Autopilot", "Pause all work", "Agents working at once"), "office: the office's settings")
     shot("office-more")
@@ -448,6 +468,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     def audited(action):
         return [e["detail"] for e in control.call("GET", "/log")["entries"] if e["action"] == action]
 
+    home()
     tap("Screen", wait=4)
     for _ in range(15):
         if not has("Connecting"):
@@ -984,7 +1005,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     time.sleep(18)
     sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
     time.sleep(3)
-    step(has("Pinned", "Recents"), "lock: ordinary app switching resumes immediately")
+    step(has("Pinned", "Stage"), "lock: ordinary app switching resumes immediately")
     sh("shell", "input", "keyevent", "KEYCODE_POWER")
     time.sleep(2)
     sh("shell", "input", "keyevent", "KEYCODE_WAKEUP")
@@ -994,11 +1015,11 @@ def screens(check, adb, device, control, build_env, sandbox):
     time.sleep(2)
     sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
     time.sleep(3)
-    step(not has("Pinned", "Recents"), "lock: a device-lock transition hides app content")
+    step(not has("Pinned", "Stage"), "lock: a device-lock transition hides app content")
     sh("shell", "input", "text", PIN)
     sh("shell", "input", "keyevent", "KEYCODE_ENTER")
     time.sleep(3)
-    step(has("Pinned", "Recents"), "lock: one device-credential confirmation opens it")
+    step(has("Pinned", "Stage"), "lock: one device-credential confirmation opens it")
 
     sh("shell", "am", "force-stop", "com.karthi.adaptivelink")
     sh("shell", "locksettings", "clear", "--old", PIN)
@@ -1011,9 +1032,20 @@ def main():
         return 0
     devices = [line.split()[0] for line in subprocess.run(
         [str(adb), "devices"], capture_output=True, text=True).stdout.splitlines()[1:] if line.endswith("\tdevice")]
-    if not devices:
+    requested = os.environ.get("LINK_ANDROID_DEVICE", "")
+    if not devices and not requested:
         print("SKIP Android link: no emulator or phone is attached (scripts/link-emulator.sh)")
         return 0
+    if requested:
+        if requested not in devices:
+            print(f"FAIL Android link: requested device {requested} is not attached")
+            return 1
+        device = requested
+    else:
+        # This suite uninstalls the app and temporarily changes the target's
+        # lock credential. Prefer a disposable emulator whenever one is
+        # available so an attached owner's phone keeps its pairing and data.
+        device = next((candidate for candidate in devices if candidate.startswith("emulator-")), devices[0])
 
     failures = []
 
@@ -1087,7 +1119,7 @@ def main():
             except control.NotRunning:
                 time.sleep(0.2)
         # The computer signs in to its owner's account.
-        on_emulator = devices[0].startswith("emulator-")
+        on_emulator = device.startswith("emulator-")
         cloud_url = f"http://127.0.0.1:{CLOUD_PORT}"
         control.call("POST", "/cloud/setup", fake_cloud.project(cloud_url))
         control.call("POST", "/cloud/signin")
@@ -1102,11 +1134,14 @@ def main():
         check(control.status().get("account") == "me@example.com", "the computer is signed in to its owner's account")
 
         offer = json.loads(control.call("POST", "/pair/start")["payload"])
-        offer["h"] = [EMULATOR_HOST] if devices[0].startswith("emulator-") else offer["h"]
+        offer["h"] = [EMULATOR_HOST] if on_emulator else offer["h"]
         encoded = base64.urlsafe_b64encode(json.dumps(offer).encode()).decode()
 
-        build_env = dict(os.environ, ANDROID_HOME=str(SDK), ANDROID_SERIAL=devices[0])
+        build_env = dict(os.environ, ANDROID_HOME=str(SDK), ANDROID_SERIAL=device)
         build_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+        # The Android Gradle plugin needs JDK 17; use the same private one as build-link-app.sh.
+        if (REPO / ".local" / "jdk-17" / "bin" / "java").exists():
+            build_env["JAVA_HOME"] = str(REPO / ".local" / "jdk-17")
         # LINK_ANDROID_ONLY=office: the screens below pair through the app itself; the full
         # instrumented run is left out.
         if os.environ.get("LINK_ANDROID_ONLY") != "office":
@@ -1148,7 +1183,7 @@ def main():
                 check("tunnel" in actions, "the computer's audit log shows the direct connection being set up")
             check(daemon.poll() is None, "the daemon stayed up throughout")
 
-        screens(check, adb, devices[0], control, build_env, sandbox)
+        screens(check, adb, device, control, build_env, sandbox)
         text = (sandbox / "daemon.log").read_text()
         check("Traceback" not in text, "no exceptions in the daemon's log")
         if "Traceback" in text:

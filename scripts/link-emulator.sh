@@ -12,6 +12,8 @@ SDK="$REPO/.local/android-sdk"
 export ANDROID_HOME="$SDK" ANDROID_SDK_ROOT="$SDK" ANDROID_AVD_HOME="$SDK/avd"
 ADB="$SDK/platform-tools/adb"
 SERIAL=emulator-5584
+# avdmanager needs JDK 17 or newer; use the same private one as build-link-app.sh.
+[ -x "$REPO/.local/jdk-17/bin/java" ] && export JAVA_HOME="$REPO/.local/jdk-17"
 
 if [ ! -x "$SDK/emulator/emulator" ]; then
     echo "The Android emulator is not installed in $SDK (see docs/ADAPTIVE_LINK.md)." >&2

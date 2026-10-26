@@ -405,12 +405,12 @@ else. This is the app's landing screen.
   folders, recent apps, *Continue* for what is running, and a dock of up to
   six. Long-press anything to pin it, move it first, put it in the dock or a
   drawer folder, see what it is, or edit its custom controls.
-- **Apps** (the drawer) lists every app installed on the laptop by its real
+- **All Apps** (the drawer) lists every app installed on the laptop by its real
   name and icon, with search, categories, favourites and your folders, beside
   the phone's own tools: Control Center, Files, Tasks, Desktop Remote, the
   camera and microphone, scanner, presenter, trackpad, media, run, laptop
   windows, game pad, drawing input and your global controls.
-- **Recents** lists the apps open in the phone's session. Tap one to go back
+- **Stage** lists the apps open in the phone's session. Tap one to go back
   to it; with several windows the phone asks which. *Close* asks the app to
   close as the laptop would (a save dialog appears on the phone); force quit
   is separate and asks first. On a tablet, two apps can be shown side by

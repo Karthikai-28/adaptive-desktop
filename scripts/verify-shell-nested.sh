@@ -182,7 +182,8 @@ print(",".join(str(b) for b in png))')"
     check $? "project indicator appears when a project becomes active"
     sleep 1.5
     shown="$(probe "$LABELS return labels(Main.panel.statusArea['adaptive-project']).join('|')")"
-    [[ "$shown" == *Alpha* && "$shown" == *"main ±1"* ]]
+    # On the default branch the label leaves the branch out; uncommitted changes are a dot.
+    [[ "$shown" == *Alpha* && "$shown" == *"•"* && "$shown" != *main* ]]
     check $? "project indicator shows the name and live git status ($shown)"
 
     # ------------------------------------------------------------ menus
