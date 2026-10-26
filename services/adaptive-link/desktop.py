@@ -13,6 +13,8 @@ may contain - are pure, and verify-link.py checks them directly.
 """
 
 import json
+import hashlib
+import io
 import os
 import re
 import shutil
@@ -242,12 +244,114 @@ def notify(title, body):
 
 # ---------------------------------------------------------------- clipboard
 
-CLIPBOARD_MAX = 200_000
+CLIPBOARD_MAX = 20_000
+CLIPBOARD_IMAGE_MAX = 8 * 1024 * 1024
+CLIPBOARD_PIXEL_MAX = 64 * 1024 * 1024
+CLIPBOARD_IMAGE_TYPES = ("image/png", "image/jpeg")
+CLIPBOARD_SECRET_TARGETS = {
+    "x-kde-passwordManagerHint", "application/x-nspasteboard-concealed-type",
+}
+_clipboard_feedback_seen = ""
+
+
+def _clipboard_bytes(target, limit=None):
+    process = None
+    try:
+        if limit is None:
+            done = subprocess.run(["xclip", "-selection", "clipboard", "-o", "-target", target],
+                                  capture_output=True, timeout=3, check=False)
+            return done.stdout if done.returncode == 0 else b""
+        process = subprocess.Popen(["xclip", "-selection", "clipboard", "-o", "-target", target],
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        data = process.stdout.read(limit + 1)
+        if len(data) > limit:
+            process.terminate()
+        process.wait(timeout=3)
+        return data
+    except (OSError, subprocess.SubprocessError):
+        if process is not None and process.poll() is None:
+            process.kill()
+        return b""
+
+
+def _clipboard_feedback(reason, targets, enabled):
+    """Say why a changed clipboard was skipped, once, without reading it."""
+    global _clipboard_feedback_seen
+    if not enabled:
+        return
+    stamp = _clipboard_bytes("TIMESTAMP", 32) if "TIMESTAMP" in targets else b""
+    key = hashlib.sha256(reason.encode() + stamp + "\n".join(sorted(targets)).encode()).hexdigest()
+    if key == _clipboard_feedback_seen:
+        return
+    _clipboard_feedback_seen = key
+    messages = {
+        "sensitive": "A password-manager or concealed clipboard item was not shared.",
+        "oversized-text": "Clipboard text longer than 20,000 characters was not shared.",
+        "oversized-image": "A clipboard image over 8 MiB was not shared.",
+        "unsupported-image": "Only PNG and JPEG clipboard images can be shared.",
+        "invalid-image": "The clipboard image could not be validated and was not shared.",
+    }
+    notify("Clipboard not shared", messages[reason])
+
+
+def clipboard_targets():
+    raw = _clipboard_bytes("TARGETS")
+    return {line.strip() for line in raw.decode("utf-8", "replace").splitlines() if line.strip()}
+
+
+def clipboard_item_from_bytes(data, mime):
+    """Validate one image without decoding all of its pixels."""
+    if mime not in CLIPBOARD_IMAGE_TYPES or not 0 < len(data) <= CLIPBOARD_IMAGE_MAX:
+        return None
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as picture:
+            expected = "PNG" if mime == "image/png" else "JPEG"
+            if picture.format != expected or picture.width * picture.height > CLIPBOARD_PIXEL_MAX:
+                return None
+            width, height = picture.size
+    except Exception:  # noqa: BLE001 - corrupt or unsupported image data
+        return None
+    return {"kind": "image", "mime": mime, "size": len(data), "width": width, "height": height,
+            "hash": hashlib.sha256(data).hexdigest(), "data": data}
+
+
+def clipboard_read(feedback=False):
+    """Return a typed clipboard item, without reading a marked secret."""
+    targets = clipboard_targets()
+    if {target.casefold() for target in targets} & {target.casefold() for target in CLIPBOARD_SECRET_TARGETS}:
+        _clipboard_feedback("sensitive", targets, feedback)
+        return {"kind": "sensitive", "hash": ""}
+    for mime in CLIPBOARD_IMAGE_TYPES:
+        if mime in targets:
+            data = _clipboard_bytes(mime, CLIPBOARD_IMAGE_MAX)
+            if len(data) > CLIPBOARD_IMAGE_MAX:
+                _clipboard_feedback("oversized-image", targets, feedback)
+                return None
+            item = clipboard_item_from_bytes(data, mime)
+            if item:
+                return item
+            _clipboard_feedback("invalid-image", targets, feedback)
+            return None
+    if any(target.casefold().startswith("image/") for target in targets):
+        _clipboard_feedback("unsupported-image", targets, feedback)
+        return None
+    text = clipboard_get()
+    if not text or len(text) > CLIPBOARD_MAX:
+        if text:
+            _clipboard_feedback("oversized-text", targets, feedback)
+        return None
+    data = text.encode("utf-8")
+    link = bool(web_address(text.strip()))
+    return {"kind": "link" if link else "text", "mime": "text/uri-list" if link else "text/plain", "size": len(data),
+            "hash": hashlib.sha256(data).hexdigest(), "text": text}
 
 
 def clipboard_get():
     ok, out = _run(["xclip", "-selection", "clipboard", "-o"], timeout=3)
-    return out[:CLIPBOARD_MAX] if ok else ""
+    # Keep one extra character so the typed reader can distinguish a value
+    # exactly at the limit from one that must be skipped.
+    return out[:CLIPBOARD_MAX + 1] if ok else ""
 
 
 def clipboard_set(text):
@@ -259,6 +363,21 @@ def clipboard_set(text):
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                 start_new_session=True)
         proc.stdin.write(text.encode())
+        proc.stdin.close()
+    except OSError:
+        return False
+    return True
+
+
+def clipboard_set_image(data, mime):
+    item = clipboard_item_from_bytes(data, mime)
+    if item is None:
+        return False
+    try:
+        proc = subprocess.Popen(["xclip", "-selection", "clipboard", "-i", "-target", mime],
+                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        proc.stdin.write(data)
         proc.stdin.close()
     except OSError:
         return False

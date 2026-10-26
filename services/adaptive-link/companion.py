@@ -221,7 +221,7 @@ class PhoneBook:
 
 # ---------------------------------------------------------------- clipboard
 
-async def watch_clipboard(events, read, wanted, came_from_phone):
+async def watch_clipboard(events, read, wanted, came_from_phone, publish=None):
     """Tell the phones what is copied on the computer, as it is copied.
     `read` gets the clipboard; `wanted` says whether to look at all (the
     owner's switch, and a phone listening); `came_from_phone` is what a
@@ -233,15 +233,19 @@ async def watch_clipboard(events, read, wanted, came_from_phone):
             last = None
             continue
         try:
-            text = await asyncio.to_thread(read)
+            item = await asyncio.to_thread(read)
         except Exception:  # noqa: BLE001 - a clipboard that cannot be read is tried again
             continue
         if last is None:
-            last = text   # what was there before anyone listened is not news
+            last = item.get("hash") if item else ""   # what was there before anyone listened is not news
             continue
-        if text and text != last and text != came_from_phone() and len(text) <= CLIPBOARD_MAX:
-            events.add("clipboard", "", keep=False, data={"text": text})
-        last = text
+        digest = item.get("hash") if item else ""
+        if item and item.get("kind") != "sensitive" and digest and digest != last and digest != came_from_phone():
+            if publish:
+                publish(item)
+            elif item.get("kind") == "text":
+                events.add("clipboard", "", keep=False, data={"text": item["text"]})
+        last = digest
 
 
 # --------------------------------------------------------------- microphone

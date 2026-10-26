@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import copy
+import hashlib
 import json
 import os
 import time
@@ -120,9 +121,25 @@ class Workspace:
             candidates = matches(window, self.catalog, self.associations)
             window["app_id"] = candidates[0] if len(candidates) == 1 else ""
             window["candidates"] = candidates
-        return [{**a, "adapter": adapter(a["id"]), "windows": [w for w in windows if w["app_id"] == a["id"]],
-                 "new_window": any(x in a.get("desktop_actions", []) for x in NEW_WINDOW)}
-                for a in self.catalog], windows
+        listed = [{**a, "adapter": adapter(a["id"]), "windows": [w for w in windows if w["app_id"] == a["id"]],
+                   "new_window": any(x in a.get("desktop_actions", []) for x in NEW_WINDOW)}
+                  for a in self.catalog]
+        # A real window must never disappear from Continue merely because its
+        # desktop file cannot be identified (or is ambiguous). Give that
+        # stable X11 identity a synthetic app ID; opening it still requires
+        # the exact existing window ID and never launches a replacement.
+        unmatched = {}
+        for window in windows:
+            if window["app_id"]:
+                continue
+            identity = window.get("application_id") or window.get("app") or window.get("executable") or str(window["id"])
+            app_id = "window:" + hashlib.sha256(identity.casefold().encode()).hexdigest()[:16]
+            window["app_id"] = app_id
+            unmatched.setdefault(app_id, []).append(window)
+        for app_id, own in unmatched.items():
+            listed.append({"id": app_id, "name": own[0].get("app") or own[0].get("title") or "Laptop window",
+                           "adapter": "universal", "windows": own, "new_window": False, "synthetic": True})
+        return listed, windows
 
     async def icon(self, request):
         if not self.catalog:
@@ -176,6 +193,14 @@ class Workspace:
         return {k: copy.deepcopy(v) for k, v in session.items() if k not in ("owner", "seen", "original", "checked")} | {
             "control": self.control_owner == session["owner"]}
 
+    async def _restore(self, session):
+        """Put an explicitly moved window back before its workspace disappears."""
+        original = session.get("original")
+        if session.get("display") and original:
+            await asyncio.to_thread(phone_display._place, session["window_id"], original, 0, 0, 1, 1, False)
+        session["display"] = ""
+        session["presentation"] = "mirror"
+
     async def get_sessions(self, request):
         owner = self.owner(request)
         ident = request.query.get("id")
@@ -191,6 +216,7 @@ class Workspace:
             session = self.session(body.get("id"), owner)
             if operation == "close":
                 await self.cancel_owner(owner)
+                await self._restore(session)
                 self.sessions.pop(session["id"], None)
                 await asyncio.to_thread(phone_display.release, owner)
                 if self.control_owner == owner:
@@ -206,6 +232,16 @@ class Workspace:
                 if original:
                     await asyncio.to_thread(phone_display._place, session["window_id"], original, 0, 0, 1, 1, False)
                 session["display"] = ""
+                session["presentation"] = "mirror"
+            elif operation == "move-to-phone":
+                ok, name = await asyncio.to_thread(phone_display.extend, owner, body.get("size", "800x1280"))
+                if not ok:
+                    raise ValueError("the phone display is unavailable")
+                moved, message = await asyncio.to_thread(phone_display.bring, owner, str(session["window_id"]))
+                if not moved:
+                    raise ValueError(message or "the window could not be moved to the phone")
+                session["display"] = name
+                session["presentation"] = "phone-display"
             elif operation == "resize" and session["display"]:
                 ok, name = await asyncio.to_thread(phone_display.extend, owner, body.get("size", "800x1280"))
                 if ok:
@@ -262,16 +298,21 @@ class Workspace:
         # Opening another app on this phone ends the previous workspace, but not its app.
         await self.cancel_owner(owner)
         for ident in [i for i, s in self.sessions.items() if s["owner"] == owner]:
+            await self._restore(self.sessions[ident])
             self.sessions.pop(ident)
+        await asyncio.to_thread(phone_display.release, owner)
         original = await asyncio.to_thread(phone_display._geometry, target["id"])
+        presentation = body.get("presentation")
+        if presentation not in ("mirror", "phone-display"):
+            presentation = "phone-display" if body.get("phone_display") is True else "mirror"
         session = {"id": str(uuid.uuid4()), "owner": owner, "app_id": app["id"], "name": app["name"],
                    "adapter": app["adapter"], "window_id": target["id"], "target": target["id"],
-                   "display": "", "original": original, "seen": time.monotonic()}
+                   "display": "", "presentation": presentation, "original": original, "seen": time.monotonic()}
         if not self.control_owner:
             self.control_owner = owner
         if self.control_owner == owner:
             await asyncio.to_thread(machine.window_action, "show", target["id"])
-            if body.get("phone_display", True):
+            if presentation == "phone-display":
                 ok, name = await asyncio.to_thread(phone_display.extend, owner, body.get("size", "800x1280"))
                 if ok:
                     moved, _ = await asyncio.to_thread(phone_display.bring, owner, str(target["id"]))
@@ -541,6 +582,7 @@ class Workspace:
             for owner in owners:
                 await self.cancel_owner(owner)
                 for ident in [i for i, s in self.sessions.items() if s["owner"] == owner]:
+                    await self._restore(self.sessions[ident])
                     self.sessions.pop(ident, None)
                 await asyncio.to_thread(phone_display.release, owner)
                 if self.control_owner == owner:
@@ -549,5 +591,9 @@ class Workspace:
     async def close(self):
         for owner in {r["owner"] for r in self.runs.values()}:
             await self.cancel_owner(owner)
+        for session in list(self.sessions.values()):
+            await self._restore(session)
+        for owner in {s["owner"] for s in self.sessions.values()}:
+            await asyncio.to_thread(phone_display.release, owner)
         self.sessions.clear()
         self.control_owner = ""

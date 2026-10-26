@@ -29,6 +29,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -96,22 +100,41 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                            connections: @Composable () -> Unit, native: @Composable (Page, () -> Unit) -> Unit) {
     val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     val scope = rememberCoroutineScope()
+    val configuration = LocalConfiguration.current
     val disk = remember(client.computer.fingerprint) { ShellStore(activity, client.computer.fingerprint) }
     val cache = remember(client.computer.fingerprint) { WorkspaceStore(activity, client.computer, store) }
+    val restoredShell = remember(client.computer.fingerprint) {
+        runCatching { JSONObject(store.shellState(client.computer.fingerprint)) }.getOrElse { JSONObject() }
+    }
+    val restoredRoutes = remember(client.computer.fingerprint) {
+        ShellRoutes.normalize(restoredShell.optString("stack", restoredShell.optString("route", "home"))).split('|')
+    }
+    val initialRoute = restoredRoutes.last()
+    val navController = rememberNavController()
+    val navEntry by navController.currentBackStackEntryAsState()
     var layout by remember(client.computer.fingerprint) { mutableStateOf(disk.data.copyJson()) }
-    var location by rememberSaveable(client.computer.fingerprint) { mutableStateOf("home") }
-    var nativePage by remember { mutableStateOf<Page?>(null) }
+    var location by rememberSaveable(client.computer.fingerprint) { mutableStateOf(initialRoute) }
+    var routeStack by rememberSaveable(client.computer.fingerprint) { mutableStateOf(restoredRoutes.joinToString("|")) }
+    var restoringNavigation by remember(client.computer.fingerprint) { mutableStateOf(restoredRoutes.size > 1) }
+    var nativePage by rememberSaveable(client.computer.fingerprint) {
+        mutableStateOf(restoredShell.optString("native").takeIf { it.isNotBlank() }?.let { runCatching { Page.valueOf(it) }.getOrNull() })
+    }
     var session by remember { mutableStateOf<JSONObject?>(null) }
     var apps by remember { mutableStateOf(cache.catalog()) }
-    var folderPath by rememberSaveable { mutableStateOf("~") }
-    var query by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf("All") }
+    var laptopApps by remember { mutableStateOf(emptyList<JSONObject>()) }
+    var hostLoaded by remember { mutableStateOf(false) }
+    var liveSession by remember { mutableStateOf<JSONObject?>(null) }
+    var liveClosed by remember { mutableStateOf(false) }
+    var restoringLive by remember { mutableStateOf(false) }
+    var folderPath by rememberSaveable { mutableStateOf(restoredShell.optString("folder", "~")) }
+    var query by rememberSaveable { mutableStateOf(restoredShell.optString("query")) }
+    var category by rememberSaveable { mutableStateOf(restoredShell.optString("category", "All")) }
     var note by remember { mutableStateOf("Connecting to your laptop…") }
     var online by remember { mutableStateOf(false) }
     var supported by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var choices by remember { mutableStateOf<List<JSONObject>?>(null) }
-    var selectedApp by rememberSaveable { mutableStateOf("") }
+    var selectedApp by rememberSaveable { mutableStateOf(restoredShell.optString("selected_app")) }
     var organizing by remember { mutableStateOf<JSONObject?>(null) }
     var folderName by remember { mutableStateOf("") }
     var editLayouts by remember { mutableStateOf(false) }
@@ -129,9 +152,58 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     val profiles = remember(profileVersion, chosenLayout, selectedApp) { cache.profiles().filter { it.optString("app_id") in listOf(selectedApp, "") } }
     val profile = profiles.firstOrNull { it.optString("id") == chosenLayout } ?: profiles.firstOrNull { it.optString("app_id") == selectedApp }
     val id = session?.optString("id").orEmpty()
-    fun back() { editLayouts = false; controls = false; nativePage = null; location = "home" }
-    BackHandler(location != "home" || editLayouts || controls) { back() }
-    LaunchedEffect(externalPage) { if (externalPage != Page.Home) { nativePage = externalPage; location = "native"; consumed() } }
+    fun visit(destination: String, replace: Boolean = false) {
+        if (destination == location) return
+        routeStack = ShellRoutes.push(if (replace) "home" else routeStack, destination)
+        location = destination
+        navController.navigate(destination) { launchSingleTop = true }
+    }
+    fun goHome() {
+        editLayouts = false; controls = false; nativePage = null
+        routeStack = "home"; location = "home"
+        navController.navigate("home") {
+            popUpTo(navController.graph.id) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+    fun back() {
+        when {
+            editLayouts -> { editLayouts = false; profileVersion++; return }
+            controls -> { controls = false; return }
+        }
+        val previous = ShellRoutes.pop(routeStack)
+        routeStack = previous.first
+        location = previous.second
+        navController.popBackStack()
+        if (location != "native") nativePage = null
+    }
+    BackHandler(editLayouts || controls) { back() }
+    LaunchedEffect(navController, client.computer.fingerprint) {
+        // Navigation Compose restores its own stack after rotation/ordinary
+        // process recreation. The persisted route list covers cold process
+        // recreation too, without creating duplicate entries in the former.
+        val current = navController.currentDestination?.route
+        if (restoringNavigation && current == "home") {
+            restoredRoutes.drop(1).forEach { route ->
+                navController.navigate(route) { launchSingleTop = true }
+            }
+        }
+        restoringNavigation = false
+    }
+    LaunchedEffect(navEntry?.destination?.route) {
+        if (restoringNavigation) return@LaunchedEffect
+        val route = navEntry?.destination?.route ?: return@LaunchedEffect
+        location = route
+        val known = ShellRoutes.normalize(routeStack).split('|')
+        val index = known.indexOfLast { it == route }
+        if (index >= 0) routeStack = known.take(index + 1).joinToString("|")
+    }
+    LaunchedEffect(externalPage) { if (externalPage != Page.Home) { nativePage = externalPage; visit("native"); consumed() } }
+    LaunchedEffect(location, routeStack, nativePage, query, category, selectedApp, folderPath) {
+        store.shellState(client.computer.fingerprint, JSONObject().put("route", location).put("stack", routeStack)
+            .put("native", nativePage?.name ?: "").put("query", query).put("category", category)
+            .put("selected_app", selectedApp).put("folder", folderPath).toString())
+    }
     fun persist(next: JSONObject) {
         next.put("dirty", true)
         disk.save(next); layout = next.copyJson()
@@ -159,6 +231,32 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             }
         }
     }
+    fun continueWindow(app: JSONObject, window: JSONObject, presentation: String = "mirror", restoring: Boolean = false) {
+        if (busy || liveSession != null) return
+        busy = true
+        if (!restoring) visit("continue")
+        scope.launch {
+            try {
+                val size = if (configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) "1280x800" else "800x1280"
+                val answer = client.post("/v1/app-sessions", JSONObject().put("app_id", app.getString("id"))
+                    .put("window_id", window.getInt("id")).put("presentation", presentation).put("size", size))
+                if (answer?.optBoolean("ok") == true) {
+                    val opened = answer.getJSONObject("session")
+                    liveSession = opened
+                    liveClosed = false
+                    store.continuity(client.computer.fingerprint, ContinuityDescriptor(client.computer.fingerprint,
+                        opened.optString("app_id"), opened.optInt("window_id"), opened.optString("presentation", "mirror")).json())
+                    if (location != "continue") visit("continue")
+                } else {
+                    liveClosed = true
+                    note = answer?.optString("error") ?: "Cannot reach the laptop"
+                }
+            } finally {
+                busy = false
+                restoringLive = false
+            }
+        }
+    }
     fun stop() {
         released = true
         scope.launch { client.post("/v1/mobile/runs", JSONObject().put("operation", "cancel")) }
@@ -172,6 +270,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             state.status = status
             online = status != null
             val capability = status?.optJSONObject("capabilities")?.optJSONObject("mobile_desktop")
+            val continuity = status?.optJSONObject("capabilities")?.optInt("continuity") == 1
             supported = capability?.optBoolean("available") == true
             if (!online) note = "Disconnected · your phone apps stay open on the laptop"
             else if (!supported) note = "Connected · ${client.computer.name} · " + (if (capability == null) "update the laptop service for phone apps; Desktop Remote is available"
@@ -183,6 +282,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 else if (!busy && run?.optString("state") != "failed") note = "Connected · ${client.computer.name}"
                 if (count % 8 == 0) {
                     client.get("/v1/mobile/apps")?.optJSONArray("apps")?.let { apps = it.rows(); cache.catalog(it) }
+                    if (continuity) client.get("/v1/apps")?.optJSONArray("apps")?.let { laptopApps = it.rows(); hostLoaded = true }
                     syncShell(); cache.sync(client); profileVersion++
                 }
                 if (run?.optString("state") == "running") {
@@ -200,6 +300,20 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             count++; delay(if (run?.optString("state") == "running") 700 else 2000)
         }
     }
+    LaunchedEffect(location, hostLoaded, laptopApps, liveSession) {
+        if (location != "continue" || !hostLoaded || liveSession != null || restoringLive || busy) return@LaunchedEffect
+        val descriptor = ContinuityDescriptor.parse(store.continuity(client.computer.fingerprint))
+        val appId = descriptor?.appId.orEmpty()
+        val windowId = descriptor?.windowId ?: 0
+        val app = laptopApps.firstOrNull { it.optString("id") == appId }
+        val window = app?.optJSONArray("windows").rows().firstOrNull { it.optInt("id") == windowId }
+        if (app != null && window != null) {
+            restoringLive = true
+            continueWindow(app, window, descriptor?.presentation ?: "mirror", restoring = true)
+        } else if (appId.isNotEmpty()) {
+            liveClosed = true
+        }
+    }
     suspend fun ensureSession(): String? {
         if (session?.optString("state") == "ready") return session?.getString("id")
         val reply = client.post("/v1/mobile/sessions", JSONObject().put("operation", "open"))
@@ -209,20 +323,20 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     }
     fun open(appId: String, new: Boolean = false) {
         layout.optJSONObject("pinned_folders")?.optString(appId)?.takeIf { it.isNotBlank() }?.let {
-            folderPath = it; nativePage = Page.Files; location = "native"; return
+            folderPath = it; nativePage = Page.Files; visit("native"); return
         }
         val entry = NativeApps.firstOrNull { it.id == appId }
         if (entry != null) {
             when (appId) {
-                "native:drawer" -> location = "drawer"
-                "native:recents" -> location = "recents"
-                "native:control" -> location = "control"
-                "native:connections" -> location = "connections"
-                else -> { folderPath = "~"; nativePage = entry.page; location = "native" }
+                "native:drawer" -> visit("drawer")
+                "native:recents" -> visit("recents")
+                "native:control" -> visit("control")
+                "native:connections" -> visit("connections")
+                else -> { folderPath = "~"; nativePage = entry.page; visit("native") }
             }
             return
         }
-        if (appId.contains("control-center")) { location = "control"; return }
+        if (appId.contains("control-center")) { visit("control"); return }
         if (!online || !supported || busy) return
         busy = true
         scope.launch {
@@ -230,7 +344,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 val sid = ensureSession() ?: return@launch
                 val reply = client.post("/v1/mobile/apps", JSONObject().put("session", sid).put("app_id", appId).put("new_window", new))
                 if (reply?.optBoolean("ok") == true) {
-                    if (reply.optString("native") == "control-center") { location = "control"; return@launch }
+                    if (reply.optString("native") == "control-center") { visit("control"); return@launch }
                     reply.optJSONObject("session")?.let { session = it }
                     choices = reply.optJSONArray("choose_window")?.rows()
                     selectedApp = appId
@@ -246,7 +360,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     }
                     chosenLayout = cache.selected(appId)
                     persist(layout.copyJson().put("recent", JSONArray((listOf(appId) + layout.optJSONArray("recent").strings().filterNot { it == appId }).take(20))))
-                    location = "app"
+                    visit("app")
                 } else note = reply?.optString("error") ?: "Connection lost · launch was not retried"
             } finally { busy = false }
         }
@@ -256,7 +370,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             val reply = client.post("/v1/mobile/apps", JSONObject().put("session", id).put("operation", operation).put("window", w.optInt("id")).put("confirm", confirmed))
             if (reply?.optBoolean("ok") == true) {
                 session = reply.optJSONObject("session") ?: session
-                if (operation == "activate" || operation == "close" || operation == "split") { selectedApp = w.optString("app_id"); location = "app" }
+                if (operation == "activate" || operation == "close" || operation == "split") { selectedApp = w.optString("app_id"); visit("app") }
                 choices = null
             } else note = reply?.optString("error") ?: "Connection lost"
         }
@@ -280,10 +394,17 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     val nativeJson = NativeApps.map { JSONObject().put("id", it.id).put("name", it.name) }
     val folderPins = layout.optJSONObject("pinned_folders") ?: JSONObject()
     val folderApps = folderPins.keys().asSequence().map { key -> JSONObject().put("id", key).put("name", File(folderPins.getString(key)).name.ifBlank { "Home folder" }) }.toList()
-    val all = (nativeJson + folderApps + apps.filterNot { it.optString("id").contains("control-center") }).distinctBy { it.optString("id") }
+    val all = (nativeJson + folderApps + laptopApps + apps.filterNot { it.optString("id").contains("control-center") }).distinctBy { it.optString("id") }
+    val liveWindows = laptopApps.flatMap { app -> app.optJSONArray("windows").rows().map { app to it } }
+        .sortedWith(compareByDescending<Pair<JSONObject, JSONObject>> { it.second.optBoolean("active") }
+            .thenBy { it.second.optString("title").lowercase() })
     val running = session?.optJSONArray("apps").rows().filter { it.optString("state") == "running" }.map { it.optString("app_id") }.toSet()
     val folders = layout.optJSONObject("folders") ?: JSONObject()
     val pinned = layout.optJSONArray("pins").strings()
+    fun activate(appId: String) {
+        val live = liveWindows.firstOrNull { it.first.optString("id") == appId }
+        if (live != null) continueWindow(live.first, live.second) else open(appId)
+    }
     @Composable fun grid(entries: List<JSONObject>, modifier: Modifier = Modifier) {
         LazyVerticalGrid(GridCells.Adaptive(96.dp), modifier, contentPadding = PaddingValues(12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -293,7 +414,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     shape = RoundedCornerShape(18.dp),
                     color = Color(0xFF1C1C1E),
                     border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
-                    modifier = Modifier.heightIn(min = 108.dp).combinedClickable(onClick = { open(aid) }, onLongClick = { organizing = app; folderName = folders.optString(aid) }),
+                    modifier = Modifier.heightIn(min = 108.dp).combinedClickable(onClick = { activate(aid) }, onLongClick = { organizing = app; folderName = folders.optString(aid) }),
                 ) {
                     Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
@@ -326,13 +447,44 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             Box(Modifier.weight(1f)) { LayoutManager(activity, client, cache, selectedApp,
                 apps.firstOrNull { it.optString("id") == selectedApp }?.optString("name") ?: "Custom controls", profile,
                 onBack = { editLayouts = false; profileVersion++ }, test = { submit(it) }) }
-        } else when (location) {
-            "native" -> Box(Modifier.weight(1f)) {
+        } else NavHost(navController, startDestination = "home", modifier = Modifier.weight(1f)) {
+            ShellRoutes.destinations.forEach { destination -> composable(destination) { when (destination) {
+            "continue" -> Box(Modifier.fillMaxSize()) {
+                liveSession?.let { current ->
+                    AppWorkspace(activity, client, store, cache, current, onExpired = {
+                        liveSession = null
+                        liveClosed = true
+                    }) {
+                        liveSession = null
+                        back()
+                    }
+                } ?: Column(Modifier.fillMaxSize()) {
+                    TopBar("Continue", ::back)
+                    if (busy || restoringLive) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(if (liveClosed) "Window closed" else "Reconnecting to the exact laptop window…",
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
+                    if (liveClosed) Text("Nothing was relaunched. Choose a matching live window, or go back.",
+                        Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+                    val descriptor = ContinuityDescriptor.parse(store.continuity(client.computer.fingerprint))
+                    val matches = liveWindows.filter { descriptor == null || it.first.optString("id") == descriptor.appId }
+                    LazyColumn(Modifier.weight(1f)) {
+                        items(matches, key = { it.second.optInt("id") }) { (app, window) ->
+                            ListItem(
+                                headlineContent = { Text(window.optString("title").ifBlank { app.optString("name") }, maxLines = 2) },
+                                supportingContent = { Text(app.optString("name")) },
+                                leadingContent = { AppIcon(client, app) },
+                                modifier = Modifier.combinedClickable(onClick = { liveClosed = false; continueWindow(app, window) }),
+                            )
+                        }
+                    }
+                }
+            }
+            "native" -> Box(Modifier.fillMaxSize()) {
                 if (nativePage == Page.Files) FilesPage(activity, client, folderPath, onOpen = { path ->
                     scope.launch {
                         val sid = ensureSession() ?: return@launch
                         val reply = client.post("/v1/mobile/apps", JSONObject().put("session", sid).put("operation", "open-file").put("path", path))
-                        if (reply?.optBoolean("ok") == true) { session = reply.getJSONObject("session"); selectedApp = session?.optString("selected_app").orEmpty(); location = "app" }
+                        if (reply?.optBoolean("ok") == true) { session = reply.getJSONObject("session"); selectedApp = session?.optString("selected_app").orEmpty(); visit("app") }
                         else note = reply?.optString("error") ?: "Connection lost · file open was not retried"
                     }
                 }, onPin = { path ->
@@ -342,16 +494,16 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 }, onBack = ::back)
                 else nativePage?.let { native(it, ::back) }
             }
-            "connections" -> Box(Modifier.weight(1f)) { connections() }
-            "control" -> Column(Modifier.weight(1f)) {
+            "connections" -> Box(Modifier.fillMaxSize()) { connections() }
+            "control" -> Column(Modifier.fillMaxSize()) {
                 TopBar("Control Center", ::back)
                 Text("Laptop settings · changes apply directly", Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
                 LazyColumn { items(ControlSections) { (title, page) ->
                     ListItem(headlineContent = { Text(title) }, leadingContent = { Icon(Icons.Default.Tune, null) },
-                        modifier = Modifier.combinedClickable(onClick = { nativePage = page; location = "native" }))
+                        modifier = Modifier.combinedClickable(onClick = { nativePage = page; visit("native") }))
                 } }
             }
-            "recents" -> Column(Modifier.weight(1f)) {
+            "recents" -> Column(Modifier.fillMaxSize()) {
                 TopBar("Running apps", ::back) { TextButton(onClick = { confirmEnd = true }, enabled = id.isNotEmpty()) { Text("End session") } }
                 val windows = session?.optJSONArray("windows").rows()
                 if (windows.isEmpty()) Text("No phone applications are open", Modifier.padding(24.dp))
@@ -365,7 +517,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                         })
                 } }
             }
-            "app" -> Column(Modifier.weight(1f)) {
+            "app" -> Column(Modifier.fillMaxSize()) {
                 val appName = apps.firstOrNull { it.optString("id") == selectedApp }?.optString("name") ?: "Phone application"
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { choices = session?.optJSONArray("windows").rows().filter { it.optString("app_id") == selectedApp } }) { Text("Windows") }
@@ -379,7 +531,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 } else Column(Modifier.weight(1f).padding(20.dp), verticalArrangement = Arrangement.Center) {
                     Text(session?.optJSONArray("apps").rows().firstOrNull { it.optString("app_id") == selectedApp }?.optString("message") ?: "Choose a phone window to continue")
                     TextButton(onClick = { open(selectedApp, true) }) { Text("Retry launch") }
-                    TextButton(onClick = { location = "recents" }) { Text("Choose a window") }
+                    TextButton(onClick = { visit("recents") }) { Text("Choose a window") }
                 }
                 if (controls) Column(Modifier.heightIn(max = 280.dp)) {
                     Row(Modifier.horizontalScroll(rememberScrollState())) {
@@ -391,11 +543,11 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     profile?.let { ControlGrid(it, online && !pending && run?.optString("state") != "running", onPress = { c -> submit(c) }, onRelease = ::stop) }
                 }
             }
-            else -> Column(Modifier.weight(1f)) {
+            else -> Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(if (location == "drawer") "All apps" else "Home", style = MaterialTheme.typography.headlineMedium)
                         Text(client.computer.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    IconButton(onClick = { location = "control" }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
+                    IconButton(onClick = { visit("control") }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
                         Icon(Icons.Default.Tune, "Control Center", modifier = Modifier.size(18.dp), tint = Color(0xFFF5F5F7))
                     }
                 }
@@ -430,17 +582,41 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     layout.optJSONObject("offline_copy")?.let { copy -> TextButton(onClick = {
                         persist(copy.copyJson().put("revision", layout.optInt("revision")))
                     }) { Text("Restore offline Home organization") } }
+                    if (liveWindows.isNotEmpty()) {
+                        Text("Continue", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            liveWindows.forEach { (app, window) ->
+                                Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF1C1C1E),
+                                    border = BorderStroke(0.5.dp, if (window.optBoolean("active")) Color(0x660A84FF) else Color(0x22FFFFFF))) {
+                                    Column(Modifier.width(220.dp).padding(10.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            AppIcon(client, app)
+                                            Column(Modifier.padding(start = 8.dp)) {
+                                                Text(window.optString("title").ifBlank { app.optString("name") }, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                                Text(app.optString("name"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                        Row {
+                                            TextButton(onClick = { continueWindow(app, window) }) { Text("Continue") }
+                                            TextButton(onClick = { open(app.optString("id")) }) { Text("Open phone copy") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if (running.isNotEmpty()) {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = Color(0x2230D158),
                             border = BorderStroke(0.5.dp, Color(0x5530D158)),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).combinedClickable(onClick = { location = "recents" }),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).combinedClickable(onClick = { visit("recents") }),
                         ) {
                             Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF30D158)))
                                 Spacer(Modifier.width(8.dp))
-                                Text("Active Stage · ${running.size} running app${if (running.size > 1) "s" else ""}", color = Color(0xFF30D158), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Phone workspace · ${running.size} running app${if (running.size > 1) "s" else ""}", color = Color(0xFF30D158), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -456,7 +632,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                                     shape = RoundedCornerShape(12.dp),
                                     color = Color(0xFF1C1C1E),
                                     border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
-                                    modifier = Modifier.combinedClickable(onClick = { open(aid) }),
+                                    modifier = Modifier.combinedClickable(onClick = { activate(aid) }),
                                 ) {
                                     Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
@@ -491,7 +667,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                                     val isRunning = aid in running
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.combinedClickable(onClick = { open(aid) }, onLongClick = { organizing = app }),
+                                        modifier = Modifier.combinedClickable(onClick = { activate(aid) }, onLongClick = { organizing = app }),
                                     ) {
                                         Box(
                                             Modifier.size(48.dp).clip(RoundedCornerShape(13.dp))
@@ -518,31 +694,31 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     }
                 }
             }
-        }
+        } } } }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (run?.optString("state") == "running") Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Step ${run?.optInt("step")}/${run?.optInt("total")}", Modifier.weight(1f).padding(12.dp))
             Button(onClick = ::stop) { Text("Stop") }
         }
         // The Office has its own tabs and connection line: it fills the screen without the shell's.
-        val ownChrome = location == "native" && nativePage == Page.Office
+        val ownChrome = (location == "native" && nativePage == Page.Office) || location == "continue"
         if (!ownChrome && (location != "app" || !online || note.startsWith("Step"))) Text(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
         if (!ownChrome) NavigationBar(
             containerColor = Color(0xFF141416),
             tonalElevation = 8.dp,
         ) {
             NavigationBarItem(
-                selected = location == "home", onClick = { back() },
+                selected = location == "home", onClick = { goHome() },
                 icon = { Icon(Icons.Default.Home, "Home") },
                 label = { Text("Home", fontWeight = FontWeight.Medium) },
             )
             NavigationBarItem(
-                selected = location == "drawer", onClick = { location = "drawer"; editLayouts = false },
+                selected = location == "drawer", onClick = { editLayouts = false; visit("drawer") },
                 icon = { Icon(Icons.Default.Apps, "Apps") },
                 label = { Text("All Apps", fontWeight = FontWeight.Medium) },
             )
             NavigationBarItem(
-                selected = location == "recents", onClick = { location = "recents"; editLayouts = false },
+                selected = location == "recents", onClick = { editLayouts = false; visit("recents") },
                 icon = { Icon(Icons.Default.ViewCarousel, "Recents") },
                 label = { Text("Stage", fontWeight = FontWeight.Medium) },
             )
@@ -588,9 +764,9 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         confirmButton = { TextButton(onClick = { confirmEnd = false; scope.launch {
             val reply = client.post("/v1/mobile/sessions", JSONObject().put("session", id).put("operation", "end"))
             note = reply?.optString("error")?.ifEmpty { "Session ended" } ?: "Connection lost"
-            if (reply?.optBoolean("pending") == true) { session = reply.optJSONObject("session"); selectedApp = session?.optString("selected_app").orEmpty(); location = "app" }
-            else { session = null; location = "home" }
+            if (reply?.optBoolean("pending") == true) { session = reply.optJSONObject("session"); selectedApp = session?.optString("selected_app").orEmpty(); visit("app") }
+            else { session = null; goHome() }
         } }) { Text("Close normally") } }, dismissButton = { TextButton(onClick = { confirmEnd = false; scope.launch {
-            client.post("/v1/mobile/sessions", JSONObject().put("session", id).put("operation", "force-end").put("confirm", true)); session = null; location = "home"
+            client.post("/v1/mobile/sessions", JSONObject().put("session", id).put("operation", "force-end").put("confirm", true)); session = null; goHome()
         } }) { Text("Force end") } })
 }

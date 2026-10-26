@@ -1,8 +1,6 @@
 package com.karthi.adaptivelink
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
@@ -448,7 +446,6 @@ fun MorePage(
     var relay by remember { mutableStateOf(store.relayNotifications && notificationAccessGranted(activity)) }
     var lock by remember { mutableStateOf(store.lockOnOpen) }
     var unpair by remember { mutableStateOf(false) }
-    val clipboard = remember { activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     var clipboardBoth by remember { mutableStateOf(store.syncClipboard) }
     var findable by remember { mutableStateOf(store.findPhone) }
     var approving by remember { mutableStateOf(store.approvals) }
@@ -498,20 +495,19 @@ fun MorePage(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
                     scope.launch {
-                        val text = client.get("/v1/clipboard")?.optString("text").orEmpty()
-                        if (text.isEmpty()) note = "The computer's clipboard is empty"
-                        else {
-                            clipboard.setPrimaryClip(ClipData.newPlainText("From computer", text))
-                            note = "Copied the computer's clipboard to this phone"
-                        }
+                        val current = client.get("/v1/clipboard")
+                        val event = current?.let { JSONObject().put("kind", "clipboard").put("text", it.optString("text"))
+                            .put("item", it.optJSONObject("item")) }
+                        note = if (event != null && ClipboardSync.receive(activity, client, event))
+                            "Copied the computer's clipboard to this phone"
+                        else "The computer's clipboard is empty or not shareable"
                     }
                 }) { Text("Get from computer") }
                 OutlinedButton(onClick = {
-                    val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(activity)?.toString().orEmpty()
-                    if (text.isEmpty()) note = "This phone's clipboard is empty"
-                    else scope.launch {
-                        client.post("/v1/clipboard", JSONObject().put("text", text))
-                        note = "Sent this phone's clipboard to the computer"
+                    scope.launch {
+                        note = if (ClipboardSync.sendCurrent(activity, client))
+                            "Sent this phone's clipboard to the computer"
+                        else "This phone's clipboard is empty or not shareable"
                     }
                 }) { Text("Send to computer") }
             }

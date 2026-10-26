@@ -759,6 +759,27 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   text sent from it, making the phone ring, its battery and signal, new
   photos copied over. 🔬 sudo through PAM and the proximity lock on a real
   network.
+- ✅ **One continuous device.** Home now merges every live laptop window under
+  Continue, private Xvfb apps under Phone workspace, and installed/native apps
+  under Apps. Opening a live window mirrors the exact existing window without
+  moving it; Move to phone and Return to laptop are explicit, reversible
+  operations, while Open phone copy starts an independent phone-sized session.
+  Stable reconnect descriptors survive rotation/process recreation and never
+  silently replace a closed window. Navigation Compose supplies a saved real
+  back stack, launcher/notification resume, and root predictive Back. Ordinary
+  app switching resumes immediately; only an Android device-lock transition
+  requires one new biometric/device-credential confirmation. The foreground
+  connection uses one shared client, network-triggered bounded reconnect and
+  boot/package recovery without duplicate sockets.
+- ✅ **Protected clipboard v2.** Text, links, PNG and JPEG travel both ways by
+  content hash, with a one-time migration enabling sync, persistent opt-out,
+  20,000-character and 8 MiB/64-megapixel limits, sensitive-target filtering,
+  private read-only Android image URIs and bounded 24-hour cache cleanup. The
+  legacy JSON text contract remains available. Authenticated binary endpoints
+  validate permission, MIME, declared/streamed size, dimensions, identifier and
+  SHA-256 before changing either clipboard; clipboard content never reaches the
+  audit log. Android's foreground-only read rule is handled on focus plus a
+  **Send clipboard now** notification action.
 - ✅ **More of the phone used**: its microphone as a microphone on the
   computer, a document scanner, the phone aimed as a pointer, dictation, NFC
   tags that press the owner's own buttons, a game pad, a page of the owner's
@@ -788,6 +809,11 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   Apps and layout screens on an emulator. 🔬 The three `link_app_workspaces`,
   `link_layouts_sync` and `link_macro_cancel` checks on a real phone and
   desktop.
+- 🔬 **Continuous-device checks on a real phone.** Image paste into another
+  Android app; foreground-only phone clipboard reads; lock/unlock and ordinary
+  app switching; background/network reconnection; launcher resume and
+  predictive Back; and mirror/move/return against real laptop windows remain
+  for `record-live-verification.py`.
 - ⬜ Not there: a watch app of its own (the notification's buttons reach a
   watch), browsing the phone's files from the desktop's file manager, the
   phone's battery in the panel (it is in `link-cli.py status`), Wayland, iOS,

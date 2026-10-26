@@ -7,8 +7,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
@@ -20,6 +18,7 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
@@ -66,6 +65,25 @@ import org.json.JSONObject
 class EventsService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var listening: Job? = null
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            if (Store(this@EventsService).listens) restartListening()
+        }
+        override fun onLost(network: Network) {
+            if (Store(this@EventsService).listens) restartListening()
+        }
+    }
+    private val screenLockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) Store(context).needsUnlock = true
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        registerReceiver(screenLockReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(networkCallback)
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -93,21 +111,33 @@ class EventsService : Service() {
             shown.addAction(0, "Play / pause", QuickActions.intent(this, "play-pause"))
             shown.addAction(0, "Next", QuickActions.intent(this, "next"))
         }
+        if (store.syncClipboard) {
+            val copy = PendingIntent.getActivity(this, 8, Intent(this, ClipboardSendActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            shown.addAction(0, "Send clipboard now", copy)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(ONGOING_ID, shown.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(ONGOING_ID, shown.build())
         }
         // Started again when a switch changes: listen afresh, for what is wanted now.
-        listening?.cancel()
-        listening = scope.launch { listen() }
+        restartListening()
         return START_STICKY
     }
 
     override fun onDestroy() {
         Ringer.stop(this)
         scope.cancel()
+        runCatching { unregisterReceiver(screenLockReceiver) }
+        runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
         super.onDestroy()
+    }
+
+    @Synchronized
+    private fun restartListening() {
+        listening?.cancel()
+        listening = scope.launch { listen() }
     }
 
     private fun kinds(store: Store): List<String> = listOfNotNull(
@@ -164,11 +194,7 @@ class EventsService : Service() {
         val store = Store(this)
         when (event.optString("kind")) {
             "clipboard" -> {
-                val text = event.optString("text")
-                if (text.isNotEmpty() && text != store.clipboardSeen) {
-                    store.clipboardSeen = text
-                    getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("From computer", text))
-                }
+                scope.launch { ClipboardSync.receive(this@EventsService, client, event) }
             }
             "ring" -> Ringer.start(this)
             // The computer offers to do something: one tap says yes.
@@ -204,7 +230,7 @@ class EventsService : Service() {
             .setSubText(if (alert) store.computer?.name else event.optString("app").ifBlank { store.computer?.name })
             .setWhen(event.optLong("at") * 1000)
             .setAutoCancel(true)
-            .setContentIntent(openApp(this))
+            .setContentIntent(openApp(this, if (alert) Page.More else Page.Home, id))
             .build()
         // One notification per event, within a range that never meets the service's own.
         getSystemService(NotificationManager::class.java).notify(1000 + (id % 1_000_000).toInt(), shown)
@@ -233,8 +259,10 @@ class EventsService : Service() {
         fun mayNotify(context: Context): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-        fun openApp(context: Context): PendingIntent = PendingIntent.getActivity(
-            context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        fun openApp(context: Context, page: Page = Page.Home, request: Long = 0): PendingIntent = PendingIntent.getActivity(
+            context, (request % Int.MAX_VALUE).toInt(), Intent(context, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_PAGE, page.name),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         /** Start listening if the owner has asked for anything that needs it, or stop if they no longer do. */
         fun sync(context: Context) {
@@ -249,7 +277,9 @@ class EventsService : Service() {
 /** Listening starts again by itself when the phone is switched on. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) EventsService.sync(context)
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) Store(context).needsUnlock = true
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED)
+            EventsService.sync(context)
     }
 }
 

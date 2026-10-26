@@ -91,7 +91,8 @@ async def async_checks(check):
             phones=[{"fingerprint": "phone"}, {"fingerprint": "second"}], audit=SimpleNamespace(write=lambda *args: None))
         work = aw.Workspace(link)
         work.control_owner = "phone"
-        session = {"id": "session", "owner": "phone", "window_id": 7, "app_id": "a.desktop", "display": "", "seen": time.monotonic()}
+        session = {"id": "session", "owner": "phone", "window_id": 7, "app_id": "a.desktop", "display": "",
+                   "presentation": "mirror", "original": (100, 50, 800, 600), "seen": time.monotonic()}
         work.sessions["session"] = session
         windows = [{"id": 7, "title": "Main", "app": "A", "active": False}, {"id": 8, "title": "Dialog", "app": "A", "active": True, "parent": 7}]
         with patch.object(aw.machine, "windows", return_value=windows), patch.object(aw.phone_display, "_geometry", return_value=(100, 50, 800, 600)):
@@ -154,9 +155,29 @@ async def async_checks(check):
                 check(listing.call_count == 1, "workspace: live input reuses a recent window check")
                 await work.focus("session", "phone")
                 check(listing.call_count == 2, "workspace: control steps always check the window again")
+            placed = []
+            with patch.object(aw.phone_display, "extend", return_value=(True, "PHONE-1")), \
+                    patch.object(aw.phone_display, "bring", return_value=(True, "moved")), \
+                    patch.object(aw.phone_display, "release"), \
+                    patch.object(aw.phone_display, "_place", side_effect=lambda *args: placed.append(args) or True):
+                moved = await work.change_session(Request({"operation": "move-to-phone", "id": "session", "size": "800x1280"}))
+                check(moved["session"]["presentation"] == "phone-display" and moved["session"]["display"] == "PHONE-1",
+                      "workspace: moving to phone is explicit and keeps the existing window")
+                returned = await work.change_session(Request({"operation": "return", "id": "session"}))
+                check(returned["session"]["presentation"] == "mirror" and not returned["session"]["display"]
+                      and placed[-1][:2] == (7, (100, 50, 800, 600)),
+                      "workspace: return restores the exact original geometry")
+                await work.change_session(Request({"operation": "move-to-phone", "id": "session", "size": "800x1280"}))
+                await work.change_session(Request({"operation": "close", "id": "session"}))
+                check(placed[-1][:2] == (7, (100, 50, 800, 600)),
+                      "workspace: closing a moved session restores its window before releasing the display")
+                work.sessions["session"] = {"id": "session", "owner": "phone", "app_id": "app.desktop", "name": "App",
+                    "adapter": "universal", "window_id": 7, "target": 7, "display": "", "presentation": "mirror",
+                    "original": (100, 50, 800, 600), "seen": time.monotonic()}
             windows.clear()
             result = await work.get_sessions(Request(query={"id": "session"}))
             check(result["session"]["closed"], "workspace: closed windows are reported rather than retargeted")
+            work.sessions.clear()
         await work.close()
 
 

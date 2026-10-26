@@ -311,6 +311,10 @@ class LinkClient(
     suspend fun post(path: String, body: JSONObject = JSONObject()): JSONObject? =
         call(Request.Builder().url(url(path)).post(body.toString().toRequestBody(JSON)).build())
 
+    suspend fun postBytes(path: String, bytes: ByteArray, mime: String, hash: String): JSONObject? =
+        call(Request.Builder().url(url(path)).header("X-Clipboard-Hash", hash).header("X-Clipboard-Size", bytes.size.toString())
+            .post(bytes.toRequestBody(mime.toMediaType())).build())
+
     private suspend fun call(request: Request): JSONObject? = withContext(Dispatchers.IO) {
         runCatching {
             http.newCall(request).execute().use { response ->

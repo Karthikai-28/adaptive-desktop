@@ -25,6 +25,7 @@ in config.json. Everything the phone does is written to the audit log.
 
 import asyncio
 import contextvars
+import hashlib
 import json
 import os
 import signal
@@ -203,6 +204,7 @@ class Link:
                                            companion.reachable if probing else (lambda _address: False))
         self.phonebook = companion.PhoneBook()
         self._clip_from_phone = ""
+        self._clipboard_item = None
         self._camera_ws = None
         self._camera_webcam = None
         self._camera_lock = asyncio.Lock()
@@ -240,9 +242,9 @@ class Link:
                           asyncio.ensure_future(alerts.watch_notifications(self.events)),
                           asyncio.ensure_future(alerts.watch_machine(self.events, ALERT_EVERY_S)),
                           asyncio.ensure_future(companion.watch_clipboard(
-                              self.events, desktop.clipboard_get,
+                              self.events, lambda: desktop.clipboard_read(feedback=True),
                               lambda: self.config["sync_clipboard"] and self.events.listening("clipboard"),
-                              lambda: self._clip_from_phone)),
+                              lambda: self._clip_from_phone, self._publish_clipboard)),
                           asyncio.ensure_future(self._watch_scenes()),
                           asyncio.ensure_future(usb_link.watch(self.port, lambda what: self.audit.write("-", "usb", what)))]
 
@@ -407,6 +409,8 @@ class Link:
         add.add_post("/v1/volume", self.h_volume)
         add.add_get("/v1/clipboard", self.h_clipboard_get)
         add.add_post("/v1/clipboard", self.h_clipboard_set)
+        add.add_get("/v1/clipboard/content", self.h_clipboard_content_get)
+        add.add_post("/v1/clipboard/content", self.h_clipboard_content_set)
         add.add_post("/v1/notify", self.h_notify)
         add.add_post("/v1/notify/dismiss", self.h_notify_dismiss)
         add.add_post("/v1/power", self.h_power)
@@ -452,7 +456,14 @@ class Link:
         info = await asyncio.to_thread(desktop.status)
         info.update({
             "version": VERSION,
-            "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1, "mobile_desktop": self.mobile.capabilities(), "office": 1},
+            "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1,
+                             "continuity": 1,
+                             "clipboard": {"version": 2, "kinds": ["text", "link", "image"],
+                                           "mime_types": ["text/plain", "text/uri-list", "image/png", "image/jpeg"],
+                                           "max_text": desktop.CLIPBOARD_MAX,
+                                           "max_bytes": desktop.CLIPBOARD_IMAGE_MAX,
+                                           "max_pixels": desktop.CLIPBOARD_PIXEL_MAX, "protected": True},
+                             "mobile_desktop": self.mobile.capabilities(), "office": 1},
             # From this machine itself: the direct tunnel, or the USB cable.
             "via": "direct" if identity.is_tunnel(request["peer"])
                    else "usb" if identity.is_loopback(request["peer"]) else "lan",
@@ -833,15 +844,85 @@ class Link:
         if not self._allowed("allow_input"):
             return json_error(403, "the clipboard is turned off on the computer")
         self.audit.write(request["peer"], "clipboard-read")
-        return web.json_response({"text": await asyncio.to_thread(desktop.clipboard_get)})
+        item = await asyncio.to_thread(desktop.clipboard_read)
+        if item and item.get("kind") == "image":
+            self._clipboard_item = item
+        public = self._clipboard_public(item)
+        return web.json_response({"text": item.get("text", "") if item else "", "item": public})
 
     async def h_clipboard_set(self, request):
         if not self._allowed("allow_input"):
             return json_error(403, "the clipboard is turned off on the computer")
         data = await read_json(request)
         if isinstance(data.get("text"), str):
-            self._clip_from_phone = data["text"]   # not to be told back to the phone as news
-        return web.json_response({"ok": await asyncio.to_thread(desktop.clipboard_set, data.get("text"))})
+            raw = data["text"].encode("utf-8")
+            if len(data["text"]) > desktop.CLIPBOARD_MAX:
+                return json_error(413, "clipboard text is too large")
+            digest = hashlib.sha256(raw).hexdigest()
+            if data.get("hash") and data["hash"] != digest:
+                return json_error(400, "clipboard text hash does not match")
+            kind = data.get("kind", "text")
+            mime = data.get("mime", "text/plain")
+            if kind not in ("text", "link") or mime not in ("text/plain", "text/uri-list"):
+                return json_error(400, "invalid clipboard text metadata")
+            self._clip_from_phone = digest
+            ok = await asyncio.to_thread(desktop.clipboard_set, data.get("text"))
+            item = {"kind": kind, "mime": mime, "size": len(raw), "hash": digest, "text": data["text"]}
+            if ok:
+                self._clipboard_item = item
+            return web.json_response({"ok": ok, "item": self._clipboard_public(item)})
+        return web.json_response({"ok": False})
+
+    @staticmethod
+    def _clipboard_public(item):
+        if not item or item.get("kind") == "sensitive":
+            return None
+        return {key: item[key] for key in ("kind", "mime", "size", "width", "height", "hash") if key in item} | \
+            ({"text": item["text"]} if item.get("kind") in ("text", "link") else {})
+
+    def _publish_clipboard(self, item):
+        self._clipboard_item = item
+        public = self._clipboard_public(item)
+        data = {"item": public}
+        if item.get("kind") in ("text", "link"):
+            data["text"] = item["text"]  # legacy phone clients
+        self.events.add("clipboard", "", keep=False, data=data)
+
+    async def h_clipboard_content_get(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the clipboard is turned off on the computer")
+        item = self._clipboard_item
+        if not item or item.get("kind") != "image" or request.query.get("id") != item.get("hash"):
+            return json_error(404, "clipboard image is no longer available")
+        self.audit.write(request["peer"], "clipboard-read", f"image {item['size']} bytes")
+        return web.Response(body=item["data"], content_type=item["mime"])
+
+    async def h_clipboard_content_set(self, request):
+        if not self._allowed("allow_input"):
+            return json_error(403, "the clipboard is turned off on the computer")
+        if request.headers.get("X-Clipboard-Sensitive", "").lower() == "true":
+            return json_error(400, "sensitive clipboard content is not synchronized")
+        mime = request.content_type
+        if mime not in desktop.CLIPBOARD_IMAGE_TYPES:
+            return json_error(415, "clipboard image must be PNG or JPEG")
+        data = await request.content.read(desktop.CLIPBOARD_IMAGE_MAX + 1)
+        try:
+            declared = int(request.headers.get("X-Clipboard-Size", "-1"))
+        except ValueError:
+            declared = -1
+        if declared != len(data) or (request.content_length is not None and request.content_length != len(data)):
+            return json_error(400, "clipboard image size does not match")
+        item = await asyncio.to_thread(desktop.clipboard_item_from_bytes, data, mime)
+        if item is None:
+            return json_error(413 if len(data) > desktop.CLIPBOARD_IMAGE_MAX else 400, "invalid or oversized clipboard image")
+        claimed = request.headers.get("X-Clipboard-Hash", "")
+        if len(claimed) != 64 or any(char not in "0123456789abcdef" for char in claimed.lower()) or claimed.lower() != item["hash"]:
+            return json_error(400, "clipboard image hash does not match")
+        self._clip_from_phone = item["hash"]
+        ok = await asyncio.to_thread(desktop.clipboard_set_image, data, mime)
+        if ok:
+            self._clipboard_item = item
+        return web.json_response({"ok": ok, "item": self._clipboard_public(item)})
 
     # -------------------------------------------------------- notifications
 
@@ -1193,6 +1274,7 @@ class Link:
         code = companion.find_code(entry["text"])
         if code and self.config["sync_clipboard"]:
             await asyncio.to_thread(desktop.clipboard_set, code)
+            self._clip_from_phone = hashlib.sha256(code.encode()).hexdigest()
         note = entry["text"] + (f"\n\nThe code {code} is on the clipboard." if code and self.config["sync_clipboard"] else "")
         await asyncio.to_thread(self.notifications.show, f"sms:{entry['from']}", "Messages",
                                 entry["name"] or entry["from"] or "Text message", note)

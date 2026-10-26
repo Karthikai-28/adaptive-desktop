@@ -85,6 +85,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
+    implementation("androidx.navigation:navigation-compose:2.9.4")
     implementation("androidx.biometric:biometric:1.1.0")
     // biometric 1.1.0 asks only for fragment 1.2.5, whose FragmentActivity
     // rejects the request codes the current activity-result API uses: every

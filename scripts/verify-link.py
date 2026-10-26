@@ -153,12 +153,36 @@ def pure_checks(check):
         check(not (folder / "phone.json").exists() and len(I.load_phones(folder)) == 1, "identity: and is kept with the others from then on")
         I.forget_phone(folder)
 
-        check(I.load_config(folder) == I.DEFAULT_CONFIG and I.DEFAULT_CONFIG["allow_public"] is False,
-              "config: defaults, with the public internet refused")
+        check(I.load_config(folder) == I.DEFAULT_CONFIG and I.DEFAULT_CONFIG["allow_public"] is False
+              and I.DEFAULT_CONFIG["sync_clipboard"] is True and I.DEFAULT_CONFIG["config_version"] == 2,
+              "config: defaults protect the network and enable clipboard v2")
+        (folder / "config.json").write_text('{"sync_clipboard": false}')
+        check(I.load_config(folder)["sync_clipboard"] is True,
+              "config: the one-time clipboard v2 migration enables an older installation")
+        (folder / "config.json").write_text('{"config_version": 2, "sync_clipboard": false}')
+        check(I.load_config(folder)["sync_clipboard"] is False,
+              "config: an explicit clipboard opt-out after migration persists")
         (folder / "config.json").write_text('{"port": 80, "allow_exec": "yes", "enabled": false, "junk": 1}')
         config = I.load_config(folder)
         check(config["port"] == I.DEFAULT_PORT and config["allow_exec"] is True and config["enabled"] is False,
               "config: a privileged port and wrong types fall back, valid values are kept")
+
+    import base64
+    from unittest.mock import patch
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+    image = desktop.clipboard_item_from_bytes(png, "image/png")
+    check(image and image["kind"] == "image" and image["size"] == len(png) and len(image["hash"]) == 64,
+          "clipboard: PNG metadata is typed and content-addressed")
+    check(desktop.clipboard_item_from_bytes(b"not an image", "image/png") is None
+          and desktop.clipboard_item_from_bytes(png, "image/gif") is None,
+          "clipboard: malformed and unsupported images are refused")
+    with patch.object(desktop, "clipboard_targets", return_value={"UTF8_STRING", "x-kde-passwordManagerHint"}):
+        check(desktop.clipboard_read() == {"kind": "sensitive", "hash": ""},
+              "clipboard: concealed X11 selections are never read")
+    with patch.object(desktop, "clipboard_targets", return_value={"UTF8_STRING"}), \
+            patch.object(desktop, "clipboard_get", return_value="https://example.org/page"):
+        check(desktop.clipboard_read()["kind"] == "link" and desktop.clipboard_read()["mime"] == "text/uri-list",
+              "clipboard: web links retain their typed MIME identity")
 
     token = I.new_pairing_token()
     check(len(token) >= 40 and I.tokens_match(token, token), "pairing: the code is long and matches itself")
@@ -1350,11 +1374,12 @@ async def daemon_checks(sandbox, check):
             def ask(path, body=None, timeout=45):
                 return asyncio.to_thread(control.call, "POST", path, body, timeout)
 
-            # The clipboard: off until the owner turns it on.
+            # Explicit opt-out persists even though clipboard v2 defaults on.
+            control.call("POST", "/configure", {"sync_clipboard": False})
             async with phone.ws_connect(f"{link_url}/v1/events?kinds=clipboard,ring") as listening:
                 await run("printf 'copied on the computer' | xclip -selection clipboard -i", detach=True)
                 check((await ask("/ring"))["ok"] and (await asyncio.wait_for(listening.receive_json(), 10))["kind"] == "ring",
-                      "phone: the computer makes a listening phone ring, and the clipboard is not told while that is off")
+                      "phone: the computer makes a listening phone ring, and an opted-out clipboard is not told")
             check(not (await ask("/ring"))["ok"], "phone: with no phone listening, the computer says so")
             control.call("POST", "/configure", {"sync_clipboard": True})
             async with phone.ws_connect(f"{link_url}/v1/events?kinds=clipboard") as listening:
@@ -1365,6 +1390,27 @@ async def daemon_checks(sandbox, check):
                 heard = await asyncio.wait_for(listening.receive_json(), 10)
                 check(heard["kind"] == "clipboard" and heard["text"] == "copied afterwards",
                       "clipboard: what is copied on the computer reaches the phone, and what the phone sent is not sent back")
+            import hashlib
+            image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+            image_digest = hashlib.sha256(image).hexdigest()
+            headers = {"Content-Type": "image/png", "X-Clipboard-Hash": image_digest, "X-Clipboard-Size": str(len(image))}
+            async with phone.post(f"{link_url}/v1/clipboard/content", data=image, headers=headers) as reply:
+                uploaded = await reply.json()
+            async with phone.get(f"{link_url}/v1/clipboard/content", params={"id": image_digest}) as reply:
+                fetched = await reply.read()
+            check(uploaded["ok"] and uploaded["item"]["mime"] == "image/png" and fetched == image,
+                  "clipboard: a validated content-addressed PNG travels through the binary endpoint")
+            wrong = {**headers, "X-Clipboard-Size": str(len(image) + 1)}
+            async with phone.post(f"{link_url}/v1/clipboard/content", data=image, headers=wrong) as reply:
+                check(reply.status == 400, "clipboard: a false declared image size is refused")
+            missing_hash = {"Content-Type": "image/png", "X-Clipboard-Size": str(len(image))}
+            async with phone.post(f"{link_url}/v1/clipboard/content", data=image, headers=missing_hash) as reply:
+                check(reply.status == 400, "clipboard: an image without its content identity is refused")
+            bad = b"not an image"
+            bad_headers = {"Content-Type": "image/png", "X-Clipboard-Hash": hashlib.sha256(bad).hexdigest(),
+                           "X-Clipboard-Size": str(len(bad))}
+            async with phone.post(f"{link_url}/v1/clipboard/content", data=bad, headers=bad_headers) as reply:
+                check(reply.status == 400, "clipboard: malformed image bytes are refused")
 
             # Texts and calls.
             texted = await change("/v1/phone/sms", **{"from": "+15550100", "name": "Bank", "text": "Your login code is 771204."})
@@ -1802,9 +1848,18 @@ async def daemon_checks(sandbox, check):
         check(control.call("GET", "/pair/state")["state"] != "pending",
               "account: a request under the wrong name, an old one, and one for another computer are ignored")
 
-        await me.put(f"phones/{pid}", {"name": "Pixel 9", "cert": phone_cert, "want": cid, "at": time.time()})
-        check(await until(lambda: control.call("GET", "/pair/state")["state"] == "pending"),
-              "account: a fresh request from the account reaches the owner")
+        reached = False
+        for _attempt in range(3):
+            # A Realtime Database stream can reconnect between the write and
+            # its event. Keeping the current request fresh makes that
+            # reconnect's initial snapshot equivalent to the missed event.
+            await me.put(f"phones/{pid}", {"name": "Pixel 9", "cert": phone_cert, "want": cid, "at": time.time()})
+            reached = await until(lambda: control.call("GET", "/pair/state")["state"] == "pending", 5)
+            if reached:
+                break
+        check(reached, "account: a fresh request from the account reaches the owner")
+        if not reached:
+            raise RuntimeError("the mock account request stream did not recover")
         pending = control.call("GET", "/pair/state")
         check(pending["account"] == "me@example.com" and pending["code"] == I.pairing_code(qr["f"], digest)
               and pending["name"] == "Pixel 9", "account: the owner sees the device, the account and the six digits")

@@ -76,7 +76,8 @@ internal fun AppsPage(activity: MainActivity, client: LinkClient, store: Store, 
                 val config = activity.resources.configuration
                 val size = if (config.orientation == Configuration.ORIENTATION_LANDSCAPE) "1280x800" else "800x1280"
                 val answer = client.post("/v1/app-sessions", JSONObject().put("app_id", app.getString("id"))
-                    .put("window_id", window).put("new_window", newWindow).put("remember", rememberMatch).put("size", size))
+                    .put("window_id", window).put("new_window", newWindow).put("remember", rememberMatch)
+                    .put("presentation", "mirror").put("size", size))
                 if (answer?.optBoolean("ok") == true) {
                     session = answer.getJSONObject("session")
                     cache.recent(app.getString("id")); choices = null
@@ -95,9 +96,9 @@ internal fun AppsPage(activity: MainActivity, client: LinkClient, store: Store, 
     val current = session
     if (current != null) {
         AppWorkspace(activity, client, store, cache, current, onExpired = {
-            // The computer let the workspace go while this phone was away: open the same window again.
+            // Never relaunch an application when its exact window is gone.
             session = null
-            apps.firstOrNull { it.optString("id") == current.optString("app_id") }?.let { open(it, current.optInt("window_id")) }
+            note = "Window closed · choose another live window"
         }) { session = null }
         return
     }
@@ -161,7 +162,7 @@ internal fun AppIcon(client: LinkClient, app: JSONObject) {
 }
 
 @Composable
-private fun AppWorkspace(activity: MainActivity, client: LinkClient, store: Store, cache: WorkspaceStore,
+internal fun AppWorkspace(activity: MainActivity, client: LinkClient, store: Store, cache: WorkspaceStore,
                          initial: JSONObject, onExpired: () -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val id = initial.getString("id")
@@ -192,6 +193,10 @@ private fun AppWorkspace(activity: MainActivity, client: LinkClient, store: Stor
         ?: available.firstOrNull { it.optString("app_id") == app && it.optBoolean("default") }
         ?: available.firstOrNull()
     val working = run?.optString("state") == "running" || pendingPress
+    fun rememberPresentation(value: String) {
+        store.continuity(client.computer.fingerprint,
+            ContinuityDescriptor(client.computer.fingerprint, app, session.optInt("window_id"), value).json())
+    }
     fun submit(c: JSONObject, confirm: Boolean = false) {
         if (!online || working) return
         val asked = c.optJSONArray("steps").rows().any { it.optBoolean("prompt") }
@@ -294,9 +299,16 @@ private fun AppWorkspace(activity: MainActivity, client: LinkClient, store: Stor
             if (!session.optBoolean("control")) TextButton(onClick = { scope.launch {
                 client.post("/v1/app-sessions", JSONObject().put("operation", "take-control").put("id", id))?.optJSONObject("session")?.let { session = it }
             } }) { Text("Take control from other phone") }
-            if (session.optString("display").isNotBlank()) TextButton(onClick = { scope.launch {
-                client.post("/v1/app-sessions", JSONObject().put("operation", "return").put("id", id))?.optJSONObject("session")?.let { session = it; note = "Returned to computer" }
-            } }) { Text("Return window to computer") }
+            if (session.optString("presentation", "mirror") == "phone-display") TextButton(onClick = { scope.launch {
+                client.post("/v1/app-sessions", JSONObject().put("operation", "return").put("id", id))?.optJSONObject("session")?.let {
+                    session = it; note = "Returned to laptop"; rememberPresentation("mirror")
+                }
+            } }) { Text("Return to laptop") }
+            else TextButton(enabled = enabled, onClick = { scope.launch {
+                val size = if (landscape) "1280x800" else "800x1280"
+                client.post("/v1/app-sessions", JSONObject().put("operation", "move-to-phone").put("id", id).put("size", size))
+                    ?.optJSONObject("session")?.let { session = it; note = "Moved to phone"; rememberPresentation("phone-display") }
+            } }) { Text("Move to phone") }
             if (initial.optString("adapter") == "browser") Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(url, { url = it }, label = { Text("URL") }, singleLine = true, modifier = Modifier.weight(1f))
                 TextButton(enabled = enabled && url.isNotBlank(), onClick = { submit(control("Open URL", step("launch", if (url.contains("://")) url else "https://$url", args = JSONObject().put("type", "url")))) }) { Text("Open") }

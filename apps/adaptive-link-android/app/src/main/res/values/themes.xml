@@ -5,6 +5,12 @@
         <item name="android:statusBarColor">@color/background</item>
         <item name="android:navigationBarColor">@color/background</item>
     </style>
+    <style name="Theme.AdaptiveLink.Transparent" parent="android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:colorAccent">#0A84FF</item>
+    </style>
     <color name="background">#1C1C1E</color>
     <color name="accent">#0A84FF</color>
 </resources>

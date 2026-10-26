@@ -43,9 +43,11 @@ The devices you pair - a phone, a tablet; up to five. Nothing else.
   not answer. (`allow_public` in the config turns this off; there is no
   reason to.) Away from home the phone does not come in through a port at
   all: see *Local and away*.
-- **The app locks itself.** It asks for your fingerprint or screen lock each
-  time it is opened, hides its contents from screenshots and the recent-apps
-  list, and is excluded from Android backups.
+- **The app locks with the phone.** Ordinary app switching resumes immediately.
+  After Android reports that the device was locked, Adaptive Link asks once for
+  your fingerprint or device credential before revealing its contents again.
+  It still hides screenshots and recent-app previews with `FLAG_SECURE`, and is
+  excluded from Android backups.
 - **There is a record.** Everything the phone does is written to
   `~/.local/state/adaptive-desktop/link.log` (`link-cli.py log`), and the
   computer shows a notification when the phone connects.
@@ -53,7 +55,7 @@ The devices you pair - a phone, a tablet; up to five. Nothing else.
 What this does not protect against:
 
 - Someone who has your unlocked phone and can pass its screen lock has what
-  you have. The app stays open for fifteen seconds after you leave it.
+  you have. Switching apps does not add a second lock; locking the device does.
 - With `allow power` on, the phone can unlock the computer's screen. That is
   what "complete control" means, and it is also what someone holding your
   open phone would have.
@@ -300,13 +302,17 @@ on the local network only and the screen is sent a picture at a time.
 
 ## What the phone can do
 
-The app opens on the laptop's **mobile desktop** (below). Every screen in
-this table is in its drawer, and all of them together are under *Laptop
-tools*, which is pinned to Home to begin with.
+The app opens on the laptop's **mobile desktop** (below). Home combines three
+views of the same computer: **Continue** contains every live laptop window,
+active and recent first; **Phone workspace** contains apps running in the
+private phone-sized session; and **Apps** contains installed laptop apps and
+Adaptive Link's native tools. Every screen in this table is in its drawer,
+and all of them together are under *Laptop tools*, which is pinned to Home to
+begin with.
 
 | In the app | On the computer |
 | --- | --- |
-| Desktop workspaces | Every app in the app grid, searched, starred and recent; opened (or the window it already has brought back) into a workspace of its own, with your saved button layouts beside it (see *Every app, with buttons of your own*) |
+| Desktop workspaces | Every live laptop window under Continue, private phone-session apps under Phone workspace, and installed/native apps under Apps; each opens into a workspace with saved button layouts (see *Every app, with buttons of your own*) |
 | Screen | The screen as video with the computer's sound (three qualities), or a picture at a time where video cannot be had; tap to click, drag to drag, long-press for right-click, pinch to zoom, a scroll mode, a keyboard |
 | Trackpad | Relative pointer, a scroll strip, both buttons, a keyboard with the keys a phone lacks; *Air* aims the phone like a pointer; the microphone on the keyboard types what you say |
 | Media | Whatever is playing (MPRIS): play, pause, next, previous, seek, volume; what is playing from the web can be carried on with on the phone |
@@ -457,24 +463,42 @@ own screen, shared as it is, stays available as *Desktop Remote*.
 
 ### Every app, with buttons of your own
 
-*Desktop workspaces* lists what is in the computer's app grid, by its desktop-entry ID
-(`firefox.desktop`), never by a window's title. Tapping one opens it, or
-brings back the window it already has; with several windows the phone asks
-which, and can remember that a window class belongs to that app. An app that
-offers *New window* gets a button for it. An app that starts but shows no
-window in six seconds says so, and offers its windows to choose from.
+**Continue** lists every window already open on the laptop. Tapping one mirrors
+and controls that exact window without resizing or moving it: its desktop
+geometry remains authoritative, the stream follows modal dialogs, and the
+phone can fit or zoom the desktop UI. **Move to phone** is the explicit action
+that attaches it to the virtual phone display; **Return to laptop** restores
+its original display, size and position. **Open phone copy** instead launches
+an independent instance in the isolated Xvfb phone session.
+
+Reconnection stores the computer fingerprint, app ID, window ID, presentation
+mode and destination—not a short-lived server session ID. After process death
+the app resumes the same window only when both identities still match. If it
+was closed, the phone says **Window closed** and offers matching live windows;
+it never launches a replacement by itself.
+
+The installed app grid is keyed by desktop-entry ID (`firefox.desktop`), never
+by a window title. An app that offers *New window* gets a button for it. An app
+that starts but shows no window in six seconds says so and offers its windows
+to choose from.
 
 The app opens into a workspace: its name and window at the top, the app
 itself in the middle, a drawer of buttons below (beside it, sideways), and
 along the bottom Apps, Trackpad, Controls, Desktop and Full screen. Where the
-phone can be a display (*The screen as video*, below) the window is moved
-onto it and fills it, and *Return window to computer* puts it back where it
-was. Where it cannot, the window stays on the computer, is brought to the
-front, and the phone shows the part of the screen it covers, following it as
-it moves. That is a crop of the screen, not a capture of the window alone:
+phone can be a display (*The screen as video*, below), moving it is still an
+explicit choice. In the default mirror presentation the window stays on the
+computer and the phone shows the part of the screen it covers, following it
+as it moves. That is a crop of the screen, not a capture of the window alone:
 whatever lies over it shows too, and *Desktop* shows the whole screen for a
 menu or dialog that reaches outside it. A dialog the app opens is followed
 by its parent, not guessed from its title.
+
+Navigation uses Android's saved back stack. Back dismisses a modal or
+full-screen state first and then returns to the preceding destination; Back at
+Home backgrounds the task normally. Rotation, process recreation and launcher
+resume preserve the selected computer, route, window, search/filter state and
+relevant scroll state. Notification links reuse the same activity and open the
+related alert, clipboard action or computer view.
 
 **Layouts.** Each app has as many layouts as you like - Reading, Research and
 Meetings for a browser; Coding, Debugging and Writing for an editor;
@@ -596,15 +620,23 @@ right. The app shows the same under More.
 
 ### The phone and the computer together
 
-Each of these is a switch in the app's More screen, off until you turn it on;
-some need a switch on the computer as well. The phone keeps a connection open
-for them and says so in its notification shade.
+Each of these is a switch in the app's More screen. Protected clipboard sync
+is enabled by the one-time v2 migration; turning it off afterwards is explicit
+and persists. The phone keeps a connection open for enabled background
+features and says so in its notification shade.
 
-- **Clipboard.** `link-cli.py allow clipboard on`, and the switch in the app.
-  What is copied on the computer reaches the phone as it is copied. The other
-  way is limited by Android, which lets an app read the clipboard only while
-  it is in front: what you copy on the phone goes over when you next open the
-  app. A clipboard holds passwords; that is why both ends have to agree.
+- **Protected clipboard v2.** `link-cli.py allow clipboard on`, and the switch
+  in the app. Text, links, PNG and JPEG images use SHA-256 identities to avoid
+  echo loops. Text is limited to 20,000 characters; images to 8 MiB and 64
+  megapixels. Android clips marked sensitive and X11 selections advertising
+  known password-manager or concealed targets are skipped; unmarked secrets
+  cannot be inferred reliably. Clipboard payloads never enter the audit log.
+  Laptop-to-phone sync continues in the background. Images are exposed through
+  a private read-only content provider, with at most five cached items/40 MiB
+  and 24-hour cleanup. Android permits phone clipboard reads only while the app
+  has input focus, so it sends on foreground entry; the persistent notification
+  also offers **Send clipboard now**, which briefly opens a focused activity,
+  sends the item and closes. Older clients keep using the JSON text endpoint.
 - **Find this phone.** `link-cli.py ring` makes it ring at full volume,
   whatever it is set to, for up to a minute.
 - **Approve with the phone's fingerprint.** The computer asks, the phone
@@ -778,7 +810,10 @@ never as part of a command line that other programs could read.
   screen frame, a command, the computer reached through a direct connection
   when none of its addresses answers, an impostor computer and a replaced
   key; then the app itself - signing in, every screen opened and every
-  control pressed, and a command typed on the phone's own screen.
+  control pressed, and a command typed on the phone's own screen. It also
+  exercises real Back-stack traversal, launcher resume, rotation and forced
+  process restoration, device-lock-only authentication, and reconnect without
+  duplicate foreground connections.
 - `scripts/verify_link_mobile.py` (also run by `verify-link.py`) — two
   phones' private sessions on real displays: each its own display and bus,
   the daemon's environment untouched, input reaching only its own session
@@ -795,8 +830,10 @@ never as part of a command line that other programs could read.
   key when `input` is turned off, and not getting round input ownership or
   `exec`.
 - The app's unit tests check that the phone computes the same pairing digits
-  and fingerprints as the computer's code, and that its starter layouts and
-  export carry only what a layout holds.
+  and fingerprints as the computer's code; that its starter layouts and
+  export carry only what a layout holds; and continuity route/descriptor
+  restoration, typed clipboard parsing, sensitive detection, hashing, cache
+  eviction and migration.
 
 What that leaves for a real phone is in `record-live-verification.py`: your
 own device, Google's real sign-in (the emulator has no Google account, so the
@@ -808,7 +845,10 @@ Bluetooth, displays and sound devices, waking the computer from sleep, the
 computer's sound on the phone, a relay, the widget and tiles on a real home
 screen, and what needs hardware an emulator has not got: NFC tags, the
 gyroscope, speech, a watch, the phone as another display, and sudo through
-PAM.
+PAM. Continuity additionally needs real-phone checks for image pasting into
+another Android app, foreground-only phone reads, lock/unlock, background
+reconnection, launcher/predictive Back, and mirror/move/return against real
+laptop windows.
 
 ## Known limits
 
@@ -824,8 +864,9 @@ PAM.
   what is safe for that (see above).
 - An app workspace without the phone as a display is a crop of the screen,
   not of the window: what overlaps the window shows on the phone too.
-- Phone apps cannot pick up what is open on the laptop: the phone's Firefox
-  is another Firefox, and unsaved work in a laptop window stays there.
+- Continue can control the exact open laptop window, including unsaved work,
+  but its desktop interface remains a fitted/zoomable desktop interface. Open
+  phone copy is deliberately a separate phone-session instance.
 - A desktop app keeps its desktop layout on the phone; it is fitted, panned
   and zoomed, not redesigned. Only the shell and the system tools are native.
 - Apps that need the GPU run on Xvfb's software rendering in the phone's

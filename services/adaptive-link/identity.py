@@ -44,6 +44,9 @@ MAX_PHONES = 5
 PHONE_SWITCHES = ("allow_input", "allow_exec", "allow_files", "allow_power")
 
 DEFAULT_CONFIG = {
+    # Versioned defaults let an upgrade change an old implicit default once
+    # without undoing a choice the owner makes afterwards.
+    "config_version": 2,
     "enabled": True,
     "port": DEFAULT_PORT,
     # Connections are taken only from private addresses. A
@@ -61,9 +64,9 @@ DEFAULT_CONFIG = {
     # The desktop's own notifications are told to a phone that asks for them.
     # Alerts about the machine itself (a full disk, a low battery) always are.
     "send_notifications": True,
-    # What is copied on the computer is told to a phone that asks, as it is
-    # copied. Off until the owner wants it: a clipboard holds passwords.
-    "sync_clipboard": False,
+    # Ordinary, non-sensitive clipboard items follow paired devices by
+    # default. Password-manager selections are filtered before they are read.
+    "sync_clipboard": True,
     # Lock the computer when the paired phone leaves its network.
     "proximity_lock": False,
     # A device signed in to the same Google account as this computer may ask
@@ -98,10 +101,15 @@ def load_config(link_dir=None):
         data = json.loads(((link_dir or LINK_DIR) / "config.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return config
+    migrated = isinstance(data, dict) and data.get("config_version", 0) < 2
     if isinstance(data, dict):
         for key, default in DEFAULT_CONFIG.items():
             if key in data and type(data[key]) is type(default):
                 config[key] = data[key]
+    if migrated:
+        config["config_version"] = 2
+        config["sync_clipboard"] = True
+        save_config(config, link_dir)
     if not 1024 <= config["port"] <= 65535:
         config["port"] = DEFAULT_PORT
     return config

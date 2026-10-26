@@ -2,9 +2,22 @@ package com.karthi.adaptivelink
 
 import android.content.Context
 
+internal fun clipboardPolicy(version: Int, enabled: Boolean): Pair<Boolean, Int> =
+    if (version < 2) true to 2 else enabled to version
+
 /** What the app remembers: the computers it is paired with, which of them it is talking to, and a few switches. */
 class Store(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("link", Context.MODE_PRIVATE)
+
+    init {
+        // Version 2 makes protected clipboard sharing the normal paired-device
+        // behaviour. A later explicit opt-out keeps this version and sticks.
+        val version = prefs.getInt("clipboard_policy_version", 0)
+        val migrated = clipboardPolicy(version, prefs.getBoolean("sync_clipboard", false))
+        if (version != migrated.second) {
+            prefs.edit().putBoolean("sync_clipboard", migrated.first).putInt("clipboard_policy_version", migrated.second).commit()
+        }
+    }
 
     /** Every computer this phone is paired with. One paired before there could be several is carried over. */
     val computers: List<Computer>
@@ -62,6 +75,26 @@ class Store(context: Context) {
     var clipboardSeen: String
         get() = prefs.getString("clipboard_seen", "") ?: ""
         set(value) = prefs.edit().putString("clipboard_seen", value.take(20_000)).apply()
+
+    var clipboardSkipSeen: String
+        get() = prefs.getString("clipboard_skip_seen", "") ?: ""
+        set(value) = prefs.edit().putString("clipboard_skip_seen", value.take(500)).apply()
+
+    /** App contents need authentication again after Android locks the device. */
+    var needsUnlock: Boolean
+        get() = prefs.getBoolean("needs_unlock", true)
+        set(value) { prefs.edit().putBoolean("needs_unlock", value).commit() }
+
+    fun continuity(fingerprint: String): String = prefs.getString("continuity_$fingerprint", "") ?: ""
+    fun continuity(fingerprint: String, value: String) {
+        prefs.edit().putString("continuity_$fingerprint", value.take(4096)).commit()
+    }
+
+    /** Route and small UI selections for restoring the same mobile workspace after process death. */
+    fun shellState(fingerprint: String): String = prefs.getString("shell_state_$fingerprint", "") ?: ""
+    fun shellState(fingerprint: String, value: String) {
+        prefs.edit().putString("shell_state_$fingerprint", value.take(8192)).apply()
+    }
 
     /** The computer may make this phone ring, to find it. */
     var findPhone: Boolean

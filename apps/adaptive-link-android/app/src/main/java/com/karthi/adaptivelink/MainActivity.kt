@@ -2,6 +2,11 @@ package com.karthi.adaptivelink
 
 import android.os.Build
 import android.os.Bundle
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -74,6 +79,8 @@ class MainActivity : FragmentActivity() {
     /** The app's contents are shown only after the owner has unlocked it. */
     private var unlocked by mutableStateOf(false)
     private var lockMessage by mutableStateOf("")
+    internal var requestedPage by mutableStateOf(Page.Home)
+        private set
 
     /**
      * Set while the app itself has sent the owner somewhere and is waiting
@@ -83,7 +90,14 @@ class MainActivity : FragmentActivity() {
      * waiting for the answer, and with it the code that was just scanned.
      */
     var awayOnPurpose = false
-    private var stoppedAt = 0L
+    private val screenLockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                Store(context).needsUnlock = true
+                unlocked = false
+            }
+        }
+    }
 
     /** While presenting, the volume buttons turn the pages. */
     var volumeKeys: ((up: Boolean) -> Unit)? = null
@@ -93,6 +107,10 @@ class MainActivity : FragmentActivity() {
         // What is on the computer's screen should not end up in the phone's
         // recent-apps thumbnails or in a screenshot taken by another app.
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        val store = Store(this)
+        requestedPage = requestedPage(intent)
+        unlocked = !store.lockOnOpen || !store.needsUnlock
+        registerReceiver(screenLockReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
 
         EventsService.sync(this)
 
@@ -107,14 +125,30 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Coming back locks the app again if it was really left: not for a
-        // screen it opened itself, and not for a glance away of a few seconds.
-        val away = System.currentTimeMillis() - stoppedAt
-        if (unlocked && stoppedAt != 0L && !awayOnPurpose && away > LOCK_AFTER_MS && Store(this).lockOnOpen)
+        // App switching is ordinary Android multitasking. Only a real device
+        // lock re-arms the privacy gate.
+        val store = Store(this)
+        if (getSystemService(KeyguardManager::class.java).isDeviceLocked) {
+            store.needsUnlock = true
             unlocked = false
+        }
         awayOnPurpose = false
-        stoppedAt = 0L
         if (!unlocked) unlock()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        requestedPage = requestedPage(intent)
+    }
+
+    private fun requestedPage(intent: Intent?): Page = intent?.getStringExtra(EXTRA_PAGE)?.let {
+        runCatching { Page.valueOf(it) }.getOrNull()
+    } ?: Page.Home
+
+    internal fun consumeRequestedPage() {
+        requestedPage = Page.Home
+        intent?.removeExtra(EXTRA_PAGE)
     }
 
     /**
@@ -126,25 +160,21 @@ class MainActivity : FragmentActivity() {
         super.onWindowFocusChanged(hasFocus)
         val store = Store(this)
         if (!hasFocus || !unlocked || !store.syncClipboard) return
-        val text = runCatching {
-            getSystemService(android.content.ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
-        }.getOrNull().orEmpty()
-        if (text.isEmpty() || text == store.clipboardSeen || text.length > 20_000) return
-        store.clipboardSeen = text
         val client = Link.client(this) ?: return
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            if (client.host != null || client.connect() != null) client.post("/v1/clipboard", org.json.JSONObject().put("text", text))
+            if (client.host != null || client.connect() != null) ClipboardSync.sendCurrent(this@MainActivity, client)
         }
     }
 
-    override fun onStop() {
-        super.onStop()
-        if (!isChangingConfigurations) stoppedAt = System.currentTimeMillis()
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(screenLockReceiver) }
+        super.onDestroy()
     }
 
     private fun unlock() {
         val store = Store(this)
         if (!store.lockOnOpen) {
+            store.needsUnlock = false
             unlocked = true
             return
         }
@@ -161,6 +191,7 @@ class MainActivity : FragmentActivity() {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     lockMessage = ""
+                    store.needsUnlock = false
                     unlocked = true
                 }
 
@@ -192,12 +223,11 @@ class MainActivity : FragmentActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
-    companion object {
-        /** Away for longer than this, the app asks to be unlocked again. */
-        const val LOCK_AFTER_MS = 15_000L
-    }
-
     fun phoneName(): String = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
+
+    companion object {
+        const val EXTRA_PAGE = "com.karthi.adaptivelink.PAGE"
+    }
 }
 
 @Composable
@@ -241,6 +271,13 @@ private fun App(activity: MainActivity) {
     val state = remember { LinkState() }
     // Where the Files screen opens: home, or a drive chosen under Devices.
     var folder by remember { mutableStateOf("~") }
+
+    LaunchedEffect(activity.requestedPage) {
+        if (activity.requestedPage != Page.Home) {
+            page = activity.requestedPage
+            activity.consumeRequestedPage()
+        }
+    }
 
     LaunchedEffect(computer) { LinkWidget.refresh(activity); LinkWidgetBase.refreshAll(activity) }
 
