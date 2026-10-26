@@ -527,9 +527,11 @@ def screens(check, adb, device, control, build_env, sandbox):
         tap(label, wait=0.8)
     step(has("Trackpad", "Hide keyboard"), "trackpad: pointer, mouse buttons, Air, Ink and keyboard remain available")
     tap("Hide keyboard", wait=1)
+    home()
     # With auto-rotate off (the navigation checks turn it off), Android keeps the
-    # trackpad's landscape as the locked rotation after the app lets go of it.
-    # The window manager then overrides the user_rotation setting, so ask it directly.
+    # trackpad's landscape as the locked rotation after the app lets go of it, so
+    # once it has (not before), lock it back to portrait through the window manager,
+    # which overrides the user_rotation setting.
     sh("shell", "wm", "user-rotation", "-d", "0", "lock", "0")
     time.sleep(2)
     home()
