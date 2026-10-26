@@ -14,7 +14,10 @@ fi
 
 export PATH="${PREFIX}/bin:${PATH}"
 export LD_LIBRARY_PATH="${PREFIX}/lib/x86_64-linux-gnu:${PREFIX}/lib:${LD_LIBRARY_PATH:-}"
-export XDG_DATA_DIRS="${PREFIX}/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+case ":${XDG_DATA_DIRS:-}:" in
+  *":${PREFIX}/share:"*) ;;
+  *) export XDG_DATA_DIRS="${PREFIX}/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" ;;
+esac
 
 if [ -d "${PREFIX}/share/glib-2.0/schemas" ]; then
   export GSETTINGS_SCHEMA_DIR="${PREFIX}/share/glib-2.0/schemas"

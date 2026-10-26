@@ -30,7 +30,9 @@ done
 
 mkdir -p "$EXT_DIR" "$CSS_DIR"
 install -m 0755 "$REPO/extension/adaptive_preview.py" "$EXT_DIR/adaptive_preview.py"
-install -m 0644 "$REPO/terminal/kterm_open_terminal.py" "$EXT_DIR/kterm_open_terminal.py"
+# Open in Terminal comes from ~/.local/share/nautilus-python (install-terminal.py),
+# which the fork also scans; a second copy here showed the item twice or more.
+rm -f "$EXT_DIR/kterm_open_terminal.py"
 # Helper package (models, archives, git, tags, cleanup, media). Replaced
 # whole so a module deleted in the repo does not linger in the install.
 rm -rf "$EXT_DIR/adaptive_files"
