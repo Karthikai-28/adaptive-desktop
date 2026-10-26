@@ -230,6 +230,9 @@ def screens(check, adb, device, control, build_env, sandbox):
     # phone: with none set, the app has nothing to ask for and stays open.
     sh("shell", "locksettings", "set-pin", PIN)
     sh("shell", "svc", "power", "stayon", "true")
+    # A fresh device shows a one-time "Viewing full screen" notice over the first
+    # immersive screen (the trackpad); mark it as already seen.
+    sh("shell", "settings", "put", "secure", "immersive_mode_confirmations", "confirmed")
 
     def unlock_app():
         """Answer the app's unlock prompt with the PIN, if it is showing."""
@@ -488,7 +491,7 @@ def screens(check, adb, device, control, build_env, sandbox):
         # This machine has a card to make one with; the test desktop (Xvfb) cannot show it.
         step(has("the desktop did not see it"), "screen: says so when the display it made is not taken up by the desktop")
     tap("Picture and sound", wait=1.5)
-    tap("Low quality", wait=3)
+    tap("Low quality", wait=3, exact=False)   # "Low quality (Data saver)"
     for _ in range(10):
         if not has("Connecting"):
             break
@@ -523,6 +526,12 @@ def screens(check, adb, device, control, build_env, sandbox):
     for label in ("Esc", "Enter"):
         tap(label, wait=0.8)
     step(has("Trackpad", "Hide keyboard"), "trackpad: pointer, mouse buttons, Air, Ink and keyboard remain available")
+    tap("Hide keyboard", wait=1)
+    # With auto-rotate off (the navigation checks turn it off), Android keeps the
+    # trackpad's landscape as the locked rotation after the app lets go of it.
+    # The window manager then overrides the user_rotation setting, so ask it directly.
+    sh("shell", "wm", "user-rotation", "-d", "0", "lock", "0")
+    time.sleep(2)
     home()
 
     # ------------------------------------------------------------- media
@@ -593,7 +602,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     home()
 
     tap("Devices", wait=4)
-    step(has("USB", "Drives"), "devices: USB devices and drives")
+    step(has("USB") and reach("Drives"), "devices: USB devices and drives")   # below this machine's USB list
     for _ in range(4):   # the mounted drive is further down the list
         if has("Browse"):
             break
@@ -739,6 +748,12 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(has("Clipboard"), "more: clipboard both ways")
     tap("Lock", wait=2)
     step(has("turned off on the computer"), "more: a power action is refused when the computer has it turned off")
+    # The power buttons scroll sideways; on a narrow screen Suspend is past the edge.
+    for label, _x, y in nodes():
+        if label == "Screen off":
+            sh("shell", "input", "swipe", "900", str(y), "200", str(y), "300")
+            time.sleep(1)
+            break
     tap("Suspend", wait=1.5)
     step(has("Cancel", "Yes"), "more: suspend asks first")
     tap("Cancel", wait=1)
@@ -1005,7 +1020,9 @@ def screens(check, adb, device, control, build_env, sandbox):
     time.sleep(18)
     sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
     time.sleep(3)
-    step(has("Pinned", "Stage"), "lock: ordinary app switching resumes immediately")
+    # The app comes back where it was left (not necessarily Home); "Connected" is
+    # on every screen of it and on none of the lock's, as unlock_app() relies on.
+    step(has("Connected"), "lock: ordinary app switching resumes immediately")
     sh("shell", "input", "keyevent", "KEYCODE_POWER")
     time.sleep(2)
     sh("shell", "input", "keyevent", "KEYCODE_WAKEUP")
@@ -1015,11 +1032,11 @@ def screens(check, adb, device, control, build_env, sandbox):
     time.sleep(2)
     sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
     time.sleep(3)
-    step(not has("Pinned", "Stage"), "lock: a device-lock transition hides app content")
+    step(not has("Connected"), "lock: a device-lock transition hides app content")
     sh("shell", "input", "text", PIN)
     sh("shell", "input", "keyevent", "KEYCODE_ENTER")
     time.sleep(3)
-    step(has("Pinned", "Stage"), "lock: one device-credential confirmation opens it")
+    step(has("Connected"), "lock: one device-credential confirmation opens it")
 
     sh("shell", "am", "force-stop", "com.karthi.adaptivelink")
     sh("shell", "locksettings", "clear", "--old", PIN)
