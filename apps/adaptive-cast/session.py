@@ -66,7 +66,11 @@ def encoder_chain(encoder, video):
     kbps = BITRATE_KBPS.get(video["height"], 3000)
     gop = video["fps"]
     if encoder == "vaapih264enc":
-        return f"vaapih264enc rate-control=cbr bitrate={kbps} keyframe-period={gop} max-bframes=0"
+        # Constant QP: on this Gen9 iGPU the iHD driver refuses CBR/VBR
+        # (bitrate control needs HuC firmware the kernel does not load), so
+        # quality is fixed instead. Desktop content stays far below the
+        # 50 Mbps a WFD sink takes.
+        return f"vaapih264enc rate-control=cqp init-qp=26 keyframe-period={gop} max-bframes=0"
     if encoder == "x264enc":
         return (f"x264enc tune=zerolatency speed-preset=ultrafast bitrate={kbps}"
                 f" key-int-max={gop} bframes=0 sliced-threads=true")
@@ -87,12 +91,14 @@ def pipeline_description(video, audio, host, port, encoder, audio_device=None):
     mpegtsmux takes the PID from the requested pad name.
     """
     width, height, fps = video["width"], video["height"], video["fps"]
+    # VA-API takes only NV12 here; the software encoders want I420.
+    raw_format = "NV12" if encoder == "vaapih264enc" else "I420"
     parts = [
         f"mpegtsmux name=mux alignment=7 ! rtpmp2tpay pt=33 ! "
         f"udpsink host={host} port={port} sync=false async=false",
         f"ximagesrc use-damage=false show-pointer=true ! video/x-raw,framerate={fps}/1 ! "
         "queue leaky=downstream max-size-buffers=2 ! videoconvert ! videoscale ! "
-        f"video/x-raw,format=I420,width={width},height={height},pixel-aspect-ratio=1/1 ! "
+        f"video/x-raw,format={raw_format},width={width},height={height},pixel-aspect-ratio=1/1 ! "
         f"{encoder_chain(encoder, video)} name=venc ! "
         "video/x-h264,profile=constrained-baseline ! "
         "h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au ! "
@@ -141,6 +147,7 @@ class Session:
         self.sink_ip = None
         self.local_ip = None
         self.state = None
+        self.stopping = None
         self.cancel = Gio.Cancellable()
 
     # --- lifecycle -------------------------------------------------------
@@ -154,6 +161,7 @@ class Session:
 
     def stop(self, reason="Stopped"):
         """Ask the TV to tear down, then close everything."""
+        self.stopping = reason
         if self.conn and self.state == "streaming":
             self._send_request("SET_PARAMETER", "rtsp://localhost/wfd1.0",
                                body="wfd_trigger_method: TEARDOWN\r\n")
@@ -217,7 +225,7 @@ class Session:
             return
         if not data:
             if self.state != "ended":
-                self._close("The TV ended the session")
+                self._close(self.stopping or "The TV ended the session")
             return
         self.buffer += data
         while True:
@@ -238,12 +246,14 @@ class Session:
     def _send_request(self, method, uri, headers=None, body="", then=None):
         self.cseq += 1
         self.pending[self.cseq] = (method, then)
+        self.log(f"cast: -> {method} (CSeq {self.cseq})")
         self._write(wfd.request(method, uri, self.cseq, headers, body))
 
     def _reply(self, message, headers=None, body=""):
         self._write(wfd.response(message.cseq, headers, body))
 
     def _handle(self, message):
+        self.log(f"cast: <- {message.first_line} (CSeq {message.cseq}) {message.body.strip()!r}")
         if message.is_response:
             method, then = self.pending.pop(message.cseq, (None, None))
             if message.status != 200 and method != "GET_PARAMETER":
@@ -273,7 +283,7 @@ class Session:
                 self.pipeline.set_state(Gst.State.PAUSED)
         elif method == "TEARDOWN":
             self._reply(message, {"Session": self.session_id})
-            self._close("The TV ended the session")
+            self._close(self.stopping or "The TV ended the session")
         elif method == "SET_PARAMETER":
             self._reply(message)
             if "wfd_idr_request" in message.body:

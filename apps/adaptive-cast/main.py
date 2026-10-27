@@ -28,6 +28,8 @@ import session as cast_session  # noqa: E402
 APP_ID = "com.karthi.AdaptiveCast"
 HERE = Path(__file__).resolve().parent
 OPEN_TIMEOUT_S = 30
+# A TV that has just ended a session drops the next join for a few seconds.
+RETRY_AFTER_S = 6
 
 
 class Cast:
@@ -44,9 +46,11 @@ class Cast:
         self.session = None
         self.wait_timer = 0
         self.display = None
+        self.retried = False
 
-    def start(self, display):
+    def start(self, display, retry=False):
         self.stop()
+        self.retried = retry
         self.display = display
         self.session = cast_session.Session(self._on_session, self.log)
         try:
@@ -62,6 +66,8 @@ class Cast:
         if self.session:
             session, self.session = self.session, None
             session.stop()
+        # The link closing after this was asked for; it is not news.
+        self.display = None
         self.link.disconnect()
 
     def _clear_wait(self):
@@ -77,11 +83,30 @@ class Cast:
             self.on_state("connecting", "Linked. Waiting for the TV to open the session")
             self.wait_timer = GLib.timeout_add_seconds(OPEN_TIMEOUT_S, self._open_timeout)
         elif state in ("disconnected", "failed"):
+            if self.display is None:
+                return
+            display, self.display = self.display, None
             self._clear_wait()
+            if (state == "disconnected" and not self.retried and self.session
+                    and self.session.state == "listening"):
+                self.on_state("connecting", "The TV is still busy. Trying again")
+                session, self.session = self.session, None
+                session.on_state = lambda *_: None
+                session.stop()
+                self.display = display
+                GLib.timeout_add_seconds(RETRY_AFTER_S, self._retry, display)
+                return
             if self.session:
                 session, self.session = self.session, None
+                # Reported below; the session's own "ended" would repeat it.
+                session.on_state = lambda *_: None
                 session.stop(text)
             self.on_state("failed" if state == "failed" else "ended", text)
+
+    def _retry(self, display):
+        if self.display is display and self.session is None:
+            self.start(display, retry=True)
+        return GLib.SOURCE_REMOVE
 
     def _open_timeout(self):
         self.wait_timer = 0
@@ -98,6 +123,7 @@ class Cast:
             self._clear_wait()
         if state in ("ended", "failed") and self.session:
             self.session = None
+            self.display = None
             self.link.disconnect()
         self.on_state(state, text)
 
@@ -130,6 +156,7 @@ def run_connect(name, seconds):
         return 1
     loop = GLib.MainLoop()
     result = {"code": 1}
+    picked = []
     cast = None
 
     def on_state(state, text):
@@ -142,11 +169,12 @@ def run_connect(name, seconds):
             GLib.timeout_add(800, loop.quit)
 
     def on_displays(displays):
-        if cast.display:
+        if picked:
             return
         for d in displays:
             if name.lower() in d.name.lower():
                 print(f"Found {d.name} ({d.address})", flush=True)
+                picked.append(d)
                 cast.start(d)
                 return
 
@@ -156,7 +184,7 @@ def run_connect(name, seconds):
         return 1
     cast.link.start_find()
     on_displays(cast.link.displays())
-    GLib.timeout_add_seconds(30, lambda: (cast.display or (print("TV not found"), loop.quit()))
+    GLib.timeout_add_seconds(30, lambda: (picked or (print("TV not found"), loop.quit()))
                              and GLib.SOURCE_REMOVE)
     GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, 2, lambda: cast.stop() or GLib.SOURCE_REMOVE)
     loop.run()

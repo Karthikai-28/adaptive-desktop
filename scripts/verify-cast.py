@@ -81,10 +81,23 @@ try:
                 continue
             text = session.pipeline_description(video, "AAC" if session.have_aac() else None,
                                                 "127.0.0.1", 19000, encoder)
+            # Run it briefly with test sources: the encoder only refuses a
+            # setting once caps reach it, which parsing alone never shows.
+            text = text.replace("ximagesrc use-damage=false show-pointer=true",
+                                "videotestsrc is-live=true num-buffers=15")
+            text = text.replace("pulsesrc", "audiotestsrc is-live=true num-buffers=15")
             try:
-                Gst.parse_launch(text)
+                pipe = Gst.parse_launch(text)
             except Exception as error:  # noqa: BLE001
                 check(f"pipeline parses with {encoder}: {error}", False)
+                continue
+            pipe.set_state(Gst.State.PLAYING)
+            message = pipe.get_bus().timed_pop_filtered(
+                10 * Gst.SECOND, Gst.MessageType.ERROR | Gst.MessageType.EOS)
+            pipe.set_state(Gst.State.NULL)
+            failed = message is None or message.type == Gst.MessageType.ERROR
+            reason = message.parse_error()[0].message if message and failed else "timed out"
+            check(f"pipeline runs with {encoder}: {reason}", not failed)
     else:
         print(f"skip pipeline: missing {', '.join(session.missing_elements())}")
 except ImportError as error:

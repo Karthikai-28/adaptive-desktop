@@ -148,7 +148,7 @@ class WifiDirect:
         active.connect("state-changed", self._on_state)
         self._on_state(active, active.get_state(), 0)
 
-    def _on_state(self, active, state, _reason):
+    def _on_state(self, active, state, reason):
         state = NM.ActiveConnectionState(int(state)) if not isinstance(
             state, NM.ActiveConnectionState) else state
         if state == NM.ActiveConnectionState.ACTIVATED:
@@ -158,7 +158,8 @@ class WifiDirect:
         elif state == NM.ActiveConnectionState.DEACTIVATED:
             if self.active is active:
                 self.active = None
-            self.on_link("disconnected", "Wi-Fi Direct link closed")
+            why = NM.ActiveConnectionStateReason(int(reason)).value_nick if reason else ""
+            self.on_link("disconnected", f"Wi-Fi Direct link closed{f' ({why})' if why else ''}")
 
     def disconnect(self):
         if self.active:
