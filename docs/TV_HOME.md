@@ -57,6 +57,17 @@ On the laptop:
 
 The webOS CLI is pinned (`@webos-tools/cli` 3.2.6) in `.local/webos-cli`.
 
+Verified live 2026-10-27 on the 43UQ7500PSF (webOS SDK 7.6, firmware 04.60.91, Chrome 87 web
+engine): installed, paired with the TV's prompt, all apps and inputs listed, and icons served through
+the service.
+
+## Looking inside it on the TV
+
+`ares-inspect -d adaptive-tv -a com.karthi.adaptivetv` prints a DevTools URL. Its `ws=` part is a
+Chrome DevTools Protocol socket, so `Runtime.evaluate` reads the page's state and
+`Page.captureScreenshot` captures what is on the TV. `ares-novacom --run "luna-send-pub ..."` prints
+nothing from the Developer Mode shell, so services can't be called that way.
+
 ## Gotchas
 
 - **The Developer Mode session runs out.** Extend it in the Developer Mode app on the TV before it
