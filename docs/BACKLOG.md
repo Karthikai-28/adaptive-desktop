@@ -856,8 +856,11 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   real touch and a hardware keyboard, the phone's sound, the clipboard both
   ways, an app on a display of its own (`adaptive-phone app NAME`, palette
   `phone NAME`); Wi-Fi port found again by mDNS; Adaptive Link's
-  accessibility window where adb cannot reach. Logic checked with stand-ins
-  by `verify-phone.py`; not yet run against the real phone.
+  accessibility window where adb cannot reach. A locked phone is unlocked
+  with its password from the login keyring (asked once), kept dark while in
+  use and locked again on close. Logic checked with stand-ins by
+  `verify-phone.py`; lock detection read from the real phone; not yet run
+  against it end to end.
 - ⬜ Not there: a watch app of its own (the notification's buttons reach a
   watch), browsing the phone's files from the desktop's file manager, the
   phone's battery in the panel (it is in `link-cli.py status`), Wayland, iOS,

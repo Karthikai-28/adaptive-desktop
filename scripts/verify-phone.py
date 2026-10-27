@@ -127,4 +127,48 @@ case "$*" in *--list-apps*) printf '%s\\n' "[server] INFO: List of apps:" " - Wh
     done = subprocess.run([sys.executable, script, "app", "no such app"], env=env, capture_output=True, text=True, timeout=30)
     assert done.returncode == 1 and "No such phone app" in done.stderr, done
 
-print("PASS phone: phone choice, Wi-Fi rediscovery, apps, scrcpy arguments, palette mode")
+    # Locked. The password kept for this phone (by its serial number, not
+    # its Wi-Fi address) unlocks it on standard input; the phone stays dark
+    # while used from here and is locked again when the window closes.
+    assert phone.parse_locked("    isKeyguardShowing=true\n") and not phone.parse_locked("isKeyguardShowing=false")
+    assert phone.parse_awake("  mWakefulness=Awake") and not phone.parse_awake("  mWakefulness=Dozing")
+    assert phone.typed("it's 12") == "'it'\\''s%s12'"
+    (root / "adb").write_text(f"""#!/bin/sh
+echo "adb $*" >> {log}
+case "$1" in
+  devices) echo "List of devices attached"; echo "192.168.31.15:40005 device model:motorola_edge_50_pro" ; exit ;;
+esac
+case "$3 $4" in
+  "shell dumpsys") if [ "$5" = power ]; then echo "  mWakefulness=Awake"; elif [ -f {root}/unlocked ]; then echo "isKeyguardShowing=false"; else echo "isKeyguardShowing=true"; fi ;;
+  "shell getprop") echo ZD2TEST ;;
+  "shell input") echo "adb pressed $6" >> {log} ;;
+  "shell ") script=$(cat); echo "script: $script" >> {log}; case "$script" in *"input text 'right%spass'"*) touch {root}/unlocked ;; esac ;;
+esac
+""")
+    keys = root / "keyring.json"
+    keys.write_text(json.dumps({"ZD2TEST": "right pass"}))
+    env["ADAPTIVE_PHONE_KEYRING"] = str(keys)
+    log.write_text("")
+    done = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    lines = log.read_text().splitlines()
+    assert not any("right" in line for line in lines if line.startswith(("adb ", "scrcpy "))), lines   # never in argv
+    assert any(line.startswith("script: input keyevent KEYCODE_WAKEUP") for line in lines), lines
+    started = next(line for line in lines if line.startswith("scrcpy "))
+    assert "--turn-screen-off" in started, started
+    assert lines[-1] == "adb pressed KEYCODE_POWER", lines
+
+    # Refused: forgotten at once, never tried twice; the lock screen is shown
+    # as it is, to be used from here.
+    (root / "unlocked").unlink()
+    keys.write_text(json.dumps({"ZD2TEST": "stale"}))
+    log.write_text("")
+    done = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    lines = log.read_text().splitlines()
+    assert json.loads(keys.read_text()) == {}, keys.read_text()
+    assert sum(line.startswith("script:") for line in lines) == 1, lines
+    assert "--turn-screen-off" not in lines[-1] and "pressed" not in "".join(lines), lines
+    assert "did not unlock" in done.stderr
+
+print("PASS phone: phone choice, Wi-Fi rediscovery, apps, scrcpy arguments, palette mode, unlock and lock again")

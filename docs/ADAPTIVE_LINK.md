@@ -815,6 +815,17 @@ features and says so in its notification shade.
   Phone finds it again on the network. With no adb route, Phone opens the
   Adaptive Link window above instead. `./install.sh --only phone` (scrcpy is
   pinned and checked); check: `scripts/verify-phone.py`.
+- **A locked phone, used from here.** Android runs nothing behind a secure
+  lock screen for anyone but itself (not even on an app's own display), so
+  Phone unlocks it as you would: the first time it finds the phone locked it
+  asks for the phone's PIN or password, and keeps it in your login keyring
+  (never in a file or on a command line). From then on opening Phone or a
+  phone app unlocks it, keeps the phone's own screen dark while you use it
+  here, and locks it again (the power button, as you would press it) when
+  the last window closes. A password the phone refuses is forgotten at once,
+  so a stale one never counts towards Android's lockout.
+  `adaptive-phone --forget-unlock` forgets it. After the phone restarts it
+  must be unlocked once in your hand: Android allows no debugging before.
 - **Nothing lost.** A link, text or files shared to the computer while it
   cannot be reached are kept on the phone and sent when it can.
 
