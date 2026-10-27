@@ -100,7 +100,7 @@ var UI_MODE_SCREENCAST = 1;
 // ~/.config/adaptive-desktop/control-center.json.
 var DEFAULT_TILES = [
     'wifi', 'bluetooth', 'power', 'nightLight', 'dnd',
-    'airplane', 'awake', 'mic', 'tailscale',
+    'airplane', 'awake', 'mic', 'tailscale', 'cast',
 ];
 // Tiles whose arrow opens a dropdown, and which one.
 var TILE_DROPDOWNS = {

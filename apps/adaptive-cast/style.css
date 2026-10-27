@@ -159,6 +159,7 @@ button.stop {
 .tabs { padding: 12px 10px 6px 10px; }
 
 .tabs button {
+    min-width: 0;
     background-image: none;
     background-color: transparent;
     border: none;
@@ -214,3 +215,8 @@ entry {
 }
 
 switch:checked { background-color: @ad_accent; }
+
+/* Narrow (the phone): tabs under the main area, which sizes to its content. */
+window.narrow .sidebar { border-left: none; border-top: 1px solid alpha(@ad_divider, 0.35); }
+window.narrow .page { padding: 14px 14px; }
+window.narrow .header { padding: 16px 16px 12px 16px; }

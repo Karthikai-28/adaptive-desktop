@@ -440,12 +440,40 @@ class AdaptivePreviewExtension(GObject.GObject, Nautilus.MenuProvider, Nautilus.
             if self is _MENU_OWNER and files:
                 local = [info for info in files if info.get_uri_scheme() == "file"]
                 if local:
-                    return [self._share_menu(controller, local), self._tags_menu(controller, local)]
+                    items = [self._share_menu(controller, local), self._tags_menu(controller, local)]
+                    cast = self._cast_item(local)
+                    if cast:
+                        items.insert(0, cast)
+                    return items
 
         except Exception:
             _log_exception("get_file_items failed")
 
         return []
+
+    def _cast_item(self, files):
+        """Play on the TV: one video, song or photo, played by the TV itself
+        through Cast (apps/adaptive-cast), not mirrored."""
+        if len(files) != 1:
+            return None
+        kind = (files[0].get_mime_type() or "").split("/")[0]
+        if kind not in ("video", "audio", "image"):
+            return None
+        try:
+            with open(os.path.expanduser("~/.config/adaptive-desktop/repo")) as handle:
+                launcher = os.path.join(handle.read().strip(), "scripts", "adaptive-cast-launch.sh")
+        except OSError:
+            return None
+        if not os.access(launcher, os.X_OK):
+            return None
+        path = files[0].get_location().get_path()
+        item = Nautilus.MenuItem(name="AdaptiveCast::play", label="Play on the TV",
+                                 tip="The TV plays it at full quality; the laptop stays free")
+
+        def play(_item):
+            GLib.spawn_async([launcher, "--play", path], flags=GLib.SpawnFlags.DEFAULT)
+        item.connect("activate", play)
+        return item
 
     def _share_menu(self, controller, files):
         """Share ▸ LocalSend and Slack first, then the other ways out."""

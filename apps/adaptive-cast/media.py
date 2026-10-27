@@ -1,9 +1,16 @@
 """Play things on the TV without mirroring, and the wall display.
 
-  play_file   serve a local file over HTTP and hand its URL to the TV's DLNA
-              renderer: the TV decodes at full quality, the laptop stays free
-  Wall        a page for the TV's browser: clock, date, weather and this
+  player      a page for the TV's browser that plays one shared file (video,
+              song or photo) full screen: the TV decodes it at full quality
+              and the laptop stays free; Play / Pause / Stop reach it as
+              numbered commands it polls for
+  wall        a page for the TV's browser: clock, date, weather and this
               laptop's vitals, for when nothing is being cast
+
+Both are opened on the TV over its webOS connection (tv.TvControl.open_url).
+The TV's DLNA renderer was tried first: on this LG it accepted a file, then
+stalled in TRANSITIONING and stopped answering until its media app was
+closed, so the browser, which plays the same files reliably, does it.
 
 The HTTP server listens only on the address this laptop uses to reach the
 TV, and serves only what was shared, under a random token.
@@ -23,7 +30,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
-AVT = "urn:schemas-upnp-org:service:AVTransport:1"
 HERE = Path(__file__).resolve().parent
 
 
@@ -123,6 +129,9 @@ class Server:
         self.token = secrets.token_urlsafe(12)
         self.files = {}
         self.httpd = None
+        # The player polls this: each new seq is one Play / Pause / Stop.
+        self.command = {"seq": 0, "action": ""}
+        self.playing = None        # {"name", "t", "d", "paused"} from the player
 
     def start(self):
         if self.httpd:
@@ -146,6 +155,14 @@ class Server:
                     return
                 if parts[1] == "wall":
                     self._send(200, "text/html; charset=utf-8", server.wall_page().encode(), head)
+                elif parts[1] == "play" and len(parts) >= 3 and parts[2] in server.files:
+                    self._send(200, "text/html; charset=utf-8",
+                               server.player_page(parts[2]).encode(), head)
+                elif parts[1] == "cmd":
+                    self._send(200, "application/json", json.dumps(server.command).encode(), head)
+                elif parts[1] == "report":
+                    server.report(self.path)
+                    self._send(204, "image/gif", b"", head)
                 elif parts[1] == "vitals":
                     self._send(200, "application/json", json.dumps(vitals(server.place())).encode(), head)
                 elif parts[1] == "f" and len(parts) >= 3 and parts[2] in server.files:
@@ -213,6 +230,36 @@ class Server:
         self.files[ident] = path
         return f"{self.base}/f/{ident}/{quote(path.name)}"
 
+    def player_url(self, path):
+        """Share a file and return the page that plays it on the TV."""
+        url = self.share(path)
+        ident = url.split("/f/")[1].split("/")[0]
+        return f"{self.base}/play/{ident}"
+
+    def player_page(self, ident):
+        path = self.files[ident]
+        kind = (mimetypes.guess_type(path.name)[0] or "video/mp4").split("/")[0]
+        page = (HERE / "player.html").read_text()
+        values = {"@TITLE@": html.escape(path.stem), "@HOST@": html.escape(socket.gethostname()),
+                  "@KIND@": kind if kind in ("video", "audio", "image") else "video",
+                  "@SRC@": f"{self.base}/f/{ident}/{quote(path.name)}", "@CMD@": f"{self.base}/cmd",
+                  "@REPORT@": f"{self.base}/report"}
+        for key, value in values.items():
+            page = page.replace(key, value)
+        return page
+
+    def send(self, action):
+        """Play, Pause or Stop for the player page on the TV."""
+        self.command = {"seq": self.command["seq"] + 1, "action": action}
+
+    def report(self, path):
+        query = dict(part.split("=", 1) for part in path.split("?", 1)[-1].split("&") if "=" in part)
+        try:
+            self.playing = {"t": float(query.get("t", 0)), "d": float(query.get("d", 0)),
+                            "paused": query.get("p") == "1", "at": time.time()}
+        except ValueError:
+            pass
+
     def wall_url(self):
         return f"{self.base}/wall"
 
@@ -220,61 +267,6 @@ class Server:
         page = (HERE / "wall.html").read_text()
         return page.replace("@VITALS@", f"{self.base}/vitals").replace(
             "@HOST@", html.escape(socket.gethostname()))
-
-
-# --- DLNA ------------------------------------------------------------------
-
-def _soap(url, action, body):
-    envelope = ('<?xml version="1.0" encoding="utf-8"?>'
-                '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
-                's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>'
-                f'<u:{action} xmlns:u="{AVT}"><InstanceID>0</InstanceID>{body}</u:{action}>'
-                '</s:Body></s:Envelope>').encode()
-    request = urllib.request.Request(url, envelope, {
-        "Content-Type": 'text/xml; charset="utf-8"', "SOAPAction": f'"{AVT}#{action}"'})
-    with urllib.request.urlopen(request, timeout=6) as reply:
-        return reply.read().decode("utf-8", "replace")
-
-
-def renderer_control(tv_ip, port=1527):
-    """The AVTransport control URL of the TV's DLNA renderer."""
-    base = f"http://{tv_ip}:{port}"
-    xml = urllib.request.urlopen(base + "/", timeout=4).read().decode("utf-8", "replace")
-    for block in re.findall(r"<service>(.*?)</service>", xml, re.S):
-        if AVT in block:
-            control = re.search(r"<controlURL>([^<]+)</controlURL>", block).group(1)
-            return control if control.startswith("http") else base + control
-    raise OSError("The TV has no DLNA renderer")
-
-
-def didl(title, url, mime):
-    kind = {"video": "videoItem", "audio": "audioItem.musicTrack", "image": "imageItem.photo"}.get(
-        mime.split("/")[0], "videoItem")
-    return ('<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
-            'xmlns:dc="http://purl.org/dc/elements/1.1/" '
-            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
-            f'<item id="0" parentID="-1" restricted="1"><dc:title>{html.escape(title)}</dc:title>'
-            f'<upnp:class>object.item.{kind}</upnp:class>'
-            f'<res protocolInfo="http-get:*:{mime}:*">{html.escape(url)}</res></item></DIDL-Lite>')
-
-
-def play_file(server, path, tv_ip):
-    """Hand a local file to the TV. Blocking; run it off the main loop."""
-    path = Path(path)
-    url = server.share(path)
-    mime = mimetypes.guess_type(path.name)[0] or "video/mp4"
-    control = renderer_control(tv_ip)
-    _soap(control, "SetAVTransportURI",
-          f"<CurrentURI>{html.escape(url)}</CurrentURI>"
-          f"<CurrentURIMetaData>{html.escape(didl(path.stem, url, mime))}</CurrentURIMetaData>")
-    _soap(control, "Play", "<Speed>1</Speed>")
-    return url
-
-
-def transport(tv_ip, action):
-    """Pause, Play or Stop whatever the renderer is playing."""
-    body = "<Speed>1</Speed>" if action == "Play" else ""
-    _soap(renderer_control(tv_ip), action, body)
 
 
 def playable(path):

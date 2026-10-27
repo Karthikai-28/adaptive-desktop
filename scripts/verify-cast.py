@@ -171,6 +171,52 @@ if stream:
                   1 <= len(overlay.pointer._displays) <= 2)
             overlay.pointer.close()
 
+# Media without mirroring: the server, the player page and its commands.
+try:
+    import json as _json
+    import tempfile as _tempfile
+    import urllib.request
+    import media
+    import tv
+except ImportError as error:
+    media = None
+    print(f"skip media: {error}")
+
+if media:
+    check("range: first bytes", media.parse_range("bytes=0-99", 1000) == (0, 99))
+    check("range: last bytes", media.parse_range("bytes=-100", 1000) == (900, 999))
+    check("range: open end", media.parse_range("bytes=500-", 1000) == (500, 999))
+    check("range: none", media.parse_range("", 10) is None and media.parse_range("bytes=9-2", 10) is None)
+    server = media.Server("127.0.0.1")
+    server.start()
+    with _tempfile.TemporaryDirectory() as tmp:
+        clip = Path(tmp) / "Holiday clip.mp4"
+        clip.write_bytes(bytes(range(256)) * 20)
+        page_url = server.player_url(clip)
+        page = urllib.request.urlopen(page_url).read().decode()
+        check("player page names the file", "Holiday clip" in page and '"video"' in page)
+        src = page.split('var KIND = "video", SRC = "')[1].split('"')[0]
+        part = urllib.request.urlopen(urllib.request.Request(src, headers={"Range": "bytes=10-19"}))
+        check("player source honours ranges", part.status == 206 and part.read() == bytes(range(10, 20)))
+        server.send("pause")
+        command = _json.loads(urllib.request.urlopen(f"{server.base}/cmd").read())
+        check("player command is numbered", command == {"seq": 1, "action": "pause"})
+        urllib.request.urlopen(f"{server.base}/report?t=4.5&d=10.0&p=1").read()
+        check("player reports its position", server.playing and server.playing["t"] == 4.5
+              and server.playing["paused"])
+        wrong = server.base.rsplit("/", 1)[0] + "/not-the-token/wall"
+        try:
+            urllib.request.urlopen(wrong)
+            check("a wrong token is refused", False)
+        except urllib.error.HTTPError as error:
+            check("a wrong token is refused", error.code == 404)
+        check("wall page fills in its vitals URL", "/vitals" in urllib.request.urlopen(
+            server.wall_url()).read().decode())
+    server.stop()
+    check("TV names match across Wi-Fi Direct and the LAN",
+          tv.same_tv("[LG] webOS TV UQ7500PSF", "[LG] webOS TV UQ7500PSF")
+          and not tv.same_tv("Samsung AU7500 43 TV", "[LG] webOS TV UQ7500PSF"))
+
 if failures:
     sys.exit(1)
 print("cast checks passed")

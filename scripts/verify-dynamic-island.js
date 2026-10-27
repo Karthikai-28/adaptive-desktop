@@ -417,6 +417,22 @@ async function main() {
     check(!JSON.stringify(island.getMultiActivitySlots()).includes('private_topic'), 'recording activity hides topics during sharing');
     island.setRosRecording(null);
     check(island.getMultiActivitySlots().primary?.type !== 'ros', 'stopping removes the recording activity');
+
+    // Cast (apps/adaptive-cast): the TV takes the center pill, and the island
+    // goes private once the TV is live, whatever GNOME's own screencast says.
+    island.setScreenSharing(false);
+    island.setCasting({ state: 'connecting', tv: '[LG] webOS TV UQ7500PSF' });
+    check(island.getMultiActivitySlots().primary.type === 'cast', 'cast: a cast takes the primary slot');
+    check(!island.getState().isScreenSharing, 'cast: not private until the TV shows the screen');
+    island.setCasting({ state: 'streaming', tv: '[LG] webOS TV UQ7500PSF', frozen: false });
+    check(island.getMultiActivitySlots().primary.title === 'On LG TV', 'cast: the pill names the TV briefly');
+    check(island.getState().isScreenSharing, 'cast: the island is private while the TV is live');
+    check(!JSON.stringify(island.getMultiActivitySlots()).includes('Compile ROS'), 'cast: task titles are hidden from the TV');
+    island.setCasting({ state: 'streaming', tv: 'TV', frozen: true });
+    check(island.getMultiActivitySlots().primary.title === 'TV paused', 'cast: a frozen TV says so');
+    island.setCasting({ state: 'ended', text: 'Stopped' });
+    check(island.getMultiActivitySlots().primary?.type !== 'cast', 'cast: stopping removes the activity');
+    check(!island.getState().isScreenSharing, 'cast: privacy lifts when the cast ends');
     island.destroy();
     check(island._destroyed === true, 'bus: clean destroy with zero lingering resources');
 

@@ -863,6 +863,25 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   Logic checked with stand-ins by
   `verify-phone.py`; lock detection read from the real phone; not yet run
   against it end to end.
+- ✅ **Cast: this laptop on the TV** (`apps/adaptive-cast/`, `castStatus.js`;
+  `docs/CAST.md`). Miracast over Wi-Fi Direct with the home Wi-Fi kept up;
+  whole screen, one window or half the screen; Sharp/Smooth/Light/Game
+  presets; fit, fill or safe margins; cursor ring or spotlight, clock, badge,
+  caption; Freeze, Curtain and blacked-out private windows; quiet banners and
+  no sleep while casting; sound on the TV, the laptop or both; recording; a
+  live preview with stats. The paired LG is woken, put on Screen Share and
+  put back afterwards; volume, remote, toasts, YouTube in its own app, files
+  and a wall page (clock, weather, vitals) through its browser. Reached from
+  `Super+K`, the Control Center tile, the Dynamic Island card, the palette's
+  `cast` mode, Files and Adaptive Link actions. Checked by `verify-cast.py`,
+  the island and palette suites; tried live on 2026-10-27 against the
+  UQ7500PSF: casting with sound, source and quality changes mid-cast,
+  freeze, curtain, `Super+K` on and off, player play/pause/stop, YouTube
+  launch, wall page, sound and banners restored after. 🔬 Not yet seen: the
+  island card and tile in the live shell (needs a shell restart), the
+  picture as it looks on the TV, Files' menu item, the phone actions from a
+  real phone. Not done: extended desktop, the TV remote driving the laptop
+  (UIBC), LPCM-only TVs.
 - ⬜ Not there: a watch app of its own (the notification's buttons reach a
   watch), browsing the phone's files from the desktop's file manager, the
   phone's battery in the panel (it is in `link-cli.py status`), Wayland, iOS,

@@ -16,8 +16,28 @@ DESKTOP="com.karthi.AdaptiveCast.desktop"
 
 mkdir -p "$APPS"
 adaptive_render "$REPO/apps/adaptive-cast/$DESKTOP" "$APPS/$DESKTOP"
-chmod +x "$REPO/scripts/adaptive-cast-launch.sh" "$REPO/apps/adaptive-cast/main.py"
+chmod +x "$REPO/scripts/adaptive-cast-launch.sh" "$REPO/scripts/adaptive-cast-action.sh" \
+    "$REPO/apps/adaptive-cast/main.py"
 update-desktop-database "$APPS" 2>/dev/null || true
+
+# Adaptive Link actions, so the phone can say "cast to the TV", "stop casting".
+ACTIONS="$HOME/.config/adaptive-desktop/actions.d"
+mkdir -p "$ACTIONS"
+action() {
+    local id="$1" title="$2" words="$3" risk="$4"; shift 4
+    python3 - "$ACTIONS/$id.json" "$id" "$title" "$words" "$risk" "$REPO/scripts/adaptive-cast-action.sh" "$@" <<'PY'
+import json, sys
+path, ident, title, words, risk, script, *args = sys.argv[1:]
+json.dump({"id": ident, "title": title, "words": words.split("|"), "risk": risk,
+           "command": [script, *args]}, open(path, "w"), indent=1)
+PY
+}
+action cast-toggle "Cast the screen to the TV, or stop" "cast|cast to tv|screen to tv|mirror to tv|tv" changes --toggle
+action cast-stop "Stop casting to the TV" "stop casting|stop cast|stop tv" safe --stop
+action cast-freeze "Freeze the TV picture" "freeze tv|pause tv|hold the tv" safe --freeze
+action cast-curtain "Curtain on the TV" "curtain|hide tv|be right back" safe --curtain
+action cast-resume "Show the screen on the TV again" "resume tv|unfreeze|lift curtain" safe --resume
+action cast-wall "Show the wall on the TV" "wall|tv clock|tv dashboard" changes --wall
 
 echo "Installed:"
 echo "  $APPS/$DESKTOP"

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@TITLE@</title>
+<style>
+  :root { --bg: #000; --text: #f5f5f7; --muted: #98989d; --accent: #0a84ff; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "SF Pro Display", "Ubuntu", "LG Smart UI", system-ui, sans-serif; }
+  video, img { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+  .audio { position: fixed; inset: 0; display: grid; place-items: center; text-align: center;
+    background: radial-gradient(50% 50% at 50% 45%, rgba(10,132,255,.25), transparent 70%), #0b0b0d; }
+  .audio .note { font-size: 18vh; color: var(--accent); }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 5vh 6vw 6vh;
+    background: linear-gradient(transparent, rgba(0,0,0,.75)); transition: opacity .6s ease; }
+  .bar.hidden { opacity: 0; }
+  .title { font-size: 4vh; font-weight: 600; }
+  .meta { color: var(--muted); font-size: 2.4vh; margin-top: .8vh; font-variant-numeric: tabular-nums; }
+  .track { height: .8vh; border-radius: .4vh; background: rgba(255,255,255,.18); margin-top: 2vh; overflow: hidden; }
+  .track i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .stopped { position: fixed; inset: 0; display: none; place-items: center; background: #0b0b0d;
+    font-size: 4vh; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div class="bar" id="bar">
+  <div class="title">@TITLE@</div>
+  <div class="meta" id="meta">From @HOST@</div>
+  <div class="track"><i id="fill"></i></div>
+</div>
+<div class="stopped" id="stopped">Stopped. Press Back on the remote.</div>
+<script>
+  var KIND = "@KIND@", SRC = "@SRC@", CMD = "@CMD@", REPORT = "@REPORT@";
+  var stage = document.getElementById("stage"), bar = document.getElementById("bar");
+  var media = null, seen = 0, hideTimer = 0;
+  if (KIND === "image") {
+    media = document.createElement("img");
+    media.src = SRC;
+  } else {
+    media = document.createElement(KIND === "audio" ? "audio" : "video");
+    media.src = SRC;
+    media.autoplay = true;
+    if (KIND === "audio") {
+      var art = document.createElement("div");
+      art.className = "audio";
+      art.innerHTML = '<div class="note">♫</div>';
+      stage.appendChild(art);
+    }
+  }
+  stage.appendChild(media);
+
+  function clock(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    var m = Math.floor(s / 60), r = s % 60;
+    return m + ":" + (r < 10 ? "0" : "") + r;
+  }
+  function showBar() {
+    bar.classList.remove("hidden");
+    clearTimeout(hideTimer);
+    if (KIND === "video") hideTimer = setTimeout(function () { bar.classList.add("hidden"); }, 4000);
+  }
+  function update() {
+    if (KIND === "image") return;
+    var d = media.duration || 0, t = media.currentTime || 0;
+    document.getElementById("fill").style.width = (d ? t / d * 100 : 0) + "%";
+    document.getElementById("meta").textContent = clock(t) + " / " + clock(d) + (media.paused ? "  ·  Paused" : "");
+  }
+  function act(action) {
+    if (KIND === "image") return;
+    if (action === "play") media.play();
+    if (action === "pause") media.pause();
+    if (action === "stop") {
+      media.pause();
+      document.getElementById("stopped").style.display = "grid";
+    }
+    showBar();
+  }
+  // The laptop's Play / Pause / Stop arrive as a numbered command; each is done once.
+  function poll() {
+    fetch(CMD, { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (c) {
+      if (c.seq > seen) { seen = c.seq; if (seen > 0) act(c.action); }
+    }).catch(function () {});
+    if (KIND !== "image") {
+      new Image().src = REPORT + "?t=" + (media.currentTime || 0).toFixed(1) +
+        "&d=" + (media.duration || 0).toFixed(1) + "&p=" + (media.paused ? 1 : 0);
+    }
+  }
+  fetch(CMD, { cache: "no-store" }).then(function (r) { return r.json(); })
+    .then(function (c) { seen = c.seq; }).catch(function () {});
+  setInterval(update, 500);
+  setInterval(poll, 1000);
+  showBar();
+  if (KIND !== "image") {
+    media.addEventListener("play", showBar);
+    media.addEventListener("pause", showBar);
+  }
+</script>
+</body>
+</html>

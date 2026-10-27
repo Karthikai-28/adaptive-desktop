@@ -845,6 +845,8 @@ class Palette(Gtk.ApplicationWindow):
             rows = M.ssh_rows(rest, M.parse_ssh_hosts(config))
         elif mode == "phone":
             rows = M.phone_rows(rest, self._phone_cache())
+        elif mode == "cast":
+            rows = M.cast_rows(rest, M.cast_state())
         elif mode == "branch":
             _pid, _name, root = self._active_project()
             branches, current = M.list_branches(root) if root else ([], "")

@@ -22,6 +22,9 @@ import wfd  # noqa: E402
 STEPS = (("preparing", "TV ready"), ("connecting", "Joining"), ("negotiating", "Handshake"),
          ("streaming", "Live"))
 ACTIVE = ("preparing", "connecting", "negotiating", "streaming", "reconnecting")
+# Below this width (the phone, through Adaptive Link) the tabs go under the
+# main area instead of beside it.
+NARROW_PX = 820
 
 SOURCES = ("Whole screen", "One window", "Left half", "Right half")
 FITS = (("fit", "Fit, with bars"), ("fill", "Fill, cropping edges"), ("safe", "Safe margins"))
@@ -71,10 +74,14 @@ class Window(Gtk.ApplicationWindow):
 
         root = Gtk.Box()
         root.add_css_class("root")
-        self.set_child(root)
+        self.root_box = root
         main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
         root.append(main)
-        root.append(self._sidebar())
+        self.side = self._sidebar()
+        root.append(self.side)
+        # Narrow, the whole window scrolls instead of each half.
+        self.set_child(Gtk.ScrolledWindow(child=root, hscrollbar_policy=Gtk.PolicyType.NEVER))
+        self.narrow = None
 
         main.append(self._header())
         self.banner = label("", "banner", wrap=True)
@@ -99,6 +106,20 @@ class Window(Gtk.ApplicationWindow):
         self._refresh_tv()
         self.tick = GLib.timeout_add(250, self._tick)
         self.connect("close-request", self._closing)
+
+    def do_size_allocate(self, width, height, baseline):
+        Gtk.ApplicationWindow.do_size_allocate(self, width, height, baseline)
+        narrow = width < NARROW_PX
+        if narrow != self.narrow:
+            self.narrow = narrow
+            # Not during allocation: changing the layout queues another one.
+            GLib.idle_add(self._apply_width, narrow)
+
+    def _apply_width(self, narrow):
+        self.root_box.set_orientation(Gtk.Orientation.VERTICAL if narrow
+                                      else Gtk.Orientation.HORIZONTAL)
+        (self.add_css_class if narrow else self.remove_css_class)("narrow")
+        return GLib.SOURCE_REMOVE
 
     # --- header ----------------------------------------------------------
 
@@ -134,8 +155,7 @@ class Window(Gtk.ApplicationWindow):
         box.append(hint)
         self.pick_status = label("", "status", wrap=True)
         box.append(self.pick_status)
-        scroller = Gtk.ScrolledWindow(child=box, vexpand=True)
-        return scroller
+        return box
 
     def on_displays(self, displays):
         while (child := self.list.get_first_child()) is not None:
@@ -161,13 +181,15 @@ class Window(Gtk.ApplicationWindow):
             icon.add_css_class("tv-icon")
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True,
                            valign=Gtk.Align.CENTER)
-            text.append(label(display.name, "name"))
+            name = label(display.name, "name")
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            text.append(name)
             bits = ["Ready" if display.available else "Busy", self._bars(display.strength)]
             if self.cast.tv.known_for(display.name):
                 bits.append("paired for control")
             if display.address == last:
                 bits.append("last used")
-            text.append(label(" · ".join(bits), "muted"))
+            text.append(label(" · ".join(bits), "muted", wrap=True))
             go = button("Cast", lambda d=display: self._start(d), "cast")
             go.set_valign(Gtk.Align.CENTER)
             go.set_sensitive(not blocked and not self.cast.casting)
@@ -192,7 +214,7 @@ class Window(Gtk.ApplicationWindow):
         frame = Gtk.Overlay()
         frame.add_css_class("preview")
         self.preview = Gtk.Picture(can_shrink=True, hexpand=True, vexpand=True)
-        self.preview.set_size_request(480, 270)
+        self.preview.set_size_request(280, 158)
         frame.set_child(self.preview)
         self.preview_note = label("", "preview-note", xalign=0.5)
         self.preview_note.set_halign(Gtk.Align.CENTER)
@@ -214,7 +236,7 @@ class Window(Gtk.ApplicationWindow):
 
         self.live_status = label("", "status", wrap=True)
         box.append(self.live_status)
-        self.stats = label("", "stats")
+        self.stats = label("", "stats", wrap=True)
         box.append(self.stats)
 
         actions = Gtk.Box(spacing=10)
@@ -300,7 +322,6 @@ class Window(Gtk.ApplicationWindow):
     def _sidebar(self):
         side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         side.add_css_class("sidebar")
-        side.set_size_request(380, -1)
         pages = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
         switcher = Gtk.StackSwitcher(stack=pages)
         switcher.add_css_class("tabs")
@@ -310,7 +331,10 @@ class Window(Gtk.ApplicationWindow):
                                    ("privacy", "Privacy", self._privacy_tab),
                                    ("tv", "TV", self._tv_tab),
                                    ("media", "Media", self._media_tab)):
-            scroller = Gtk.ScrolledWindow(child=build(), hscrollbar_policy=Gtk.PolicyType.NEVER)
+            # Sized to the content, at most 400 px wide; the window scrolls.
+            scroller = Gtk.ScrolledWindow(child=build(), hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                          vscrollbar_policy=Gtk.PolicyType.NEVER,
+                                          propagate_natural_width=True, max_content_width=400)
             pages.add_titled(scroller, name, title)
         side.append(pages)
         return side
@@ -444,7 +468,7 @@ class Window(Gtk.ApplicationWindow):
                   "No banners pop up on the TV")
         self._row(box, "Hide private windows", self._switch("hide_windows"),
                   "Blacked out on the TV, still visible here")
-        box.append(label("Windows to hide (name or app, comma separated)", "row-title"))
+        box.append(label("Windows to hide (name or app, comma separated)", "row-title", wrap=True))
         box.append(self._entry("hidden_classes", "keepassxc, bitwarden",
                                lambda text: self.cast.set_option(
                                    "hidden_classes", [p.strip() for p in text.split(",")
@@ -626,19 +650,7 @@ class Window(Gtk.ApplicationWindow):
         chooser.show()
 
     def _transport(self, action):
-        import threading
-        import media
-        _server, ip = self.app.media_server()
-        if not ip:
-            return
-
-        def work():
-            try:
-                media.transport(ip, action)
-            except OSError as error:
-                text = str(error)
-                GLib.idle_add(lambda: self.media_status.set_label(text) or False)
-        threading.Thread(target=work, daemon=True).start()
+        self.app.send_media(action.lower())
 
     def _youtube(self, entry):
         if self.cast.tv.youtube(entry.get_text().strip()):

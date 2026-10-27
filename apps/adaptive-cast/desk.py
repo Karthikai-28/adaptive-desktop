@@ -12,6 +12,7 @@ import ctypes.util
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 from pathlib import Path
@@ -131,17 +132,37 @@ def current_desktop():
 def windows():
     """Normal windows on any desktop: dicts with xid, cls, title, x, y, w, h, desktop."""
     out = []
+    host = socket.gethostname()
     for line in _run("wmctrl", "-lGx").splitlines():
-        parts = line.split(None, 8)
-        if len(parts) < 8:
+        parts = line.split(None, 6)
+        if len(parts) < 7:
             continue
-        xid, desktop, x, y, w, h, cls = parts[:7]
-        title = parts[8] if len(parts) > 8 else ""
+        xid, desktop, x, y, w, h, rest = parts
+        # The class can hold spaces ("antigravity ide.Antigravity IDE"); the
+        # host name column after it cannot.
+        cls, _, title = rest.partition(f" {host} ")
+        cls = cls.strip()
         if desktop == "-1" or cls in ("gjs.Gjs", "N/A"):
             continue
         out.append({"xid": int(xid, 16), "cls": cls, "title": title, "x": int(x), "y": int(y),
                     "w": int(w), "h": int(h), "desktop": int(desktop)})
     return out
+
+
+def topmost_window(skip=()):
+    """The highest normal window on this desktop whose class is not in skip.
+
+    "This window" from the palette or Cast itself means the one you were in,
+    not the palette or Cast, which may still have focus.
+    """
+    order = re.findall(r"0x[0-9a-f]+", _run("xprop", "-root", "_NET_CLIENT_LIST_STACKING"))
+    here = current_desktop()
+    known = {w["xid"]: w for w in windows() if w["desktop"] == here}
+    for xid in reversed([int(x, 16) for x in order]):
+        win = known.get(xid)
+        if win and not any(s.lower() in win["cls"].lower() for s in skip) and not minimized(xid):
+            return win
+    return None
 
 
 def minimized(xid):

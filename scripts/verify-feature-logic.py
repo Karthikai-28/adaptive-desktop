@@ -245,6 +245,25 @@ def palette_modes():
           "modes: a longer word is an ordinary search")
     check(M.mode_of("/needle here") == ("grep", "needle here") and M.mode_of("/") == (None, ""), "modes: / is grep")
 
+    # cast: actions follow the cast's state; links and files play on the TV.
+    idle = M.cast_rows("", {})
+    check(idle[0]["action"][1][1:] == ["--toggle"], "cast: idle offers casting first")
+    live = M.cast_rows("", {"state": "streaming", "tv": "LG", "quality": "sharp", "frozen": True})
+    check(live[0]["action"][1][1:] == ["--stop"], "cast: casting offers stop first")
+    check(any(r["title"] == "Resume the TV" for r in live), "cast: a frozen TV offers resume")
+    check(not any(r["title"] == "Quality: Sharp" for r in live), "cast: the current quality is not offered")
+    yt = M.cast_rows("https://www.youtube.com/watch?v=dQw4w9WgXcQ", {})
+    check(yt[0]["action"][1][1] == "--youtube", "cast: a YouTube link plays on the TV")
+    check(M.cast_rows("curtain", {"state": "streaming"})[0]["title"] == "Curtain on the TV",
+          "cast: text narrows the actions")
+    with tempfile.TemporaryDirectory() as tmp:
+        clip = Path(tmp) / "talk.mp4"
+        clip.write_bytes(b"x")
+        check(M.cast_rows(str(clip), {})[0]["action"][1][1:] == ["--play", str(clip)],
+              "cast: a media file plays on the TV")
+        (Path(tmp) / "state.json").write_text(json.dumps({"state": "streaming", "pid": 0x7FFFFFFE}))
+        check(M.cast_state(Path(tmp) / "state.json") == {}, "cast: a crashed Cast's state is ignored")
+
     with tempfile.TemporaryDirectory() as folder:
         snippets = Path(folder) / "snippets.json"
         check(M.add_snippet("Sig", "Regards,\nK", snippets) == "", "snippets: saved")

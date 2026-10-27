@@ -18,6 +18,9 @@
                            saved setup or robot profile, "ros domain 7"
     phone [app]            the paired phone, or one of its apps, in a window here;
                            files on the phone with that name, copied here on Enter
+    cast [text]            the TV: cast the screen or this window, stop, freeze,
+                           curtain, quality; a YouTube link or a media file plays
+                           on the TV itself
 
 Your own commands are executables in ~/.config/adaptive-desktop/commands/;
 each shows up as an action, named after its file.
@@ -59,8 +62,14 @@ import extras  # noqa: E402
 ROS_HELPER = REPO / "shell" / "adaptive-shell@local" / "tools" / "ros_info.py"
 PHONE = REPO / "apps" / "adaptive-phone" / "phone.py"
 PHONE_APPS = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "adaptive-desktop" / "phone-apps.json"
+CAST = REPO / "scripts" / "adaptive-cast-launch.sh"
+CAST_STATE = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "adaptive-cast.json"
+CAST_ACTIVE = ("preparing", "connecting", "negotiating", "streaming", "reconnecting")
+CAST_MEDIA = (".mp4", ".mkv", ".webm", ".mov", ".avi", ".mp3", ".flac", ".m4a", ".ogg", ".wav",
+              ".jpg", ".jpeg", ".png", ".gif", ".webp")
 
-MODE_WORDS = ("snip", "todo", "git", "time", "grep", "kill", "ssh", "branch", "timer", "keys", "new", "ros", "phone")
+MODE_WORDS = ("snip", "todo", "git", "time", "grep", "kill", "ssh", "branch", "timer", "keys", "new", "ros", "phone",
+              "cast")
 _MODE = re.compile(r"^\s*(" + "|".join(MODE_WORDS) + r")(?:\s+(.*))?$", re.I | re.S)
 
 
@@ -454,6 +463,66 @@ def phone_file_rows(rest, files, reachable=True):
         rows.append(row(found["name"], f"{folder} on the phone - {found.get('size_text', '')} - Enter copies it here",
                         "Phone files", "document-save-symbolic", "Get",
                         ("run", [str(PHONE), "get", found["path"], "--open"], None), 200 - rank))
+    return rows
+
+
+# --------------------------------------------------------------------- cast
+
+def cast_state(path=CAST_STATE):
+    """What apps/adaptive-cast last published, or {} when it is not running."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    pid = data.get("pid")
+    if pid and not Path(f"/proc/{pid}").exists():
+        return {}
+    return data
+
+
+def cast_rows(rest, state):
+    """The TV, as actions for where the cast is now."""
+    def cast(title, subtitle, args, badge="Run", score=300):
+        return row(title, subtitle, "Cast", "video-display-symbolic", badge,
+                   ("run", [str(CAST), *args], None), score)
+
+    text = rest.strip()
+    if re.search(r"(youtube\.com/(watch|shorts)|youtu\.be/)", text):
+        return [cast("Play on the TV's YouTube", _clip(text, 80), ["--youtube", text], "Play", 500)]
+    path = Path(os.path.expanduser(text)) if text else None
+    if path and path.suffix.lower() in CAST_MEDIA and path.is_file():
+        return [cast(f"Play {path.name} on the TV", "The TV plays the file itself - no mirroring",
+                     ["--play", str(path)], "Play", 500)]
+
+    tv = state.get("tv") or "the TV"
+    live = state.get("state") in CAST_ACTIVE
+    if live:
+        rows = [cast("Stop casting", f"Casting to {tv}", ["--stop"], "Stop", 400),
+                cast("Resume the TV" if state.get("frozen") else "Freeze the TV",
+                     "Hold the picture while you do something else", ["--resume" if state.get("frozen") else "--freeze"]),
+                cast("Lift the curtain" if state.get("curtain") else "Curtain on the TV",
+                     "A clock and 'Back in a moment' instead of your screen",
+                     ["--resume" if state.get("curtain") else "--curtain"]),
+                cast("Show this window only", "The window you were in, nothing else", ["--show", "window"]),
+                cast("Show the whole screen", "", ["--show", "screen"]),
+                cast("Show the left half", "", ["--show", "left"]),
+                cast("Show the right half", "", ["--show", "right"])]
+        for name, detail in (("sharp", "1080p 30 fps"), ("smooth", "1080p 60 fps"),
+                             ("light", "720p 30 fps"), ("game", "720p 60 fps")):
+            if state.get("quality") != name:
+                rows.append(cast(f"Quality: {name.title()}", detail, ["--set", f"quality={name}"], score=200))
+    else:
+        rows = [cast("Cast the screen to the TV", "The last TV used; Super+K does the same", ["--toggle"],
+                     "Cast", 400),
+                cast("Cast this window to the TV", "Only the window you were in",
+                     ["--show", "window", "--toggle"], "Cast"),
+                cast("Show the wall on the TV", "Clock, weather and this laptop's vitals", ["--wall"]),
+                cast("Open Cast", "TVs nearby, quality, overlays, the TV remote", [], "Open", 250)]
+    if text:
+        folded = text.casefold()
+        rows = [r for r in rows if folded in r["title"].casefold()] or [
+            row("No Cast action matches", "Paste a YouTube link or a video path to play it on the TV",
+                "Cast", "video-display-symbolic", score=100)]
     return rows
 
 

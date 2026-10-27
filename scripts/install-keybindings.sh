@@ -40,6 +40,7 @@ for name in [
     "adaptive-shortcuts",
     "adaptive-annotate",
     "adaptive-screen-text",
+    "adaptive-cast",
 ]:
     key = f"{base}/{name}/"
     if key not in values:
@@ -80,6 +81,8 @@ set_binding "adaptive-shortcuts" "Adaptive Keyboard Shortcuts" "${REPO}/scripts/
 set_binding "adaptive-annotate" "Adaptive Annotate Screenshot" "${REPO}/apps/adaptive-annotate/main.py" "<Super><Shift>s"
 
 set_binding "adaptive-screen-text" "Adaptive Copy Text from Screen" "gdbus call --session -d org.gnome.Shell -o /org/adaptive/Shell -m org.adaptive.Shell.CopyScreenText" "<Super><Shift>t"
+# Cast to the last TV, or stop casting (apps/adaptive-cast).
+set_binding "adaptive-cast" "Adaptive Cast to TV" "${REPO}/scripts/adaptive-cast-launch.sh --toggle" "<Super>k"
 
 #
 # GNOME's own switch-to-workspace-left/right also list Super+Alt+Left/Right.

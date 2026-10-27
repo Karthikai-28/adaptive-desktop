@@ -31,6 +31,7 @@ import session as cast_session
 import tv as tvcontrol
 
 APP_ID = "com.karthi.AdaptiveCast"
+ACTIVE = ("preparing", "connecting", "negotiating", "streaming", "reconnecting")
 STATE_FILE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "adaptive-cast.json"
 OPEN_TIMEOUT_S = 30
 # A TV that has just ended a session drops the next join for a few seconds.

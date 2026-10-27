@@ -45,6 +45,15 @@ const Timers = _loadModule('islandTimers');
 const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {}, ActivityPrecedence = {} } = Types;
 
 const QUEUE_CAPACITY = 8;
+const CAST_ACTIVE = ['preparing', 'connecting', 'negotiating', 'streaming', 'reconnecting'];
+
+// "[LG] webOS TV UQ7500PSF" is "LG TV" in a pill.
+function shortTvName(name) {
+    if (!name)
+        return 'the TV';
+    const brand = /^\[([^\]]+)\]/.exec(name);
+    return brand ? `${brand[1]} TV` : name.split(' ').slice(0, 2).join(' ');
+}
 const ROUTINE_EVENT_TTL_MS = 15000; // 15s TTL for routine events
 
 var DynamicIslandBackend = class DynamicIslandBackend {
@@ -61,6 +70,8 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         this._isDwellPaused = false;
         this._isPinned = false;
         this._isScreenSharing = false;
+        this._shellSharing = false;
+        this._casting = null;
 
         // Subscriptions
         this._surfacedListeners = new Set();
@@ -324,12 +335,30 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         }
     }
 
+    // GNOME's own screencast, or Cast showing this screen on a TV: either
+    // way what the island shows is seen by others.
     setScreenSharing(active) {
-        const sharing = Boolean(active);
+        this._shellSharing = Boolean(active);
+        this._syncSharing();
+    }
+
+    _syncSharing() {
+        const sharing = this._shellSharing || !!(this._casting && this._casting.state === 'streaming');
         if (this._isScreenSharing === sharing)
-            return;
+            return false;
         this._isScreenSharing = sharing;
         this._notifyStateChange();
+        return true;
+    }
+
+    // Cast's published state (apps/adaptive-cast), or null when idle.
+    setCasting(cast) {
+        const active = cast && CAST_ACTIVE.includes(cast.state) ? cast : null;
+        if (JSON.stringify(this._casting || null) === JSON.stringify(active))
+            return;
+        this._casting = active;
+        if (!this._syncSharing())
+            this._notifyStateChange();
     }
 
     _sanitizeForPrivacy(eventType, payload) {
@@ -394,6 +423,14 @@ var DynamicIslandBackend = class DynamicIslandBackend {
         let secondary = null;
 
         const candidates = [];
+        if (this._casting) {
+            const cast = this._casting;
+            const live = cast.state === 'streaming';
+            candidates.push({ type: 'cast', rank: -1,
+                title: live ? (cast.curtain ? 'Curtain on the TV' : cast.frozen ? 'TV paused'
+                    : `On ${shortTvName(cast.tv)}`) : 'Connecting to the TV',
+                data: cast });
+        }
         if (this._rosRecording) {
             candidates.push({ type: 'ros', rank: 0,
                 title: this._isScreenSharing ? 'Recording active' : 'ROS 2 · recording',

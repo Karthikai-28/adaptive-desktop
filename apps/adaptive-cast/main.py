@@ -13,6 +13,7 @@ cast as the window.
   main.py --show screen|window|left|right   what to send (window: the focused one)
   main.py --set KEY=VALUE      change an option (quality, sound, cursor, clock, ...)
   main.py --play FILE          play a video, song or photo on the TV (no mirroring)
+  main.py --media play|pause|stop   control what --play started
   main.py --youtube URL        open a YouTube link in the TV's own app
   main.py --wall               show the wall page (clock, weather, vitals) on the TV
   main.py --status             print the current cast state as JSON
@@ -54,6 +55,7 @@ def parser():
     p.add_argument("--show", choices=("screen", "window", "left", "right"))
     p.add_argument("--set", metavar="KEY=VALUE", action="append", default=[])
     p.add_argument("--play", metavar="FILE")
+    p.add_argument("--media", choices=("play", "pause", "stop"))
     p.add_argument("--youtube", metavar="URL")
     p.add_argument("--wall", action="store_true")
     p.add_argument("--status", action="store_true")
@@ -137,16 +139,13 @@ def parse_value(text):
 
 def source_for(name):
     """A source dict for --show. "window" is whichever window has focus now."""
-    import subprocess
     import desk
     width, height = desk.screen_size()
     half = width // 2 // 2 * 2
     if name == "window":
-        out = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True)
-        xid = int(out.stdout.strip() or 0)
-        title = next((w["title"] for w in desk.windows() if w["xid"] == xid), "Window")
-        if xid:
-            return {"kind": "window", "xid": xid, "title": title[:60]}
+        win = desk.topmost_window(skip=("AdaptiveCast", "AdaptiveCommand"))
+        if win:
+            return {"kind": "window", "xid": win["xid"], "title": win["title"][:60]}
     if name == "left":
         return {"kind": "region", "x": 0, "y": 0, "w": half, "h": height, "title": "Left half"}
     if name == "right":
@@ -177,11 +176,13 @@ class App(Gtk.Application):
         return self.cast
 
     def _on_state(self, state, text):
-        if state == "streaming" and not self.held:
-            # Casting continues with the window closed.
+        # The app stays up for the whole cast, from joining to the end, with
+        # or without its window (the shortcut starts it with none).
+        active = state in controller.ACTIVE
+        if active and not self.held:
             self.hold()
             self.held = True
-        if state in ("ended", "failed", "idle") and self.held:
+        elif not active and self.held:
             self.release()
             self.held = False
         for listener in list(self.listeners):
@@ -205,6 +206,14 @@ class App(Gtk.Application):
             command_line.print_literal(data + "\n")
             return 0
         cast = self.ensure_cast()
+        # What to show and options apply first, so "--show window --toggle"
+        # starts a cast of that window.
+        if args.show:
+            cast.set_source(source_for(args.show))
+        for item in args.set:
+            key, _, value = item.partition("=")
+            if key in controller.saved.DEFAULTS:
+                cast.set_option(key, parse_value(value))
         if args.toggle:
             if cast.casting:
                 cast.stop()
@@ -221,20 +230,15 @@ class App(Gtk.Application):
         elif args.resume:
             cast.freeze(False)
             cast.set_curtain(None)
-        elif args.show:
-            cast.set_source(source_for(args.show))
-        elif args.set:
-            for item in args.set:
-                key, _, value = item.partition("=")
-                if key in controller.saved.DEFAULTS:
-                    cast.set_option(key, parse_value(value))
         elif args.play:
             self.play_file(args.play)
+        elif args.media:
+            self.send_media(args.media)
         elif args.youtube:
             self.ensure_cast().tv.youtube(args.youtube)
         elif args.wall:
             self.show_wall()
-        else:
+        elif not (args.show or args.set):
             self.present_window()
         return 0
 
@@ -299,23 +303,26 @@ class App(Gtk.Application):
         return self.media, ip
 
     def play_file(self, path, done=None):
-        import threading
+        """Open the player page for a file on the TV; the TV plays it itself."""
         import media
-        server, ip = self.media_server()
+        server, _ip = self.media_server()
         if not server:
             if done:
                 done(False, "Pair with the TV first (TV tab)")
             return
+        if not Path(path).is_file() or not media.playable(path):
+            if done:
+                done(False, "Only videos, songs and photos play on the TV")
+            return
+        # The page streams from this process, so it stays up while it plays.
         self.hold()
+        self.ensure_cast().tv.open_url(server.player_url(path))
+        if done:
+            done(True, f"Playing {Path(path).name} on the TV")
 
-        def work():
-            try:
-                media.play_file(server, path, ip)
-                result = (True, f"Playing {Path(path).name} on the TV")
-            except OSError as error:
-                result = (False, f"The TV could not play it: {error}")
-            GLib.idle_add(lambda: (done and done(*result)) or GLib.SOURCE_REMOVE)
-        threading.Thread(target=work, daemon=True).start()
+    def send_media(self, action):
+        if self.media:
+            self.media.send(action)
 
     def show_wall(self):
         server, _ip = self.media_server()

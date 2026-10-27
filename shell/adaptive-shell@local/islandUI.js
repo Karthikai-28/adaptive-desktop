@@ -53,6 +53,7 @@ function _loadModule(name) {
 const Types = _loadModule("islandTypes");
 const DynamicIsland = _loadModule("dynamicIsland");
 const { describeUsage = () => [] } = _loadModule("islandQuota");
+const CastStatus = _loadModule("castStatus");
 const USAGE_TRACK_PX = 132;
 const { DynamicIslandBackend } = DynamicIsland;
 const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {} } = Types;
@@ -506,7 +507,11 @@ var IslandAnchor = class IslandAnchor {
     }
 
     _renderSlotCompact(slot, quota) {
-        if (slot.type === "ros") {
+        if (slot.type === "cast") {
+            this._compactIconLabel.text = "▣";
+            this._compactTextLabel.text = slot.title;
+            this._compactSecondaryLabel.text = "";
+        } else if (slot.type === "ros") {
             this._compactIconLabel.text = "●";
             this._compactTextLabel.text = slot.title;
             this._compactSecondaryLabel.text = "";
@@ -530,7 +535,9 @@ var IslandAnchor = class IslandAnchor {
     }
 
     _renderSatelliteSlot(slot) {
-        if (slot.type === "ros") {
+        if (slot.type === "cast") {
+            this._satelliteIconLabel.text = "▣";
+        } else if (slot.type === "ros") {
             this._satelliteIconLabel.text = "●";
         } else if (slot.type === "timer") {
             this._satelliteIconLabel.text = "⏱";
@@ -721,6 +728,7 @@ var IslandOverlay = class IslandOverlay {
             if (panel) panel.menu.open();
         }));
         this._cardContentBox.add_child(this._rosCard);
+        this._buildCastCard();
 
         mainLayout.add_child(this._cardContentBox);
         this._actor.add_child(mainLayout);
@@ -997,6 +1005,56 @@ var IslandOverlay = class IslandOverlay {
         this._cardContentBox.add_child(this._mediaCard);
     }
 
+    // Cast: what the TV is showing, and the controls you reach for mid-talk.
+    _buildCastCard() {
+        this._castCard = new St.BoxLayout({ vertical: true, style_class: "adaptive-island-card-body",
+            visible: false });
+        this._castLabel = new St.Label({ text: "", style_class: "adaptive-island-timer-note" });
+        if (this._castLabel.clutter_text)
+            this._castLabel.clutter_text.line_wrap = true;
+        this._castCard.add_child(this._castLabel);
+        const row = new St.BoxLayout({ vertical: false, style_class: "adaptive-island-actions" });
+        this._castFreezeBtn = _button("Freeze", "adaptive-island-btn", "Hold the picture on the TV",
+            () => this._ui.castCommand("freeze"));
+        this._castCurtainBtn = _button("Curtain", "adaptive-island-btn",
+            "Cover the TV with a clock while you do something private",
+            () => this._ui.castCommand("curtain"));
+        row.add_child(this._castFreezeBtn);
+        row.add_child(this._castCurtainBtn);
+        row.add_child(new St.Widget({ x_expand: true }));
+        row.add_child(_button("Open", "adaptive-island-btn", "Open Cast",
+            () => this._ui.castCommand("open")));
+        row.add_child(_button("Stop", "adaptive-island-btn", "Stop casting",
+            () => this._ui.castCommand("stop")));
+        this._castCard.add_child(row);
+        this._cardContentBox.add_child(this._castCard);
+    }
+
+    _renderCastData(state) {
+        const slot = state.multiActivity && state.multiActivity.primary;
+        const cast = slot && slot.type === "cast" ? slot.data : null;
+        this._titleIcon.text = "▣";
+        this._titleLabel.text = "Cast";
+        if (!cast) {
+            this._badgeLabel.text = "OFF";
+            this._castLabel.text = "Not casting.";
+            return;
+        }
+        const live = cast.state === "streaming";
+        this._badgeLabel.text = live ? "LIVE" : cast.state === "reconnecting" ? "RECONNECTING" : "CONNECTING";
+        const lines = [cast.tv || "TV", cast.text || ""];
+        if (live && cast.since) {
+            const seconds = Math.max(0, Math.floor(Date.now() / 1000 - cast.since));
+            const minutes = Math.floor(seconds / 60);
+            lines.push(minutes ? `for ${minutes} min` : "just started");
+        }
+        this._castLabel.text = lines.filter(Boolean).join("\n");
+        this._castFreezeBtn.label = cast.frozen ? "Resume" : "Freeze";
+        this._castCurtainBtn.label = cast.curtain ? "Lift curtain" : "Curtain";
+        this._castFreezeBtn.visible = live;
+        this._castCurtainBtn.visible = live;
+    }
+
     _buildTimerCard() {
         this._timerCard = new St.BoxLayout({
             style_class: "adaptive-island-card adaptive-island-timer-card",
@@ -1103,13 +1161,16 @@ var IslandOverlay = class IslandOverlay {
         this._mediaCard.visible = card === "media";
         this._timerCard.visible = card === "timer";
         this._rosCard.visible = card === "ros";
+        this._castCard.visible = card === "cast";
 
         // Let the active card determine its height; fixed heights clip controls.
         this._actor.remove_style_class_name("caution");
         this._actor.remove_style_class_name("critical");
 
         // Update card data
-        if (card === "ros") {
+        if (card === "cast") {
+            this._renderCastData(state);
+        } else if (card === "ros") {
             this._titleIcon.text = '●';
             this._titleLabel.text = 'ROS 2';
             this._badgeLabel.text = 'RECORDING';
@@ -1665,6 +1726,7 @@ var IslandUI = class IslandUI {
         }
 
         this._watchScreenSharing();
+        this._watchCast();
 
         if (typeof Main !== "undefined" && Main) {
             Main._dynamicIsland = this;
@@ -1695,6 +1757,31 @@ var IslandUI = class IslandUI {
         } catch (e) {
             this._screencastNotifyId = 0;
         }
+    }
+
+    // Cast publishes its state to a file; the island shows it and goes
+    // private while the TV is live.
+    _watchCast() {
+        if (!CastStatus.acquire)
+            return;
+        this._cast = CastStatus.acquire();
+        this._castId = this._cast.connect("changed", (_status, state) => this._backend.setCasting(state));
+        this._backend.setCasting(this._cast.state);
+    }
+
+    castCommand(name) {
+        const cast = this._cast;
+        const state = cast && cast.state;
+        if (!cast)
+            return;
+        if (name === "freeze")
+            cast.freeze(!(state && state.frozen));
+        else if (name === "curtain")
+            cast.curtain(!(state && state.curtain));
+        else if (name === "open")
+            cast.open();
+        else if (name === "stop")
+            cast.stop();
     }
 
     _syncScreenSharingFromShell() {
@@ -1796,6 +1883,13 @@ var IslandUI = class IslandUI {
         }
         this._screencastNotifyId = 0;
         this._screencastSource = null;
+
+        if (this._cast) {
+            this._cast.disconnect(this._castId);
+            this._cast = null;
+            this._castId = 0;
+            CastStatus.release();
+        }
 
         if (this._backend.timers.setDigestSource)
             this._backend.timers.setDigestSource(null);

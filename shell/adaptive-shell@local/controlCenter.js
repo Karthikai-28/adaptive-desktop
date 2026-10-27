@@ -47,6 +47,7 @@ const CcNetwork = Me.imports.ccNetwork;
 const CcBluetooth = Me.imports.ccBluetooth;
 const CcMedia = Me.imports.ccMedia;
 const CcSystem = Me.imports.ccSystem;
+const CastStatus = Me.imports.castStatus;
 
 // ------------------------------------------------------------ control center
 
@@ -115,6 +116,7 @@ var ControlCenter = class ControlCenter {
             this._notifSettings = new Gio.Settings({
                 schema_id: 'org.gnome.desktop.notifications',
             });
+            this._castStatus = CastStatus.acquire();
 
             this._build();
             this._buildAgent();
@@ -180,6 +182,11 @@ var ControlCenter = class ControlCenter {
 
         // Keep Awake belongs to this panel; it must not outlive it.
         this._releaseInhibitor();
+
+        if (this._castStatus) {
+            this._castStatus = null;
+            CastStatus.release();
+        }
 
         this._cancelPairing();
         this._unregisterAgent();
@@ -419,6 +426,17 @@ var ControlCenter = class ControlCenter {
                 title: 'Tailscale',
                 onToggle: () => this._toggleTailscale(),
                 onOpen: () => this._toggleDropdown('tailscale'),
+            }),
+            // Cast to the last TV, or stop; the arrow opens the Cast window.
+            cast: new Tile({
+                icon: 'video-display-symbolic',
+                title: 'Screen Cast',
+                onToggle: () => this._castStatus && this._castStatus.toggle(),
+                onOpen: () => {
+                    if (this._castStatus)
+                        this._castStatus.open();
+                    this._menu.close();
+                },
             }),
         };
         // Placed by _layoutTiles(), once their dropdowns exist.
@@ -781,6 +799,7 @@ var ControlCenter = class ControlCenter {
         this._listen(this._profilesProxy(), 'g-properties-changed', queue);
         this._listen(this._colorSettings, 'changed::night-light-enabled', queue);
         this._listen(this._notifSettings, 'changed::show-banners', queue);
+        this._listen(this._castStatus, 'changed', queue);
         this._listen(this._rfkill, 'airplane-mode-changed', queue);
 
         const client = this._nmClient();
@@ -1023,6 +1042,15 @@ var ControlCenter = class ControlCenter {
             active: awake,
             subtitle: this._inhibitPending ? '…' : awake ? 'Screen stays on' : 'Off',
             icon: awake ? 'view-reveal-symbolic' : 'view-conceal-symbolic',
+        });
+
+        const cast = this._castStatus && this._castStatus.state;
+        const casting = CastStatus.isActive(cast);
+        this._tiles.cast.update({
+            active: casting,
+            subtitle: !casting ? 'Off'
+                : cast.state === 'streaming' ? (cast.tv || 'On the TV').replace(/^\[[^\]]*\]\s*/, '')
+                    : 'Connecting…',
         });
 
         const source = this._mixer.get_default_source();
