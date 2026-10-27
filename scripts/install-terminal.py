@@ -86,6 +86,42 @@ Icon=kterm-terminal
         previous = [line for line in previous if line not in ("terminal.desktop", "kterm-terminal.desktop", "terminator.desktop", "org.gnome.Terminal.desktop")]
         write(path, "\n".join(["terminal.desktop", "kterm-terminal.desktop", *previous]) + "\n")
 
+    # agy, claude and codex as apps: each opens one session the laptop and
+    # the phone (Adaptive Link) share. See terminal/agent.py.
+    write(BIN / "adaptive-agent", (REPO / "terminal/agent.py").read_bytes(), 0o755)
+    write(CONFIG / "karthi-shell/agents.tmux.conf", (REPO / "terminal/agents.tmux.conf").read_bytes())
+    agents = {"claude": ("Claude Code", "Anthropic's coding agent", "claude;anthropic;"),
+              "codex": ("Codex", "OpenAI's coding agent", "codex;openai;gpt;"),
+              "agy": ("Antigravity CLI", "Gemini through the Antigravity CLI", "agy;antigravity;gemini;google;")}
+    for agent, (name, comment, keywords) in agents.items():
+        entry = DATA / f"applications/adaptive-agent-{agent}.desktop"
+        if not shutil.which(agent) and not (BIN / agent).exists():
+            if entry.exists():
+                print(f"{'Remove' if args.apply else 'Would remove'} {entry} ({agent} is not installed)")
+                if args.apply:
+                    entry.unlink()
+            continue
+        icon = f"adaptive-agent-{agent}"
+        write(DATA / f"icons/hicolor/scalable/apps/{icon}.svg", (REPO / f"terminal/icons/{icon}.svg").read_bytes())
+        write(entry, f'''[Desktop Entry]
+Version=1.0
+Type=Application
+Name={name}
+GenericName=AI agent
+Comment={comment}, in a terminal. The same session on the laptop and the phone
+Exec="{BIN / 'adaptive-agent'}" {agent}
+Icon={icon}
+Terminal=false
+Categories=Development;
+StartupNotify=false
+Keywords=ai;agent;terminal;{keywords}
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Session
+Exec="{BIN / 'adaptive-agent'}" {agent} --new
+''')
+
     dropdown = CONFIG / "adaptive-desktop/dropdown.json"
     options = json.loads(dropdown.read_text()) if dropdown.exists() else {}
     options["terminal"] = "kterm-terminal"
@@ -120,6 +156,9 @@ Icon=kterm-terminal
           (REPO / "terminal/kterm_open_terminal.py").read_bytes())
     if args.apply:
         subprocess.run(["update-desktop-database", str(DATA / "applications")], check=True)
+        if (DATA / "icons/hicolor/icon-theme.cache").exists() and shutil.which("gtk-update-icon-cache"):
+            # A stale cache hides the agents' new icons.
+            subprocess.run(["gtk-update-icon-cache", "-q", "-f", "-t", str(DATA / "icons/hicolor")], check=False)
         # Apply to both this Adaptive session and the normal Ubuntu user profile.
         for profile_name in ("adaptive", None):
             env = dict(os.environ)

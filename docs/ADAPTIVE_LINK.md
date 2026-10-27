@@ -487,6 +487,33 @@ Needs `xvfb`, `xfwm4`, `dbus`, `xauth`, `x11-utils` and `xdotool` on the
 laptop; `scripts/link-cli.py doctor` says which are missing. The laptop's
 own screen, shared as it is, stays available as *Desktop Remote*.
 
+#### agy, Claude Code and Codex
+
+**Claude Code**, **Codex** and **Antigravity CLI** (agy) are apps in the
+Apps grid, on the phone and on the laptop alike (`terminal/agent.py`,
+installed as `adaptive-agent` by `./install.sh --only terminal`). Each opens
+a terminal on a session that the laptop and the phone share: start a
+conversation at the desk, open the same app on the phone and it is there,
+mid-answer; go back to the laptop and carry on. The session takes the size
+of whichever screen was used last.
+
+- The agent always runs as it does in a laptop terminal: the owner's login
+  shell and rc files, the laptop's display, session bus and keyring, never
+  the phone's display or scale. Leaving the app or losing the connection
+  only detaches; the agent keeps working.
+- Opening the app shows a session that is not already open on that screen,
+  most recent first, or starts one in the active project (else home). *New
+  window* on the phone, or *New Session* on the laptop, starts another.
+- When the agent exits, its shell stays, in the same folder.
+- There is no tmux prefix or status line: every key, Ctrl+B included,
+  reaches the agent. The wheel scrolls back; a drag copies to the laptop's
+  clipboard.
+- In any terminal, `adaptive-agent claude` attaches in place;
+  `adaptive-agent codex --new ~/project` starts in a folder.
+
+The sessions live on a private tmux server, `tmux -L adaptive-agents ls`.
+Check: `scripts/verify-agent-apps.py`.
+
 #### Apps in the phone's form factor
 
 The phone's session is not a small desktop that the phone stretches. Its
