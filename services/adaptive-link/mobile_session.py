@@ -82,7 +82,11 @@ class MobileSession:
         self.id = uuid.uuid4().hex
         self.owner = owner
         self.root = Path(root) / hashlib.sha256(owner.encode()).hexdigest()
-        self.runtime = self.root / "runtime"
+        # Apps make their sockets here, and a socket's path fits in 107
+        # bytes: under the root it does not, and a cut-short one is left
+        # behind under the wrong name (Antigravity's then never starts again).
+        laptop = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        self.runtime = Path(laptop) / ("adaptive-phone-" + self.root.name[:16])
         self.env = None
         self.input = None
         self.processes = []
@@ -139,8 +143,7 @@ class MobileSession:
         missing = [name for name in REQUIRED if not shutil.which(name)]
         if missing:
             raise ValueError("Install phone-session dependencies: " + ", ".join(missing))
-        for name in ("runtime", "config", "cache", "data", "state", "profiles", "xdg"):
-            path = self.root / name
+        for path in [self.runtime] + [self.root / name for name in ("config", "cache", "data", "state", "profiles", "xdg")]:
             path.mkdir(parents=True, exist_ok=True, mode=0o700)
             path.chmod(0o700)
         auth = self.runtime / "Xauthority"

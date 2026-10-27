@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 
 def checks(check):
-    from mobile_launch import arguments, holders, independent, snap
+    from mobile_launch import arguments, confined, holders, independent, snap
     from mobile_session import ExecutionTarget, viewport
     check(arguments('app --label "two words" %U %%', 'Test', '/app.desktop', files=['/tmp/a b']) ==
           ['app', '--label', 'two words', '/tmp/a b', '%'], 'mobile: desktop Exec expands argv without a shell')
@@ -64,6 +64,18 @@ def checks(check):
               f'one device: the copies holding an app\'s profile are found on the laptop and other phones ({found})')
     check(snap(['/snap/bin/firefox']) == ('firefox', 'firefox') and snap(['/snap/bin/foo.bar']) == ('foo', 'bar')
           and snap([sys.executable]) is None, 'mobile: snap commands are recognised for their own adapter')
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / 'auth').write_bytes(b'cookie')
+        env = {'ADAPTIVE_PHONE_PROFILE': 'laptop', 'XAUTHORITY': str(Path(tmp) / 'auth')}
+        with patch.object(Path, 'home', lambda: Path(tmp)), patch('shutil.which', lambda name: None):
+            argv = confined(['/snap/bin/firefox'], 'firefox_firefox.desktop', '/phone/one', env)
+        check(argv[0] == '/snap/bin/firefox' and Path(env['XAUTHORITY']).read_bytes() == b'cookie'
+              and 'XDG_CONFIG_HOME' not in env, 'one device: a snap opens with the laptop\'s profile and the session\'s X authority')
+    from mobile_session import MobileSession
+    session = MobileSession('/home/someone/.config/adaptive-desktop/link/mobile', 'a' * 64)
+    # The longest socket an app has asked for there: Antigravity's single-instance one.
+    check(len(str(session.runtime / 'vscode-aa78601b-1.10-main.sock').encode()) <= 107,
+          f'mobile: sockets fit in the session\'s runtime folder ({session.runtime})')
     check(viewport([100, 9999]) == (320, 3840), 'mobile: viewport bounded inside framebuffer')
     try:
         ExecutionTarget('phone')

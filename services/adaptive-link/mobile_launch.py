@@ -189,6 +189,8 @@ def confined(argv, app_id, root, env):
     of the phone's own; with the laptop's, the snap's own folders)."""
     name, app = snap(argv)
     base = Path.home() / "snap" / name / "common" / "adaptive-phone" / Path(root).name
+    # Its X authority goes here whichever profile it uses.
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
     for key, folder in (("XDG_CONFIG_HOME", "config"), ("XDG_CACHE_HOME", "cache"), ("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state")):
         if shares(env):
             # The snap's own folders, which its laptop copy uses too.
