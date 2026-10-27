@@ -35,8 +35,12 @@ def terminal_args(args, caller="kterm-terminal"):
 
 
 def main():
-    config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    profile = config / "karthi-shell/terminator-modern.conf"
+    # A phone session (Adaptive Link) has a config folder of its own; the
+    # profile is still the one installed in the laptop's.
+    homes = [Path(os.environ["XDG_CONFIG_HOME"])] if os.environ.get("XDG_CONFIG_HOME") else []
+    homes.append(Path.home() / ".config")
+    profile = next((home / "karthi-shell/terminator-modern.conf" for home in homes
+                    if (home / "karthi-shell/terminator-modern.conf").is_file()), homes[0] / "karthi-shell/terminator-modern.conf")
     binary = shutil.which("terminator")
     if not binary or not profile.is_file():
         raise SystemExit("Terminal needs the KTERM modern profile and Terminator installed.")

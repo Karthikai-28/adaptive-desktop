@@ -40,7 +40,47 @@ def checks(check):
         check(False, 'mobile: phone target needs a session')
     except ValueError:
         check(True, 'mobile: phone target needs a session')
+    form_checks(check)
     asyncio.run(real_checks(check))
+
+
+def form_checks(check):
+    import phone_form as form
+    pixel = form.plan({'dp': [412, 915], 'density': 2.625})
+    check(pixel['scale'] == 2 and pixel['size'] == [824, 1830], 'form: a phone is drawn at its dp size, twice over by default')
+    check(form.plan({'dp': [412, 915], 'density': 1.5, 'sharpness': 3})['scale'] == 2
+          and form.plan({'dp': [1600, 1000], 'density': 3, 'sharpness': 3})['scale'] == 2,
+          'form: sharpness is capped by the phone\'s density and the framebuffer')
+    phone, compact = form.environment(2, 'phone'), form.environment(2, 'compact')
+    check(phone['GDK_SCALE'] == '2' and phone['QT_SCALE_FACTOR'] == '2' and phone['QT_QUICK_CONTROLS_MOBILE'] == '1'
+          and compact['GDK_SCALE'] == '1' and compact['GDK_DPI_SCALE'] == '1.5', 'form: toolkits are told the layout\'s scale')
+    check(form.factor(2, 'phone', 824, 520) == 1.58 and form.factor(2, 'phone', 1800, 520) == 2 and form.factor(2, 'desktop', 824, 520) == 1.2,
+          'form: a browser is drawn as large as its narrowest window allows')
+    check(form.kind([], 'firefox_firefox.desktop') == 'firefox' and form.kind([], 'google-chrome.desktop') == 'browser'
+          and form.kind(['code'], 'code.desktop') == 'electron' and form.kind([sys.executable], 'x.desktop') == '',
+          'form: browsers and Electron apps are recognised')
+    env = {'ADAPTIVE_PHONE_SCALE': '2', 'ADAPTIVE_PHONE_MODE': 'phone', 'ADAPTIVE_PHONE_SHORT': '824'}
+    with patch.object(form, 'browser_version', lambda argv, fallback: 141):
+        chrome = form.adapt(['google-chrome'], 'google-chrome.desktop', '/nonexistent', dict(env))
+        desk = form.adapt(['google-chrome'], 'google-chrome.desktop', '/nonexistent', dict(env, ADAPTIVE_PHONE_MODE='desktop'))
+    check('--force-device-scale-factor=1.58' in chrome and any('Android' in a and 'Chrome/141' in a for a in chrome)
+          and not any(a.startswith('--user-agent') for a in desk), 'form: Chrome gets a phone\'s user agent only in the phone layouts')
+    with tempfile.TemporaryDirectory() as tmp:
+        firefox_env = dict(env)
+        form.adapt(['firefox'], 'firefox_firefox.desktop', tmp, firefox_env)
+        prefs = (Path(tmp) / 'user.js').read_text()
+        check('"dom.meta-viewport.enabled", true' in prefs and 'Android' in prefs and firefox_env['GDK_SCALE'] == '1'
+              and 'min-width: 0' in (Path(tmp) / 'chrome/userChrome.css').read_text(), 'form: Firefox lays pages out as on Android')
+        (Path(tmp) / 'user.js').write_text('user_pref("mine", 1);')
+        form.adapt(['firefox'], 'firefox_firefox.desktop', tmp, dict(env))
+        check((Path(tmp) / 'user.js').read_text() == 'user_pref("mine", 1);', 'form: an owner\'s own user.js is left alone')
+        choices = form.Choices(Path(tmp) / 'form.json')
+        choices.learn('a.desktop', 'compact')
+        check(choices.mode('a.desktop') == 'compact' and not choices.chosen('a.desktop'), 'form: a learned layout applies')
+        choices.set('a.desktop', 'phone')
+        check(choices.mode('a.desktop') == 'phone' and choices.chosen('a.desktop'), 'form: the owner\'s choice beats a learned layout')
+        form.prepare(tmp, 2)
+        check('gtk-decoration-layout=menu:' in (Path(tmp) / 'gtk-4.0/settings.ini').read_text(), 'form: GTK apps have no window buttons')
 
 
 async def real_checks(check):
@@ -76,7 +116,7 @@ root.mainloop()
             '[Desktop Entry]\nType=Application\nName=Mobile fixture\nExec=' + sys.executable + ' ' + str(fixture) + '\nStartupWMClass=MobileFixture\n')
         (data / 'applications/mobile-broken.desktop').write_text(
             '[Desktop Entry]\nType=Application\nName=Mobile broken\nExec=false\n')
-        phones = [{'fingerprint': 'one'}, {'fingerprint': 'two'}]
+        phones = [{'fingerprint': 'one'}, {'fingerprint': 'two'}, {'fingerprint': 'three'}]
         permission = {'allow_input': True, 'allow_exec': True, 'allow_files': True}
         link = SimpleNamespace(link_dir=root / 'link', phones=phones, relay=None,
             _allowed=lambda key: permission.get(key, False), audit=SimpleNamespace(write=lambda *args: None),
@@ -180,6 +220,8 @@ root.mainloop()
             check((root / 'order.txt').read_text() == 'one' and mobile.runs[ident]['state'] == 'cancelled', 'mobile: cancelling skips remaining macro steps')
             await client.post('/v1/mobile/runs', json={'session': first.id, 'request_id': ident, 'steps': [{'kind': 'command', 'value': 'false'}]})
             check(mobile.runs[ident]['state'] == 'cancelled', 'mobile: request ID replay never reexecutes cancelled command')
+            with patch.dict(os.environ, {'XDG_DATA_DIRS': str(data) + ':/usr/share', 'PULSE_SERVER': 'unix:/nonexistent/link-test-audio'}):
+                await form_session(check, client, mobile, catalog)
             reconnected = await (await client.post('/v1/mobile/sessions', json={})).json()
             check(reconnected['session']['id'] == first.id and first.alive(), 'mobile: reconnect resumes the same apps and display')
             reply = await (await client.post('/v1/mobile/sessions', json={'operation': 'force-end', 'session': first.id})).json()
@@ -189,6 +231,48 @@ root.mainloop()
         finally:
             await mobile.close()
             await client.close()
+
+
+async def form_session(check, client, mobile, catalog):
+    """A phone that says what its screen is gets the phone form factor."""
+    three = {'X-Test-Phone': 'three'}
+    opened = await (await client.post('/v1/mobile/sessions', headers=three,
+        json={'phone': {'dp': [300, 500], 'density': 2.5}})).json()
+    s = mobile.sessions[opened['session']['id']]
+    check(opened.get('ok') and opened['session']['scale'] == 2 and opened['session']['viewport'] == [600, 1000],
+          'form: the session display is the phone\'s dp size times its scale')
+    async def launched():
+        await client.post('/v1/mobile/apps', headers=three, json={'session': s.id, 'app_id': 'mobile-fixture.desktop'})
+        for _ in range(50):
+            await s.refresh(await catalog())
+            if s.selected:
+                break
+            await asyncio.sleep(.2)
+        pid = s.apps['mobile-fixture.desktop']['pids'][-1]
+        return dict(item.split('=', 1) for item in Path(f'/proc/{pid}/environ').read_text().split('\0') if '=' in item)
+    env = await launched()
+    check(env.get('GDK_SCALE') == '2' and env.get('QT_SCALE_FACTOR') == '2' and env.get('ADAPTIVE_PHONE_MODE') == 'phone',
+          'form: an app in the phone session is started at the phone\'s scale')
+    await asyncio.sleep(.4)
+    await s.refresh(await catalog())
+    ok, geometry = await s.run('xdotool', 'getwindowgeometry', '--shell', str(s.selected))
+    values = dict(line.split('=') for line in geometry.splitlines())
+    _, hints = await s.run('xprop', '-id', str(s.selected), '_MOTIF_WM_HINTS')
+    check(ok and values.get('X') == '0' and values.get('Y') == '0' and values.get('WIDTH') == '600' and '0x2, 0x0, 0x0' in hints,
+          f'form: the app fills the phone screen with no window frame ({values.get("X")},{values.get("Y")} {values.get("WIDTH")})')
+    reply = await (await client.post('/v1/mobile/apps', headers=three, json={'session': s.id, 'operation': 'layout',
+        'app_id': 'mobile-fixture.desktop', 'layout': 'desktop'})).json()
+    check(reply.get('ok') and reply.get('running') and reply['session']['layouts'].get('mobile-fixture.desktop') == 'desktop',
+          'form: a layout is chosen per app and applies at its next start')
+    for w in list(s.windows):
+        await s.run('xdotool', 'windowkill', str(w['id']))
+    await asyncio.sleep(.5)
+    env = await launched()
+    check(env.get('GDK_SCALE') == '1' and env.get('ADAPTIVE_PHONE_MODE') == 'desktop', 'form: the desktop layout starts the app at desktop scale')
+    reply = await (await client.post('/v1/mobile/sessions', headers=three, json={'operation': 'resize', 'session': s.id,
+        'phone': {'dp': [500, 300], 'density': 2.5}})).json()
+    check(reply.get('ok') and reply['session']['viewport'] == [1000, 600], 'form: turning the phone turns the display')
+    await client.post('/v1/mobile/sessions', headers=three, json={'operation': 'force-end', 'session': s.id, 'confirm': True})
 
 
 if __name__ == '__main__':

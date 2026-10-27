@@ -10,6 +10,8 @@ import shutil
 import sys
 import uuid
 
+import phone_form
+
 
 def arguments(command, name, filename, icon="", files=()):
     result = []
@@ -38,8 +40,11 @@ def arguments(command, name, filename, icon="", files=()):
     return result
 
 
-def independent(argv, app_id, root):
-    """Known single-instance programs must never use the laptop profile."""
+def independent(argv, app_id, root, env=None):
+    """Known single-instance programs must never use the laptop profile.
+
+    With the session's environment, the app is also told the phone's form
+    factor in its own toolkit's terms (phone_form.adapt)."""
     executable = Path(argv[0]).name.lower()
     name = app_id.lower()
     profile = str(Path(root) / "profiles" / app_id)
@@ -56,6 +61,8 @@ def independent(argv, app_id, root):
         argv += ["--user-data-dir=" + profile, "--new-window", "--password-store=basic"]
     elif "libreoffice" in name or executable in ("libreoffice", "soffice"):
         argv += ["-env:UserInstallation=" + Path(profile).as_uri()]
+    if env is not None:
+        argv = phone_form.adapt(argv, app_id, profile, env)
     return argv
 
 
@@ -83,7 +90,7 @@ def confined(argv, app_id, root, env):
         out.write(Path(env["XAUTHORITY"]).read_bytes())
     env["XAUTHORITY"] = str(xauthority)
     env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-    argv = independent(argv, app_id, base)
+    argv = independent(argv, app_id, base, env)
     if shutil.which("systemd-run"):
         argv = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit", f"snap.{name}.{app}-{uuid.uuid4()}", "--", *argv]
     return argv
@@ -100,7 +107,7 @@ def main():
     if snap(argv):
         argv = confined(argv, app_id, env["ADAPTIVE_MOBILE_ROOT"], env)
     else:
-        argv = independent(argv, app_id, env["ADAPTIVE_MOBILE_ROOT"])
+        argv = independent(argv, app_id, env["ADAPTIVE_MOBILE_ROOT"], env)
     if info.get_boolean("Terminal"):
         argv = ["kterm-terminal", "-x", *argv]
     cwd = info.get_string("Path")

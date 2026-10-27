@@ -21,6 +21,7 @@ def place(wid, x, y, width, height):
     x11.XInternAtom.argtypes = [C.c_void_p, C.c_char_p, C.c_int]
     x11.XInternAtom.restype = C.c_ulong
     x11.XSendEvent.argtypes = [C.c_void_p, C.c_ulong, C.c_int, C.c_long, C.POINTER(Event)]
+    x11.XChangeProperty.argtypes = [C.c_void_p, C.c_ulong, C.c_ulong, C.c_ulong, C.c_int, C.c_int, C.c_void_p, C.c_int]
     x11.XSync.argtypes = [C.c_void_p, C.c_int]
     x11.XCloseDisplay.argtypes = [C.c_void_p]
     display = x11.XOpenDisplay(None)
@@ -29,6 +30,9 @@ def place(wid, x, y, width, height):
     try:
         atom = lambda name: x11.XInternAtom(display, name.encode(), False)
         root = x11.XDefaultRootWindow(display)
+        # A phone app has no frame: Motif hints, flags=decorations, none.
+        hints = (C.c_long * 5)(2, 0, 0, 0, 0)
+        x11.XChangeProperty(display, wid, atom("_MOTIF_WM_HINTS"), atom("_MOTIF_WM_HINTS"), 32, 0, hints, 5)
         for message, values in (("_NET_WM_STATE", (0, atom("_NET_WM_STATE_MAXIMIZED_VERT"), atom("_NET_WM_STATE_MAXIMIZED_HORZ"), 1, 0)),
                                 ("_NET_MOVERESIZE_WINDOW", (0x1F00, x, y, width, height))):
             event = Event()

@@ -23,6 +23,7 @@ import control_profiles
 import desktop
 import inputs
 import machine
+import phone_form
 import screen
 
 FRAMEBUFFER = (4096, 4096)
@@ -32,6 +33,7 @@ INHERITED = ("VSCODE_", "ELECTRON_", "CHROME_DESKTOP", "GIO_LAUNCHED_DESKTOP_FIL
              "GNOME_TERMINAL_", "GNOME_KEYRING_", "TERM_PROGRAM", "XDG_SESSION_ID", "XDG_SEAT", "XDG_VTNR")
 # The Debian/Ubuntu package that provides each of REQUIRED.
 PACKAGES = {"Xvfb": "xvfb", "xfwm4": "xfwm4", "dbus-daemon": "dbus", "xdotool": "xdotool", "xprop": "x11-utils", "xauth": "xauth"}
+NATIVE_FILES = ("org.gnome.nautilus.desktop", "nautilus.desktop", "adaptive-files.desktop")
 # What a launch showed about an app, kept per app rather than per phone.
 COMPATIBILITY = {"running": "works", "no-window": "no-window", "failed": "failed"}
 
@@ -101,6 +103,31 @@ class MobileSession:
         self.seen = time.monotonic()
         self.last_fit = {}
         self.report = None
+        # Drawn at the phone's own size in dp, times this (phone_form).
+        self.scale = 1
+        self.form = None
+        self.choices = phone_form.Choices(self.root / "form-factor.json")
+
+    def plan(self, phone):
+        """Size the display for the phone's screen; new launches use its scale."""
+        self.form = phone_form.plan(phone)
+        changed = self.form["scale"] != self.scale
+        self.scale = self.form["scale"]
+        self.size = tuple(self.form["size"])
+        return changed
+
+    async def apply_form(self, initial=False):
+        """The session's own GTK settings, dconf and X resources at its scale."""
+        await asyncio.to_thread(phone_form.prepare, self.root / "config", self.scale)
+        if initial and shutil.which("gsettings"):
+            for command in phone_form.settings_commands(self.scale):
+                await self.run(*command)
+        if shutil.which("xrdb"):
+            proc = await asyncio.create_subprocess_exec("xrdb", "-merge", env=self.env, stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await proc.communicate(phone_form.resources(self.scale).encode())
+        if not initial and shutil.which("xrandr"):
+            await self.run("xrandr", "--dpi", str(96 * self.scale))
 
     async def run(self, *args):
         if self.env is None:
@@ -127,7 +154,7 @@ class MobileSession:
         read_fd, write_fd = os.pipe()
         try:
             self.xserver = await asyncio.create_subprocess_exec(
-                "Xvfb", "-displayfd", str(write_fd), "-screen", "0", "4096x4096x24", "-nolisten", "tcp", "-auth", str(auth),
+                "Xvfb", "-displayfd", str(write_fd), "-screen", "0", "4096x4096x24", "-dpi", str(96 * self.scale), "-nolisten", "tcp", "-auth", str(auth),
                 pass_fds=(write_fd,), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
             os.close(write_fd)
             write_fd = -1
@@ -190,6 +217,7 @@ class MobileSession:
         else:
             # No accidental playback on the physical default sink.
             self.env["PULSE_SERVER"] = "unix:" + str(self.runtime / "audio-unavailable")
+        await self.apply_form(initial=True)
         self.state = "ready"
 
     def alive(self):
@@ -198,6 +226,7 @@ class MobileSession:
     def public(self):
         alive = self.alive()
         return {"id": self.id, "state": "ready" if alive else "failed", "viewport": list(self.size), "canvas": list(self.canvas),
+                "scale": self.scale, "dp": self.form["dp"] if self.form else None, "layouts": self.choices.effective(),
                 "selected_window": self.selected, "split_window": self.split, "selected_app": self.selected_app, "audio": self.audio,
                 "apps": list(self.apps.values()), "windows": self.windows,
                 "error": "" if alive else "Private session stopped. End this session and create a new one."}
@@ -240,28 +269,45 @@ class MobileSession:
             self.split = 0
         targets = [w for w in self.windows if w["id"] in (self.selected, self.split) or w["app_id"] == self.selected_app and w["parent"]]
         self.canvas = self.size
+        width, height = self.size
+        half = width // 2 if self.split else width
         for w in targets:
             wid = str(w["id"])
-            width = self.size[0] // 2 if self.split else self.size[0]
-            x = width + 4 if w["id"] == self.split else 4
-            geometry = (x, 28, width - 12, self.size[1] - 40)
+            # Phone apps have no window frame: the app is the whole screen,
+            # two apps share it on a tablet, and a dialog is a sheet along the
+            # bottom, as wide as the screen and as tall as it asks to be.
+            fitted = self.last_fit.get(wid)
+            if w["parent"] and fitted and fitted[2] == width and fitted[1] + fitted[3] == height:
+                geometry = fitted
+            elif w["parent"]:
+                ok, geom = await self.run("xdotool", "getwindowgeometry", "--shell", wid)
+                asked = int(dict(re.findall(r"^(HEIGHT)=(\d+)$", geom, re.M)).get("HEIGHT", height)) if ok else height
+                tall = max(1, min(height, asked))
+                geometry = (0, height - tall, width, tall)
+            else:
+                geometry = (half + 2 if w["id"] == self.split else 0, 0, half - 2 if self.split else width, height)
             if self.last_fit.get(wid) != geometry or w["maximized"]:
                 await self.run(sys.executable, str(Path(__file__).with_name("mobile_window.py")), wid, *(str(v) for v in geometry))
                 self.last_fit[wid] = geometry
             ok, geom = await self.run("xdotool", "getwindowgeometry", "--shell", wid)
             if ok:
                 values = dict(re.findall(r"^(X|Y|WIDTH|HEIGHT)=(-?\d+)$", geom, re.M))
-                right = max(0, int(values.get("X", 0))) + int(values.get("WIDTH", 0)) + 8
-                bottom = max(0, int(values.get("Y", 0))) + int(values.get("HEIGHT", 0)) + 8
+                right = max(0, int(values.get("X", 0))) + int(values.get("WIDTH", 0))
+                bottom = max(0, int(values.get("Y", 0))) + int(values.get("HEIGHT", 0))
+                # An app that sized itself down after it was placed
+                # (LibreOffice restoring its window) is placed again.
+                if not w["parent"] and (int(values.get("WIDTH", 0)) < geometry[2] - 8 or int(values.get("HEIGHT", 0)) < geometry[3] - 8):
+                    self.last_fit.pop(wid, None)
                 self.canvas = (min(4096, max(self.canvas[0], right)), min(4096, max(self.canvas[1], bottom)))
 
     async def spawn(self, app_id, name, files=()):
         """Start one catalog app on this display through the launch helper."""
+        env = dict(self.env, **phone_form.environment(self.scale, self.choices.mode(app_id)), ADAPTIVE_PHONE_SHORT=str(min(self.size)))
         process = await asyncio.create_subprocess_exec(sys.executable, str(Path(__file__).with_name("mobile_launch.py")), app_id, *files,
-            env=self.env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+            env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
         self.processes.append(process)
         instance = self.apps.setdefault(app_id, {"app_id": app_id, "name": name, "windows": [], "pids": []})
-        instance.update(started=time.time(), state="starting", message="Waiting for its phone window")
+        instance.update(started=time.time(), state="starting", message="Waiting for its phone window", layout=self.choices.mode(app_id))
         instance.pop("reported", None)
         instance["pids"].append(process.pid)
         return instance
@@ -307,6 +353,7 @@ class MobileDesktop:
         self.creation = asyncio.Lock()
         self.runs = {}
         self.tasks = {}
+        self.fitting = set()
 
     @staticmethod
     def capabilities():
@@ -380,19 +427,30 @@ class MobileDesktop:
                         raise ValueError("four phone sessions are already running")
                     s = MobileSession(self.link.link_dir / "mobile", owner)
                     s.report = self.record
+                    if "phone" in body:
+                        s.plan(body["phone"])
                     try:
                         await s.start()
                     except BaseException:
                         await s.close()
                         raise
                     self.sessions[s.id] = s
-                if "viewport" in body:
+                if "phone" in body:
+                    if s.plan(body["phone"]) and s.alive():
+                        await s.apply_form()
+                elif "viewport" in body:
                     s.size = viewport(body["viewport"])
                 return {"ok": True, "session": await s.refresh(await self.catalog())}
         s = self.session(body.get("session"), owner)
         async with s.lock:
             if op == "resize":
-                s.size = viewport(body.get("viewport"))
+                # A phone that says what its screen is gets the phone form
+                # factor; an older app sends only the pixels it shows.
+                if "phone" in body:
+                    if s.plan(body["phone"]):
+                        await s.apply_form()
+                else:
+                    s.size = viewport(body.get("viewport"))
                 await s.refresh(await self.catalog())
             elif op in ("end", "force-end"):
                 await self.cancel_owner(owner)
@@ -430,6 +488,10 @@ class MobileDesktop:
             raise ValueError("application is not in the installed catalog")
         if any(word in app_id.lower() for word in ("gnome-control-center", "unity-control-center")):
             return {"ok": True, "native": "control-center"}
+        # The phone's own Files screen, unless a layout was chosen for the
+        # desktop one: Files with its inspector is wider than a phone.
+        if app_id.lower() in NATIVE_FILES and not s.choices.chosen(app_id) and not files:
+            return {"ok": True, "native": "files"}
         await s.refresh(catalog)
         existing = [w for w in s.windows if w["app_id"] == app_id and not w["parent"]]
         if existing and not new and not files:
@@ -440,6 +502,7 @@ class MobileDesktop:
         instance = await s.spawn(app_id, app["name"], files)
         s.selected_app, s.selected = app_id, 0
         before = {w["id"] for w in s.windows}
+        found = []
         for _ in range(12):
             await asyncio.sleep(.25)
             await s.refresh(catalog)
@@ -447,6 +510,17 @@ class MobileDesktop:
             if found:
                 await s.focus(found[0]["id"])
                 break
+        if not found and s.choices.mode(app_id) == "phone" and not s.choices.chosen(app_id):
+            task = asyncio.create_task(self.watch_fit(s, app_id, before))
+            self.fitting.add(task)
+            task.add_done_callback(self.fitting.discard)
+        if found and not existing and not files and await self.too_wide(s, found[0]["id"]):
+            # Its smallest window is wider than the phone at full scale: the
+            # first launch learns the compact layout and starts it again so.
+            # It has only just opened, so closing it loses nothing.
+            s.choices.learn(app_id, "compact")
+            self.link.audit.write(s.owner, "mobile-launch", f"{app_id} learned compact layout")
+            return dict(await self.relayout(s, app_id, None, True), learned="compact")
         self.link.audit.write(s.owner, "mobile-launch", f"{app_id} session={s.id} {instance['state']}")
         return {"ok": True, "session": s.public(), "status": instance["state"]}
 
@@ -474,6 +548,8 @@ class MobileDesktop:
                 return await self.launch(s, app_id, files=[str(path)])
             if op == "launch":
                 return await self.launch(s, body.get("app_id"), body.get("new_window") is True)
+            if op == "layout":
+                return await self.relayout(s, body.get("app_id"), body.get("layout"), body.get("reopen") is True)
             await s.refresh(await self.catalog())
             wid = int(body.get("window", 0))
             w = next((w for w in s.windows if w["id"] == wid), None)
@@ -505,6 +581,70 @@ class MobileDesktop:
             else:
                 raise ValueError("unknown app operation")
             return {"ok": True, "session": await s.refresh(await self.catalog())}
+
+    async def watch_fit(self, s, app_id, before):
+        """The fit check for an app whose first window came after the launch reply."""
+        for _ in range(60):
+            await asyncio.sleep(.5)
+            if not s.alive():
+                return
+            async with s.lock:
+                await s.refresh(await self.catalog())
+                found = [w for w in s.windows if w["app_id"] == app_id and w["id"] not in before and not w["parent"]]
+                if not found:
+                    continue
+                if s.selected_app == app_id and await self.too_wide(s, found[0]["id"]):
+                    s.choices.learn(app_id, "compact")
+                    self.link.audit.write(s.owner, "mobile-launch", f"{app_id} learned compact layout")
+                    await self.relayout(s, app_id, None, True)
+                return
+
+    async def too_wide(self, s, wid):
+        if s.scale < 2 or s.choices.mode(s.selected_app) != "phone" or s.choices.chosen(s.selected_app):
+            return False
+        if phone_form.kind([], s.selected_app) in ("browser", "firefox"):
+            return False   # browsers are drawn at the scale their window allows
+        # The window and any dialog it opens with (LibreOffice's tips come a
+        # moment after it), for the first three seconds.
+        for _ in range(5):
+            await asyncio.sleep(.6)
+            await s.refresh(await self.catalog())
+            for w in [w for w in s.windows if w["id"] == wid or w["parent"] == wid]:
+                ok, geom = await s.run("xdotool", "getwindowgeometry", "--shell", str(w["id"]))
+                if ok and int(dict(re.findall(r"^(WIDTH)=(\d+)$", geom, re.M)).get("WIDTH", 0)) > s.size[0] + 8:
+                    return True
+        return False
+
+    async def relayout(self, s, app_id, mode, reopen):
+        """Phone or desktop layout for one app; it applies when the app next starts.
+
+        reopen closes the app's windows as the laptop would and starts it again
+        in the new layout. A window that stays open (a save dialog) stops it.
+        """
+        catalog = await self.catalog()
+        if not any(a["id"] == app_id for a in catalog):
+            raise ValueError("application is not in the installed catalog")
+        if mode is not None:
+            s.choices.set(app_id, mode)
+        mode = s.choices.mode(app_id)
+        await s.refresh(catalog)
+        windows = [w for w in s.windows if w["app_id"] == app_id]
+        if not reopen or not windows:
+            return {"ok": True, "layout": mode, "running": bool(windows), "session": s.public()}
+        for w in windows:
+            if not w["parent"]:
+                await s.run("xdotool", "windowactivate", "--sync", str(w["id"]), "key", "--clearmodifiers", "alt+F4")
+        for _ in range(20):
+            await asyncio.sleep(.25)
+            await s.refresh(catalog)
+            if not any(w["app_id"] == app_id for w in s.windows):
+                break
+        else:
+            remaining = [w for w in s.windows if w["app_id"] == app_id]
+            await s.focus(remaining[0]["id"])
+            return {"ok": False, "pending": True, "layout": mode, "session": s.public(),
+                    "error": "The app is still open. Answer its dialog, then reopen it."}
+        return dict(await self.launch(s, app_id), layout=mode)
 
     def layout_path(self, owner):
         return self.link.link_dir / "mobile" / hashlib.sha256(owner.encode()).hexdigest() / "shell.json"
@@ -810,6 +950,9 @@ class MobileDesktop:
                         await s.media.close_all()
 
     async def close(self):
+        for task in list(self.fitting):
+            task.cancel()
+        await asyncio.gather(*self.fitting, return_exceptions=True)
         for s in list(self.sessions.values()):
             await self.cancel_owner(s.owner)
             await s.close()
