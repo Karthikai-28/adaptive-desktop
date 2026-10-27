@@ -12,6 +12,7 @@
     var KEYS = { 37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'ok', 461: 'back', 27: 'back',
         8: 'back', 406: 'pin', 80: 'pin' };
     var ICON_WORKERS = 4;
+    var SERVICE_WAIT_MS = 15000;
 
     var CONTROL_ICONS = {
         settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
@@ -68,7 +69,17 @@
             }
             var bridge = new PalmServiceBridge();
             bridges.push(bridge);   // a collected bridge never answers
+            var settled = false;
+            var timer = setTimeout(function () {
+                if (settled) return;
+                settled = true;
+                bridges.splice(bridges.indexOf(bridge), 1);
+                reject(new Error('The TV service did not answer'));
+            }, SERVICE_WAIT_MS);
             bridge.onservicecallback = function (text) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
                 bridges.splice(bridges.indexOf(bridge), 1);
                 var reply;
                 try {
@@ -94,9 +105,20 @@
     var refreshing = null;
     function refresh() {
         if (!refreshing) {
-            refreshing = readHome().then(function () { refreshing = null; });
+            refreshing = readHome().then(function (value) {
+                refreshing = null;
+                return value;
+            }, function (error) {
+                refreshing = null;
+                throw error;
+            });
         }
         return refreshing;
+    }
+
+    function same(left, right) {
+        try { return JSON.stringify(left) === JSON.stringify(right); }
+        catch (error) { return false; }
     }
 
     function readHome() {
@@ -104,11 +126,16 @@
         if (!state.key) pairing.classList.add('on');
         return call('home').then(function (reply) {
             pairing.classList.remove('on');
-            state.apps = reply.apps || [];
-            state.inputs = reply.inputs || [];
+            var apps = reply.apps || [];
+            var inputs = reply.inputs || [];
+            var changed = !same(apps, state.apps) || !same(inputs, state.inputs);
+            state.apps = apps;
+            state.inputs = inputs;
             save('apps', state.apps);
             save('inputs', state.inputs);
-            render();
+            // Do not tear down every tile when returning from another app.
+            // Keeping the DOM also preserves focus and prevents icon flicker.
+            if (changed || !tiles.length) render();
         }, function (error) {
             pairing.classList.remove('on');
             toast(error.message);
@@ -292,7 +319,7 @@
         }
         var limit = Math.max(0, scroller.scrollHeight - rows.clientHeight);
         target = Math.max(0, Math.min(target, limit));
-        scroller.style.transform = 'translateY(' + (-target) + 'px)';
+        scroller.style.transform = 'translate3d(0,' + (-target) + 'px,0)';
     }
 
     function move(direction) {
@@ -561,5 +588,8 @@
     weather();
     setInterval(weather, 15 * 60 * 1000);
     render();
+    requestAnimationFrame(function () {
+        requestAnimationFrame(function () { document.body.classList.add('ready'); });
+    });
     refresh();
 })();

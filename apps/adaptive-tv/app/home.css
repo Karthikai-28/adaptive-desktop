@@ -23,6 +23,14 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
   font-family: "LG Smart UI", "Museo Sans", "SF Pro Display", "Ubuntu", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased; cursor: default; }
 
+/* One composed entrance instead of individual elements popping in while the
+   cached model and icon data are restored. */
+.top, .hero, .rows { opacity: 0; transform: translate3d(0, 1.2vh, 0);
+  transition: opacity .45s ease, transform .55s var(--ease); }
+body.ready .top, body.ready .hero, body.ready .rows { opacity: 1; transform: translate3d(0, 0, 0); }
+.hero { transition-delay: .04s; }
+.rows { transition-delay: .09s; }
+
 /* --- the light in the room ---------------------------------------------- */
 
 .ambient { position: fixed; top: -30%; left: -20%; right: -20%; bottom: -30%;
@@ -83,7 +91,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
 .rows { position: absolute; top: 50vh; left: 0; right: 0; bottom: 0; overflow: hidden;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 2.4vh, #000 92%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 2.4vh, #000 92%, transparent 100%); }
-.scroller { padding: 4vh 5vw 30vh; transition: transform 0.45s var(--ease); }
+.scroller { padding: 4vh 5vw 30vh; transition: transform 0.42s var(--ease); will-change: transform; }
 .section { margin-bottom: 4.6vh; }
 .section h2 { font-size: 2.3vh; font-weight: 600; color: var(--muted); margin-bottom: 1.8vh;
   display: flex; align-items: baseline; gap: 0.8vw; }
@@ -94,7 +102,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
 .face { position: relative; width: var(--tile-w); height: var(--tile-h); border-radius: 1.3vw;
   background-color: var(--c, var(--surface-2)); overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
-  transition: transform 0.22s var(--ease), box-shadow 0.22s var(--ease); }
+  transition: transform 0.2s var(--ease), box-shadow 0.24s var(--ease); will-change: transform; }
 .face img { position: absolute; left: 50%; top: 50%; height: 100%; transform: translate(-50%, -50%);
   opacity: 0; transition: opacity 0.3s ease; }
 .face img.ready { opacity: 1; }

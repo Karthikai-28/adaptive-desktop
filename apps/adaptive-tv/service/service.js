@@ -39,6 +39,27 @@ function connected(key) {
     return opening;
 }
 
+function reset(link) {
+    if (link) link.close();
+    if (tv === link) tv = null;
+}
+
+// The TV sometimes closes its local control socket while an app is hidden or
+// while waking. Re-open it and replay one idempotent request instead of making
+// the page show a transient failure.
+function withConnection(key, work, retried) {
+    return connected(key).then((link) => work(link).catch((error) => {
+        if (retried || !error.connection) throw error;
+        reset(link);
+        return new Promise((resolve) => setTimeout(resolve, 180))
+            .then(() => withConnection(key, work, true));
+    }), (error) => {
+        if (retried || !error.connection) throw error;
+        return new Promise((resolve) => setTimeout(resolve, 180))
+            .then(() => withConnection(key, work, true));
+    });
+}
+
 function answer(message, work) {
     work.then((out) => message.respond(Object.assign({ returnValue: true, key: tv && tv.key }, out)),
         (error) => message.respond({ returnValue: false, errorText: String((error && error.message) || error) }));
@@ -47,7 +68,7 @@ function answer(message, work) {
 function method(name, work) {
     service.register(name, (message) => {
         const args = message.payload || {};
-        answer(message, connected(args.key).then((link) => work(link, args)));
+        answer(message, withConnection(args.key, (link) => work(link, args), false));
     });
 }
 

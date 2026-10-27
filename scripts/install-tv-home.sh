@@ -2,12 +2,13 @@
 set -Eeuo pipefail
 
 # Install Adaptive Home on the LG TV (apps/adaptive-tv): a launcher with every
-# app on the TV, its inputs and its power, that runs on the TV by itself - the
-# laptop is only needed to install it.
+# app on the TV, its inputs and its power. A small desktop companion launches
+# it once when the paired TV turns on; the UI itself still runs on the TV.
 #
 #   install-tv-home.sh --setup [TV_IP]   once: register the TV with the webOS tools
 #   install-tv-home.sh                   package, install and open it on the TV
 #   install-tv-home.sh --package         only build dist/tv-home/*.ipk
+#   install-tv-home.sh --check           check the TV, install and running state
 #   install-tv-home.sh --remove          take it off the TV
 #
 # On the TV, once: install "Developer Mode" from the LG Content Store, sign in
@@ -28,12 +29,15 @@ DEVICE="adaptive-tv"
 APP_ID="com.karthi.adaptivetv"
 SOURCE="$REPO/apps/adaptive-tv"
 OUT="$REPO/dist/tv-home"
+USER_UNITS="$HOME/.config/systemd/user"
+WATCH_UNIT="adaptive-tv-home-watch.service"
 
 MODE=install
 TV_IP=""
 case "${1:-}" in
     --setup) MODE=setup; TV_IP="${2:-}" ;;
     --package) MODE=package ;;
+    --check) MODE=check ;;
     --remove) MODE=remove ;;
     "") ;;
     -h|--help) sed -n '4,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -62,6 +66,7 @@ PY
 
 package() {
     node "$REPO/scripts/verify-tv-home.js"
+    python3 "$REPO/scripts/verify-tv-home-auto.py"
     rm -rf "$OUT"
     mkdir -p "$OUT"
     "$BIN/ares-package" --no-minify -o "$OUT" "$SOURCE/app" "$SOURCE/service" >/dev/null
@@ -97,10 +102,38 @@ case "$MODE" in
         ipk="$(package | tail -1)"
         "$BIN/ares-install" --device "$DEVICE" "$ipk"
         "$BIN/ares-launch" --device "$DEVICE" "$APP_ID"
+        mkdir -p "$USER_UNITS"
+        adaptive_render "$REPO/services/$WATCH_UNIT" "$USER_UNITS/$WATCH_UNIT"
+        systemctl --user daemon-reload
+        systemctl --user enable "$WATCH_UNIT"
+        systemctl --user restart "$WATCH_UNIT"
         echo "Adaptive Home is open on the TV. The first time, choose Allow on the TV's prompt."
+        echo "Adaptive Home will open once when this computer sees the TV turn on."
+        ;;
+    check)
+        need_device
+        "$BIN/ares-device" --device "$DEVICE" --system-info
+        if "$BIN/ares-install" --device "$DEVICE" --list | grep -qx "$APP_ID"; then
+            echo "Adaptive Home: installed"
+        else
+            echo "Adaptive Home: not installed"
+        fi
+        if "$BIN/ares-launch" --device "$DEVICE" --running | grep -qx "$APP_ID"; then
+            echo "Adaptive Home: running"
+        else
+            echo "Adaptive Home: not running"
+        fi
+        if systemctl --user is-active --quiet "$WATCH_UNIT"; then
+            echo "Adaptive Home power-on companion: running"
+        else
+            echo "Adaptive Home power-on companion: not running"
+        fi
         ;;
     remove)
         need_device
+        systemctl --user disable --now "$WATCH_UNIT" 2>/dev/null || true
+        rm -f "$USER_UNITS/$WATCH_UNIT"
+        systemctl --user daemon-reload
         "$BIN/ares-install" --device "$DEVICE" --remove "$APP_ID"
         ;;
 esac

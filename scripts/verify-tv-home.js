@@ -130,6 +130,15 @@ function finish() {
     ['home', 'icon', 'launch', 'input', 'power'].forEach((name) => {
         check('service answers ' + name, new RegExp("(method|register)\\('" + name + "'").test(service));
     });
+    check('socket requests retry once', service.indexOf('withConnection') >= 0 &&
+        service.indexOf('error.connection') >= 0);
+    check('page service calls time out', home.indexOf('SERVICE_WAIT_MS') >= 0);
+    check('relaunch returns straight to full screen', info.handlesRelaunch === false);
+    check('desktop wake watcher exists', fs.existsSync(path.join(root, 'auto_launch.py')));
+    const unit = fs.readFileSync(path.join(root, '..', '..', 'services',
+        'adaptive-tv-home-watch.service'), 'utf8');
+    check('wake watcher has a restartable user service', unit.indexOf('auto_launch.py') >= 0 &&
+        unit.indexOf('Restart=on-failure') >= 0);
     (home.match(/call\('([a-z]+)'/g) || []).forEach((use) => {
         const name = use.slice(6, -1);
         check('page calls a real method: ' + name, new RegExp("(method|register)\\('" + name + "'").test(service));

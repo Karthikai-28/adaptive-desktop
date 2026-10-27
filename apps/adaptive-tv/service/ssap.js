@@ -20,6 +20,12 @@ const PERMISSIONS = [
 const PAIR_WAIT_MS = 60000;
 const CALL_WAIT_MS = 8000;
 
+function connectionError(error) {
+    const out = error instanceof Error ? error : new Error(String(error || 'TV connection failed'));
+    out.connection = true;
+    return out;
+}
+
 // --- WebSocket frames (RFC 6455) --------------------------------------------
 
 // A client frame: always masked.
@@ -99,7 +105,7 @@ class Tv {
         return new Promise((resolve, reject) => {
             const fail = (error) => {
                 this.close();
-                reject(error);
+                reject(connectionError(error));
             };
             const wsKey = crypto.randomBytes(16).toString('base64');
             this.socket = tls.connect({ host: this.host, port: this.port, rejectUnauthorized: false }, () => {
@@ -191,7 +197,9 @@ class Tv {
         this.socket = null;
         const waiting = this.waiting;
         this.waiting = {};
-        Object.keys(waiting).forEach((id) => waiting[id].done({ type: 'error', error: 'closed' }));
+        Object.keys(waiting).forEach((id) => waiting[id].done({
+            type: 'error', error: 'The TV connection closed', connection: true,
+        }));
     }
 
     close() {
@@ -201,19 +209,23 @@ class Tv {
 
     // Resolves with the reply's payload.
     request(uri, payload) {
-        if (!this.ready) return Promise.reject(new Error('Not connected to the TV'));
+        if (!this.ready) return Promise.reject(connectionError('Not connected to the TV'));
         return new Promise((resolve, reject) => {
             const id = 'c' + (++this.nextId);
             const timer = setTimeout(() => {
                 delete this.waiting[id];
-                reject(new Error('The TV did not answer ' + uri));
+                reject(connectionError('The TV did not answer ' + uri));
             }, CALL_WAIT_MS);
             this.waiting[id] = {
                 done: (data) => {
                     clearTimeout(timer);
                     const reply = data.payload || {};
                     if (data.type === 'response' && reply.returnValue !== false) resolve(reply);
-                    else reject(new Error(data.error || reply.errorText || 'The TV said no'));
+                    else {
+                        const error = new Error(data.error || reply.errorText || 'The TV said no');
+                        if (data.connection) error.connection = true;
+                        reject(error);
+                    }
                     return true;
                 },
             };
@@ -247,4 +259,4 @@ function fetchIcon(url) {
 }
 
 module.exports = { Tv: Tv, encodeFrame: encodeFrame, decodeFrames: decodeFrames, fetchIcon: fetchIcon,
-    PERMISSIONS: PERMISSIONS };
+    connectionError: connectionError, PERMISSIONS: PERMISSIONS };
