@@ -1,0 +1,6 @@
+{
+  "name": "com.karthi.adaptivetv.service",
+  "version": "1.0.0",
+  "description": "Adaptive Home: the TV's apps, inputs and power, for the launcher page",
+  "main": "service.js"
+}

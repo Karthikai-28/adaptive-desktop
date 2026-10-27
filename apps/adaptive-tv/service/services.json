@@ -1,0 +1,9 @@
+{
+  "id": "com.karthi.adaptivetv.service",
+  "description": "Adaptive Home: the TV's apps, inputs and power, for the launcher page",
+  "services": [
+    {
+      "name": "com.karthi.adaptivetv.service"
+    }
+  ]
+}

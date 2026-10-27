@@ -39,6 +39,7 @@ codebase_digest.md
 .local/android-sdk/
 .local/scrcpy/
 .local/scrcpy-dl/
+.local/webos-cli/
 .local/jdk-17/
 apps/adaptive-link-android/.gradle/
 apps/adaptive-link-android/build/

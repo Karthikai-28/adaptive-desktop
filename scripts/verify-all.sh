@@ -104,6 +104,7 @@ step "agy, claude and codex as apps: shared sessions" quiet python3 "$REPO/scrip
 step "Phone: phone choice, its apps, scrcpy arguments" quiet python3 "$REPO/scripts/verify-phone.py"
 step "Adaptive Settings backend" quiet python3 "$REPO/scripts/verify-adaptive-settings.py"
 step "Cast: Miracast elements, RTSP framing, format choice" quiet python3 "$REPO/scripts/verify-cast.py"
+step "Adaptive Home on the TV: tiles, remote navigation, socket frames" quiet node "$REPO/scripts/verify-tv-home.js"
 step "Agent Office (syntax, roster, API guards; no quota)" quiet "$REPO/scripts/verify-agent-office.sh"
 
 inspector_static() {

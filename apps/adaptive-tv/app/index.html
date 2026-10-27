@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920, height=1080">
+<title>Adaptive Home</title>
+<link rel="stylesheet" href="home.css">
+</head>
+<body>
+<div class="ambient" id="ambient-a"></div>
+<div class="ambient" id="ambient-b"></div>
+<div class="grain"></div>
+
+<header class="top">
+  <div class="brand"><span class="mark"></span><span id="greeting">Adaptive Home</span></div>
+  <div class="now">
+    <div class="weather" id="weather"></div>
+    <div class="clock"><span id="clock">--:--</span><span class="date" id="date"></span></div>
+  </div>
+</header>
+
+<section class="hero" id="hero">
+  <div class="hero-text">
+    <div class="eyebrow" id="hero-eyebrow">Adaptive Home</div>
+    <h1 class="hero-title" id="hero-title">Hello</h1>
+    <div class="hero-meta" id="hero-meta">Reading the TV's apps…</div>
+    <div class="hints">
+      <span class="hint"><b>OK</b> Open</span>
+      <span class="hint" id="hint-pin"><i class="dot blue"></i><span id="hint-pin-text">Pin to favourites</span></span>
+    </div>
+  </div>
+  <div class="hero-art" id="hero-art"><div class="art-face" id="art-face"></div></div>
+</section>
+
+<main class="rows" id="rows"><div class="scroller" id="scroller"></div></main>
+
+<div class="launch" id="launch"><div class="launch-icon" id="launch-icon"></div><div class="launch-text" id="launch-text"></div></div>
+<div class="overlay" id="pairing">
+  <div class="card">
+    <div class="card-title">Allow Adaptive Home</div>
+    <p>The TV is asking whether Adaptive Home may open apps and switch inputs. Choose <b>Allow</b> on the prompt with the remote. This happens once.</p>
+  </div>
+</div>
+<div class="overlay" id="city">
+  <form class="card" id="city-form">
+    <div class="card-title">Weather</div>
+    <p>Type the city for the weather, then press OK.</p>
+    <input id="city-input" type="text" autocomplete="off" spellcheck="false" placeholder="Chennai">
+  </form>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="model.js"></script>
+<script src="home.js"></script>
+</body>
+</html>
