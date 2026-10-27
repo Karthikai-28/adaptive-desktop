@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Cast
+GenericName=Wireless Display
+Comment=Show this screen on a TV over Miracast (Wi-Fi Direct)
+Keywords=cast;miracast;wireless;display;tv;screen;mirror;project;wfd;
+Exec=@ADAPTIVE_REPO@/scripts/adaptive-cast-launch.sh
+Icon=video-display
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=com.karthi.AdaptiveCast

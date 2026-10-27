@@ -1,0 +1,79 @@
+/* Cast - same tokens as the shell and the palette. */
+
+@define-color ad_bg        #1C1C1E;
+@define-color ad_bg_deep   #141416;
+@define-color ad_surface   #2C2C2E;
+@define-color ad_surface_2 #3A3A3C;
+@define-color ad_divider   #48484A;
+@define-color ad_text      #F5F5F7;
+@define-color ad_muted     #98989D;
+@define-color ad_accent    #0A84FF;
+@define-color ad_warning   #FF9F0A;
+@define-color ad_danger    #FF453A;
+@define-color ad_live      #30D158;
+
+window.adaptive-cast, .root { background-color: @ad_bg; color: @ad_text; }
+
+.header {
+    padding: 22px 24px 14px 24px;
+    background-color: @ad_bg_deep;
+    border-bottom: 1px solid alpha(@ad_divider, 0.35);
+}
+
+.title { font-size: 22px; font-weight: 600; }
+
+.muted { color: @ad_muted; }
+
+.banner {
+    margin: 14px 16px 0 16px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background-color: alpha(@ad_warning, 0.14);
+    color: @ad_warning;
+    font-family: monospace;
+}
+
+.displays { background: transparent; padding: 10px 8px; }
+
+.displays > row { background: transparent; }
+
+.display {
+    margin: 4px 8px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background-color: @ad_surface;
+}
+
+.display .name { font-weight: 600; }
+
+.empty { margin: 32px 24px; }
+
+button.cast {
+    background-image: none;
+    background-color: @ad_accent;
+    color: white;
+    border-radius: 8px;
+    border: none;
+    padding: 6px 18px;
+    font-weight: 600;
+}
+
+button.cast:disabled { background-color: @ad_surface_2; color: @ad_muted; }
+
+button.stop {
+    background-image: none;
+    background-color: alpha(@ad_danger, 0.18);
+    color: @ad_danger;
+    border-radius: 8px;
+    border: none;
+}
+
+.footer {
+    padding: 12px 16px;
+    background-color: @ad_bg_deep;
+    border-top: 1px solid alpha(@ad_divider, 0.35);
+}
+
+.status { color: @ad_muted; }
+.status.live { color: @ad_live; }
+.status.error { color: @ad_danger; }

@@ -49,6 +49,7 @@ PARTS=(
     "keybindings|Adaptive keyboard shortcuts|status_keybindings|$S/install-keybindings.sh"
     "terminal|Terminal defaults and KTERM integration|status_terminal|install_terminal"
     "settings|Adaptive Settings app|status_settings|$S/install-adaptive-settings.sh"
+    "cast|Cast: this screen on a TV over Miracast|status_cast|$S/install-cast.sh"
     "gestures|Touchpad gesture service|status_gestures|$S/install-gestures.sh"
     "files|Files inspector for the Nautilus fork|status_files|install_files"
     "wallpaper|Hourly wallpaper rotation|status_unit adaptive-wallpaper.timer|$S/install-wallpaper-rotation.sh"
@@ -82,6 +83,10 @@ status_keybindings() {
         [[ "$have" == *"/$name/"* ]] || missing=$((missing + 1))
     done
     [ "$missing" = 0 ] || echo "$missing shortcut(s) not installed"
+}
+
+status_cast() {
+    [ -f "$APPS/com.karthi.AdaptiveCast.desktop" ] || echo "not in the app grid"
 }
 
 status_settings() {
