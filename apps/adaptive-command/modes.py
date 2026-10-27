@@ -16,7 +16,8 @@
                            Gazebo or rqt, record ("ros record /a /b"), stop what the
                            panel started, build the workspace or a package, use a
                            saved setup or robot profile, "ros domain 7"
-    phone [app]            the paired phone, or one of its apps, in a window here
+    phone [app]            the paired phone, or one of its apps, in a window here;
+                           files on the phone with that name, copied here on Enter
 
 Your own commands are executables in ~/.config/adaptive-desktop/commands/;
 each shows up as an action, named after its file.
@@ -436,6 +437,23 @@ def phone_rows(rest, cache):
                         "Phone", "phone-symbolic", score=100))
     elif not hits and not rows:
         rows.append(row("No phone app matches", "", "Phone", "phone-symbolic", score=100))
+    return rows
+
+
+def phone_file_rows(rest, files, reachable=True):
+    """Files on the phone whose names match: Enter copies one to
+    ~/Downloads/Phone and opens it."""
+    if len(rest) < 2:
+        return []
+    if not reachable:
+        return [row("Phone files: the phone is not reachable over adb", "Wireless debugging on, or a cable",
+                    "Phone files", "phone-symbolic", score=90)]
+    rows = []
+    for rank, found in enumerate(files[:10]):
+        folder = found.get("shown") or found.get("folder", "")
+        rows.append(row(found["name"], f"{folder} on the phone - {found.get('size_text', '')} - Enter copies it here",
+                        "Phone files", "document-save-symbolic", "Get",
+                        ("run", [str(PHONE), "get", found["path"], "--open"], None), 200 - rank))
     return rows
 
 

@@ -10,8 +10,12 @@ Terminal=false
 Categories=Utility;
 StartupNotify=false
 StartupWMClass=scrcpy
-Actions=screen-off;
+Actions=screen-off;get-files;
 
 [Desktop Action screen-off]
 Name=With the Phone's Screen Off
 Exec=@ADAPTIVE_REPO@/apps/adaptive-phone/phone.py --screen-off
+
+[Desktop Action get-files]
+Name=Get Files from the Phone…
+Exec=@ADAPTIVE_REPO@/apps/adaptive-phone/phone.py get

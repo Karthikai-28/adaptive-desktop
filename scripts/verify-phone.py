@@ -188,4 +188,42 @@ esac
     assert ran == [("run", [str(modes.PHONE), "app", "com.whatsapp"], None)], ran
     assert palette.Palette._provide_phone_apps(window, palette.Query.make("w")) == []
 
-print("PASS phone: phone choice, Wi-Fi rediscovery, apps, scrcpy arguments, palette search and mode, unlock and lock again")
+    # Files from the phone: found through Android's media index, named as the
+    # phone's owner knows them, copied to ~/Downloads/Phone without
+    # overwriting, and offered in the palette.
+    media = ("Row: 0 _data=/storage/emulated/0/Download/a, b.pdf, _size=2048, date_modified=200\n"
+             "Row: 1 _data=/storage/emulated/0/DCIM/Camera/IMG_1.jpg, _size=NULL, date_modified=300\n")
+    parsed = phone.parse_media(media)
+    assert [(f["name"], f["size"], phone.shown(f["folder"])) for f in parsed] == [
+        ("IMG_1.jpg", 0, "DCIM/Camera"), ("a, b.pdf", 2048, "Download")], parsed
+    assert phone.shown("/sdcard") == "Internal storage" and phone.size_text(1536) == "1.5 KB"
+    (root / "adb").write_text(f"""#!/bin/sh
+echo "adb $*" >> {log}
+case "$1" in
+  devices) echo "List of devices attached"; echo "192.168.31.15:40005 device model:motorola_edge_50_pro" ; exit ;;
+esac
+case "$3" in
+  shell) if [ -z "$4" ]; then script=$(cat); echo "script: $script" >> {log}
+           printf '%s\\n' "Row: 0 _data=/storage/emulated/0/Download/report.pdf, _size=10, date_modified=5"; fi ;;
+  pull) printf 'from the phone' > "$6" ;;
+esac
+""")
+    received = root / "Downloads/Phone"
+    phone.RECEIVED = received
+    os.environ["ADAPTIVE_PHONE_ADB"] = str(root / "adb")
+    log.write_text("")
+    found = phone.search_files("S", "it's 50%_x")
+    script = log.read_text()
+    assert "_display_name LIKE '\\''%it'\\'''\\''s 50\\%\\_x%'\\'' ESCAPE" in script, script   # one word for the phone's shell
+    assert [f["name"] for f in found] == ["report.pdf"]
+    arrived = phone.pull("S", ["/storage/emulated/0/Download/report.pdf"] * 2)
+    assert [a.name for a in arrived] == ["report.pdf", "report (2).pdf"] and arrived[1].read_text() == "from the phone"
+    assert "pull -a /storage/emulated/0/Download/report.pdf" in log.read_text()
+    rows = modes.phone_file_rows("rep", [dict(found[0], shown="Download", size_text="10 B")])
+    assert rows[0]["group"] == "Phone files" and rows[0]["badge"] == "Get"
+    assert rows[0]["action"] == ("run", [str(modes.PHONE), "get", "/storage/emulated/0/Download/report.pdf", "--open"], None)
+    assert modes.phone_file_rows("rep", [], reachable=False)[0]["title"].startswith("Phone files: the phone is not reachable")
+    assert modes.phone_file_rows("r", found) == []
+
+print("PASS phone: phone choice, Wi-Fi rediscovery, apps, scrcpy arguments, palette search and mode, "
+      "unlock and lock again, files from the phone")

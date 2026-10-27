@@ -816,6 +816,17 @@ features and says so in its notification shade.
   Phone finds it again on the network. With no adb route, Phone opens the
   Adaptive Link window above instead. `./install.sh --only phone` (scrcpy is
   pinned and checked); check: `scripts/verify-phone.py`.
+- **Files from the phone, from here.** A file dropped on the Phone window
+  goes to the phone's *Download* folder; the other way needs nothing done on
+  the phone. *Get Files from the Phone…* (Phone's right-click menu, or
+  `adaptive-phone get`) lists what changed on the phone in the last 30 days
+  in its usual folders (Download, DCIM, Pictures, Documents, Recordings,
+  Movies, Music), newest first; the ticked ones are copied to
+  `~/Downloads/Phone`, keeping their dates. `phone NAME` in the palette also
+  finds files anywhere in the phone's storage by name, through Android's own
+  media index (a second or so); Enter copies one here and opens it. On the
+  phone itself, Share - *Send to computer* puts files in the same folder
+  through Adaptive Link.
 - **A locked phone, used from here.** Android runs nothing behind a secure
   lock screen for anyone but itself (not even on an app's own display), so
   Phone unlocks it as you would: the first time it finds the phone locked it

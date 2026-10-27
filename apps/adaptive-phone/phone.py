@@ -6,6 +6,9 @@
     adaptive-phone app NAME        one phone app in a window of its own
     adaptive-phone apps [--refresh]  the phone's apps (cached for the palette)
     adaptive-phone --forget-unlock the phone's password is no longer kept here
+    adaptive-phone get             choose recent files on the phone; they are copied here
+    adaptive-phone get PATH... [--open]   these, into ~/Downloads/Phone
+    adaptive-phone files TEXT      files on the phone whose names have TEXT in them
 
 It is scrcpy (pinned in .local/scrcpy by scripts/install-phone.sh) over adb:
 the phone's screen at full rate with its sound, a real touch for every click
@@ -20,6 +23,11 @@ debugging, paired once). The Wi-Fi port changes when the phone restarts; it
 is found again by asking the network (mDNS). With no adb route at all, the
 whole phone opens through Adaptive Link instead (phone_screen.py, which
 Android asks about every time and which acts through accessibility).
+
+Files go both ways: one dropped on the window goes to the phone's Download
+folder (scrcpy), and `get` brings the phone's to ~/Downloads/Phone - where
+the phone's own Share, *Send to computer*, puts them through Adaptive Link -
+without touching the phone.
 
 A locked phone is used too. Android runs nothing past a secure lock screen
 for anyone but itself, so Phone unlocks it as its owner would: with the
@@ -47,6 +55,10 @@ SDK_ADB = REPO / ".local/android-sdk/platform-tools/adb"
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "adaptive-desktop/phone.json"
 APPS_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "adaptive-desktop/phone-apps.json"
 APPS_FRESH_S = 24 * 3600
+RECEIVED = Path.home() / "Downloads" / "Phone"
+STORAGE = "/sdcard"
+# Where a phone keeps what its owner made or was sent: the first look.
+RECENT_FOLDERS = ("Download", "DCIM", "Pictures", "Documents", "Recordings", "Movies", "Music")
 _PACKAGE = re.compile(r"^[A-Za-z][\w]*(?:\.[\w]+)+$")
 _APP_LINE = re.compile(r"^\s*([*-])\s+(.*?)\s+([A-Za-z][\w]*(?:\.[\w]+)+)\s*$")
 
@@ -151,6 +163,50 @@ def typed(secret):
     """The phone's `input text` argument for a password, quoted for its shell:
     a space is %s there."""
     return "'" + secret.replace("'", "'\\''").replace(" ", "%s") + "'"
+
+
+def quote(text):
+    """A word for the phone's shell, whatever is in it."""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def parse_listing(text):
+    """Lines of "mtime|size|path" (stat on the phone) as files, newest first."""
+    files = []
+    for line in (text or "").splitlines():
+        stamp, _, rest = line.partition("|")
+        size, _, path = rest.partition("|")
+        if stamp.isdigit() and size.isdigit() and path.startswith("/"):
+            files.append({"path": path, "name": path.rsplit("/", 1)[-1], "folder": path.rsplit("/", 1)[0],
+                          "size": int(size), "time": int(stamp)})
+    return sorted(files, key=lambda f: -f["time"])
+
+
+def shown(folder):
+    """A phone folder as its owner knows it: Download, DCIM/Camera."""
+    for root in ("/storage/emulated/0", STORAGE):
+        if folder == root or folder.startswith(root + "/"):
+            return folder[len(root) + 1:] or "Internal storage"
+    return folder
+
+
+def size_text(size):
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
+def received_as(name, folder=None):
+    """Where a file from the phone lands: its own name, numbered if taken."""
+    folder = folder or RECEIVED
+    target = folder / name
+    stem, suffix = target.stem, target.suffix
+    number = 1
+    while target.exists():
+        number += 1
+        target = folder / f"{stem} ({number}){suffix}"
+    return target
 
 
 def load(path):
@@ -329,6 +385,120 @@ def lock_again(serial):
         run_adb("-s", serial, "shell", "input", "keyevent", "KEYCODE_POWER")
 
 
+# ------------------------------------------------------------------- files
+
+# Hidden files and apps' private storage are never offered.
+_LIST = "2>/dev/null | head -{limit} | tr '\\n' '\\0' | xargs -0 stat -c '%Y|%s|%n' 2>/dev/null"
+
+
+def recent_files(serial, days=30, limit=300):
+    """What changed on the phone lately, in the folders its owner uses."""
+    folders = " ".join(quote(f"{STORAGE}/{f}") for f in RECENT_FOLDERS)
+    return parse_listing(shell(serial, f"find {folders} -type f ! -path '*/.*' -mtime -{int(days)} "
+                                       + _LIST.format(limit=limit) + "\n", timeout=30))
+
+
+def parse_media(text):
+    """`content query` rows of the phone's media index as files, newest first."""
+    lines = []
+    for line in (text or "").splitlines():
+        match = re.match(r"^Row: \d+ _data=(/.*), _size=(\d+|NULL), date_modified=(\d+|NULL)$", line)
+        if match:
+            size, stamp = (v if v.isdigit() else "0" for v in (match.group(2), match.group(3)))
+            lines.append(f"{stamp}|{size}|{match.group(1)}")
+    return parse_listing("\n".join(lines))
+
+
+def search_files(serial, text, limit=40):
+    """Files anywhere in the phone's shared storage whose names have this in
+    them. Android's own index answers in a second or so; walking the storage
+    takes ten, and is what is done only where the index cannot be asked."""
+    word = text.strip()
+    if len(word) < 2:
+        return []
+    like = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("'", "''")
+    where = (f"_display_name LIKE '%{like}%' ESCAPE '\\' AND _data NOT LIKE '%/.%' "
+             "AND _data NOT LIKE '/storage/emulated/0/Android/%' AND _size > 0")
+    out = shell(serial, "content query --uri content://media/external/file --projection _data:_size:date_modified "
+                        f"--where {quote(where)} --sort {quote('date_modified DESC')}\n", timeout=30)
+    if "Row:" in out or "No result found" in out:
+        return parse_media(out)[:limit]
+    glob = re.sub(r"[*?\[\]\\]", "", word)
+    # Pruned, not filtered: apps' storage and hidden folders are never walked.
+    return parse_listing(shell(serial, f"find {STORAGE}/ \\( -path {STORAGE}/Android -o -name '.*' \\) -prune -o "
+                                       f"-type f -iname {quote('*' + glob + '*')} -print " + _LIST.format(limit=limit) + "\n",
+                               timeout=30))
+
+
+def pull(serial, paths, folder=None):
+    """Copy files from the phone here; what arrived, in order."""
+    folder = folder or RECEIVED
+    folder.mkdir(parents=True, exist_ok=True)
+    arrived = []
+    for path in paths:
+        if not path.startswith("/"):
+            path = f"{STORAGE}/{path}"
+        target = received_as(path.rsplit("/", 1)[-1], folder)
+        try:
+            done = subprocess.run([adb(), "-s", serial, "pull", "-a", path, str(target)], capture_output=True,
+                                  text=True, timeout=3600)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if done.returncode == 0 and target.exists():
+            arrived.append(target)
+    return arrived
+
+
+def choose(files):
+    """The files its owner ticks in a list of the phone's recent ones."""
+    if not files or not shutil.which("zenity"):
+        return []
+    rows = []
+    for f in files:
+        rows += ["FALSE", f["name"], shown(f["folder"]), size_text(f["size"]),
+                 time.strftime("%d %b %H:%M", time.localtime(f["time"])), f["path"]]
+    try:
+        done = subprocess.run(["zenity", "--list", "--checklist", "--title", "Get files from the phone",
+                               "--text", "Recent files on the phone, newest first. Ticked ones are copied to Downloads/Phone.",
+                               "--width", "760", "--height", "560", "--ok-label", "Copy here",
+                               "--column", "", "--column", "Name", "--column", "Folder", "--column", "Size",
+                               "--column", "Changed", "--column", "Path", "--hide-column", "6",
+                               "--print-column", "6", "--separator", "\n", *rows],
+                              capture_output=True, text=True, timeout=3600)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [line for line in done.stdout.splitlines() if line.startswith("/")] if done.returncode == 0 else []
+
+
+def open_path(path):
+    if shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+
+
+def get(device, paths, open_it=False):
+    """Bring files from the phone; with none named, its owner picks them."""
+    serial = device["serial"]
+    if not paths:
+        files = recent_files(serial)
+        if not files:
+            tell("Nothing new on the phone", "No files changed in the last 30 days in its usual folders. "
+                 "Search all of it with \"phone files NAME\" in the palette.")
+            return 1
+        paths = choose(files)
+        if not paths:
+            return 0
+        open_it = False
+    arrived = pull(serial, paths)
+    if not arrived:
+        tell("Nothing was copied", "The phone did not give the file(s); is it still connected?")
+        return 1
+    named = arrived[0].name if len(arrived) == 1 else f"{len(arrived)} files"
+    tell("From the phone", f"{named} in Downloads/Phone")
+    open_path(arrived[0] if open_it and len(arrived) == 1 else RECEIVED)
+    return 0 if len(arrived) == len(paths) else 1
+
+
 def through_link():
     """The whole phone through Adaptive Link, where adb cannot reach it."""
     cli = REPO / "scripts/link-cli.py"
@@ -346,7 +516,7 @@ def main(argv):
     if args and args[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
-    command = args.pop(0) if args and args[0] in ("app", "apps") else ""
+    command = args.pop(0) if args and args[0] in ("app", "apps", "get", "files") else ""
     device = phone()
     if "--forget-unlock" in args:
         if device:
@@ -361,6 +531,19 @@ def main(argv):
             for app in apps:
                 print(f"{app['name']:<32} {app['package']}")
         return 0 if apps else 1
+    if command in ("get", "files") and device is None:
+        tell("Phone is not reachable", "Files come over adb: turn on Wireless debugging on the phone, or plug it in. "
+             "On the phone, Share - Send to computer works through Adaptive Link.")
+        return 1
+    if command == "get":
+        return get(device, [a for a in args if not a.startswith("--")], open_it="--open" in args)
+    if command == "files":
+        found = search_files(device["serial"], " ".join(a for a in args if not a.startswith("--")))
+        if "--json" in args:
+            print(json.dumps(found))
+        for f in [] if "--json" in args else found:
+            print(f"{f['path']}  ({size_text(f['size'])})")
+        return 0 if found else 1
     if device is None:
         if command == "app":
             tell("Phone is not reachable", "Phone apps open here over adb: turn on Wireless debugging on the phone, or plug it in.")

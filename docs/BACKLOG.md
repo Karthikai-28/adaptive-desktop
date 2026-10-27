@@ -858,7 +858,9 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   `phone NAME`); Wi-Fi port found again by mDNS; Adaptive Link's
   accessibility window where adb cannot reach. A locked phone is unlocked
   with its password from the login keyring (asked once), kept dark while in
-  use and locked again on close. Logic checked with stand-ins by
+  use and locked again on close. Files from the phone without touching it:
+  a picker of recent ones, and search by name in the palette (MediaStore).
+  Logic checked with stand-ins by
   `verify-phone.py`; lock detection read from the real phone; not yet run
   against it end to end.
 - ⬜ Not there: a watch app of its own (the notification's buttons reach a

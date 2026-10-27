@@ -92,6 +92,9 @@ GROUPS = [
     ("New Project", "violet"),
     ("Windows", "cyan"),
     ("Applications", "accent"),
+    ("Phone", "accent"),
+    ("Phone apps", "accent"),
+    ("Phone files", "cyan"),
     ("Files & Folders", "cyan"),
     ("Projects", "violet"),
     ("Settings", "muted"),
@@ -462,7 +465,25 @@ class Palette(Gtk.ApplicationWindow):
                                   "In Files", "text-x-generic-symbolic", score=WEIGHT_ANSWER)]
         if mode == "ros":
             return M.ros_rows(rest, M.ros_status())
+        if mode == "phone" and len(rest) >= 2:
+            phone = self._phone_module()
+            device = phone.phone()
+            files = phone.search_files(device["serial"], rest) if device else []
+            for found in files:
+                found.update(shown=phone.shown(found["folder"]), size_text=phone.size_text(found["size"]))
+            return M.phone_file_rows(rest, files, reachable=device is not None)
         return []
+
+    @staticmethod
+    def _phone_module():
+        """apps/adaptive-phone/phone.py, loaded once, for searching the phone."""
+        if "adaptive_phone" not in sys.modules:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("adaptive_phone", M.PHONE)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            sys.modules["adaptive_phone"] = module
+        return sys.modules["adaptive_phone"]
 
     def _dedupe(self, results):
         """Merge the live and indexed sources, keeping the best score for each
