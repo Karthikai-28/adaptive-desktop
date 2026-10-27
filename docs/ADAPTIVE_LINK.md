@@ -421,15 +421,22 @@ else. This is the app's landing screen.
   services, acting on the laptop directly. The laptop's own *Settings* entry
   opens it rather than a Settings window on the laptop.
 
-**A session of its own.** Each paired phone gets a private display on the
-laptop (Xvfb with the xfwm4 window manager), its own session bus, input and
-sound output, and app settings of its own under
-`~/.config/adaptive-desktop/link/mobile/`. Apps opened from the phone run
-there, so a tap or a keystroke from the phone never reaches the laptop's
-screen, and nothing on the laptop moves or loses focus. Both use the same
-files: open a document from *Files* on the phone and save it, and the laptop
-has the change. It is a separate graphical session, not a sandbox - phone
-apps run as you, with your permissions.
+**A session of its own, on one computer.** Each paired phone gets a private
+display on the laptop (Xvfb with the xfwm4 window manager), its own session
+bus, input and sound output. Apps opened from the phone run there, so a tap
+or a keystroke from the phone never reaches the laptop's screen, and nothing
+on the laptop moves or loses focus. Everything else is the laptop's: the
+same files, the same app settings and profiles in `~/.config`, and the same
+keyring, which the phone's bus reaches through `secrets_bridge.py` (it
+passes on the Secret Service and nothing else). Open a document on the phone
+and save it, and the laptop has the change; Antigravity, VS Code or Chrome
+open signed in, as they are on the laptop. It is a separate graphical
+session, not a sandbox - phone apps run as you, with your permissions.
+
+Settings the phone changes stay on the phone: its GTK settings come before
+the laptop's in `XDG_CONFIG_DIRS` (your own `~/.config/gtk-*/settings.ini`
+still wins), and it writes dconf settings to a database of its own that sits
+over the laptop's, which it reads (`DCONF_PROFILE`).
 
 The app is fitted to the phone's screen, keyboard and turning, without
 restarting it and without changing the laptop's own displays (see *Apps in
@@ -440,11 +447,29 @@ the picture and lets go of held keys, but the apps keep running, and coming
 back finds them as they were. A laptop restart ends the session; pins, folders
 and app settings remain.
 
-Apps that refuse a second copy are given one of their own: Firefox, Chrome
-and Chromium, VS Code and its relatives (Antigravity, Codium, Cursor), and
-LibreOffice each get a fresh profile for the phone, never a copy of yours -
-sign in on the phone if you want to. Snap apps run in a scope of their own,
-as snapd requires, with their phone profile under `~/snap/NAME/common/`.
+**One copy at a time.** Firefox, Chrome and Chromium, VS Code and its
+relatives (Antigravity, Codium, Cursor) and LibreOffice let only one running
+copy have their profile open; a second one hands itself to the first, which
+would open the window on the laptop. So before opening one of them the
+laptop looks for a copy already running (`mobile_launch.holders`):
+
+- **Open on the laptop**: the phone asks. *Move here* closes it on the
+  laptop as its own close button would (editors keep unsaved work as they
+  do when closed; anything that asks to save asks on the laptop) and opens
+  it on the phone. *Its laptop window* shows the laptop's window as it is,
+  as *Continue* does.
+- **Open on another phone**: close it there, or give it a profile of this
+  phone's own.
+- **Move to laptop** (the app's menu on the phone) is the way back: it
+  closes the app on the phone and opens it on the laptop.
+
+An app can instead have **a profile of the phone's own** (the app's menu,
+*Profile*): a fresh one, kept under `~/.config/adaptive-desktop/link/mobile/`
+with settings of its own, signed in separately. It can be open on the phone
+and the laptop at once. Snap apps run in a scope of their own, as snapd
+requires; with the laptop's profile they use the snap's own folders, as on
+the laptop, and with the phone's their profile is under
+`~/snap/NAME/common/`.
 
 An app that cannot start this way says so on the phone; it is never opened
 on the laptop instead. To find out beforehand:
@@ -475,9 +500,12 @@ scale, so apps lay themselves out for a phone at the phone's sharpness:
 - Chrome, Chromium and Electron apps (VS Code, Antigravity, Slack...) get
   `--force-device-scale-factor`; browsers also a phone's user agent, so
   websites serve their mobile pages.
-- Firefox gets the same through its phone profile's `user.js` (meta
-  viewport on, a phone's user agent) and a `userChrome.css` that lets its
-  toolbar go narrower than a desktop window. A `user.js` of your own in
+- Firefox is drawn at the phone's scale from the display's DPI. Its
+  settings live in its profile, and the laptop's is never written to, so
+  with the laptop's profile it keeps its desktop toolbar and user agent
+  (and is panned). Given a profile of the phone's own, it gets a `user.js`
+  (meta viewport on, a phone's user agent) and a `userChrome.css` that lets
+  its toolbar go narrower than a desktop window. A `user.js` of your own in
   that profile is left alone.
 - Java, Tk and plain X11 apps get the screen DPI and `Xft.dpi`.
 
@@ -936,6 +964,9 @@ laptop windows.
   zoomed. GTK scales only by whole numbers, so *Compact* text is the nearest
   readable size rather than the phone's exact one. Only the shell and the
   system tools are native.
+- An app open on the phone with the laptop's profile is that app's one
+  copy: opening it on the laptop then opens its window on the phone, not
+  the laptop. Use *Move to laptop* on the phone instead.
 - Apps that need the GPU run on Xvfb's software rendering in the phone's
   session, so 3D apps (Blender, games) are slow there.
 - Android only.

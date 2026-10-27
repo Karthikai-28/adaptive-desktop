@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 
 def checks(check):
-    from mobile_launch import arguments, independent, snap
+    from mobile_launch import arguments, holders, independent, snap
     from mobile_session import ExecutionTarget, viewport
     check(arguments('app --label "two words" %U %%', 'Test', '/app.desktop', files=['/tmp/a b']) ==
           ['app', '--label', 'two words', '/tmp/a b', '%'], 'mobile: desktop Exec expands argv without a shell')
@@ -32,6 +32,36 @@ def checks(check):
         check('--password-store=basic' in independent(['google-chrome'], 'google-chrome.desktop', tmp)
               and '--password-store=basic' in independent(['antigravity-ide'], 'antigravity.desktop', tmp),
               'mobile: browsers and editors skip the fresh keyring prompt')
+        tmp = str(Path(tmp) / 'shared')
+        shared = {'ADAPTIVE_PHONE_PROFILE': 'laptop', 'ADAPTIVE_PHONE_SCALE': '2', 'ADAPTIVE_PHONE_SHORT': '824'}
+        with patch('phone_form.browser_version', lambda argv, fallback: 141):
+            chrome = independent(['google-chrome'], 'google-chrome.desktop', tmp, dict(shared))
+        editor = independent(['antigravity-ide'], 'antigravity.desktop', tmp, dict(shared))
+        firefox_env = dict(shared)
+        fox = independent(['firefox'], 'firefox.desktop', tmp, firefox_env)
+        office = independent(['libreoffice'], 'libreoffice-writer.desktop', tmp, dict(shared))
+        check(not any(a.startswith(('--user-data-dir', '--profile', '-env:UserInstallation')) for a in chrome + editor + fox + office)
+              and '--password-store=gnome-libsecret' in chrome and '--password-store=gnome-libsecret' in editor
+              and not Path(tmp).exists() and firefox_env['GDK_SCALE'] == '1',
+              'one device: browsers, editors and office open with the laptop\'s own profile, which is never written to')
+        own = dict(shared, ADAPTIVE_PHONE_PROFILE='phone')
+        independent(['code'], 'code.desktop', tmp, own)
+        check(own['XDG_CONFIG_HOME'] == str(Path(tmp) / 'config'), 'one device: a profile of the phone\'s own has settings of its own')
+    with tempfile.TemporaryDirectory() as tmp:
+        proc, folder = Path(tmp) / 'proc', Path(tmp) / 'opt/editor'
+        folder.mkdir(parents=True)
+        def process(pid, exe, *env):
+            (proc / str(pid)).mkdir(parents=True)
+            os.symlink(exe, proc / str(pid) / 'exe')
+            (proc / str(pid) / 'environ').write_bytes(b'\0'.join(item.encode() for item in env) + b'\0')
+        process(10, folder / 'editor', 'HOME=/h')
+        process(11, folder / 'editor', 'ADAPTIVE_MOBILE_ROOT=/phone/one')
+        process(12, folder / 'editor', 'ADAPTIVE_MOBILE_ROOT=/phone/two')
+        process(13, folder / 'chrome_crashpad_handler', 'HOME=/h')
+        process(14, Path(tmp) / 'elsewhere/editor', 'HOME=/h')
+        found = holders([str(folder / 'editor')], 'editor.desktop', '/phone/one', proc=str(proc))
+        check(found == {'laptop': [10], 'phone': [12]},
+              f'one device: the copies holding an app\'s profile are found on the laptop and other phones ({found})')
     check(snap(['/snap/bin/firefox']) == ('firefox', 'firefox') and snap(['/snap/bin/foo.bar']) == ('foo', 'bar')
           and snap([sys.executable]) is None, 'mobile: snap commands are recognised for their own adapter')
     check(viewport([100, 9999]) == (320, 3840), 'mobile: viewport bounded inside framebuffer')
@@ -79,6 +109,18 @@ def form_checks(check):
         check(choices.mode('a.desktop') == 'compact' and not choices.chosen('a.desktop'), 'form: a learned layout applies')
         choices.set('a.desktop', 'phone')
         check(choices.mode('a.desktop') == 'phone' and choices.chosen('a.desktop'), 'form: the owner\'s choice beats a learned layout')
+        check(choices.profile('a.desktop') == 'laptop', 'one device: apps share the laptop\'s profile by default')
+        choices.set_profile('a.desktop', 'phone')
+        check(choices.profile('a.desktop') == 'phone' and choices.mode('a.desktop') == 'phone', 'one device: a profile of the phone\'s own is chosen per app')
+        try:
+            choices.set_profile('a.desktop', 'elsewhere')
+            check(False, 'one device: only the two profiles exist')
+        except ValueError:
+            check(True, 'one device: only the two profiles exist')
+        laptop = Path(tmp) / 'adaptive'
+        laptop.write_text('# the laptop session\nuser-db:adaptive\nsystem-db:local\n')
+        check(form.dconf_profile('adaptive_phone_x', str(laptop)) == 'user-db:adaptive_phone_x\nuser-db:adaptive\nsystem-db:local\n',
+              'one device: the phone writes settings of its own over the laptop\'s, which it reads')
         form.prepare(tmp, 2)
         check('gtk-decoration-layout=menu:' in (Path(tmp) / 'gtk-4.0/settings.ini').read_text(), 'form: GTK apps have no window buttons')
 
@@ -138,8 +180,11 @@ root.mainloop()
         await client.start_server()
         before = dict(os.environ)
         try:
+            # The laptop's settings folder, for this check: its dconf databases are files there.
+            laptop_config = root / 'laptop-config'
             with patch.dict(os.environ, {'XDG_DATA_DIRS': str(data) + ':/usr/share', 'PULSE_SERVER': 'unix:/nonexistent/link-test-audio',
-                                         'VSCODE_IPC_HOOK': '/nonexistent/vscode.sock', 'ELECTRON_RUN_AS_NODE': '1'}):
+                                         'VSCODE_IPC_HOOK': '/nonexistent/vscode.sock', 'ELECTRON_RUN_AS_NODE': '1',
+                                         'XDG_CONFIG_HOME': str(laptop_config), 'DCONF_PROFILE': ''}):
                 a = await (await client.post('/v1/mobile/sessions', json={})).json()
                 b = await (await client.post('/v1/mobile/sessions', json={}, headers={'X-Test-Phone': 'two'})).json()
             check(a.get('ok') and b.get('ok'), 'mobile: two paired phones create private sessions')
@@ -147,7 +192,17 @@ root.mainloop()
             check(first.env['DISPLAY'] != second.env['DISPLAY'] and first.env['DBUS_SESSION_BUS_ADDRESS'] != second.env['DBUS_SESSION_BUS_ADDRESS'],
                   'mobile: each phone has a distinct X display and D-Bus')
             check(dict(os.environ) == before and first.env['HOME'] == before.get('HOME'), 'mobile: daemon environment unchanged and files share HOME')
-            check(first.env['XDG_CONFIG_HOME'] != second.env['XDG_CONFIG_HOME'], 'mobile: persistent profiles separated by phone')
+            check(first.env.get('XDG_CONFIG_HOME') == str(laptop_config) and first.env['DCONF_PROFILE'] != second.env['DCONF_PROFILE']
+                  and Path(first.env['DCONF_PROFILE']).read_text().startswith('user-db:adaptive_phone_')
+                  and first.env['XDG_CONFIG_DIRS'].startswith(str(first.root / 'xdg') + ':'),
+                  'one device: phones use the laptop\'s folders, with settings changes of their own')
+            written = sorted(p.name for p in (laptop_config / 'dconf').glob('*'))
+            check(len([n for n in written if n.startswith('adaptive_phone_')]) == 2 and not any(n in written for n in ('user', 'adaptive')),
+                  f'one device: the phone\'s settings go to its own database, never the laptop\'s ({written})')
+            if before.get('DBUS_SESSION_BUS_ADDRESS'):
+                _, owner = await first.run('dbus-send', '--session', '--print-reply', '--dest=org.freedesktop.DBus', '/org/freedesktop/DBus',
+                                           'org.freedesktop.DBus.NameHasOwner', 'string:org.freedesktop.secrets')
+                check(first.public()['keyring'] and 'boolean true' in owner, 'one device: the laptop\'s keyring answers on the phone\'s bus')
             check('VSCODE_IPC_HOOK' not in first.env and 'ELECTRON_RUN_AS_NODE' not in first.env,
                   'mobile: the launcher\'s editor hand-off is not inherited by phone apps')
             response = await client.get('/v1/mobile/apps?session=' + first.id, headers={'X-Test-Phone': 'two'})
@@ -220,7 +275,8 @@ root.mainloop()
             check((root / 'order.txt').read_text() == 'one' and mobile.runs[ident]['state'] == 'cancelled', 'mobile: cancelling skips remaining macro steps')
             await client.post('/v1/mobile/runs', json={'session': first.id, 'request_id': ident, 'steps': [{'kind': 'command', 'value': 'false'}]})
             check(mobile.runs[ident]['state'] == 'cancelled', 'mobile: request ID replay never reexecutes cancelled command')
-            with patch.dict(os.environ, {'XDG_DATA_DIRS': str(data) + ':/usr/share', 'PULSE_SERVER': 'unix:/nonexistent/link-test-audio'}):
+            with patch.dict(os.environ, {'XDG_DATA_DIRS': str(data) + ':/usr/share', 'PULSE_SERVER': 'unix:/nonexistent/link-test-audio',
+                                         'XDG_CONFIG_HOME': str(laptop_config), 'DCONF_PROFILE': ''}):
                 await form_session(check, client, mobile, catalog)
             reconnected = await (await client.post('/v1/mobile/sessions', json={})).json()
             check(reconnected['session']['id'] == first.id and first.alive(), 'mobile: reconnect resumes the same apps and display')
@@ -250,7 +306,20 @@ async def form_session(check, client, mobile, catalog):
             await asyncio.sleep(.2)
         pid = s.apps['mobile-fixture.desktop']['pids'][-1]
         return dict(item.split('=', 1) for item in Path(f'/proc/{pid}/environ').read_text().split('\0') if '=' in item)
+    import mobile_session
+    sleeper = await asyncio.create_subprocess_exec('sleep', '1')
+    def holding(app_id, root, profile='laptop'):
+        alive = profile == 'laptop' and Path(f'/proc/{sleeper.pid}').exists()
+        return {'laptop': [sleeper.pid] if alive else [], 'phone': []}
+    with patch.object(mobile_session.mobile_launch, 'holding', holding), patch.object(mobile_session.machine, 'windows', lambda env=None: []):
+        held = await (await client.post('/v1/mobile/apps', headers=three, json={'session': s.id, 'app_id': 'mobile-fixture.desktop'})).json()
+        check(held.get('held', {}).get('where') == 'laptop' and 'mobile-fixture.desktop' not in s.apps,
+              'one device: an app open on the laptop is not opened a second time')
+        taken = await (await client.post('/v1/mobile/apps', headers=three, json={'session': s.id, 'app_id': 'mobile-fixture.desktop', 'take': True})).json()
+        check(taken.get('ok') and not Path(f'/proc/{sleeper.pid}').exists() and 'mobile-fixture.desktop' in s.apps,
+              'one device: moving it here waits for the laptop\'s copy to close, then opens it on the phone')
     env = await launched()
+    check(env.get('ADAPTIVE_PHONE_PROFILE') == 'laptop', 'one device: the app is started with the laptop\'s profile')
     check(env.get('GDK_SCALE') == '2' and env.get('QT_SCALE_FACTOR') == '2' and env.get('ADAPTIVE_PHONE_MODE') == 'phone',
           'form: an app in the phone session is started at the phone\'s scale')
     await asyncio.sleep(.4)
@@ -269,6 +338,17 @@ async def form_session(check, client, mobile, catalog):
     await asyncio.sleep(.5)
     env = await launched()
     check(env.get('GDK_SCALE') == '1' and env.get('ADAPTIVE_PHONE_MODE') == 'desktop', 'form: the desktop layout starts the app at desktop scale')
+    reply = await (await client.post('/v1/mobile/apps', headers=three, json={'session': s.id, 'operation': 'profile',
+        'app_id': 'mobile-fixture.desktop', 'profile': 'phone'})).json()
+    check(reply.get('ok') and reply['session']['profiles'].get('mobile-fixture.desktop') == 'phone', 'one device: a profile of the phone\'s own is kept per app')
+    opened_on_laptop = []
+    with patch.object(mobile_session.desktop, 'launch', lambda app_id: opened_on_laptop.append(app_id) or True), \
+            patch.object(mobile_session.mobile_launch, 'mine', lambda app_id, root: []):
+        moved = await (await client.post('/v1/mobile/apps', headers=three, json={'session': s.id, 'operation': 'to-laptop',
+            'app_id': 'mobile-fixture.desktop'})).json()
+    check(moved.get('moved') == 'laptop' and opened_on_laptop == ['mobile-fixture.desktop']
+          and not any(w['app_id'] == 'mobile-fixture.desktop' for w in s.windows),
+          'one device: moving an app to the laptop closes it on the phone, then opens it there')
     reply = await (await client.post('/v1/mobile/sessions', headers=three, json={'operation': 'resize', 'session': s.id,
         'phone': {'dp': [500, 300], 'density': 2.5}})).json()
     check(reply.get('ok') and reply['session']['viewport'] == [1000, 600], 'form: turning the phone turns the display')

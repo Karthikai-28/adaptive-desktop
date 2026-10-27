@@ -145,6 +145,8 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     var launching by remember { mutableStateOf<JSONObject?>(null) }
     var homeMenu by remember { mutableStateOf(false) }
     var layoutMenu by remember { mutableStateOf(false) }
+    // A laptop app whose profile another copy has open: on the laptop or another phone.
+    var held by remember { mutableStateOf<JSONObject?>(null) }
     var forceWindow by remember { mutableStateOf<JSONObject?>(null) }
     var run by remember { mutableStateOf<JSONObject?>(null) }
     var pending by remember { mutableStateOf(false) }
@@ -326,7 +328,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         session = reply.getJSONObject("session")
         return session?.getString("id")
     }
-    fun open(appId: String, new: Boolean = false) {
+    fun open(appId: String, new: Boolean = false, take: Boolean = false) {
         layout.optJSONObject("pinned_folders")?.optString(appId)?.takeIf { it.isNotBlank() }?.let {
             folderPath = it; nativePage = Page.Files; visit("native"); return
         }
@@ -350,7 +352,8 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         scope.launch {
             try {
                 val sid = ensureSession() ?: return@launch
-                val reply = client.post("/v1/mobile/apps", JSONObject().put("session", sid).put("app_id", appId).put("new_window", new))
+                val reply = client.post("/v1/mobile/apps", JSONObject().put("session", sid).put("app_id", appId).put("new_window", new).put("take", take))
+                reply?.optJSONObject("held")?.let { held = it; return@launch }
                 if (reply?.optBoolean("ok") == true) {
                     if (reply.optString("native") == "control-center") { visit("control"); return@launch }
                     if (reply.optString("native") == "files") { folderPath = "~"; nativePage = Page.Files; visit("native"); return@launch }
@@ -386,13 +389,52 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 val reply = client.post("/v1/mobile/apps", JSONObject().put("session", id).put("operation", "layout")
                     .put("app_id", appId).put("layout", mode).put("reopen", true))
                 reply?.optJSONObject("session")?.let { session = it }
+                reply?.optJSONObject("held")?.let { held = it }
                 note = when {
                     reply == null -> "Connection lost"
+                    reply.has("held") -> note
                     reply.optBoolean("pending") -> reply.optString("error")
                     reply.optBoolean("ok") -> "${launching?.optString("name")} · ${mode.replaceFirstChar { it.uppercase() }} layout"
                     else -> reply.optString("error")
                 }
             } finally { busy = false; launching = null }
+        }
+    }
+    /** The laptop's profile (signed in as there) or one of this phone's own; a running app is reopened with it. */
+    fun useProfile(appId: String, profile: String, openAfter: Boolean = false) {
+        if (id.isEmpty() || busy) return
+        busy = true
+        scope.launch {
+            var start = false
+            try {
+                val reply = client.post("/v1/mobile/apps", JSONObject().put("session", id).put("operation", "profile")
+                    .put("app_id", appId).put("profile", profile).put("reopen", true))
+                reply?.optJSONObject("session")?.let { session = it }
+                reply?.optJSONObject("held")?.let { held = it }
+                note = when {
+                    reply == null -> "Connection lost"
+                    reply.has("held") -> note
+                    reply.optBoolean("pending") || !reply.optBoolean("ok") -> reply.optString("error")
+                    profile == "phone" -> "Opens with this phone's own profile from now on"
+                    else -> "Opens with the laptop's profile from now on"
+                }
+                start = openAfter && reply?.optBoolean("ok") == true && !reply.optBoolean("running")
+            } finally { busy = false }
+            if (start) open(appId)
+        }
+    }
+    /** Closes the app here and opens it on the laptop: one computer, the app goes where you are. */
+    fun toLaptop(appId: String) {
+        if (id.isEmpty() || busy) return
+        busy = true
+        val name = (apps + laptopApps).firstOrNull { it.optString("id") == appId }?.optString("name") ?: "The app"
+        scope.launch {
+            try {
+                val reply = client.post("/v1/mobile/apps", JSONObject().put("session", id).put("operation", "to-laptop").put("app_id", appId))
+                reply?.optJSONObject("session")?.let { session = it }
+                if (reply?.optString("moved") == "laptop") { note = "$name is open on the laptop"; back() }
+                else note = reply?.optString("error") ?: "Connection lost"
+            } finally { busy = false }
         }
     }
     fun window(w: JSONObject, operation: String = "activate", confirmed: Boolean = false) {
@@ -578,6 +620,20 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                                     leadingIcon = { RadioButton(mode == current, null) },
                                     onClick = { layoutMenu = false; if (mode != current) relayout(selectedApp, mode) })
                             }
+                            HorizontalDivider()
+                            val profileNow = session?.optJSONObject("profiles")?.optString(selectedApp)?.ifBlank { null } ?: "laptop"
+                            Text("Profile", Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp), style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            listOf(Triple("laptop", "The laptop's", "Signed in and set up as on the laptop"),
+                                Triple("phone", "This phone's own", "A separate profile: sign in again here")).forEach { (choice, label, detail) ->
+                                DropdownMenuItem(text = { Column { Text(label, fontWeight = if (choice == profileNow) FontWeight.SemiBold else FontWeight.Normal)
+                                    Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                                    leadingIcon = { RadioButton(choice == profileNow, null) },
+                                    onClick = { layoutMenu = false; if (choice != profileNow) useProfile(selectedApp, choice) })
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text("Move to laptop") }, leadingIcon = { Icon(Icons.Default.Laptop, null) },
+                                onClick = { layoutMenu = false; toLaptop(selectedApp) })
                         }
                     }
                     TextButton(onClick = { controls = !controls }) { Text("Controls") }
@@ -831,6 +887,26 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 if (aid in running) TextButton(onClick = { session?.optJSONArray("windows").rows().filter { it.optString("app_id") == aid }.forEach { window(it, "close") }; organizing = null }) { Text("Close application") }
             }
         }, confirmButton = { TextButton(onClick = { persist(layout.copyJson().put("folders", folders.copyJson().put(aid, folderName.trim()))); organizing = null }) { Text("Done") } })
+    }
+    held?.let { h ->
+        val appId = h.optString("app_id")
+        val name = h.optString("name").ifBlank { "This app" }
+        val onLaptop = h.optString("where") == "laptop"
+        val live = liveWindows.firstOrNull { it.first.optString("id") == appId }
+        AlertDialog(onDismissRequest = { held = null },
+            icon = { Icon(if (onLaptop) Icons.Default.Laptop else Icons.Default.PhoneAndroid, null) },
+            title = { Text(if (onLaptop) "$name is open on the laptop" else "$name is open on your other phone") },
+            text = { Text(if (onLaptop) "The phone and the laptop share its profile and sign-ins, and only one copy can have them open. " +
+                "Move it here: it closes on the laptop as if you closed it there, then opens on the phone. If it asks to save, answer it on the laptop."
+                else "Only one copy can have its profile open. Close it on the other phone, or give it a profile of this phone's own.") },
+            confirmButton = {
+                if (onLaptop) TextButton(onClick = { held = null; open(appId, take = true) }) { Text("Move here") }
+                else TextButton(onClick = { held = null; useProfile(appId, "phone", openAfter = true) }) { Text("Use this phone's profile") }
+            },
+            dismissButton = { Row {
+                if (onLaptop && live != null) TextButton(onClick = { held = null; continueWindow(live.first, live.second) }) { Text("Its laptop window") }
+                TextButton(onClick = { held = null }) { Text("Cancel") }
+            } })
     }
     choices?.let { windows -> AlertDialog(onDismissRequest = { choices = null }, title = { Text("Choose a phone window") }, text = {
         LazyColumn { items(windows) { w -> TextButton(onClick = { window(w) }) { Text(w.optString("title")) } } }

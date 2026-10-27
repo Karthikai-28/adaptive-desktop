@@ -26,6 +26,11 @@ Each app has a layout (mode):
   when its window does not fit (Choices.learn); browsers stay mobile.
 - desktop: the desktop design as it is on the laptop, a little larger, and
   a desktop user agent.
+
+And a profile: the laptop's own (the default: the phone and the laptop are
+one computer, signed in once), or one of the phone's own. With the laptop's,
+nothing is written into the app's profile; Firefox then gets its scale from
+the display alone.
 """
 import json
 import os
@@ -35,6 +40,7 @@ import shutil
 import subprocess
 
 MODES = ("phone", "compact", "desktop")
+PROFILES = ("laptop", "phone")
 # How much of the session's scale each layout draws text at.
 RATIO = {"phone": 1.0, "compact": .75, "desktop": .6}
 FRAMEBUFFER = 3840
@@ -194,13 +200,17 @@ FIREFOX_CHROME = """/* """ + MARK + """ */
 
 
 def adapt(argv, app_id, profile, env):
-    """The launch arguments for this app's toolkit, at the session's scale."""
+    """The launch arguments for this app's toolkit, at the session's scale.
+
+    profile is the phone's own profile folder, or None for the laptop's,
+    which is never written to."""
     scale = int(env.get("ADAPTIVE_PHONE_SCALE", "1"))
     mode = env.get("ADAPTIVE_PHONE_MODE", "phone")
     short_side = int(env.get("ADAPTIVE_PHONE_SHORT", "0")) or 800
     which = kind(argv, app_id)
     if which == "firefox":
-        firefox_prefs(profile, scale, mode, short_side)
+        if profile is not None:
+            firefox_prefs(profile, scale, mode, short_side)
         # Firefox multiplies GTK's scale by its own: only its own counts.
         env.update(GDK_SCALE="1", GDK_DPI_SCALE="1")
     elif which in ("browser", "electron"):
@@ -223,7 +233,10 @@ gtk-enable-animations=true
 
 
 def prepare(config, scale):
-    """GTK's own settings for the session (only files this module made)."""
+    """GTK's settings for the session (only files this module made).
+
+    config is a folder the session puts first in XDG_CONFIG_DIRS: below the
+    owner's own settings.ini, which the laptop shares and stays as it is."""
     for version in ("gtk-3.0", "gtk-4.0"):
         path = Path(config) / version / "settings.ini"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -231,6 +244,21 @@ def prepare(config, scale):
             continue
         # The phone closes and switches apps itself: no window buttons.
         path.write_text(GTK.format(mark=MARK, layout="menu:", cursor=24 * scale))
+
+
+def dconf_profile(name, laptop):
+    """A dconf profile: the session's own database, written to, over the laptop's, read.
+
+    laptop is the laptop session's DCONF_PROFILE (a name or a path), or ""."""
+    lines = []
+    for path in ([Path(laptop)] if laptop.startswith("/") else
+                 [Path("/etc/dconf/profile") / (laptop or "user"), Path("/usr/share/dconf/profile") / (laptop or "user")]):
+        try:
+            lines = [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.startswith("#")]
+            break
+        except OSError:
+            continue
+    return "\n".join(["user-db:" + name] + (lines or ["user-db:user"])) + "\n"
 
 
 def settings_commands(scale):
@@ -247,10 +275,11 @@ def resources(scale):
 
 
 class Choices:
-    """The layout of each app on one phone, kept with its sessions.
+    """The layout and profile of each app on one phone, kept with its sessions.
 
     chosen is what the owner picked and always wins; learned is what a
-    launch found (an app too wide for the phone layout)."""
+    launch found (an app too wide for the phone layout). profiles holds the
+    apps given a profile of the phone's own; the rest share the laptop's."""
 
     def __init__(self, path):
         self.path = Path(path)
@@ -261,7 +290,9 @@ class Choices:
         except (OSError, ValueError):
             data = {}
         clean = lambda part: {k: v for k, v in (part if isinstance(part, dict) else {}).items() if isinstance(k, str) and v in MODES}
-        return {"chosen": clean(data.get("chosen")), "learned": clean(data.get("learned"))}
+        profiles = data.get("profiles") if isinstance(data.get("profiles"), dict) else {}
+        return {"chosen": clean(data.get("chosen")), "learned": clean(data.get("learned")),
+                "profiles": {k: v for k, v in profiles.items() if isinstance(k, str) and v in PROFILES}}
 
     def mode(self, app_id):
         data = self.load()
@@ -273,6 +304,17 @@ class Choices:
     def effective(self):
         data = self.load()
         return {**data["learned"], **data["chosen"]}
+
+    def profile(self, app_id):
+        return self.load()["profiles"].get(app_id, "laptop")
+
+    def profiles(self):
+        return self.load()["profiles"]
+
+    def set_profile(self, app_id, profile):
+        if profile not in PROFILES:
+            raise ValueError("profile must be laptop or phone")
+        return self.save(app_id, profile, "profiles")
 
     def set(self, app_id, mode):
         if mode not in MODES:

@@ -827,6 +827,20 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   the widget and shortcuts on a real launcher, and the picture at 2x over a
   real connection. Qt Linguist and Evince still need about 1000 px in
   Compact and are panned.
+- ✅ **One computer, one profile** (`secrets_bridge.py`, `mobile_launch.holders`;
+  ADAPTIVE_LINK.md, *A session of its own, on one computer* and *One copy at
+  a time*). Phone-session apps use the laptop's `~/.config`, app profiles
+  and keyring (the Secret Service only, bridged onto the phone's bus), so
+  Antigravity, VS Code and Chrome open signed in. The phone's own settings
+  go to a dconf database stacked over the laptop's and to GTK settings below
+  the owner's. An app already open on the laptop is offered *Move here* or
+  its laptop window, never opened twice; *Move to laptop* goes back; a
+  profile of the phone's own stays available per app. Checked in a sandbox
+  by `verify_link_mobile.py` (shared launch arguments, holders on the laptop
+  and another phone, held / move here / move to laptop, stacked dconf, the
+  keyring name answering on the phone's bus) and the bridge against a
+  stand-in keyring. 🔬 On the real phone: Antigravity moved here and back,
+  signed in.
 - 🔬 **Continuous-device checks on a real phone.** Image paste into another
   Android app; foreground-only phone clipboard reads; lock/unlock and ordinary
   app switching; background/network reconnection; launcher resume and

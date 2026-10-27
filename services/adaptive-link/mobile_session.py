@@ -23,6 +23,7 @@ import control_profiles
 import desktop
 import inputs
 import machine
+import mobile_launch
 import phone_form
 import screen
 
@@ -93,7 +94,7 @@ class MobileSession:
         self.size = (800, 1280)
         self.canvas = self.size
         self.lock = asyncio.Lock()
-        self.xserver = self.bus = self.wm = None
+        self.xserver = self.bus = self.wm = self.keyring = None
         self.sink_module = None
         self.sink = "adaptive_phone_" + self.id
         self.audio = False
@@ -118,7 +119,7 @@ class MobileSession:
 
     async def apply_form(self, initial=False):
         """The session's own GTK settings, dconf and X resources at its scale."""
-        await asyncio.to_thread(phone_form.prepare, self.root / "config", self.scale)
+        await asyncio.to_thread(phone_form.prepare, self.root / "xdg", self.scale)
         if initial and shutil.which("gsettings"):
             for command in phone_form.settings_commands(self.scale):
                 await self.run(*command)
@@ -138,7 +139,7 @@ class MobileSession:
         missing = [name for name in REQUIRED if not shutil.which(name)]
         if missing:
             raise ValueError("Install phone-session dependencies: " + ", ".join(missing))
-        for name in ("runtime", "config", "cache", "data", "state", "profiles"):
+        for name in ("runtime", "config", "cache", "data", "state", "profiles", "xdg"):
             path = self.root / name
             path.mkdir(parents=True, exist_ok=True, mode=0o700)
             path.chmod(0o700)
@@ -180,11 +181,20 @@ class MobileSession:
         for key in list(self.env):
             if key.startswith(INHERITED):
                 del self.env[key]
+        # The laptop's own folders: apps keep the owner's settings and
+        # sign-ins (a profile of the phone's own is mobile_launch's choice).
+        # The runtime folder stays the session's: single-instance sockets
+        # there would hand an app to its laptop copy.
         self.env.update(DISPLAY=display, XAUTHORITY=str(auth), XDG_RUNTIME_DIR=str(self.runtime),
-                        XDG_CONFIG_HOME=str(self.root / "config"), XDG_CACHE_HOME=str(self.root / "cache"),
-                        XDG_DATA_HOME=str(self.root / "data"), XDG_STATE_HOME=str(self.root / "state"),
                         ADAPTIVE_MOBILE_ROOT=str(self.root), XDG_SESSION_TYPE="x11", XDG_CURRENT_DESKTOP="XFCE",
                         GDK_BACKEND="x11", QT_QPA_PLATFORM="xcb", GTK_USE_PORTAL="0")
+        # The phone's GTK settings under the owner's own, and a dconf of its
+        # own over the laptop's: what the phone changes stays on the phone.
+        self.env["XDG_CONFIG_DIRS"] = str(self.root / "xdg") + ":" + os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg")
+        dconf = self.root / "dconf-profile"
+        # A database name is part of a D-Bus object path: letters, digits and _ only.
+        dconf.write_text(phone_form.dconf_profile("adaptive_phone_" + self.root.name[:12], os.environ.get("DCONF_PROFILE", "")))
+        self.env["DCONF_PROFILE"] = str(dconf)
         # Retain installed per-user desktop entries; never copy their profiles.
         self.env["XDG_DATA_DIRS"] = str(Path.home() / ".local/share") + ":" + os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
         self.bus = await asyncio.create_subprocess_exec("dbus-daemon", "--session", "--nofork", "--print-address=1",
@@ -193,6 +203,7 @@ class MobileSession:
         if not address:
             raise ValueError("private session bus failed")
         self.env["DBUS_SESSION_BUS_ADDRESS"] = address
+        await self.bridge_keyring(address)
         self.wm = await asyncio.create_subprocess_exec("xfwm4", "--compositor=off", env=self.env,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
         self.input = inputs.Input(self.env)
@@ -220,6 +231,21 @@ class MobileSession:
         await self.apply_form(initial=True)
         self.state = "ready"
 
+    async def bridge_keyring(self, address):
+        """The laptop's keyring on the session's bus (secrets_bridge.py), if the laptop has a bus."""
+        if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+            return
+        self.keyring = await asyncio.create_subprocess_exec(sys.executable, str(Path(__file__).with_name("secrets_bridge.py")), address,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+        try:
+            ready = await asyncio.wait_for(self.keyring.stdout.readline(), 5)
+        except asyncio.TimeoutError:
+            ready = b""
+        if ready.strip() != b"ready":
+            # Apps still start; they ask to sign in, as with no keyring.
+            await stop_process(self.keyring)
+            self.keyring = None
+
     def alive(self):
         return self.state == "ready" and all(p is not None and p.returncode is None for p in (self.xserver, self.bus, self.wm))
 
@@ -227,6 +253,7 @@ class MobileSession:
         alive = self.alive()
         return {"id": self.id, "state": "ready" if alive else "failed", "viewport": list(self.size), "canvas": list(self.canvas),
                 "scale": self.scale, "dp": self.form["dp"] if self.form else None, "layouts": self.choices.effective(),
+                "profiles": self.choices.profiles(), "keyring": self.keyring is not None and self.keyring.returncode is None,
                 "selected_window": self.selected, "split_window": self.split, "selected_app": self.selected_app, "audio": self.audio,
                 "apps": list(self.apps.values()), "windows": self.windows,
                 "error": "" if alive else "Private session stopped. End this session and create a new one."}
@@ -302,12 +329,14 @@ class MobileSession:
 
     async def spawn(self, app_id, name, files=()):
         """Start one catalog app on this display through the launch helper."""
-        env = dict(self.env, **phone_form.environment(self.scale, self.choices.mode(app_id)), ADAPTIVE_PHONE_SHORT=str(min(self.size)))
+        env = dict(self.env, **phone_form.environment(self.scale, self.choices.mode(app_id)), ADAPTIVE_PHONE_SHORT=str(min(self.size)),
+                   ADAPTIVE_PHONE_PROFILE=self.choices.profile(app_id))
         process = await asyncio.create_subprocess_exec(sys.executable, str(Path(__file__).with_name("mobile_launch.py")), app_id, *files,
             env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
         self.processes.append(process)
         instance = self.apps.setdefault(app_id, {"app_id": app_id, "name": name, "windows": [], "pids": []})
-        instance.update(started=time.time(), state="starting", message="Waiting for its phone window", layout=self.choices.mode(app_id))
+        instance.update(started=time.time(), state="starting", message="Waiting for its phone window", layout=self.choices.mode(app_id),
+                        profile=self.choices.profile(app_id))
         instance.pop("reported", None)
         instance["pids"].append(process.pid)
         return instance
@@ -339,7 +368,7 @@ class MobileSession:
             await self.input.stop()
         for proc in reversed(self.processes):
             await stop_process(proc)
-        for proc in (self.wm, self.bus, self.xserver):
+        for proc in (self.wm, self.keyring, self.bus, self.xserver):
             await stop_process(proc)
         if self.sink_module:
             await asyncio.to_thread(machine._run, "pactl", "unload-module", self.sink_module)
@@ -480,7 +509,7 @@ class MobileDesktop:
         apps = [dict(app, compatibility=known[app["id"]]["result"]) if app["id"] in known else app for app in catalog]
         return {"ok": True, "apps": apps, "session": s.public() if s else None}
 
-    async def launch(self, s, app_id, new=False, files=()):
+    async def launch(self, s, app_id, new=False, files=(), take=False):
         self.permit()
         catalog = await self.catalog()
         app = next((a for a in catalog if a["id"] == app_id), None)
@@ -499,6 +528,18 @@ class MobileDesktop:
                 return {"ok": True, "choose_window": existing, "session": s.public()}
             await s.focus(existing[0]["id"])
             return {"ok": True, "session": s.public()}
+        # With the laptop's profile only one copy can be open: one already
+        # open elsewhere would be handed the launch and open there instead.
+        held = await asyncio.to_thread(mobile_launch.holding, app_id, s.root, s.choices.profile(app_id))
+        if held["phone"]:
+            return {"ok": True, "held": {"where": "phone", "app_id": app_id, "name": app["name"]}, "session": s.public()}
+        if held["laptop"]:
+            if not take:
+                return {"ok": True, "held": {"where": "laptop", "app_id": app_id, "name": app["name"]}, "session": s.public()}
+            if not await self.leave_laptop(held["laptop"]):
+                return {"ok": False, "pending": True, "session": s.public(),
+                        "error": f"{app['name']} is still open on the laptop. Answer it there, then try again."}
+            self.link.audit.write(s.owner, "mobile-launch", f"{app_id} moved from the laptop")
         instance = await s.spawn(app_id, app["name"], files)
         s.selected_app, s.selected = app_id, 0
         before = {w["id"] for w in s.windows}
@@ -524,6 +565,48 @@ class MobileDesktop:
         self.link.audit.write(s.owner, "mobile-launch", f"{app_id} session={s.id} {instance['state']}")
         return {"ok": True, "session": s.public(), "status": instance["state"]}
 
+    async def leave_laptop(self, pids):
+        """Asks the laptop's copy to close, as its own close button would; True once it has."""
+        pids = set(pids)
+        windows = [w for w in await asyncio.to_thread(machine.windows) if w["pid"] in pids and not w["parent"]]
+        for w in windows:
+            if shutil.which("wmctrl"):
+                # The window manager's own close request: no keys, nothing focused.
+                await asyncio.to_thread(machine._run, "wmctrl", "-i", "-c", hex(w["id"]))
+            else:
+                await asyncio.to_thread(machine.window_action, "close", w["id"])
+        for _ in range(40):
+            await asyncio.sleep(.25)
+            if not any(Path(f"/proc/{pid}").exists() for pid in pids):
+                return True
+        return False
+
+    async def to_laptop(self, s, app_id):
+        """Closes the app on the phone and opens it on the laptop, with the same profile."""
+        catalog = await self.catalog()
+        app = next((a for a in catalog if a["id"] == app_id), None)
+        if app is None:
+            raise ValueError("application is not in the installed catalog")
+        await s.refresh(catalog)
+        for w in [w for w in s.windows if w["app_id"] == app_id and not w["parent"]]:
+            await s.run("xdotool", "windowactivate", "--sync", str(w["id"]), "key", "--clearmodifiers", "alt+F4")
+        # Its last process gone, so the laptop's copy is not handed to it.
+        for _ in range(40):
+            await asyncio.sleep(.25)
+            await s.refresh(catalog)
+            if not any(w["app_id"] == app_id for w in s.windows) and not await asyncio.to_thread(mobile_launch.mine, app_id, s.root):
+                break
+        else:
+            remaining = [w for w in s.windows if w["app_id"] == app_id]
+            if remaining:
+                await s.focus(remaining[0]["id"])
+            return {"ok": False, "pending": True, "session": s.public(),
+                    "error": f"{app['name']} is still open on the phone. Answer its dialog, then try again."}
+        if not await asyncio.to_thread(desktop.launch, app_id):
+            return {"ok": False, "session": s.public(), "error": f"{app['name']} could not open on the laptop"}
+        self.link.audit.write(s.owner, "mobile-launch", f"{app_id} moved to the laptop")
+        return {"ok": True, "moved": "laptop", "session": await s.refresh(catalog)}
+
     async def change_app(self, request):
         self.permit()
         body = await request.json()
@@ -547,9 +630,16 @@ class MobileDesktop:
                     raise ValueError("choose an application from the drawer and open this file from its file picker")
                 return await self.launch(s, app_id, files=[str(path)])
             if op == "launch":
-                return await self.launch(s, body.get("app_id"), body.get("new_window") is True)
+                return await self.launch(s, body.get("app_id"), body.get("new_window") is True, take=body.get("take") is True)
             if op == "layout":
                 return await self.relayout(s, body.get("app_id"), body.get("layout"), body.get("reopen") is True)
+            if op == "profile":
+                if not any(a["id"] == body.get("app_id") for a in await self.catalog()):
+                    raise ValueError("application is not in the installed catalog")
+                s.choices.set_profile(body.get("app_id"), body.get("profile"))
+                return await self.relayout(s, body.get("app_id"), None, body.get("reopen") is True)
+            if op == "to-laptop":
+                return await self.to_laptop(s, body.get("app_id"))
             await s.refresh(await self.catalog())
             wid = int(body.get("window", 0))
             w = next((w for w in s.windows if w["id"] == wid), None)
