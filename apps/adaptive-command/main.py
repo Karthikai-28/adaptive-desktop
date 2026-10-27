@@ -44,6 +44,8 @@ DEBOUNCE_MS = 90
 FOCUS_GRACE_S = 0.6
 FILE_RESULTS = 8
 APP_RESULTS = 6
+PHONE_APP_RESULTS = 4
+PHONE_INSTALLED = Path.home() / ".local/share/applications/adaptive-phone.desktop"
 MAX_ROWS = 24
 
 # Category weights. A launcher is judged on short queries, where "set" means
@@ -398,6 +400,7 @@ class Palette(Gtk.ApplicationWindow):
         results.extend(self._provide_windows(query))
         results.extend(self._provide_workspaces(query))
         results.extend(self._provide_apps(query))
+        results.extend(self._provide_phone_apps(query))
         results.extend(self._provide_projects(query))
         results.extend(self._provide_settings(query))
         results.extend(self._provide_actions(query))
@@ -820,17 +823,7 @@ class Palette(Gtk.ApplicationWindow):
                 config = ""
             rows = M.ssh_rows(rest, M.parse_ssh_hosts(config))
         elif mode == "phone":
-            cache = {}
-            try:
-                cache = json.loads(M.PHONE_APPS.read_text())
-            except (OSError, ValueError):
-                pass
-            if time.time() - cache.get("time", 0) > 24 * 3600 and not getattr(self, "_phone_listing", False):
-                # Asked of the phone once a day at most, in the background.
-                self._phone_listing = True
-                subprocess.Popen([str(M.PHONE), "apps", "--refresh"], stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, start_new_session=True)
-            rows = M.phone_rows(rest, cache)
+            rows = M.phone_rows(rest, self._phone_cache())
         elif mode == "branch":
             _pid, _name, root = self._active_project()
             branches, current = M.list_branches(root) if root else ([], "")
@@ -995,6 +988,47 @@ class Palette(Gtk.ApplicationWindow):
 
         results.sort(key=lambda r: -r.score)
         return results[:APP_RESULTS]
+
+    def _phone_cache(self):
+        """The phone's apps as Phone (apps/adaptive-phone) last listed them,
+        read again only when the list changes; asked of the phone in the
+        background once a day at most."""
+        try:
+            stamp = M.PHONE_APPS.stat().st_mtime
+        except OSError:
+            stamp = 0
+        if getattr(self, "_phone_stamp", None) != stamp:
+            self._phone_stamp = stamp
+            try:
+                self._phone = json.loads(M.PHONE_APPS.read_text())
+            except (OSError, ValueError):
+                self._phone = {}
+        cache = self._phone
+        if time.time() - cache.get("time", 0) > 24 * 3600 and not getattr(self, "_phone_listing", False):
+            self._phone_listing = True
+            subprocess.Popen([str(M.PHONE), "apps", "--refresh"], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        return cache
+
+    def _provide_phone_apps(self, query):
+        """The phone's apps among the laptop's, by the same name, marked Phone;
+        each opens in a window of its own here. A laptop app of the same name
+        stays above it."""
+        if len(query.folded) < 2:
+            return []
+        results = []
+        if not M.PHONE_APPS.exists() and not PHONE_INSTALLED.exists():
+            return []   # no Phone here: the phone is never asked
+        for app in self._phone_cache().get("apps") or []:
+            score = score_match(query, app.get("name", ""), app.get("package", ""))
+            if not score:
+                continue
+            results.append(Result(
+                title=app["name"], subtitle="On the phone - opens in a window here", group="Applications",
+                icon="phone-symbolic", badge="Phone", score=score + WEIGHT_APP - 1 - (2 if app.get("system") else 0),
+                action=lambda p=app["package"]: self._perform(("run", [str(M.PHONE), "app", p], None))))
+        results.sort(key=lambda r: -r.score)
+        return results[:PHONE_APP_RESULTS]
 
     def _provide_projects(self, query):
         path = Path.home() / ".config/adaptive-desktop/projects.json"

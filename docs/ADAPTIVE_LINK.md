@@ -807,8 +807,9 @@ features and says so in its notification shade.
   US), the clipboard goes both ways, and a file dropped on the window goes to
   *Download*. Android does not ask each time. *With the Phone's Screen Off*
   (the app's right-click menu) keeps the phone dark while it is used from
-  here. One app on its own: `phone NAME` in the palette, or
-  `adaptive-phone app NAME`, opens it in a window of its own on a display of
+  here. One app on its own: search for it by name in the palette (Alt+Space)
+  like any app - it is marked *Phone*, under a laptop app of the same name -
+  or `phone NAME` for phone apps only, or `adaptive-phone app NAME`; it opens in a window of its own on a display of
   its own on the phone, resized with the window, so the phone can be used for
   something else meanwhile; closing the window hands the app back to the
   phone's screen. The phone's Wi-Fi debugging port changes when it restarts;

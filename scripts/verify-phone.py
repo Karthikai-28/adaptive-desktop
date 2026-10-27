@@ -171,4 +171,21 @@ esac
     assert "--turn-screen-off" not in lines[-1] and "pressed" not in "".join(lines), lines
     assert "did not unlock" in done.stderr
 
-print("PASS phone: phone choice, Wi-Fi rediscovery, apps, scrcpy arguments, palette mode, unlock and lock again")
+    # The palette's ordinary search: phone apps by their own names, marked
+    # Phone, under a laptop app of the same name.
+    sys.argv = ["verify-phone"]
+    palette = load(REPO / "apps/adaptive-command/main.py", "palette_main")   # GTK: after the checks that need none
+    from types import SimpleNamespace
+    modes.PHONE_APPS = root / "palette-apps.json"
+    modes.PHONE_APPS.write_text(json.dumps({"time": 4e9, "apps": apps}))
+    ran = []
+    window = SimpleNamespace(_perform=ran.append)
+    window._phone_cache = lambda: palette.Palette._phone_cache(window)
+    found = palette.Palette._provide_phone_apps(window, palette.Query.make("whats"))
+    assert [(r.title, r.badge) for r in found] == [("WhatsApp", "Phone"), ("WhatsApp Business", "Phone")], found
+    assert found[0].score < palette.score_match(palette.Query.make("whats"), "WhatsApp") + palette.WEIGHT_APP
+    found[0].action()
+    assert ran == [("run", [str(modes.PHONE), "app", "com.whatsapp"], None)], ran
+    assert palette.Palette._provide_phone_apps(window, palette.Query.make("w")) == []
+
+print("PASS phone: phone choice, Wi-Fi rediscovery, apps, scrcpy arguments, palette search and mode, unlock and lock again")
