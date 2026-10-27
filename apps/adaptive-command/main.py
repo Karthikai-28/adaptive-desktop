@@ -819,6 +819,18 @@ class Palette(Gtk.ApplicationWindow):
             except OSError:
                 config = ""
             rows = M.ssh_rows(rest, M.parse_ssh_hosts(config))
+        elif mode == "phone":
+            cache = {}
+            try:
+                cache = json.loads(M.PHONE_APPS.read_text())
+            except (OSError, ValueError):
+                pass
+            if time.time() - cache.get("time", 0) > 24 * 3600 and not getattr(self, "_phone_listing", False):
+                # Asked of the phone once a day at most, in the background.
+                self._phone_listing = True
+                subprocess.Popen([str(M.PHONE), "apps", "--refresh"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            rows = M.phone_rows(rest, cache)
         elif mode == "branch":
             _pid, _name, root = self._active_project()
             branches, current = M.list_branches(root) if root else ([], "")

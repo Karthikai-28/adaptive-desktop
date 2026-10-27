@@ -50,6 +50,7 @@ PARTS=(
     "terminal|Terminal defaults and KTERM integration|status_terminal|install_terminal"
     "settings|Adaptive Settings app|status_settings|$S/install-adaptive-settings.sh"
     "cast|Cast: this screen on a TV over Miracast|status_cast|$S/install-cast.sh"
+    "phone|Phone: the paired Android phone and its apps in windows here (scrcpy)|status_phone|$S/install-phone.sh"
     "gestures|Touchpad gesture service|status_gestures|$S/install-gestures.sh"
     "files|Files inspector for the Nautilus fork|status_files|install_files"
     "wallpaper|Hourly wallpaper rotation|status_unit adaptive-wallpaper.timer|$S/install-wallpaper-rotation.sh"
@@ -87,6 +88,11 @@ status_keybindings() {
 
 status_cast() {
     [ -f "$APPS/com.karthi.AdaptiveCast.desktop" ] || echo "not in the app grid"
+}
+
+status_phone() {
+    [ -f "$APPS/adaptive-phone.desktop" ] || { echo "not in the app grid"; return; }
+    [ -x "$REPO/.local/scrcpy/scrcpy" ] || echo "scrcpy is not in .local/scrcpy"
 }
 
 status_settings() {

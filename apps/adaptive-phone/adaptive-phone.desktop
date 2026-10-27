@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Phone
+GenericName=Android Phone
+Comment=Use the paired phone and its apps from this computer
+Keywords=phone;android;mobile;mirror;scrcpy;link;apps;
+Exec=@ADAPTIVE_REPO@/apps/adaptive-phone/phone.py
+Icon=phone
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+StartupWMClass=scrcpy
+Actions=screen-off;
+
+[Desktop Action screen-off]
+Name=With the Phone's Screen Off
+Exec=@ADAPTIVE_REPO@/apps/adaptive-phone/phone.py --screen-off

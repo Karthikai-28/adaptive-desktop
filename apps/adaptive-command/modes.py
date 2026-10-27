@@ -16,6 +16,7 @@
                            Gazebo or rqt, record ("ros record /a /b"), stop what the
                            panel started, build the workspace or a package, use a
                            saved setup or robot profile, "ros domain 7"
+    phone [app]            the paired phone, or one of its apps, in a window here
 
 Your own commands are executables in ~/.config/adaptive-desktop/commands/;
 each shows up as an action, named after its file.
@@ -55,8 +56,10 @@ sys.path.insert(0, str(REPO / "services" / "project-context"))
 import extras  # noqa: E402
 
 ROS_HELPER = REPO / "shell" / "adaptive-shell@local" / "tools" / "ros_info.py"
+PHONE = REPO / "apps" / "adaptive-phone" / "phone.py"
+PHONE_APPS = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "adaptive-desktop" / "phone-apps.json"
 
-MODE_WORDS = ("snip", "todo", "git", "time", "grep", "kill", "ssh", "branch", "timer", "keys", "new", "ros")
+MODE_WORDS = ("snip", "todo", "git", "time", "grep", "kill", "ssh", "branch", "timer", "keys", "new", "ros", "phone")
 _MODE = re.compile(r"^\s*(" + "|".join(MODE_WORDS) + r")(?:\s+(.*))?$", re.I | re.S)
 
 
@@ -409,6 +412,31 @@ def ssh_rows(rest, hosts):
     return [row(f"ssh {host}", "Opens in a terminal", "SSH", "network-server-symbolic", "Connect",
                 ("run", ["kterm-terminal", "-x", "ssh", host], None), 300 - rank)
             for rank, host in enumerate(hits[:12])]
+
+
+# -------------------------------------------------------------------- phone
+
+def phone_rows(rest, cache):
+    """The whole phone first, then its apps (apps/adaptive-phone keeps the
+    list, as the phone last gave it), each opened in a window here."""
+    apps = (cache or {}).get("apps") or []
+    model = (cache or {}).get("model") or "phone"
+    folded = rest.casefold()
+    rows = []
+    if not folded or folded in "phone" or folded in model.casefold():
+        rows.append(row("Phone", f"The whole {model} in a window", "Phone", "phone-symbolic", "Open",
+                        ("run", [str(PHONE)], None), 400))
+    hits = [a for a in apps if folded in a.get("name", "").casefold() or folded in a.get("package", "").casefold()]
+    hits.sort(key=lambda a: (not a["name"].casefold().startswith(folded), a.get("system", False), a["name"].casefold()))
+    rows += [row(app["name"], f"Opens in its own window - {app['package']}", "Phone apps", "phone-symbolic", "Open",
+                 ("run", [str(PHONE), "app", app["package"]], None), 300 - rank)
+             for rank, app in enumerate(hits[:12])]
+    if not apps:
+        rows.append(row("Phone apps are being fetched", "They show here once the phone has listed them over adb",
+                        "Phone", "phone-symbolic", score=100))
+    elif not hits and not rows:
+        rows.append(row("No phone app matches", "", "Phone", "phone-symbolic", score=100))
+    return rows
 
 
 # ----------------------------------------------------------------- branches

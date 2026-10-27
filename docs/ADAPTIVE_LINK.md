@@ -798,6 +798,23 @@ features and says so in its notification shade.
   time, and shows that it is recording. To use the phone from that window -
   click, drag, type, back and home - allow *Adaptive Link* in Android's
   accessibility settings; without that the window shows and does not act.
+- **The whole phone, and its apps, here: Phone.** Where adb reaches the
+  phone (a cable, or Wireless debugging paired once in Developer options),
+  *Phone* in the app grid (`apps/adaptive-phone`, `adaptive-phone`) is the
+  better way: scrcpy shows the phone at full rate with its sound, a click is
+  a real touch, the keyboard is a hardware keyboard to the phone (every key
+  and shortcut; set its layout once under *Physical keyboard* if it is not
+  US), the clipboard goes both ways, and a file dropped on the window goes to
+  *Download*. Android does not ask each time. *With the Phone's Screen Off*
+  (the app's right-click menu) keeps the phone dark while it is used from
+  here. One app on its own: `phone NAME` in the palette, or
+  `adaptive-phone app NAME`, opens it in a window of its own on a display of
+  its own on the phone, resized with the window, so the phone can be used for
+  something else meanwhile; closing the window hands the app back to the
+  phone's screen. The phone's Wi-Fi debugging port changes when it restarts;
+  Phone finds it again on the network. With no adb route, Phone opens the
+  Adaptive Link window above instead. `./install.sh --only phone` (scrcpy is
+  pinned and checked); check: `scripts/verify-phone.py`.
 - **Nothing lost.** A link, text or files shared to the computer while it
   cannot be reached are kept on the phone and sent when it can.
 

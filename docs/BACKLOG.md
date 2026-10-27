@@ -846,6 +846,18 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   app switching; background/network reconnection; launcher resume and
   predictive Back; and mirror/move/return against real laptop windows remain
   for `record-live-verification.py`.
+- ✅ **agy, Claude Code and Codex as apps** (`terminal/agent.py`,
+  `adaptive-agent`): one tmux session per agent, shared by the laptop
+  terminal and the phone session, always in the laptop's environment.
+  Checked by `verify-agent-apps.py` and in a sandbox phone session (Claude
+  Code at 66 columns, laptop display and bus). 🔬 On the real phone.
+- 🔬 **The whole phone, and each phone app, in a window here** (`Phone`,
+  `apps/adaptive-phone`, scrcpy 4.1 over adb, `install.sh --only phone`):
+  real touch and a hardware keyboard, the phone's sound, the clipboard both
+  ways, an app on a display of its own (`adaptive-phone app NAME`, palette
+  `phone NAME`); Wi-Fi port found again by mDNS; Adaptive Link's
+  accessibility window where adb cannot reach. Logic checked with stand-ins
+  by `verify-phone.py`; not yet run against the real phone.
 - ⬜ Not there: a watch app of its own (the notification's buttons reach a
   watch), browsing the phone's files from the desktop's file manager, the
   phone's battery in the panel (it is in `link-cli.py status`), Wayland, iOS,
