@@ -809,6 +809,24 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   Apps and layout screens on an emulator. 🔬 The three `link_app_workspaces`,
   `link_layouts_sync` and `link_macro_cancel` checks on a real phone and
   desktop.
+- ✅ **Laptop apps in the phone's form factor** (`phone_form.py`,
+  `LaptopApps.kt`, `Motion.kt`; ADAPTIVE_LINK.md, *Apps in the phone's form
+  factor*). The phone session's display is the phone's dp size times a whole
+  scale, and GTK, Qt, Chromium/Electron, Firefox and X11 apps are each told
+  it; browsers get a phone's user agent and serve mobile sites. Frameless
+  windows, dialogs as bottom sheets. Phone, Compact and Desktop layouts per
+  app, Compact learned on a first window that does not fit; native Files
+  instead of the desktop file manager. On the phone: a Layout menu per app,
+  sharpness, opt-in Material You colours, a launch animation and spring
+  motion, *Add to phone home screen*, launcher shortcuts and a Laptop apps
+  widget, all guarded by a per-install token. Checked in a sandbox by
+  `verify_link_mobile.py` (scale, environment, frameless fit, relayout,
+  rotation) and the app's build, unit tests and emulator suite; tried by
+  hand on a virtual display with Calculator, Chrome, Firefox, Antigravity,
+  System Monitor, VLC and LibreOffice at 412 x 915 dp. 🔬 On a real phone:
+  the widget and shortcuts on a real launcher, and the picture at 2x over a
+  real connection. Qt Linguist and Evince still need about 1000 px in
+  Compact and are panned.
 - 🔬 **Continuous-device checks on a real phone.** Image paste into another
   Android app; foreground-only phone clipboard reads; lock/unlock and ordinary
   app switching; background/network reconnection; launcher resume and

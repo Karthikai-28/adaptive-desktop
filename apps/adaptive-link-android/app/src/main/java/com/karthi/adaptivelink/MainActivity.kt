@@ -40,6 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,6 +82,11 @@ class MainActivity : FragmentActivity() {
     private var lockMessage by mutableStateOf("")
     internal var requestedPage by mutableStateOf(Page.Home)
         private set
+    /** A laptop app a home-screen shortcut or widget asked for (LaptopApps.kt). */
+    internal var requestedApp by mutableStateOf<String?>(null)
+        private set
+    /** Material You: the wallpaper's colours, switched from Home's menu. */
+    internal var wallpaperColours by mutableStateOf(false)
 
     /**
      * Set while the app itself has sent the owner somewhere and is waiting
@@ -109,13 +115,17 @@ class MainActivity : FragmentActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         val store = Store(this)
         requestedPage = requestedPage(intent)
+        requestedApp = requestedApp(intent)
+        wallpaperColours = store.wallpaperColours
         unlocked = !store.lockOnOpen || !store.needsUnlock
         registerReceiver(screenLockReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
 
         EventsService.sync(this)
 
         setContent {
-            MaterialTheme(colorScheme = Colors) {
+            val scheme = if (wallpaperColours && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(this)
+                .copy(background = Color.Black) else Colors
+            MaterialTheme(colorScheme = scheme) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (unlocked) App(this) else Locked(lockMessage) { unlock() }
                 }
@@ -140,6 +150,20 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         requestedPage = requestedPage(intent)
+        requestedApp = requestedApp(intent)
+    }
+
+    /** The app a shortcut asked for, on the computer it was made for (switched to if paired). */
+    private fun requestedApp(intent: Intent?): String? {
+        val (app, computer) = LaptopApps.requested(this, intent) ?: return null
+        val store = Store(this)
+        if (computer.isNotEmpty() && store.computer?.fingerprint != computer) store.switchTo(computer)
+        return app
+    }
+
+    internal fun consumeRequestedApp() {
+        requestedApp = null
+        intent?.removeExtra(LaptopApps.EXTRA_APP)
     }
 
     private fun requestedPage(intent: Intent?): Page = intent?.getStringExtra(EXTRA_PAGE)?.let {
@@ -314,7 +338,11 @@ private fun App(activity: MainActivity) {
         })
     }
 
-    MobileDesktop(activity, client, store, state, externalPage = page, consumed = { page = Page.Home }, connections = home) { chosen, back ->
+    LaunchedEffect(activity.requestedApp) {
+        if (activity.requestedApp != null && store.computer?.fingerprint != computer?.fingerprint) computer = store.computer
+    }
+    MobileDesktop(activity, client, store, state, externalPage = page, consumed = { page = Page.Home },
+        externalApp = activity.requestedApp, appConsumed = { activity.consumeRequestedApp() }, connections = home) { chosen, back ->
         Pages(activity, client, store, state, chosen, folder, { if (it == Page.Home) back() else page = it }, { folder = it }) {
             computer = store.computer
             page = Page.Home

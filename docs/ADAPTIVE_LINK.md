@@ -432,9 +432,10 @@ has the change. It is a separate graphical session, not a sandbox - phone
 apps run as you, with your permissions.
 
 The app is fitted to the phone's screen, keyboard and turning, without
-restarting it and without changing the laptop's own displays; an app with a
-minimum size larger than the phone keeps it and is panned and zoomed, and the
-zoom is remembered per app. Leaving the app, or losing the connection, stops
+restarting it and without changing the laptop's own displays (see *Apps in
+the phone's form factor* below); an app whose smallest window is still larger
+than the phone keeps it and is panned and zoomed, and the zoom is remembered
+per app. Leaving the app, or losing the connection, stops
 the picture and lets go of held keys, but the apps keep running, and coming
 back finds them as they were. A laptop restart ends the session; pins, folders
 and app settings remain.
@@ -460,6 +461,68 @@ last two. Opening an app from the phone updates its result too.
 Needs `xvfb`, `xfwm4`, `dbus`, `xauth`, `x11-utils` and `xdotool` on the
 laptop; `scripts/link-cli.py doctor` says which are missing. The laptop's
 own screen, shared as it is, stays available as *Desktop Remote*.
+
+#### Apps in the phone's form factor
+
+The phone's session is not a small desktop that the phone stretches. Its
+display is the phone's own size in dp times a whole scale (2 by default,
+`services/adaptive-link/phone_form.py`), and every toolkit is told that
+scale, so apps lay themselves out for a phone at the phone's sharpness:
+
+- GTK 3/4 and libadwaita apps get `GDK_SCALE`, dark, and no window buttons;
+  libadwaita apps switch to their own narrow layouts.
+- Qt apps get `QT_SCALE_FACTOR` and Qt Quick's mobile Material style.
+- Chrome, Chromium and Electron apps (VS Code, Antigravity, Slack...) get
+  `--force-device-scale-factor`; browsers also a phone's user agent, so
+  websites serve their mobile pages.
+- Firefox gets the same through its phone profile's `user.js` (meta
+  viewport on, a phone's user agent) and a `userChrome.css` that lets its
+  toolbar go narrower than a desktop window. A `user.js` of your own in
+  that profile is left alone.
+- Java, Tk and plain X11 apps get the screen DPI and `Xft.dpi`.
+
+Windows have no frames: the app fills the phone, dialogs open as a sheet at
+the bottom, and on a tablet two apps can share the screen.
+
+Each app has a **layout**, chosen in the app's menu on the phone
+(*Layout*):
+
+- **Phone**: everything at the session's scale, the app's own phone layout.
+- **Compact**: widgets at 1x and text at three quarters of the scale, for
+  desktop apps whose smallest window is wider than a phone (LibreOffice,
+  VLC): readable, and the whole window fits. When an app's first window does
+  not fit, the laptop learns *Compact* for it and reopens it once; the phone
+  says so. Browsers always stay mobile.
+- **Desktop**: the laptop's own design, a little larger, and a desktop user
+  agent.
+
+Changing the layout closes the app as the laptop would (a save dialog shows
+on the phone) and opens it again. Your choice beats what was learned; both
+are kept per phone, in `form-factor.json` in that phone's folder under
+`~/.config/adaptive-desktop/link/mobile/`.
+*Files* opens the phone's native Files screen rather than the desktop file
+manager, unless you choose a layout for it.
+
+**Sharpness** (Home, the menu at the top right): *Auto* is twice the phone's
+size in dp; 1x, 2x and 3x are there too (never sharper than the phone
+itself). Sharper is more for the laptop to draw and send.
+
+**On the phone's home screen**:
+
+- *Add to phone home screen* (long-press an app) pins a shortcut that opens
+  that laptop app straight into the phone session.
+- Long-pressing Adaptive Link's own icon offers the four laptop apps used
+  last.
+- The **Laptop apps** widget (4 x 2) shows eight: pinned first, then recent.
+  It is drawn from icons the phone has kept, so it shows without a
+  connection; a tap connects and opens the app.
+
+Shortcuts and the widget carry a token made by this install of the app:
+nothing else on the phone can ask Adaptive Link to open a laptop app.
+
+**Wallpaper colours** (Home, the menu at the top right; Android 12 and
+later) gives the app Material You colours from the phone's wallpaper. It is
+off by default: the app keeps its one blue accent.
 
 ### Every app, with buttons of your own
 
@@ -867,8 +930,12 @@ laptop windows.
 - Continue can control the exact open laptop window, including unsaved work,
   but its desktop interface remains a fitted/zoomable desktop interface. Open
   phone copy is deliberately a separate phone-session instance.
-- A desktop app keeps its desktop layout on the phone; it is fitted, panned
-  and zoomed, not redesigned. Only the shell and the system tools are native.
+- Apps are told the phone's size and scale, not redesigned: an app with no
+  narrow layout of its own is shown in *Compact*, and one whose smallest
+  window is wider still (Qt Linguist, Evince at about 1000 px) is panned and
+  zoomed. GTK scales only by whole numbers, so *Compact* text is the nearest
+  readable size rather than the phone's exact one. Only the shell and the
+  system tools are native.
 - Apps that need the GPU run on Xvfb's software rendering in the phone's
   session, so 3D apps (Blender, games) are slow there.
 - Android only.

@@ -97,6 +97,7 @@ private val ControlSections = listOf("Network & Wi-Fi" to Page.Network, "Bluetoo
 @Composable
 internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: Store, state: LinkState,
                            externalPage: Page = Page.Home, consumed: () -> Unit = {},
+                           externalApp: String? = null, appConsumed: () -> Unit = {},
                            connections: @Composable () -> Unit, native: @Composable (Page, () -> Unit) -> Unit) {
     val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     val scope = rememberCoroutineScope()
@@ -140,6 +141,10 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     var editLayouts by remember { mutableStateOf(false) }
     var controls by remember { mutableStateOf(false) }
     var confirmEnd by remember { mutableStateOf(false) }
+    // The laptop app starting in the phone session, for the launch animation.
+    var launching by remember { mutableStateOf<JSONObject?>(null) }
+    var homeMenu by remember { mutableStateOf(false) }
+    var layoutMenu by remember { mutableStateOf(false) }
     var forceWindow by remember { mutableStateOf<JSONObject?>(null) }
     var run by remember { mutableStateOf<JSONObject?>(null) }
     var pending by remember { mutableStateOf(false) }
@@ -316,7 +321,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     }
     suspend fun ensureSession(): String? {
         if (session?.optString("state") == "ready") return session?.getString("id")
-        val reply = client.post("/v1/mobile/sessions", JSONObject().put("operation", "open"))
+        val reply = client.post("/v1/mobile/sessions", JSONObject().put("operation", "open").put("phone", PhoneScreen.whole(activity, store.phoneSharpness)))
         if (reply?.optBoolean("ok") != true) { note = reply?.optString("error") ?: "Cannot reach the laptop"; return null }
         session = reply.getJSONObject("session")
         return session?.getString("id")
@@ -339,12 +344,17 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         if (appId.contains("control-center")) { visit("control"); return }
         if (!online || !supported || busy) return
         busy = true
+        if (session?.optJSONArray("apps").rows().none { it.optString("app_id") == appId && it.optString("state") == "running" }) launching = JSONObject().put("id", appId)
+            .put("name", (apps + laptopApps).firstOrNull { it.optString("id") == appId }?.optString("name") ?: "Laptop app")
+            .put("layout", session?.optJSONObject("layouts")?.optString(appId)?.ifBlank { null } ?: "phone")
         scope.launch {
             try {
                 val sid = ensureSession() ?: return@launch
                 val reply = client.post("/v1/mobile/apps", JSONObject().put("session", sid).put("app_id", appId).put("new_window", new))
                 if (reply?.optBoolean("ok") == true) {
                     if (reply.optString("native") == "control-center") { visit("control"); return@launch }
+                    if (reply.optString("native") == "files") { folderPath = "~"; nativePage = Page.Files; visit("native"); return@launch }
+                    if (reply.optString("learned") == "compact") note = "Opened in compact layout: this app is wider than a phone. Change it under Layout."
                     reply.optJSONObject("session")?.let { session = it }
                     choices = reply.optJSONArray("choose_window")?.rows()
                     selectedApp = appId
@@ -362,7 +372,27 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     persist(layout.copyJson().put("recent", JSONArray((listOf(appId) + layout.optJSONArray("recent").strings().filterNot { it == appId }).take(20))))
                     visit("app")
                 } else note = reply?.optString("error") ?: "Connection lost · launch was not retried"
-            } finally { busy = false }
+            } finally { busy = false; launching = null }
+        }
+    }
+    /** Phone, compact or desktop layout for an app; a running app is reopened in it. */
+    fun relayout(appId: String, mode: String) {
+        if (id.isEmpty() || busy) return
+        busy = true
+        launching = JSONObject().put("id", appId).put("layout", mode)
+            .put("name", (apps + laptopApps).firstOrNull { it.optString("id") == appId }?.optString("name") ?: "Laptop app")
+        scope.launch {
+            try {
+                val reply = client.post("/v1/mobile/apps", JSONObject().put("session", id).put("operation", "layout")
+                    .put("app_id", appId).put("layout", mode).put("reopen", true))
+                reply?.optJSONObject("session")?.let { session = it }
+                note = when {
+                    reply == null -> "Connection lost"
+                    reply.optBoolean("pending") -> reply.optString("error")
+                    reply.optBoolean("ok") -> "${launching?.optString("name")} · ${mode.replaceFirstChar { it.uppercase() }} layout"
+                    else -> reply.optString("error")
+                }
+            } finally { busy = false; launching = null }
         }
     }
     fun window(w: JSONObject, operation: String = "activate", confirmed: Boolean = false) {
@@ -401,6 +431,13 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     val running = session?.optJSONArray("apps").rows().filter { it.optString("state") == "running" }.map { it.optString("app_id") }.toSet()
     val folders = layout.optJSONObject("folders") ?: JSONObject()
     val pinned = layout.optJSONArray("pins").strings()
+    val launcherApps = (pinned + layout.optJSONArray("recent").strings()).filterNot { it.startsWith("native:") }
+        .mapNotNull { pin -> all.firstOrNull { it.optString("id") == pin }?.let { pin to it.optString("name") } }
+    LaunchedEffect(launcherApps) { if (online && launcherApps.isNotEmpty()) runCatching { LaptopApps.publish(activity, client, launcherApps) } }
+    LaunchedEffect(externalApp, online, supported) {
+        val wanted = externalApp ?: return@LaunchedEffect
+        if (online && supported) { appConsumed(); open(wanted) }
+    }
     fun activate(appId: String) {
         val live = liveWindows.firstOrNull { it.first.optString("id") == appId }
         if (live != null) continueWindow(live.first, live.second) else open(appId)
@@ -411,14 +448,15 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             items(entries, key = { it.optString("id") }) { app ->
                 val aid = app.optString("id")
                 Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color(0xFF1C1C1E),
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
-                    modifier = Modifier.heightIn(min = 108.dp).combinedClickable(onClick = { activate(aid) }, onLongClick = { organizing = app; folderName = folders.optString(aid) }),
+                    modifier = Modifier.animateItem().heightIn(min = 108.dp).clip(RoundedCornerShape(22.dp))
+                        .pressable(onLongClick = { organizing = app; folderName = folders.optString(aid) }) { activate(aid) },
                 ) {
                     Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
-                            Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF2C2C2E)),
+                            Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center,
                         ) {
                             if (aid.startsWith("native:")) Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Folder,
@@ -430,8 +468,8 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                         if (aid in running) {
                             Spacer(Modifier.height(2.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(5.dp).clip(CircleShape).background(Color(0xFF30D158)))
-                                Spacer(Modifier.width(4.dp))
+                                PulseDot(Color(0xFF30D158), 5)
+                                Spacer(Modifier.width(2.dp))
                                 Text("Running", color = Color(0xFF30D158), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                             }
                         } else compatibilityNote(app).takeIf { it.isNotEmpty() }?.let {
@@ -442,12 +480,14 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             }
         }
     }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().systemBarsPadding()) {
         if (editLayouts) {
             Box(Modifier.weight(1f)) { LayoutManager(activity, client, cache, selectedApp,
                 apps.firstOrNull { it.optString("id") == selectedApp }?.optString("name") ?: "Custom controls", profile,
                 onBack = { editLayouts = false; profileVersion++ }, test = { submit(it) }) }
-        } else NavHost(navController, startDestination = "home", modifier = Modifier.weight(1f)) {
+        } else NavHost(navController, startDestination = "home", modifier = Modifier.weight(1f),
+            enterTransition = Motion.enter, exitTransition = Motion.exit, popEnterTransition = Motion.popEnter, popExitTransition = Motion.popExit) {
             ShellRoutes.destinations.forEach { destination -> composable(destination) { when (destination) {
             "continue" -> Box(Modifier.fillMaxSize()) {
                 liveSession?.let { current ->
@@ -523,6 +563,23 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     TextButton(onClick = { choices = session?.optJSONArray("windows").rows().filter { it.optString("app_id") == selectedApp } }) { Text("Windows") }
                     TextButton(onClick = { open(selectedApp, true) }) { Text("New") }
                     Spacer(Modifier.weight(1f))
+                    val current = session?.optJSONObject("layouts")?.optString(selectedApp)?.ifBlank { null } ?: "phone"
+                    Box {
+                        TextButton(onClick = { layoutMenu = true }) {
+                            Icon(when (current) { "desktop" -> Icons.Default.DesktopWindows; "compact" -> Icons.Default.TabletAndroid; else -> Icons.Default.PhoneAndroid },
+                                null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Layout")
+                        }
+                        DropdownMenu(layoutMenu, { layoutMenu = false }) {
+                            listOf(Triple("phone", "Phone", "The app's own phone layout, full size"),
+                                Triple("compact", "Compact", "For apps wider than a phone: readable text, smaller controls"),
+                                Triple("desktop", "Desktop", "As on the laptop, a little larger; desktop websites")).forEach { (mode, label, detail) ->
+                                DropdownMenuItem(text = { Column { Text(label, fontWeight = if (mode == current) FontWeight.SemiBold else FontWeight.Normal)
+                                    Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                                    leadingIcon = { RadioButton(mode == current, null) },
+                                    onClick = { layoutMenu = false; if (mode != current) relayout(selectedApp, mode) })
+                            }
+                        }
+                    }
                     TextButton(onClick = { controls = !controls }) { Text("Controls") }
                 }
                 if (session?.optInt("selected_window") != 0 && session?.optString("state") == "ready") {
@@ -533,7 +590,8 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     TextButton(onClick = { open(selectedApp, true) }) { Text("Retry launch") }
                     TextButton(onClick = { visit("recents") }) { Text("Choose a window") }
                 }
-                if (controls) Column(Modifier.heightIn(max = 280.dp)) {
+                androidx.compose.animation.AnimatedVisibility(controls, enter = androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(300, easing = Motion.Emphasized)) + androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(200, easing = Motion.EmphasizedAccelerate)) + androidx.compose.animation.fadeOut()) { Column(Modifier.heightIn(max = 280.dp)) {
                     Row(Modifier.horizontalScroll(rememberScrollState())) {
                         profiles.forEach { p -> FilterChip(p.optString("id") == profile?.optString("id"), {
                             chosenLayout = p.getString("id"); cache.select(selectedApp, chosenLayout)
@@ -541,14 +599,36 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                         TextButton(onClick = { editLayouts = true }) { Text("Edit layouts") }
                     }
                     profile?.let { ControlGrid(it, online && !pending && run?.optString("state") != "running", onPress = { c -> submit(c) }, onRelease = ::stop) }
-                }
+                } }
             }
             else -> Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(if (location == "drawer") "All apps" else "Home", style = MaterialTheme.typography.headlineMedium)
                         Text(client.computer.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     IconButton(onClick = { visit("control") }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
-                        Icon(Icons.Default.Tune, "Control Center", modifier = Modifier.size(18.dp), tint = Color(0xFFF5F5F7))
+                        Icon(Icons.Default.Tune, "Control Center", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Box {
+                        IconButton(onClick = { homeMenu = true }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
+                            Icon(Icons.Default.MoreVert, "Phone apps settings", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                        DropdownMenu(homeMenu, { homeMenu = false }) {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) DropdownMenuItem(
+                                text = { Text("Wallpaper colours") }, leadingIcon = { Icon(Icons.Default.Palette, null) },
+                                trailingIcon = { Switch(activity.wallpaperColours, null) },
+                                onClick = { activity.wallpaperColours = !activity.wallpaperColours; store.wallpaperColours = activity.wallpaperColours })
+                            HorizontalDivider()
+                            Text("Sharpness of laptop apps", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            var sharp by remember { mutableStateOf(store.phoneSharpness) }
+                            listOf("auto" to "Automatic (2×)", "1" to "Light (1×) · least data", "2" to "Sharp (2×)", "3" to "Sharpest (3×) · most data").forEach { (value, label) ->
+                                DropdownMenuItem(text = { Text(label) }, leadingIcon = { RadioButton(sharp == value, null) }, onClick = {
+                                    sharp = value; store.phoneSharpness = value
+                                    note = "Apps opened from now on are drawn at this sharpness"
+                                })
+                            }
+                        }
                     }
                 }
                 if (location == "drawer") {
@@ -724,6 +804,10 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             )
         }
     }
+    LaunchOverlay(launching != null, launching?.optString("name").orEmpty(), launching?.optString("layout").orEmpty()) {
+        launching?.let { app -> AppIcon(client, app) }
+    }
+    }
     organizing?.let { app ->
         val aid = app.optString("id")
         AlertDialog(onDismissRequest = { organizing = null }, title = { Text(app.optString("name")) }, text = {
@@ -740,6 +824,10 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                 TextButton(onClick = { val entries = layout.optJSONArray("pins").strings(); persist(layout.copyJson().put("pins", JSONArray(listOf(aid) + entries.filterNot { it == aid }))) }) { Text("Move to first position") }
                 OutlinedTextField(folderName, { folderName = it }, label = { Text("Drawer folder (blank removes)") })
                 if (!aid.startsWith("native:")) TextButton(onClick = { selectedApp = aid; editLayouts = true; organizing = null }) { Text("Custom controls") }
+                if (!aid.startsWith("native:")) TextButton(onClick = {
+                    val name = app.optString("name"); organizing = null
+                    scope.launch { if (!LaptopApps.pin(activity, client, aid, name)) note = "This launcher cannot add shortcuts" }
+                }) { Text("Add to phone home screen") }
                 if (aid in running) TextButton(onClick = { session?.optJSONArray("windows").rows().filter { it.optString("app_id") == aid }.forEach { window(it, "close") }; organizing = null }) { Text("Close application") }
             }
         }, confirmButton = { TextButton(onClick = { persist(layout.copyJson().put("folders", folders.copyJson().put(aid, folderName.trim()))); organizing = null }) { Text("Done") } })

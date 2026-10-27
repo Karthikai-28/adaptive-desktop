@@ -318,7 +318,11 @@ fun ScreenPage(activity: Activity, client: LinkClient, store: Store, workspaceId
             delay(400)
             val scale = if (quality == "ultra" || quality == "high") 1.0f else (1.5f / activity.resources.displayMetrics.density).coerceAtLeast(0.85f)
             val size = org.json.JSONArray(listOf((box.width * scale).toInt().coerceIn(320, 3840), (box.height * scale).toInt().coerceIn(320, 3840)))
-            val reply = client.post("/v1/mobile/sessions", JSONObject().put("operation", "resize").put("session", mobileSession).put("viewport", size))
+            // The phone's own space in dp: the laptop draws its apps at that
+            // size in the phone's form factor (phone_form.py). The pixels are
+            // for a laptop service from before it.
+            val reply = client.post("/v1/mobile/sessions", JSONObject().put("operation", "resize").put("session", mobileSession).put("viewport", size)
+                .put("phone", PhoneScreen.describe(activity, box.width, box.height, store.phoneSharpness)))
             if (reply?.optBoolean("ok") == true) generation++
             else note = reply?.optString("error") ?: "Disconnected · phone applications remain open"
         }

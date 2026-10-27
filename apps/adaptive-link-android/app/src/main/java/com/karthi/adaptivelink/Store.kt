@@ -206,4 +206,18 @@ class Store(context: Context) {
     var commandHistory: List<String>
         get() = prefs.getString("history", "")!!.split('\n').filter { it.isNotBlank() }
         set(value) = prefs.edit().putString("history", value.take(30).joinToString("\n")).apply()
+
+    /**
+     * How sharply laptop apps are drawn for this phone (phone_form.py on the
+     * laptop): "auto" (twice the phone's size in dp), or 1, 2 or 3 times.
+     * Sharper is more for the laptop to draw and send.
+     */
+    var phoneSharpness: String
+        get() = prefs.getString("phone_sharpness", "auto") ?: "auto"
+        set(value) = prefs.edit().putString("phone_sharpness", value).apply()
+
+    /** The app in the colours of the phone's wallpaper (Material You, Android 12 and later). */
+    var wallpaperColours: Boolean
+        get() = prefs.getBoolean("wallpaper_colours", false)
+        set(value) = prefs.edit().putBoolean("wallpaper_colours", value).commit().let { }
 }
