@@ -71,37 +71,105 @@ check("AAC chosen", wfd.choose_audio("LPCM 00000003 00, AAC 0000000f 00") == "AA
 check("LPCM only means no sound", wfd.choose_audio("LPCM 00000003 00") is None)
 check("no encoder means no sound", wfd.choose_audio("AAC 0000000f 00", have_aac=False) is None)
 
-# The stream description parses when every element is installed.
+check("quality presets", all(wfd.choose_video(lg_formats, order=wfd.QUALITY[q]["order"])
+                             for q in wfd.QUALITY))
+check("smooth is 1080p60", wfd.choose_video(lg_formats, order=wfd.QUALITY["smooth"]["order"])
+      ["fps"] == 60)
+check("light is 720p", wfd.choose_video(lg_formats, order=wfd.QUALITY["light"]["order"])
+      ["height"] == 720)
+
 try:
-    import session
+    import stream
     from gi.repository import Gst
-    if not session.missing_elements():
-        for encoder in ("vaapih264enc", "x264enc", "openh264enc"):
-            if not session.element(encoder):
-                continue
-            text = session.pipeline_description(video, "AAC" if session.have_aac() else None,
-                                                "127.0.0.1", 19000, encoder)
-            # Run it briefly with test sources: the encoder only refuses a
-            # setting once caps reach it, which parsing alone never shows.
-            text = text.replace("ximagesrc use-damage=false show-pointer=true",
-                                "videotestsrc is-live=true num-buffers=15")
-            text = text.replace("pulsesrc", "audiotestsrc is-live=true num-buffers=15")
-            try:
-                pipe = Gst.parse_launch(text)
-            except Exception as error:  # noqa: BLE001
-                check(f"pipeline parses with {encoder}: {error}", False)
-                continue
-            pipe.set_state(Gst.State.PLAYING)
-            message = pipe.get_bus().timed_pop_filtered(
-                10 * Gst.SECOND, Gst.MessageType.ERROR | Gst.MessageType.EOS)
-            pipe.set_state(Gst.State.NULL)
-            failed = message is None or message.type == Gst.MessageType.ERROR
-            reason = message.parse_error()[0].message if message and failed else "timed out"
-            check(f"pipeline runs with {encoder}: {reason}", not failed)
+except (ImportError, ValueError) as error:
+    stream = None
+    print(f"skip stream: {error}")
+
+if stream:
+    # Where a source pixel lands on the TV frame.
+    check("fit letterboxes 16:10", stream.content_rect(1920, 1200, 1920, 1080, "fit")
+          == (0.9, 96.0, 0.0))
+    check("fill crops 16:10", stream.content_rect(1920, 1200, 1920, 1080, "fill")
+          == (1.0, 0.0, -60.0))
+    scale, ox, oy = stream.content_rect(1920, 1080, 1920, 1080, "safe")
+    check("safe keeps a margin", scale < 0.95 and ox > 50 and oy > 30)
+    check("region source", "startx=10 starty=20 endx=109 endy=219" in stream.source_element(
+        {"kind": "region", "x": 10, "y": 20, "w": 100, "h": 200}))
+    check("window source", "xid=4242" in stream.source_element({"kind": "window", "xid": 4242}))
+
+    def run(text, overlay=None, seconds=10):
+        """Run with test sources: the encoder only refuses a setting once caps
+        reach it, which parsing alone never shows."""
+        text = text.replace("ximagesrc use-damage=false show-pointer=true",
+                            "videotestsrc is-live=true num-buffers=15")
+        text = text.replace("pulsesrc", "audiotestsrc is-live=true num-buffers=15")
+        try:
+            pipe = Gst.parse_launch(text)
+        except Exception as error:  # noqa: BLE001
+            return str(error)
+        if overlay:
+            draw = pipe.get_by_name("draw")
+            draw.connect("draw", overlay.draw)
+            draw.connect("caps-changed", overlay.on_caps)
+        preview = pipe.get_by_name("preview")
+        if preview:
+            # appsink reports end-of-stream only once its last frame is taken,
+            # as the window does.
+            preview.connect("new-sample", lambda sink: sink.emit("pull-sample") and
+                            Gst.FlowReturn.OK)
+        pipe.set_state(Gst.State.PLAYING)
+        message = pipe.get_bus().timed_pop_filtered(
+            seconds * Gst.SECOND, Gst.MessageType.ERROR | Gst.MessageType.EOS)
+        pipe.set_state(Gst.State.NULL)
+        if message is None:
+            return "timed out"
+        return message.parse_error()[0].message if message.type == Gst.MessageType.ERROR else None
+
+    if stream.missing_elements():
+        print(f"skip pipeline: missing {', '.join(stream.missing_elements())}")
     else:
-        print(f"skip pipeline: missing {', '.join(session.missing_elements())}")
-except ImportError as error:
-    print(f"skip pipeline: {error}")
+        aac = "AAC" if stream.aac_encoder() else None
+        cases = []
+        for encoder in ("vaapih264enc", "x264enc", "openh264enc"):
+            if stream.element(encoder):
+                cases.append((encoder, "fit", "sharp", False, False))
+        if stream.element("vaapih264enc"):
+            cases += [("vaapih264enc", "fill", "smooth", False, True),
+                      ("vaapih264enc", "safe", "game", True, False)]
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="verify-cast-")
+        for encoder, fit, quality, record, preview in cases:
+            mode = wfd.choose_video(lg_formats, order=wfd.QUALITY[quality]["order"])
+            path = f"{tmp}/rec.mkv" if record else None
+            text = stream.pipeline_description(mode, aac, "127.0.0.1", 19000, encoder, None, fit,
+                                               quality, None, path, preview)
+            # Every overlay on at once, frozen behind a curtain; it must not
+            # slow the stream or raise in the streaming thread.
+            overlay = stream.Overlay({"kind": "screen"}, fit,
+                                     {"cursor": "spotlight", "clock": True, "badge": "Badge",
+                                      "caption": "A caption long enough to wrap " * 4})
+            overlay.masks = [(100, 100, 400, 300)]
+            overlay.freeze = True
+            overlay.curtain = "Back soon"
+            reason = run(text, overlay)
+            check(f"pipeline runs: {encoder} {fit} {quality} record={record} "
+                  f"preview={preview}: {reason}", reason is None)
+            if record:
+                check("recording written", Path(path).exists() and Path(path).stat().st_size > 0)
+
+        # The cursor is read from X on every frame, from GStreamer's thread.
+        # It must reuse one connection: a new one per frame used up X's
+        # client limit within seconds and froze the desktop.
+        import os
+        if os.environ.get("DISPLAY"):
+            overlay = stream.Overlay({"kind": "screen"}, "fit", {"cursor": "ring"})
+            reason = run("videotestsrc is-live=true num-buffers=40 ! "
+                         "video/x-raw,format=BGRx,width=640,height=360,framerate=30/1 ! "
+                         "cairooverlay name=draw ! fakesink", overlay)
+            check(f"cursor overlay runs: {reason}", reason is None)
+            check(f"one X connection for the cursor ({len(overlay.pointer._displays)} opened)",
+                  1 <= len(overlay.pointer._displays) <= 2)
+            overlay.pointer.close()
 
 if failures:
     sys.exit(1)

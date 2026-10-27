@@ -1,4 +1,4 @@
-"""One Miracast session: the RTSP control channel and the media pipeline.
+"""One Miracast session: the RTSP control channel to the TV.
 
 The TV opens a TCP connection to port 7236 once the Wi-Fi Direct group is
 up. From then on this side drives the exchange:
@@ -12,116 +12,31 @@ up. From then on this side drives the exchange:
   M7  PLAY             sink -> source   start sending MPEG-TS over RTP
   M16 GET_PARAMETER    source -> sink   keep-alive while streaming
 
-Everything runs on the GLib main loop; nothing blocks.
+The media itself is stream.Stream. Everything runs on the GLib main loop.
 """
 
 import secrets
 
-import gi
+from gi.repository import Gio, GLib
 
-gi.require_version("Gst", "1.0")
-from gi.repository import Gio, GLib, Gst  # noqa: E402
-
-import wfd  # noqa: E402
-
-Gst.init(None)
+import stream as media
+import wfd
 
 PRESENTATION = "rtsp://{ip}/wfd1.0/streamid=0"
 KEEPALIVE_S = 25
 SESSION_TIMEOUT_S = 30
-BITRATE_KBPS = {1080: 8000, 720: 5000}
-
-
-def element(name):
-    return Gst.ElementFactory.find(name) is not None
-
-
-def pick_encoder():
-    """Hardware H.264 first (Intel VA-API), then x264, then OpenH264."""
-    for name in ("vaapih264enc", "x264enc", "openh264enc"):
-        if element(name):
-            return name
-    return None
+# Asked for in M3 beyond what the stream needs, so the window can say what
+# the TV is and whether its remote could drive this laptop.
+EXTRA_PARAMETERS = ("wfd_uibc_capability", "wfd_content_protection", "wfd_display_edid",
+                    "wfd_connector_type")
 
 
 def missing_elements():
-    """GStreamer elements this needs that are not installed, by package."""
-    need = {
-        "mpegtsmux": "gstreamer1.0-plugins-bad",
-        "h264parse": "gstreamer1.0-plugins-bad",
-        "rtpmp2tpay": "gstreamer1.0-plugins-good",
-        "ximagesrc": "gstreamer1.0-plugins-good",
-    }
-    out = {pkg for name, pkg in need.items() if not element(name)}
-    if not pick_encoder():
-        out.add("gstreamer1.0-vaapi")
-    return sorted(out)
+    return media.missing_elements()
 
 
 def have_aac():
-    return element("voaacenc") or element("avenc_aac") or element("fdkaacenc")
-
-
-def encoder_chain(encoder, video):
-    kbps = BITRATE_KBPS.get(video["height"], 3000)
-    gop = video["fps"]
-    if encoder == "vaapih264enc":
-        # Constant QP: on this Gen9 iGPU the iHD driver refuses CBR/VBR
-        # (bitrate control needs HuC firmware the kernel does not load), so
-        # quality is fixed instead. Desktop content stays far below the
-        # 50 Mbps a WFD sink takes.
-        return f"vaapih264enc rate-control=cqp init-qp=26 keyframe-period={gop} max-bframes=0"
-    if encoder == "x264enc":
-        return (f"x264enc tune=zerolatency speed-preset=ultrafast bitrate={kbps}"
-                f" key-int-max={gop} bframes=0 sliced-threads=true")
-    return f"openh264enc bitrate={kbps * 1000} gop-size={gop} complexity=low"
-
-
-def aac_encoder():
-    for name in ("voaacenc", "fdkaacenc", "avenc_aac"):
-        if element(name):
-            return name
-    return None
-
-
-def pipeline_description(video, audio, host, port, encoder, audio_device=None):
-    """gst-launch text for the stream. Pure, so the check can read it.
-
-    PIDs 0x1011 (video) and 0x1100 (audio) are the ones WFD sinks expect;
-    mpegtsmux takes the PID from the requested pad name.
-    """
-    width, height, fps = video["width"], video["height"], video["fps"]
-    # VA-API takes only NV12 here; the software encoders want I420.
-    raw_format = "NV12" if encoder == "vaapih264enc" else "I420"
-    parts = [
-        f"mpegtsmux name=mux alignment=7 ! rtpmp2tpay pt=33 ! "
-        f"udpsink host={host} port={port} sync=false async=false",
-        f"ximagesrc use-damage=false show-pointer=true ! video/x-raw,framerate={fps}/1 ! "
-        "queue leaky=downstream max-size-buffers=2 ! videoconvert ! videoscale ! "
-        f"video/x-raw,format={raw_format},width={width},height={height},pixel-aspect-ratio=1/1 ! "
-        f"{encoder_chain(encoder, video)} name=venc ! "
-        "video/x-h264,profile=constrained-baseline ! "
-        "h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au ! "
-        "queue ! mux.sink_4113",
-    ]
-    if audio == "AAC":
-        device = f" device={audio_device}" if audio_device else ""
-        parts.append(
-            f"pulsesrc{device} ! audioconvert ! audioresample ! "
-            "audio/x-raw,rate=48000,channels=2 ! "
-            f"{aac_encoder()} bitrate=128000 ! aacparse ! queue ! mux.sink_4352")
-    return "  ".join(parts)
-
-
-def monitor_source():
-    """The monitor of the default output, so the TV plays what the laptop plays."""
-    try:
-        out = Gio.Subprocess.new(["pactl", "get-default-sink"], Gio.SubprocessFlags.STDOUT_PIPE)
-        ok, stdout, _ = out.communicate_utf8(None, None)
-        sink = (stdout or "").strip()
-        return f"{sink}.monitor" if ok and sink else None
-    except GLib.Error:
-        return None
+    return media.aac_encoder() is not None
 
 
 class Session:
@@ -130,19 +45,25 @@ class Session:
     States: listening, negotiating, streaming, ended, failed.
     """
 
-    def __init__(self, on_state, log=print):
+    def __init__(self, on_state, prefs, source=None, audio_device=None, log=print,
+                 preview=False):
         self.on_state = on_state
+        self.prefs = prefs
+        self.source = source or {"kind": "screen"}
+        self.audio_device = audio_device
         self.log = log
+        self.preview = preview
         self.service = None
         self.conn = None
         self.buffer = b""
         self.cseq = 0
         self.pending = {}
-        self.pipeline = None
+        self.stream = None
         self.keepalive = 0
         self.session_id = secrets.token_hex(4).upper()
         self.video = None
         self.audio = None
+        self.sink_params = {}
         self.rtp_port = None
         self.sink_ip = None
         self.local_ip = None
@@ -169,13 +90,27 @@ class Session:
         else:
             self._close(reason)
 
+    def restream(self, source=None, prefs=None, audio_device=None):
+        """Rebuild the media with a new source or options, keeping the TV session.
+
+        The video mode stays as negotiated; the TV sees a fresh keyframe.
+        """
+        if source is not None:
+            self.source = source
+        if prefs is not None:
+            self.prefs = prefs
+        if audio_device is not None:
+            self.audio_device = audio_device or None
+        if self.state != "streaming":
+            return
+        self._stop_stream()
+        self._start_stream()
+
     def _close(self, reason, state="ended"):
         if self.keepalive:
             GLib.source_remove(self.keepalive)
             self.keepalive = 0
-        if self.pipeline:
-            self.pipeline.set_state(Gst.State.NULL)
-            self.pipeline = None
+        self._stop_stream()
         self.cancel.cancel()
         if self.conn:
             self.conn.close(None)
@@ -268,37 +203,43 @@ class Session:
             self._reply(message, {"Public": "org.wfa.wfd1.0, SETUP, TEARDOWN, PLAY, PAUSE, "
                                             "GET_PARAMETER, SET_PARAMETER"})
             if self.video is None:
-                self._send_request(
-                    "GET_PARAMETER", "rtsp://localhost/wfd1.0",
-                    body="wfd_video_formats\r\nwfd_audio_codecs\r\nwfd_client_rtp_ports\r\n",
-                    then=self._on_capabilities)
+                wanted = ("wfd_video_formats", "wfd_audio_codecs", "wfd_client_rtp_ports",
+                          *EXTRA_PARAMETERS)
+                self._send_request("GET_PARAMETER", "rtsp://localhost/wfd1.0",
+                                   body="\r\n".join(wanted) + "\r\n", then=self._on_capabilities)
         elif method == "SETUP":
             self._on_setup(message)
         elif method == "PLAY":
             self._reply(message, {"Session": self.session_id})
-            self._start_stream()
+            if self.stream:
+                self.stream.pause(False)
+            else:
+                self._start_stream()
         elif method == "PAUSE":
             self._reply(message, {"Session": self.session_id})
-            if self.pipeline:
-                self.pipeline.set_state(Gst.State.PAUSED)
+            if self.stream:
+                self.stream.pause(True)
         elif method == "TEARDOWN":
             self._reply(message, {"Session": self.session_id})
             self._close(self.stopping or "The TV ended the session")
         elif method == "SET_PARAMETER":
             self._reply(message)
-            if "wfd_idr_request" in message.body:
-                self._force_keyframe()
+            if "wfd_idr_request" in message.body and self.stream:
+                self.stream.force_keyframe()
         else:
             self._reply(message)
 
     def _on_capabilities(self, message):
         params = wfd.parameters(message.body)
-        self.log(f"cast: TV offers {params}")
-        self.video = wfd.choose_video(params.get("wfd_video_formats"))
+        self.sink_params = params
+        quality = self.prefs.get("quality", "sharp")
+        order = wfd.QUALITY.get(quality, wfd.QUALITY["sharp"])["order"]
+        self.video = wfd.choose_video(params.get("wfd_video_formats"), order=order)
         if self.video is None:
             self._fail("The TV did not list any video format")
             return
-        self.audio = wfd.choose_audio(params.get("wfd_audio_codecs"), have_aac())
+        sound = self.audio_device is not None
+        self.audio = wfd.choose_audio(params.get("wfd_audio_codecs"), have_aac() and sound)
         self.rtp_port = wfd.client_rtp_port(params.get("wfd_client_rtp_ports")) or 19000
         lines = [
             f"wfd_video_formats: {wfd.video_formats_value(self.video)}",
@@ -327,42 +268,29 @@ class Session:
     # --- media -----------------------------------------------------------
 
     def _start_stream(self):
-        if self.pipeline:
-            self.pipeline.set_state(Gst.State.PLAYING)
-            return
-        encoder = pick_encoder()
-        description = pipeline_description(self.video, self.audio, self.sink_ip, self.rtp_port,
-                                           encoder, monitor_source())
-        self.log(f"cast: {description}")
+        self.stream = media.Stream(
+            self.video, self.audio, self.sink_ip, self.rtp_port, self.prefs, self.source,
+            self.audio_device, self._on_stream_error, self.log, self.preview)
         try:
-            self.pipeline = Gst.parse_launch(description)
+            self.stream.start()
         except GLib.Error as error:
+            self.stream = None
             self._fail(f"Could not build the stream: {error.message}")
             return
-        bus = self.pipeline.get_bus()
-        bus.add_signal_watch()
-        bus.connect("message::error", self._on_error)
-        self.pipeline.set_state(Gst.State.PLAYING)
-        self.keepalive = GLib.timeout_add_seconds(KEEPALIVE_S, self._keep_alive)
+        if not self.keepalive:
+            self.keepalive = GLib.timeout_add_seconds(KEEPALIVE_S, self._keep_alive)
         sound = "with sound" if self.audio else "no sound"
         self._set("streaming", f"Showing on the TV at {self.video['width']}x{self.video['height']}"
                                f" {self.video['fps']} fps, {sound}")
 
+    def _stop_stream(self):
+        if self.stream:
+            stream, self.stream = self.stream, None
+            stream.stop()
+
+    def _on_stream_error(self, text):
+        self._fail(text)
+
     def _keep_alive(self):
         self._send_request("GET_PARAMETER", "rtsp://localhost/wfd1.0")
         return GLib.SOURCE_CONTINUE
-
-    def _force_keyframe(self):
-        if not self.pipeline:
-            return
-        gi.require_version("GstVideo", "1.0")
-        from gi.repository import GstVideo
-        venc = self.pipeline.get_by_name("venc")
-        if venc:
-            event = GstVideo.video_event_new_upstream_force_key_unit(
-                Gst.CLOCK_TIME_NONE, True, 0)
-            venc.get_static_pad("src").send_event(event)
-
-    def _on_error(self, _bus, message):
-        error, _debug = message.parse_error()
-        self._fail(f"Stream stopped: {error.message}")

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wall</title>
+<style>
+  :root {
+    --bg: #0b0b0d; --surface: rgba(44, 44, 46, 0.55); --text: #f5f5f7; --muted: #98989d;
+    --accent: #0a84ff; --good: #30d158; --warn: #ff9f0a;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "SF Pro Display", "Ubuntu", "LG Smart UI", system-ui, sans-serif; }
+  .glow { position: fixed; inset: -20%; background:
+      radial-gradient(40% 40% at 30% 35%, rgba(10,132,255,.28), transparent 70%),
+      radial-gradient(35% 35% at 75% 70%, rgba(94,92,230,.22), transparent 70%);
+    animation: drift 40s ease-in-out infinite alternate; }
+  @keyframes drift { to { transform: translate(6%, -4%) rotate(8deg); } }
+  main { position: relative; height: 100%; display: grid; grid-template-rows: 1fr auto;
+    padding: 6vh 6vw; }
+  .time { align-self: center; }
+  .clock { font-size: 22vh; font-weight: 600; letter-spacing: -0.03em; line-height: 1;
+    font-variant-numeric: tabular-nums; }
+  .date { font-size: 4.2vh; color: var(--muted); margin-top: 2vh; }
+  .weather { font-size: 4.2vh; margin-top: 1.4vh; }
+  .cards { display: flex; gap: 2vw; }
+  .card { flex: 1; background: var(--surface); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 2.4vh; padding: 2.4vh 2vw; backdrop-filter: blur(20px); }
+  .label { color: var(--muted); font-size: 2.2vh; text-transform: uppercase; letter-spacing: .08em; }
+  .value { font-size: 5vh; font-weight: 600; margin-top: .8vh; font-variant-numeric: tabular-nums; }
+  .bar { height: .7vh; border-radius: .35vh; background: rgba(255,255,255,.1); margin-top: 1.4vh;
+    overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent);
+    transition: width .8s ease; }
+  .host { position: absolute; top: 6vh; right: 6vw; color: var(--muted); font-size: 2.6vh; }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<main>
+  <div class="host">@HOST@</div>
+  <section class="time">
+    <div class="clock" id="clock">--:--</div>
+    <div class="date" id="date"></div>
+    <div class="weather" id="weather"></div>
+  </section>
+  <section class="cards">
+    <div class="card"><div class="label">Processor</div><div class="value" id="cpu">–</div>
+      <div class="bar"><i id="cpu-bar"></i></div></div>
+    <div class="card"><div class="label">Memory</div><div class="value" id="memory">–</div>
+      <div class="bar"><i id="memory-bar"></i></div></div>
+    <div class="card"><div class="label">Battery</div><div class="value" id="battery">–</div>
+      <div class="bar"><i id="battery-bar"></i></div></div>
+  </section>
+</main>
+<script>
+  const pad = (n) => String(n).padStart(2, "0");
+  function tick() {
+    const now = new Date();
+    document.getElementById("clock").textContent = pad(now.getHours()) + ":" + pad(now.getMinutes());
+    document.getElementById("date").textContent = now.toLocaleDateString(undefined,
+      { weekday: "long", day: "numeric", month: "long" });
+  }
+  function show(id, value, suffix) {
+    if (value === undefined || value === null) return;
+    document.getElementById(id).textContent = value + suffix;
+    document.getElementById(id + "-bar").style.width = Math.min(100, value) + "%";
+  }
+  async function vitals() {
+    try {
+      const v = await (await fetch("@VITALS@", { cache: "no-store" })).json();
+      show("cpu", v.cpu, "%");
+      show("memory", v.memory, "%");
+      show("battery", v.battery, v.charging ? "% ⚡" : "%");
+      if (v.weather) {
+        document.getElementById("weather").textContent =
+          `${Math.round(v.weather.temperature)}° · ${v.weather.text} · ${v.weather.place}`;
+      }
+    } catch (e) { /* the laptop went away; keep the clock running */ }
+  }
+  tick(); vitals();
+  setInterval(tick, 1000);
+  setInterval(vitals, 5000);
+</script>
+</body>
+</html>

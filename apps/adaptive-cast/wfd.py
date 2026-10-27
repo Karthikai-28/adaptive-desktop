@@ -40,6 +40,19 @@ CEA_MODES = {
 # text, so it comes after the 30 fps modes.
 PREFERRED_CEA = (7, 5, 8, 6, 12, 10, 0)
 
+# Quality presets: the CEA modes each one tries, best first, and the
+# constant QP (VA-API) or bitrate (software encoders) it encodes at.
+QUALITY = {
+    "sharp": {"label": "Sharp", "detail": "1080p 30 fps, crisp text", "order": (7, 5, 0),
+              "qp": 23, "kbps": 9000},
+    "smooth": {"label": "Smooth", "detail": "1080p 60 fps, for video and scrolling",
+               "order": (8, 6, 7, 5, 0), "qp": 26, "kbps": 12000},
+    "light": {"label": "Light", "detail": "720p 30 fps, for a weak signal", "order": (5, 10, 0),
+              "qp": 30, "kbps": 4000},
+    "game": {"label": "Game", "detail": "720p 60 fps, shortest delay", "order": (6, 5, 0),
+             "qp": 28, "kbps": 6000},
+}
+
 PROFILE_CBP, PROFILE_CHP = 0x01, 0x02
 # Level bits and the CEA modes each level can carry for Constrained Baseline.
 LEVEL_31, LEVEL_32, LEVEL_4, LEVEL_41, LEVEL_42 = 0x01, 0x02, 0x04, 0x08, 0x10
@@ -195,7 +208,7 @@ def _level_for(width, height, fps):
     return LEVEL_42
 
 
-def choose_video(sink_formats, max_height=1080):
+def choose_video(sink_formats, max_height=1080, order=PREFERRED_CEA):
     """Pick a mode from the sink's wfd_video_formats value.
 
     The value is "native preferred-mode" followed by one or more
@@ -220,21 +233,21 @@ def choose_video(sink_formats, max_height=1080):
         if not profile & PROFILE_CBP:
             continue
         top = _max_level(level)
-        for bit in PREFERRED_CEA:
+        for bit in order:
             if not cea & (1 << bit):
                 continue
             width, height, fps = CEA_MODES[bit]
             need = _level_for(width, height, fps)
             if height > max_height or need > top:
                 continue
-            rank = PREFERRED_CEA.index(bit)
+            rank = order.index(bit)
             if best is None or rank < best["rank"]:
                 best = {"rank": rank, "cea_bit": bit, "width": width, "height": height,
                         "fps": fps, "level": need}
             break
     if best is None:
         # Every sink must take 640x480p60 Constrained Baseline 3.1.
-        best = {"rank": len(PREFERRED_CEA), "cea_bit": 0, "width": 640, "height": 480,
+        best = {"rank": len(order), "cea_bit": 0, "width": 640, "height": 480,
                 "fps": 60, "level": LEVEL_31}
     best.pop("rank")
     return best

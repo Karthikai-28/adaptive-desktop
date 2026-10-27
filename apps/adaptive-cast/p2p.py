@@ -149,6 +149,10 @@ class WifiDirect:
         self._on_state(active, active.get_state(), 0)
 
     def _on_state(self, active, state, reason):
+        # A connection this side already let go of (a restart, a stop) still
+        # reports its own end; that is not news about the current link.
+        if active is not self.active:
+            return
         state = NM.ActiveConnectionState(int(state)) if not isinstance(
             state, NM.ActiveConnectionState) else state
         if state == NM.ActiveConnectionState.ACTIVATED:
@@ -156,8 +160,7 @@ class WifiDirect:
             addresses = [a.get_address() for a in ip4.get_addresses()] if ip4 else []
             self.on_link("connected", f"Linked over Wi-Fi Direct ({', '.join(addresses) or 'no address'})")
         elif state == NM.ActiveConnectionState.DEACTIVATED:
-            if self.active is active:
-                self.active = None
+            self.active = None
             why = NM.ActiveConnectionStateReason(int(reason)).value_nick if reason else ""
             self.on_link("disconnected", f"Wi-Fi Direct link closed{f' ({why})' if why else ''}")
 

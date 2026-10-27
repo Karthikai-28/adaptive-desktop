@@ -15,17 +15,24 @@
 window.adaptive-cast, .root { background-color: @ad_bg; color: @ad_text; }
 
 .header {
-    padding: 22px 24px 14px 24px;
+    padding: 22px 26px 16px 26px;
     background-color: @ad_bg_deep;
     border-bottom: 1px solid alpha(@ad_divider, 0.35);
 }
 
-.title { font-size: 22px; font-weight: 600; }
-
+.title { font-size: 24px; font-weight: 700; }
 .muted { color: @ad_muted; }
 
+.chip {
+    padding: 5px 12px;
+    border-radius: 999px;
+    background-color: alpha(@ad_accent, 0.16);
+    color: @ad_accent;
+    font-weight: 600;
+}
+
 .banner {
-    margin: 14px 16px 0 16px;
+    margin: 14px 18px 0 18px;
     padding: 10px 12px;
     border-radius: 10px;
     background-color: alpha(@ad_warning, 0.14);
@@ -33,47 +40,177 @@ window.adaptive-cast, .root { background-color: @ad_bg; color: @ad_text; }
     font-family: monospace;
 }
 
-.displays { background: transparent; padding: 10px 8px; }
+.page { padding: 20px 24px; }
 
-.displays > row { background: transparent; }
-
-.display {
-    margin: 4px 8px;
-    padding: 12px 14px;
-    border-radius: 12px;
-    background-color: @ad_surface;
+.section {
+    margin-top: 14px;
+    color: @ad_muted;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
 }
 
-.display .name { font-weight: 600; }
+/* TVs nearby */
 
-.empty { margin: 32px 24px; }
+.display {
+    padding: 16px 18px;
+    border-radius: 16px;
+    background-color: @ad_surface;
+    border: 1px solid transparent;
+}
+
+.display.last { border-color: alpha(@ad_accent, 0.55); }
+.display .name { font-size: 16px; font-weight: 600; }
+.tv-icon { color: @ad_accent; }
+.empty { padding: 48px 24px; }
 
 button.cast {
     background-image: none;
     background-color: @ad_accent;
     color: white;
-    border-radius: 8px;
+    border-radius: 10px;
     border: none;
-    padding: 6px 18px;
-    font-weight: 600;
+    padding: 8px 22px;
+    font-weight: 700;
 }
 
 button.cast:disabled { background-color: @ad_surface_2; color: @ad_muted; }
+
+/* Live */
+
+.preview {
+    border-radius: 16px;
+    background-color: black;
+    border: 1px solid alpha(@ad_divider, 0.5);
+}
+
+.preview-note {
+    padding: 8px 16px;
+    border-radius: 999px;
+    background-color: alpha(@ad_bg_deep, 0.85);
+    color: @ad_text;
+    font-weight: 600;
+}
+
+.live-dot {
+    margin: 12px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background-color: @ad_danger;
+    color: white;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+.step {
+    padding: 8px 4px;
+    border-radius: 10px;
+    background-color: @ad_surface;
+    color: @ad_muted;
+    font-weight: 600;
+}
+
+.step.current { background-color: alpha(@ad_accent, 0.22); color: @ad_text; }
+.step.done { background-color: alpha(@ad_live, 0.18); color: @ad_live; }
+
+.status { color: @ad_muted; }
+.status.error { color: @ad_danger; }
+
+.stats {
+    font-family: monospace;
+    color: @ad_text;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background-color: @ad_bg_deep;
+}
+
+button.action {
+    background-image: none;
+    background-color: @ad_surface;
+    color: @ad_text;
+    border: 1px solid alpha(@ad_divider, 0.6);
+    border-radius: 10px;
+    padding: 7px 16px;
+}
+
+button.action:checked {
+    background-color: alpha(@ad_accent, 0.25);
+    border-color: @ad_accent;
+}
 
 button.stop {
     background-image: none;
     background-color: alpha(@ad_danger, 0.18);
     color: @ad_danger;
-    border-radius: 8px;
+    border-radius: 10px;
     border: none;
+    padding: 7px 18px;
+    font-weight: 700;
 }
 
-.footer {
-    padding: 12px 16px;
+/* Sidebar */
+
+.sidebar {
     background-color: @ad_bg_deep;
-    border-top: 1px solid alpha(@ad_divider, 0.35);
+    border-left: 1px solid alpha(@ad_divider, 0.35);
 }
 
-.status { color: @ad_muted; }
-.status.live { color: @ad_live; }
-.status.error { color: @ad_danger; }
+.tabs { padding: 12px 10px 6px 10px; }
+
+.tabs button {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: @ad_muted;
+    padding: 6px 8px;
+    border-radius: 8px;
+}
+
+.tabs button:checked { background-color: @ad_surface; color: @ad_text; }
+
+.tab { padding: 6px 18px 24px 18px; }
+
+.row {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background-color: @ad_surface;
+}
+
+.row-title { font-weight: 600; }
+
+button.preset {
+    background-image: none;
+    background-color: @ad_surface;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+button.preset label.row-title { color: @ad_text; }
+button.preset label.muted { color: @ad_muted; }
+
+button.preset:checked {
+    border-color: @ad_accent;
+    background-color: alpha(@ad_accent, 0.14);
+}
+
+button.key {
+    background-image: none;
+    background-color: @ad_surface;
+    border: none;
+    border-radius: 12px;
+    min-width: 52px;
+    min-height: 40px;
+}
+
+button.key:active { background-color: alpha(@ad_accent, 0.35); }
+
+entry {
+    background-color: @ad_surface;
+    color: @ad_text;
+    border-radius: 10px;
+    border: 1px solid alpha(@ad_divider, 0.5);
+}
+
+switch:checked { background-color: @ad_accent; }

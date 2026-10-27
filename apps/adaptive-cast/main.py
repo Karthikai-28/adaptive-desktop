@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
-"""Cast - show this laptop's screen on a TV over Miracast (Wi-Fi Direct).
+"""Cast - show this laptop on a TV over Miracast (Wi-Fi Direct), and more.
 
-The window lists TVs that answer Wi-Fi Direct and say they can show a
-Wi-Fi Display stream. Pick one and the laptop joins its group, the TV
-opens the RTSP session, and the desktop (with its sound) is sent as
-H.264 + AAC in MPEG-TS over RTP. The home Wi-Fi stays connected.
+One running copy owns the cast; later invocations hand it their command, so
+the keyboard shortcut, the palette, Files and the phone all drive the same
+cast as the window.
 
-  main.py                       the window
-  main.py --list                print the TVs found in ten seconds
-  main.py --connect NAME        cast to the first TV whose name contains NAME
+  main.py                      the window
+  main.py --toggle             cast to the last TV, or stop if casting
+  main.py --cast NAME          cast to the TV whose name contains NAME
+  main.py --stop               stop casting
+  main.py --freeze / --curtain [TEXT] / --resume
+  main.py --show screen|window|left|right   what to send (window: the focused one)
+  main.py --set KEY=VALUE      change an option (quality, sound, cursor, clock, ...)
+  main.py --play FILE          play a video, song or photo on the TV (no mirroring)
+  main.py --youtube URL        open a YouTube link in the TV's own app
+  main.py --wall               show the wall page (clock, weather, vitals) on the TV
+  main.py --status             print the current cast state as JSON
+
+Debugging, without the running copy:
+  main.py --list               print the TVs found in ten seconds
+  main.py --connect NAME [--seconds N]
 """
 
 import argparse
@@ -19,116 +30,40 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import controller  # noqa: E402
 import p2p  # noqa: E402
-import session as cast_session  # noqa: E402
+import stream  # noqa: E402
 
-APP_ID = "com.karthi.AdaptiveCast"
+APP_ID = controller.APP_ID
 HERE = Path(__file__).resolve().parent
-OPEN_TIMEOUT_S = 30
-# A TV that has just ended a session drops the next join for a few seconds.
-RETRY_AFTER_S = 6
+# How long a command waits for the TV to show up before giving up.
+FIND_WAIT_S = 20
 
 
-class Cast:
-    """Ties the Wi-Fi Direct link to the RTSP session; either ending ends both.
-
-    on_state(state, text) gets: idle, connecting, negotiating, streaming,
-    ended, failed.
-    """
-
-    def __init__(self, on_state, on_displays, log=print):
-        self.on_state = on_state
-        self.log = log
-        self.link = p2p.WifiDirect(on_displays, self._on_link, log)
-        self.session = None
-        self.wait_timer = 0
-        self.display = None
-        self.retried = False
-
-    def start(self, display, retry=False):
-        self.stop()
-        self.retried = retry
-        self.display = display
-        self.session = cast_session.Session(self._on_session, self.log)
-        try:
-            self.session.listen()
-        except GLib.Error as error:
-            self.session = None
-            self.on_state("failed", f"Port 7236 is busy: {error.message}")
-            return
-        self.link.connect_to(display)
-
-    def stop(self):
-        self._clear_wait()
-        if self.session:
-            session, self.session = self.session, None
-            session.stop()
-        # The link closing after this was asked for; it is not news.
-        self.display = None
-        self.link.disconnect()
-
-    def _clear_wait(self):
-        if self.wait_timer:
-            GLib.source_remove(self.wait_timer)
-            self.wait_timer = 0
-
-    def _on_link(self, state, text):
-        self.log(f"cast: link {state}: {text}")
-        if state == "connecting":
-            self.on_state("connecting", text)
-        elif state == "connected":
-            self.on_state("connecting", "Linked. Waiting for the TV to open the session")
-            self.wait_timer = GLib.timeout_add_seconds(OPEN_TIMEOUT_S, self._open_timeout)
-        elif state in ("disconnected", "failed"):
-            if self.display is None:
-                return
-            display, self.display = self.display, None
-            self._clear_wait()
-            if (state == "disconnected" and not self.retried and self.session
-                    and self.session.state == "listening"):
-                self.on_state("connecting", "The TV is still busy. Trying again")
-                session, self.session = self.session, None
-                session.on_state = lambda *_: None
-                session.stop()
-                self.display = display
-                GLib.timeout_add_seconds(RETRY_AFTER_S, self._retry, display)
-                return
-            if self.session:
-                session, self.session = self.session, None
-                # Reported below; the session's own "ended" would repeat it.
-                session.on_state = lambda *_: None
-                session.stop(text)
-            self.on_state("failed" if state == "failed" else "ended", text)
-
-    def _retry(self, display):
-        if self.display is display and self.session is None:
-            self.start(display, retry=True)
-        return GLib.SOURCE_REMOVE
-
-    def _open_timeout(self):
-        self.wait_timer = 0
-        if self.session and self.session.state == "listening":
-            self.stop()
-            self.on_state("failed", "The TV linked but never opened the session. "
-                                    "Open Screen Share on the TV and try again.")
-        return GLib.SOURCE_REMOVE
-
-    def _on_session(self, state, text):
-        if state == "listening":
-            return
-        if state in ("negotiating", "streaming"):
-            self._clear_wait()
-        if state in ("ended", "failed") and self.session:
-            self.session = None
-            self.display = None
-            self.link.disconnect()
-        self.on_state(state, text)
+def parser():
+    p = argparse.ArgumentParser(prog="cast", description=__doc__.splitlines()[0])
+    p.add_argument("--toggle", action="store_true")
+    p.add_argument("--cast", metavar="NAME")
+    p.add_argument("--stop", action="store_true")
+    p.add_argument("--freeze", action="store_true")
+    p.add_argument("--curtain", nargs="?", const="", metavar="TEXT")
+    p.add_argument("--resume", action="store_true")
+    p.add_argument("--show", choices=("screen", "window", "left", "right"))
+    p.add_argument("--set", metavar="KEY=VALUE", action="append", default=[])
+    p.add_argument("--play", metavar="FILE")
+    p.add_argument("--youtube", metavar="URL")
+    p.add_argument("--wall", action="store_true")
+    p.add_argument("--status", action="store_true")
+    p.add_argument("--list", action="store_true")
+    p.add_argument("--connect", metavar="NAME")
+    p.add_argument("--seconds", type=int, default=0)
+    return p
 
 
-# --- command line ----------------------------------------------------------
+# --- debugging paths (no running copy) -------------------------------------
 
 def run_list():
     loop = GLib.MainLoop()
@@ -150,7 +85,7 @@ def run_list():
 
 
 def run_connect(name, seconds):
-    missing = cast_session.missing_elements()
+    missing = stream.missing_elements()
     if missing:
         print("Install first: sudo apt install " + " ".join(missing))
         return 1
@@ -178,7 +113,7 @@ def run_connect(name, seconds):
                 cast.start(d)
                 return
 
-    cast = Cast(on_state, on_displays)
+    cast = controller.Cast(on_state, on_displays)
     if not cast.link.ready:
         print("No Wi-Fi Direct device.")
         return 1
@@ -191,164 +126,213 @@ def run_connect(name, seconds):
     return result["code"]
 
 
-# --- window ----------------------------------------------------------------
-
-class Window(Gtk.ApplicationWindow):
-    def __init__(self, app):
-        super().__init__(application=app, title="Cast")
-        self.set_default_size(440, 520)
-        self.add_css_class("adaptive-cast")
-        self.cast = Cast(self._on_state, self._on_displays)
-        self.casting = None
-
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        root.add_css_class("root")
-        self.set_child(root)
-
-        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        header.add_css_class("header")
-        title = Gtk.Label(label="Cast to a TV", xalign=0)
-        title.add_css_class("title")
-        hint = Gtk.Label(label="Wireless display over Wi-Fi Direct. Your Wi-Fi stays connected.",
-                         xalign=0, wrap=True)
-        hint.add_css_class("muted")
-        header.append(title)
-        header.append(hint)
-        root.append(header)
-
-        self.banner = Gtk.Label(xalign=0, wrap=True, selectable=True)
-        self.banner.add_css_class("banner")
-        root.append(self.banner)
-
-        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.list.add_css_class("displays")
-        scroller = Gtk.ScrolledWindow(vexpand=True, child=self.list)
-        root.append(scroller)
-
-        footer = Gtk.Box(spacing=12)
-        footer.add_css_class("footer")
-        self.spinner = Gtk.Spinner()
-        self.status = Gtk.Label(xalign=0, hexpand=True, wrap=True)
-        self.status.add_css_class("status")
-        self.stop_button = Gtk.Button(label="Stop casting", visible=False)
-        self.stop_button.add_css_class("stop")
-        self.stop_button.connect("clicked", lambda *_: self.cast.stop())
-        footer.append(self.spinner)
-        footer.append(self.status)
-        footer.append(self.stop_button)
-        root.append(footer)
-
-        missing = cast_session.missing_elements()
-        if not self.cast.link.ready:
-            self._banner("This laptop has no Wi-Fi Direct device, so it cannot cast.")
-        elif missing:
-            self._banner("Needs a video encoder first. In a terminal:\n"
-                         "sudo apt install " + " ".join(missing))
-        else:
-            self.banner.set_visible(False)
-
-        self._on_displays(self.cast.link.displays())
-        self.cast.link.start_find()
-        self._idle("Looking for TVs nearby")
-        self.connect("close-request", self._on_close)
-
-    def _banner(self, text):
-        self.banner.set_label(text)
-        self.banner.set_visible(True)
-
-    def _idle(self, text):
-        self.spinner.start()
-        self.status.set_label(text)
-
-    def _on_displays(self, displays):
-        while (row := self.list.get_row_at_index(0)) is not None:
-            self.list.remove(row)
-        if not displays:
-            empty = Gtk.Label(label="No TVs yet. Turn on Screen Share (LG) or Screen Mirroring "
-                                    "on the TV.", wrap=True)
-            empty.add_css_class("muted")
-            empty.add_css_class("empty")
-            self.list.append(empty)
-            return
-        blocked = bool(self.banner.get_visible())
-        for display in displays:
-            row = Gtk.Box(spacing=12)
-            row.add_css_class("display")
-            icon = Gtk.Image.new_from_icon_name("video-display-symbolic")
-            icon.set_pixel_size(28)
-            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-            name = Gtk.Label(label=display.name, xalign=0, ellipsize=Pango.EllipsizeMode.END)
-            name.add_css_class("name")
-            detail = Gtk.Label(xalign=0, label=f"{'Ready' if display.available else 'Busy'}"
-                                               f" · signal {display.strength}%")
-            detail.add_css_class("muted")
-            text.append(name)
-            text.append(detail)
-            button = Gtk.Button(label="Cast")
-            button.add_css_class("cast")
-            button.set_sensitive(not blocked and self.casting is None)
-            button.connect("clicked", self._on_cast, display)
-            row.append(icon)
-            row.append(text)
-            row.append(button)
-            self.list.append(row)
-
-    def _on_cast(self, _button, display):
-        self.casting = display
-        self.cast.start(display)
-        self._on_displays(self.cast.link.displays())
-
-    def _on_state(self, state, text):
-        self.status.set_label(text)
-        self.stop_button.set_visible(state in ("connecting", "negotiating", "streaming"))
-        if state == "streaming":
-            self.spinner.stop()
-        elif state in ("ended", "failed"):
-            self.casting = None
-            self.status.remove_css_class("live")
-            if state == "failed":
-                self.status.add_css_class("error")
-            self.cast.link.start_find()
-            self._on_displays(self.cast.link.displays())
-            self.spinner.start()
-        else:
-            self.status.remove_css_class("error")
-            self.spinner.start()
-        if state == "streaming":
-            self.status.add_css_class("live")
-
-    def _on_close(self, *_):
-        self.cast.link.stop_find()
-        self.cast.stop()
+def parse_value(text):
+    lowered = text.strip().lower()
+    if lowered in ("true", "on", "yes"):
+        return True
+    if lowered in ("false", "off", "no"):
         return False
+    return text
 
+
+def source_for(name):
+    """A source dict for --show. "window" is whichever window has focus now."""
+    import subprocess
+    import desk
+    width, height = desk.screen_size()
+    half = width // 2 // 2 * 2
+    if name == "window":
+        out = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True)
+        xid = int(out.stdout.strip() or 0)
+        title = next((w["title"] for w in desk.windows() if w["xid"] == xid), "Window")
+        if xid:
+            return {"kind": "window", "xid": xid, "title": title[:60]}
+    if name == "left":
+        return {"kind": "region", "x": 0, "y": 0, "w": half, "h": height, "title": "Left half"}
+    if name == "right":
+        return {"kind": "region", "x": width - half, "y": 0, "w": half, "h": height,
+                "title": "Right half"}
+    return {"kind": "screen"}
+
+
+# --- the running copy --------------------------------------------------------
 
 class App(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id=APP_ID)
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.cast = None
+        self.window = None
+        self.media = None
+        self.held = False
+        self.pending = None
+        self.listeners = []
+
+    # the cast is created once, on first use -----------------------------
+
+    def ensure_cast(self):
+        if self.cast is None:
+            self.cast = controller.Cast(self._on_state, self._on_displays, preview=True)
+            self.cast.link.start_find()
+        return self.cast
+
+    def _on_state(self, state, text):
+        if state == "streaming" and not self.held:
+            # Casting continues with the window closed.
+            self.hold()
+            self.held = True
+        if state in ("ended", "failed", "idle") and self.held:
+            self.release()
+            self.held = False
+        for listener in list(self.listeners):
+            listener.on_state(state, text)
+
+    def _on_displays(self, displays):
+        if self.pending and self.pending(displays):
+            self.pending = None
+        for listener in list(self.listeners):
+            listener.on_displays(displays)
+
+    # commands -----------------------------------------------------------
+
+    def do_command_line(self, command_line):
+        try:
+            args = parser().parse_args(command_line.get_arguments()[1:])
+        except SystemExit:
+            return 2
+        if args.status:
+            data = controller.STATE_FILE.read_text() if controller.STATE_FILE.exists() else "{}"
+            command_line.print_literal(data + "\n")
+            return 0
+        cast = self.ensure_cast()
+        if args.toggle:
+            if cast.casting:
+                cast.stop()
+            else:
+                self.cast_to(None)
+        elif args.cast:
+            self.cast_to(args.cast)
+        elif args.stop:
+            cast.stop()
+        elif args.freeze:
+            cast.freeze(True)
+        elif args.curtain is not None:
+            cast.set_curtain(args.curtain)
+        elif args.resume:
+            cast.freeze(False)
+            cast.set_curtain(None)
+        elif args.show:
+            cast.set_source(source_for(args.show))
+        elif args.set:
+            for item in args.set:
+                key, _, value = item.partition("=")
+                if key in controller.saved.DEFAULTS:
+                    cast.set_option(key, parse_value(value))
+        elif args.play:
+            self.play_file(args.play)
+        elif args.youtube:
+            self.ensure_cast().tv.youtube(args.youtube)
+        elif args.wall:
+            self.show_wall()
+        else:
+            self.present_window()
+        return 0
 
     def do_activate(self):
-        window = self.get_active_window()
-        if window is None:
+        self.present_window()
+
+    def present_window(self):
+        if self.window is None:
+            import window as cast_window
+            # The palette is dark; ask the theme for its dark widgets to match.
+            Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
             css = Gtk.CssProvider()
             css.load_from_path(str(HERE / "style.css"))
             Gtk.StyleContext.add_provider_for_display(
                 Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-            window = Window(self)
-        window.present()
+            self.window = cast_window.Window(self)
+            self.window.connect("close-request", self._window_closed)
+        self.window.present()
+
+    def _window_closed(self, window):
+        if window in self.listeners:
+            self.listeners.remove(window)
+        self.window = None
+        return False
+
+    def cast_to(self, wanted):
+        """Cast to a TV by name (None: the last one), waiting for it to be found."""
+        cast = self.ensure_cast()
+
+        def look(_displays):
+            display = cast.find_display(wanted)
+            if display:
+                cast.start(display)
+                return True
+            return False
+
+        if not look(None):
+            self.hold()
+            self.pending = look
+            name = wanted or (cast.prefs.get("last_display") or {}).get("name") or "the TV"
+            for listener in list(self.listeners):
+                listener.on_state("preparing", f"Looking for {name}")
+
+            def give_up():
+                if self.pending is look:
+                    self.pending = None
+                    for listener in list(self.listeners):
+                        listener.on_state("failed", f"{name} was not found nearby")
+                self.release()
+                return GLib.SOURCE_REMOVE
+            GLib.timeout_add_seconds(FIND_WAIT_S, give_up)
+
+    def media_server(self):
+        import media
+        tvs = self.ensure_cast().tv.paired()
+        if not tvs:
+            return None, None
+        ip = next(iter(tvs))
+        if self.media is None:
+            self.media = media.Server(ip, lambda: self.cast.prefs.get("wall_place"))
+            self.media.start()
+        return self.media, ip
+
+    def play_file(self, path, done=None):
+        import threading
+        import media
+        server, ip = self.media_server()
+        if not server:
+            if done:
+                done(False, "Pair with the TV first (TV tab)")
+            return
+        self.hold()
+
+        def work():
+            try:
+                media.play_file(server, path, ip)
+                result = (True, f"Playing {Path(path).name} on the TV")
+            except OSError as error:
+                result = (False, f"The TV could not play it: {error}")
+            GLib.idle_add(lambda: (done and done(*result)) or GLib.SOURCE_REMOVE)
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_wall(self):
+        server, _ip = self.media_server()
+        if server:
+            self.hold()
+            self.ensure_cast().tv.open_url(server.wall_url())
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--list", action="store_true", help="print TVs found nearby")
-    parser.add_argument("--connect", metavar="NAME", help="cast to the TV whose name contains NAME")
-    parser.add_argument("--seconds", type=int, default=0, help="with --connect: stop after this long")
-    args = parser.parse_args()
+    args, _rest = parser().parse_known_args()
     if args.list:
         return run_list()
     if args.connect:
         return run_connect(args.connect, args.seconds)
-    return App().run([sys.argv[0]])
+    GLib.set_prgname(APP_ID)
+    GLib.set_application_name("Cast")
+    return App().run(sys.argv)
 
 
 if __name__ == "__main__":
