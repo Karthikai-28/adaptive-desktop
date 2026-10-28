@@ -45,6 +45,9 @@ env -u ADAPTIVE_REPO HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/home/.config
 grep -q "^ExecStart=/usr/bin/python3 $scratch/elsewhere/services/adaptive-link/server.py$" "$scratch/home/unit.service" &&
     ! grep -q '@ADAPTIVE_REPO@' "$scratch/home/unit.service" &&
     ok "a template is installed with the checkout's path" || bad "rendered unit: $(grep ExecStart "$scratch/home/unit.service")"
+grep -q '^Restart=always$' "$scratch/home/unit.service" &&
+    ok "Adaptive Link returns after any unexpected daemon exit" ||
+    bad "Adaptive Link can remain down after a clean daemon exit"
 [ "$(cat "$scratch/home/.config/adaptive-desktop/repo")" = "$scratch/elsewhere" ] &&
     ok "the checkout is recorded for the session and the shell" || bad "record: $(cat "$scratch/home/.config/adaptive-desktop/repo")"
 
