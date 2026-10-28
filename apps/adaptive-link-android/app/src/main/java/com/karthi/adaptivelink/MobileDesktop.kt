@@ -93,6 +93,54 @@ private val ControlSections = listOf("Network & Wi-Fi" to Page.Network, "Bluetoo
     "Sound & displays" to Page.DisplaySound, "Power & accessories" to Page.More, "Storage & devices" to Page.Devices,
     "Desktop & projects" to Page.Desktop, "Tasks & resources" to Page.Tasks, "User services" to Page.Services)
 
+private fun usageColour(used: Double) = when {
+    used >= 95 -> Color(0xFFFF453A)
+    used >= 80 -> Color(0xFFFF9F0A)
+    else -> Color(0xFF0A84FF)
+}
+
+@Composable
+private fun AiUsageCard(usage: JSONObject?) {
+    Surface(
+        shape = RoundedCornerShape(14.dp), color = Color(0xFF1C1C1E),
+        border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp), tint = Color(0xFFA28BFE))
+                Spacer(Modifier.width(6.dp))
+                Text("AI usage", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                if (usage == null) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.5.dp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("codex" to "Codex", "claude" to "Claude", "gemini" to "Gemini").forEach { (key, label) ->
+                    val provider = usage?.optJSONObject(key)
+                    val windows = provider?.optJSONArray("windows").rows().filterNot { it.optBoolean("expired") }
+                    val short = windows.firstOrNull { !it.optString("label").startsWith("Weekly") } ?: windows.firstOrNull()
+                    val used = short?.optDouble("used")?.takeIf { it.isFinite() }
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C2E))
+                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                    ) {
+                        Text(label, fontSize = 11.sp, color = Color(0xFFAEAEB2), fontWeight = FontWeight.Medium)
+                        Text(
+                            if (used == null) "—" else "${used.toInt()}% used",
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            color = used?.let(::usageColour) ?: Color(0xFF8E8E93), maxLines = 1,
+                        )
+                        Text(short?.optString("label").orEmpty().ifBlank {
+                            if (provider?.optString("error").isNullOrBlank()) "Waiting" else "Unavailable"
+                        }, fontSize = 10.sp, color = Color(0xFF8E8E93), maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: Store, state: LinkState,
@@ -131,6 +179,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     var query by rememberSaveable { mutableStateOf(restoredShell.optString("query")) }
     var category by rememberSaveable { mutableStateOf(restoredShell.optString("category", "All")) }
     var note by remember { mutableStateOf("Connecting to your laptop…") }
+    var aiUsage by remember(client.computer.fingerprint) { mutableStateOf<JSONObject?>(null) }
     var online by remember { mutableStateOf(false) }
     var supported by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -206,6 +255,13 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         if (index >= 0) routeStack = known.take(index + 1).joinToString("|")
     }
     LaunchedEffect(externalPage) { if (externalPage != Page.Home) { nativePage = externalPage; visit("native"); consumed() } }
+    LaunchedEffect(client.computer.fingerprint, online) {
+        if (!online) return@LaunchedEffect
+        while (isActive) {
+            client.get("/v1/ai-usage")?.let { aiUsage = it }
+            delay(60_000)
+        }
+    }
     LaunchedEffect(location, routeStack, nativePage, query, category, selectedApp, folderPath) {
         store.shellState(client.computer.fingerprint, JSONObject().put("route", location).put("stack", routeStack)
             .put("native", nativePage?.name ?: "").put("query", query).put("category", category)
@@ -718,6 +774,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     layout.optJSONObject("offline_copy")?.let { copy -> TextButton(onClick = {
                         persist(copy.copyJson().put("revision", layout.optInt("revision")))
                     }) { Text("Restore offline Home organization") } }
+                    AiUsageCard(aiUsage)
                     if (liveWindows.isNotEmpty()) {
                         Text("Continue", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),

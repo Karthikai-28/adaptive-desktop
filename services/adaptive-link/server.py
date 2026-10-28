@@ -39,6 +39,7 @@ import aiohttp
 from aiohttp import WSMsgType, web
 
 import actions
+import ai_usage
 import app_workspace
 import mobile_session
 import office_gateway
@@ -436,6 +437,7 @@ class Link:
         add.add_get("/v1/watch", self.h_watch)
         add.add_get("/v1/doctor", self.h_doctor)
         add.add_get("/v1/front", self.h_front)
+        add.add_get("/v1/ai-usage", self.h_ai_usage)
         add.add_post("/v1/phone/screen", self.h_phone_screen)
         add.add_post("/v1/phone/screen/close", self.h_phone_screen_close)
         add.add_get("/v1/tasks", self.h_tasks)
@@ -457,7 +459,7 @@ class Link:
         info.update({
             "version": VERSION,
             "capabilities": {"app_workspaces": 1, "control_profiles": 1, "control_runs": 1,
-                             "continuity": 1,
+                             "continuity": 1, "ai_usage": 1,
                              "clipboard": {"version": 2, "kinds": ["text", "link", "image"],
                                            "mime_types": ["text/plain", "text/uri-list", "image/png", "image/jpeg"],
                                            "max_text": desktop.CLIPBOARD_MAX,
@@ -483,6 +485,10 @@ class Link:
                     "camera": camera.find_device() is not None},
         })
         return web.json_response(info)
+
+    async def h_ai_usage(self, request):
+        """Plan-limit usage already shown by the shell, projected for the phone."""
+        return web.json_response(await asyncio.to_thread(ai_usage.snapshot))
 
     # ----------------------------------------------------- screen and input
 

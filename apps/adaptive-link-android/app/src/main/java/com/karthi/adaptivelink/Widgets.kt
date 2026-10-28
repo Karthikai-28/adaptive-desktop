@@ -23,6 +23,7 @@ import org.json.JSONObject
  *    project. A tap looks again.
  *  - Media: what it is playing, with previous, play and next.
  *  - Controls: six of the owner's own buttons from the Controls screen.
+ *  - AI usage: Codex, Claude and Gemini plan limits in a compact phone card.
  *
  * A widget cannot keep a connection, so each asks the computer when it is
  * tapped (and the status one every half hour, which is as often as Android
@@ -74,11 +75,59 @@ abstract class LinkWidgetBase : AppWidgetProvider() {
 
         /** Draw every widget again: the computer changed, or the owner's buttons did. */
         fun refreshAll(context: Context) {
-            for (kind in listOf(StatusWidget::class.java, MediaWidget::class.java, ControlsWidget::class.java)) {
+            for (kind in listOf(StatusWidget::class.java, MediaWidget::class.java, ControlsWidget::class.java,
+                UsageWidget::class.java)) {
                 val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, kind))
                 if (ids.isNotEmpty()) context.sendBroadcast(Intent(context, kind).setAction(TAP))
             }
         }
+    }
+}
+
+class UsageWidget : LinkWidgetBase() {
+    private val cache = "ai-usage-widget"
+
+    private fun line(usage: JSONObject?, provider: String): Pair<String, Int> {
+        val windows = usage?.optJSONObject(provider)?.optJSONArray("windows")
+        val current = (0 until (windows?.length() ?: 0)).mapNotNull { windows?.optJSONObject(it) }
+            .firstOrNull { !it.optBoolean("expired") && !it.optString("label").startsWith("Weekly") }
+            ?: (0 until (windows?.length() ?: 0)).mapNotNull { windows?.optJSONObject(it) }
+                .firstOrNull { !it.optBoolean("expired") }
+        if (current == null || !current.has("used")) return "Unavailable" to 0xFF8E8E93.toInt()
+        val used = current.optDouble("used").coerceIn(0.0, 100.0).toInt()
+        val colour = when {
+            used >= 95 -> 0xFFFF453A.toInt()
+            used >= 80 -> 0xFFFF9F0A.toInt()
+            else -> 0xFF0A84FF.toInt()
+        }
+        return "$used% used · ${current.optString("label")}" to colour
+    }
+
+    override suspend fun draw(context: Context, client: LinkClient?): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.widget_usage)
+        val prefs = context.getSharedPreferences(cache, Context.MODE_PRIVATE)
+        val fresh = client?.get("/v1/ai-usage")
+        if (fresh != null && fresh.has("codex")) prefs.edit().putString("snapshot", fresh.toString()).apply()
+        val usage = fresh ?: prefs.getString("snapshot", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
+        listOf(
+            Triple("codex", R.id.usage_codex_value, R.id.usage_codex_name),
+            Triple("claude", R.id.usage_claude_value, R.id.usage_claude_name),
+            Triple("gemini", R.id.usage_gemini_value, R.id.usage_gemini_name),
+        ).forEach { (provider, value, name) ->
+            val (text, colour) = line(usage, provider)
+            views.setTextViewText(value, text)
+            views.setTextColor(value, colour)
+            views.setOnClickPendingIntent(name, open(context))
+        }
+        views.setTextViewText(R.id.usage_state, when {
+            fresh != null -> "Live from ${Store(context).computer?.name ?: "computer"}"
+            usage != null -> "Last reading · tap to refresh"
+            Store(context).computer == null -> "Open Adaptive Link to pair"
+            else -> "Tap to check the computer"
+        })
+        views.setOnClickPendingIntent(R.id.usage_root, tap(context, "look"))
+        views.setOnClickPendingIntent(R.id.usage_title, open(context))
+        return views
     }
 }
 

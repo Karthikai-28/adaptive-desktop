@@ -132,6 +132,12 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_status_info" />
         </receiver>
+        <receiver android:name=".UsageWidget" android:exported="true" android:label="AI usage">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_usage_info" />
+        </receiver>
         <receiver android:name=".MediaWidget" android:exported="true" android:label="Computer media">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

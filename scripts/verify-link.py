@@ -36,9 +36,22 @@ PORT, PAIRING_PORT, CLOUD_PORT, OFFICE_PORT = 47923, 47924, 47950, 47951
 
 def pure_checks(check):
     import identity as I
+    import ai_usage
     import inputs
     import screen
     import desktop
+
+    usage = ai_usage.clean_snapshot({
+        "codex": {"ts": 10, "stale": False, "windows": [
+            {"label": "5h", "used": 42.25, "resetsAt": 100, "expired": False},
+            {"label": "x" * 100, "used": 150, "resetsAt": "private", "secret": "/home/owner"}]},
+        "_watch": {"codex": "/home/owner/.codex/private"},
+    })
+    check(usage["codex"]["windows"] == [
+        {"label": "5h", "used": 42.2, "resetsAt": 100, "expired": False},
+        {"label": "x" * 24, "used": 100, "resetsAt": 0, "expired": False},
+    ] and "_watch" not in usage and "secret" not in json.dumps(usage),
+          "AI usage: only bounded display data reaches the phone")
 
     # ---- identity
     with tempfile.TemporaryDirectory() as folder:
@@ -1163,6 +1176,11 @@ async def daemon_checks(sandbox, check):
                 told = (await reply.json())["wake"]
             check(isinstance(told, list) and all(len(a["mac"]) == 17 and a["broadcast"].count(".") == 3 for a in told),
                   "wake: the phone is told where to send the packet that wakes the computer")
+            async with phone.get(f"{link_url}/v1/ai-usage") as reply:
+                usage = await reply.json()
+            check(reply.status == 200 and all(name in usage for name in ("codex", "claude", "gemini"))
+                  and "_watch" not in usage and "/home/" not in json.dumps(usage),
+                  "AI usage: a paired phone gets provider windows without private desktop paths")
             control.call("POST", "/wake", {"on": False})
 
             relayed = control.call("POST", "/relay", {"url": "turn:relay.example.org:3478", "username": "me", "credential": "pw"})

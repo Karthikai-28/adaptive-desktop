@@ -308,7 +308,9 @@ active and recent first; **Phone workspace** contains apps running in the
 private phone-sized session; and **Apps** contains installed laptop apps and
 Adaptive Link's native tools. Every screen in this table is in its drawer,
 and all of them together are under *Laptop tools*, which is pinned to Home to
-begin with.
+begin with. A compact **AI usage** card on Home shows the current Codex,
+Claude and Gemini plan windows from the same snapshot as the desktop's
+Activity Center.
 
 | In the app | On the computer |
 | --- | --- |
@@ -337,10 +339,12 @@ And without opening the app:
 - **Share** in any other app → *Send to computer*: a link opens in the
   computer's browser, text goes to its clipboard or the project's notes,
   files go to `~/Downloads/Phone`.
-- **Home-screen widgets and quick-settings tiles.** Four widgets: quick
+- **Home-screen widgets and quick-settings tiles.** Five widgets: quick
   actions (lock, play/pause, next, mute, focus), the computer's status at a
-  glance, what it is playing with previous/play/next, and six of your own
-  buttons from the Controls screen. The quick actions and the tiles do only
+  glance, AI usage for Codex/Claude/Gemini in a compact phone card, what it is
+  playing with previous/play/next, and six of your own buttons from the
+  Controls screen. The AI widget keeps its last reading while the laptop is
+  offline; tapping it refreshes. The quick actions and the tiles do only
   what is harmless by accident. The Controls widget runs your own buttons -
   including commands - from the home screen, without the app's lock: put on
   it only what you would be content for anyone holding the unlocked phone to
