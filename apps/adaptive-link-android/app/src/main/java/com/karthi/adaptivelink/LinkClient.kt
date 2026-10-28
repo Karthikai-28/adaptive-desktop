@@ -56,6 +56,9 @@ class LinkClient(
     private val cloud = Cloud(appContext)
     private var tunnel: Tunnel? = null
     private val tunnelLock = Mutex()
+    // Home, widgets and the foreground listener share this client. Only one
+    // of them may decide/renegotiate the route at a time.
+    private val connectLock = Mutex()
 
     /** Whether the link is going over a USB cable just now (the computer's adb carries this phone's 127.0.0.1 to it). */
     @Volatile var viaCable = false
@@ -100,7 +103,9 @@ class LinkClient(
      * anywhere else, the two set up a direct connection through the account
      * (Tunnel) and the same requests go through that.
      */
-    suspend fun connect(): JSONObject? {
+    suspend fun connect(): JSONObject? = connectLock.withLock { connectOnce() }
+
+    private suspend fun connectOnce(): JSONObject? {
         if (tunnelled) {
             // Already tunnelled: keep using it while it works, and look for
             // the computer's own network again only when it stops.
@@ -198,7 +203,8 @@ class LinkClient(
             tunnel = null
             host = null
             port = computer.port
-            awayProblem = e.message ?: e.javaClass.simpleName
+            awayProblem = Protocol.awayProblem(e.message ?: e.javaClass.simpleName,
+                Store(appContext).relay.isNotBlank())
             null
         }
     }
@@ -247,6 +253,18 @@ class LinkClient(
         tunnel?.close()
         tunnel = null
         if (tunnelled) host = null
+    }
+
+    /** Drop candidates bound to the old Wi-Fi/mobile interface before reconnecting. */
+    fun networkChanged() {
+        val wasTunnelled = tunnelled
+        tunnel?.close()
+        tunnel = null
+        if (wasTunnelled) {
+            host = null
+            port = computer.port
+        }
+        awayProblem = ""
     }
 
     /**

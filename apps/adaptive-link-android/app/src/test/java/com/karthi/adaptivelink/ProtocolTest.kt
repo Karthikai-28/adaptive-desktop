@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.webrtc.PeerConnection
 
 /**
  * The phone and the computer must compute the same things from the same
@@ -173,6 +174,21 @@ class ProtocolTest {
         assertNull(Relay.fromJson("""{"url":"https://relay.example.org"}"""))
         assertNull(Relay.fromJson("""{"url":"turn:host and more"}"""))
         assertNull(Relay.fromJson("""{"username":"me"}"""))
+    }
+
+    @Test
+    fun briefNetworkHandoffsRecoverWithoutTunnelChurn() {
+        assertFalse(terminalPeerState(PeerConnection.PeerConnectionState.DISCONNECTED))
+        assertFalse(terminalPeerState(PeerConnection.PeerConnectionState.CONNECTING))
+        assertTrue(terminalPeerState(PeerConnection.PeerConnectionState.FAILED))
+        assertTrue(terminalPeerState(PeerConnection.PeerConnectionState.CLOSED))
+        assertEquals(6_000L, nextListenWait(3_000L))
+        assertEquals(15_000L, nextListenWait(12_000L))
+        assertEquals(15_000L, nextListenWait(15_000L))
+        assertTrue(Protocol.awayProblem("A direct connection could not be made on this network", false)
+            .contains("TURN relay"))
+        assertFalse(Protocol.awayProblem("A direct connection could not be made on this network", true)
+            .contains("required"))
     }
 
     @Test

@@ -41,6 +41,8 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 
+internal fun nextListenWait(current: Long) = (current * 2).coerceAtMost(15_000L)
+
 /**
  * The phone's standing connection to the computer, for everything the two
  * do without the app being open (the computer's side is alerts.py and
@@ -65,12 +67,25 @@ import org.json.JSONObject
 class EventsService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var listening: Job? = null
+    private var networkChange: Job? = null
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            if (Store(this@EventsService).listens) restartListening()
+            networkChanged()
         }
         override fun onLost(network: Network) {
-            if (Store(this@EventsService).listens) restartListening()
+            networkChanged()
+        }
+    }
+
+    /** Android reports a handoff as lost(old), available(new). Coalesce both. */
+    @Synchronized
+    private fun networkChanged() {
+        if (!Store(this).listens) return
+        networkChange?.cancel()
+        networkChange = scope.launch {
+            delay(1_200)
+            Link.networkChanged()
+            restartListening()
         }
     }
     private val screenLockReceiver = object : BroadcastReceiver() {
@@ -182,11 +197,9 @@ class EventsService : Service() {
                 } finally {
                     socket.cancel()
                 }
-                // It may have moved to another network: look for it again.
-                client.connect()
             }
             delay(wait)
-            wait = (wait * 2).coerceAtMost(60_000L)
+            wait = nextListenWait(wait)
         }
     }
 

@@ -30,6 +30,11 @@ object Link {
         cached?.close()
         cached = null
     }
+
+    /** The default Android network changed; candidates from the old one are no longer useful. */
+    fun networkChanged() {
+        cached?.networkChanged()
+    }
 }
 
 /** What the screens show about the connection. */

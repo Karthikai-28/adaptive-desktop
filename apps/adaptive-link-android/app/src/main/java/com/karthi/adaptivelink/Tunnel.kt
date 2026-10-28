@@ -27,6 +27,9 @@ import kotlin.concurrent.thread
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+internal fun terminalPeerState(state: PeerConnection.PeerConnectionState) =
+    state == PeerConnection.PeerConnectionState.FAILED || state == PeerConnection.PeerConnectionState.CLOSED
+
 /**
  * A direct connection to the computer when the phone is not on its network.
  *
@@ -65,10 +68,10 @@ class Tunnel(private val context: Context, private val cloud: Cloud, private val
             PeerConnection.RTCConfiguration(Rtc.iceServers(context, cloud.config.stun)),
             object : Observer() {
                 override fun onConnectionChange(state: PeerConnection.PeerConnectionState) {
-                    if (state == PeerConnection.PeerConnectionState.FAILED ||
-                        state == PeerConnection.PeerConnectionState.CLOSED ||
-                        state == PeerConnection.PeerConnectionState.DISCONNECTED
-                    ) alive = false
+                    if (terminalPeerState(state)) alive = false
+                    // DISCONNECTED is deliberately not terminal. WebRTC uses
+                    // it during brief Wi-Fi/mobile handoffs and can recover
+                    // the same ICE connection without renegotiating.
                 }
             },
         ) ?: throw IllegalStateException("This phone could not start a direct connection")

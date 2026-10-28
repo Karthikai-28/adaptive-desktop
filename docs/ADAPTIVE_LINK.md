@@ -234,6 +234,13 @@ What that means for the computer:
 - Google's public STUN server is asked one question by each end - "what
   address do you see me at?" - and nothing else.
 
+Android's foreground listener keeps the route alive while the app is closed.
+Wi-Fi/mobile handoffs are debounced into one reconnect, all app surfaces share
+one negotiation at a time, and a temporary WebRTC `DISCONNECTED` state is
+allowed to recover. Failed background retries are capped at 15 seconds. This
+removes avoidable disconnects; a TURN relay is still the only way through a
+network that forbids peer-to-peer traffic altogether.
+
 ### A relay of your own
 
 A relay is a small server on the internet that both devices can reach, which

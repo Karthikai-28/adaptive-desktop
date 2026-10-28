@@ -159,6 +159,11 @@ data class SavedCommand(val name: String, val command: String, val detach: Boole
 }
 
 object Protocol {
+    fun awayProblem(message: String, hasRelay: Boolean): String =
+        if (!hasRelay && message.contains("direct connection could not be made", ignoreCase = true))
+            "$message This network blocks peer-to-peer traffic; an owner-controlled TURN relay is required here."
+        else message
+
     fun fingerprint(der: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(der).joinToString("") { "%02x".format(it) }
 
