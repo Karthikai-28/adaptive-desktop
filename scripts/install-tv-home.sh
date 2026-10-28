@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 # Install Adaptive Home on the LG TV (apps/adaptive-tv): a launcher with every
-# app on the TV, its inputs and its power. A small desktop companion launches
-# it once when the paired TV turns on; the UI itself still runs on the TV.
+# app on the TV, its inputs and its power. It opens only when the operator
+# launches it; the UI itself runs on the TV.
 #
 #   install-tv-home.sh --setup [TV_IP]   once: register the TV with the webOS tools
 #   install-tv-home.sh                   package, install and open it on the TV
@@ -30,7 +30,7 @@ APP_ID="com.karthi.adaptivetv"
 SOURCE="$REPO/apps/adaptive-tv"
 OUT="$REPO/dist/tv-home"
 USER_UNITS="$HOME/.config/systemd/user"
-WATCH_UNIT="adaptive-tv-home-watch.service"
+LEGACY_WATCH_UNIT="adaptive-tv-home-watch.service"
 
 MODE=install
 TV_IP=""
@@ -66,11 +66,19 @@ PY
 
 package() {
     node "$REPO/scripts/verify-tv-home.js"
-    python3 "$REPO/scripts/verify-tv-home-auto.py"
     rm -rf "$OUT"
     mkdir -p "$OUT"
     "$BIN/ares-package" --no-minify -o "$OUT" "$SOURCE/app" "$SOURCE/service" >/dev/null
     ls "$OUT"/*.ipk
+}
+
+disable_legacy_auto_launch() {
+    # Older installs launched Adaptive Home whenever the TV came online. The
+    # launcher is manual-only now, so updating or removing it must retire that
+    # unit even if it is still present in the user's systemd directory.
+    systemctl --user disable --now "$LEGACY_WATCH_UNIT" 2>/dev/null || true
+    rm -f "$USER_UNITS/$LEGACY_WATCH_UNIT"
+    systemctl --user daemon-reload
 }
 
 need_device() {
@@ -101,14 +109,10 @@ case "$MODE" in
         need_device
         ipk="$(package | tail -1)"
         "$BIN/ares-install" --device "$DEVICE" "$ipk"
+        disable_legacy_auto_launch
         "$BIN/ares-launch" --device "$DEVICE" "$APP_ID"
-        mkdir -p "$USER_UNITS"
-        adaptive_render "$REPO/services/$WATCH_UNIT" "$USER_UNITS/$WATCH_UNIT"
-        systemctl --user daemon-reload
-        systemctl --user enable "$WATCH_UNIT"
-        systemctl --user restart "$WATCH_UNIT"
         echo "Adaptive Home is open on the TV. The first time, choose Allow on the TV's prompt."
-        echo "Adaptive Home will open once when this computer sees the TV turn on."
+        echo "Adaptive Home is manual-only; pin it in LG Home to open it with the remote."
         ;;
     check)
         need_device
@@ -123,17 +127,11 @@ case "$MODE" in
         else
             echo "Adaptive Home: not running"
         fi
-        if systemctl --user is-active --quiet "$WATCH_UNIT"; then
-            echo "Adaptive Home power-on companion: running"
-        else
-            echo "Adaptive Home power-on companion: not running"
-        fi
+        echo "Adaptive Home automatic launch: disabled (manual only)"
         ;;
     remove)
         need_device
-        systemctl --user disable --now "$WATCH_UNIT" 2>/dev/null || true
-        rm -f "$USER_UNITS/$WATCH_UNIT"
-        systemctl --user daemon-reload
+        disable_legacy_auto_launch
         "$BIN/ares-install" --device "$DEVICE" --remove "$APP_ID"
         ;;
 esac

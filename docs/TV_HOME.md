@@ -2,19 +2,16 @@
 
 A launcher installed on the LG TV (webOS 22, `[LG] webOS TV UQ7500PSF`) that shows every app on
 the TV, its inputs and its power controls in the Adaptive look. Its UI runs on the TV; Adaptive
-Desktop only watches for the TV to turn on so it can launch the app. Source: `apps/adaptive-tv/`.
+Desktop does not launch it automatically. Source: `apps/adaptive-tv/`.
 
 What it is not: a replacement for LG's own home. The Home button, the LG launcher bar and the
 system menus belong to the firmware and stay; webOS does not deliver the Home key to third-party
 apps. Pin Adaptive Home first in the LG launcher bar so it is one press away.
 
-Retail webOS denies Developer Mode apps the Activity Manager permission needed for a TV-side boot
-callback. The installer therefore enables `adaptive-tv-home-watch.service` on Adaptive Desktop.
-Using the existing Cast pairing, it opens Adaptive Home once when the TV appears on the network,
-then stays out of the way until the TV has been genuinely off again. This gives power-on launch
-while this computer is running, and keeps LG Home available as the recovery path. A normal relaunch
-returns directly to full screen, and a dropped internal control connection is reopened and retried
-once.
+Adaptive Home is manual-only. Turning on or restarting the laptop never wakes the TV and never
+opens the app. Open it from LG Home or its pinned launcher tile. Running the install command is also
+an explicit launch. A normal relaunch returns directly to full screen, and a dropped internal
+control connection is reopened and retried once.
 
 ## What is on it
 
@@ -36,7 +33,6 @@ once.
 | Logic | `app/model.js` | Tiles from the TV's lists, favourites order, arrow-key navigation; pure, checked by `scripts/verify-tv-home.js` |
 | Service | `service/service.js` | A webOS JS service in the same package: `home`, `icon`, `launch`, `input`, `power` |
 | Socket | `service/ssap.js` | A WebSocket client in plain Node for the TV's own control socket, `wss://127.0.0.1:3001` |
-| Power-on companion | `auto_launch.py`, `services/adaptive-tv-home-watch.service` | Opens the app once per TV off/on cycle, using Cast's pairing |
 
 The page can't talk to the TV's control socket itself: webOS 22 answers only on `wss` port 3001
 with a self-signed certificate, and plain `ws` on port 3000 refuses the handshake. The service

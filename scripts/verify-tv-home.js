@@ -134,11 +134,8 @@ function finish() {
         service.indexOf('error.connection') >= 0);
     check('page service calls time out', home.indexOf('SERVICE_WAIT_MS') >= 0);
     check('relaunch returns straight to full screen', info.handlesRelaunch === false);
-    check('desktop wake watcher exists', fs.existsSync(path.join(root, 'auto_launch.py')));
-    const unit = fs.readFileSync(path.join(root, '..', '..', 'services',
-        'adaptive-tv-home-watch.service'), 'utf8');
-    check('wake watcher has a restartable user service', unit.indexOf('auto_launch.py') >= 0 &&
-        unit.indexOf('Restart=on-failure') >= 0);
+    check('desktop wake watcher is absent', !fs.existsSync(path.join(root, 'auto_launch.py')) &&
+        !fs.existsSync(path.join(root, '..', '..', 'services', 'adaptive-tv-home-watch.service')));
     (home.match(/call\('([a-z]+)'/g) || []).forEach((use) => {
         const name = use.slice(6, -1);
         check('page calls a real method: ' + name, new RegExp("(method|register)\\('" + name + "'").test(service));
