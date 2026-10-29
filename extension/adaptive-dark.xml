@@ -5,12 +5,12 @@
   Palette table colours only (shell stylesheet.css, end): blue for keywords,
   cyan for strings, indigo for literals, label greys for everything quieter.
   No orange or red - those mean status on this desktop, never syntax.
+  No background: the preview is a glass well drawn by preview.css.
 -->
 <style-scheme id="adaptive-dark" name="Adaptive Dark" version="1.0">
   <author>Adaptive Desktop</author>
   <description>Apple dark palette for code previews</description>
 
-  <color name="canvas"     value="#141416"/>
   <color name="primary"    value="#F5F5F7"/>
   <color name="secondary"  value="#98989D"/>
   <color name="tertiary"   value="#8E8E93"/>
@@ -20,10 +20,10 @@
   <color name="indigo"     value="#5E5CE6"/>
   <color name="selection"  value="#0058D0"/>
 
-  <style name="text"                  foreground="primary" background="canvas"/>
+  <style name="text"                  foreground="primary"/>
   <style name="selection"             foreground="#FFFFFF" background="selection"/>
   <style name="cursor"                foreground="primary"/>
-  <style name="line-numbers"          foreground="quaternary" background="canvas"/>
+  <style name="line-numbers"          foreground="quaternary"/>
   <style name="current-line"          background="#1C1C1E"/>
   <style name="bracket-match"         foreground="primary" background="#3A3A3C"/>
 

@@ -37,11 +37,11 @@
     background-image: none;
 }
 
-/* The inspector and its text preview are scrolled windows too; they draw
- * their own glass pane and code well (section 2). */
+/* The inspector is a scrolled window too; it draws its own glass pane
+ * (section 2). */
 .nautilus-window notebook,
 .nautilus-window notebook > stack,
-.nautilus-window scrolledwindow:not(.adaptive-preview-panel):not(.adaptive-text-frame),
+.nautilus-window scrolledwindow:not(.adaptive-preview-panel),
 .nautilus-window overlay,
 .nautilus-window layout.view,
 .nautilus-window layout.view:backdrop {
@@ -624,19 +624,24 @@ rubberband,
     -gtk-icon-shadow: none;
 }
 
-.adaptive-text-frame,
-.adaptive-text-frame > border {
+/* The text preview is a darker well in the inspector's glass, like the
+ * image well above; the text and gutter are clear so it is painted once. */
+.adaptive-text-frame {
     min-height: 240px;
+    border: 1px solid @ad_hairline;
+    border-radius: 10px;
+    background-color: alpha(#000000, 0.24);
+}
+
+.adaptive-text-frame > border {
     border: none;
-    border-radius: 8px;
-    background-color: @ad_bg_deep;
 }
 
 .adaptive-text-preview,
 .adaptive-code-preview,
 .adaptive-code-preview text {
     padding: 4px;
-    background-color: @ad_bg_deep;
+    background-color: transparent;
     color: @ad_text;
     font-family: "JetBrains Mono", monospace;
     font-size: 10.5px;
@@ -644,7 +649,7 @@ rubberband,
 
 .adaptive-code-preview gutter,
 .adaptive-code-preview border {
-    background-color: @ad_bg_deep;
+    background-color: transparent;
     color: @ad_quaternary;
 }
 
