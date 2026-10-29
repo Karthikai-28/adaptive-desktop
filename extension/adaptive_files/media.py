@@ -27,6 +27,15 @@ except (ValueError, ImportError):
 PAGE_CACHE = Path(GLib.get_user_cache_dir()) / "adaptive-files" / "pages"
 
 
+def format_moment(moment):
+    """As "Oct 9, 2026 · 1:05 PM". The date and the time each stay on one
+    line, so a narrow inspector row breaks only at the dot."""
+    nbsp = "\u00a0"
+    date = moment.strftime("%b %-d, %Y").replace(" ", nbsp)
+    clock = moment.strftime("%-I:%M %p").replace(" ", nbsp)
+    return f"{date} · {clock}"
+
+
 def pdf_page_count(path):
     proc = subprocess.run(
         ["pdfinfo", path], capture_output=True, text=True, timeout=5, check=False
@@ -112,7 +121,7 @@ def photo_details(path):
     if taken:
         try:
             moment = datetime.datetime.strptime(taken[:19], "%Y:%m:%d %H:%M:%S")
-            details["Taken"] = moment.strftime("%b %d, %Y · %I:%M %p")
+            details["Taken"] = format_moment(moment)
         except ValueError:
             details["Taken"] = taken
 

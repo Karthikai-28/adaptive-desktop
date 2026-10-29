@@ -19,6 +19,14 @@ from .common import (
 )
 
 
+# Name and icon of the views Files makes up itself, by URI scheme.
+_VIEW_PLACES = {
+    "other-locations": ("Other Locations", "computer"),
+    "starred": ("Starred", "starred"),
+    "x-nautilus-search": ("Search Results", "folder-saved-search"),
+}
+
+
 class FolderMixin:
     # --------------------------------------------------------------
     # Folder summary - current location, or one selected folder
@@ -28,16 +36,19 @@ class FolderMixin:
         body = self.preview_body
         path = gfile.get_path()
 
+        # Files' own views, which GIO cannot describe; their basename is "/".
+        place = _VIEW_PLACES.get(gfile.get_uri_scheme())
         if not name:
             try:
                 info = gfile.query_info("standard::display-name", Gio.FileQueryInfoFlags.NONE, None)
                 name = info.get_display_name()
             except Exception:
-                name = gfile.get_basename() or gfile.get_uri()
+                name = place[0] if place else gfile.get_basename() or gfile.get_uri()
 
         self._current_name = name or "Folder"
 
-        hero, subtitle = self._hero(self._gicon_image(gfile, "folder", 56), self._current_name, "Folder")
+        icon = self._gicon_image(gfile, place[1] if place else "folder", 56)
+        hero, subtitle = self._hero(icon, self._current_name, "Folder" if path else "Location")
         body.pack_start(hero, False, False, 0)
 
         project = self._project_for_path(path)

@@ -213,8 +213,13 @@ class PreviewController(HostMixin, FolderMixin, FileMixin, InfoMixin, WidgetsMix
         return scroll, body
 
 
-    def _on_window_size_allocate(self, _window, allocation):
-        width = allocation.width
+    def _on_window_size_allocate(self, window, allocation):
+        # The content's width, not the window's: the window's allocation
+        # includes the client-side shadow, which is smaller while the window
+        # is unfocused, so the panel changed width whenever Files gained or
+        # lost focus. The content is already allocated when this runs.
+        child = window.get_child()
+        width = child.get_allocated_width() if child is not None else allocation.width
 
         if width >= 1320:
             target = PANEL_WIDE
@@ -225,8 +230,10 @@ class PreviewController(HostMixin, FolderMixin, FileMixin, InfoMixin, WidgetsMix
 
         if target != self.panel_width:
             self.panel_width = target
-            self.panel.set_size_request(target, -1)
-            self._reserve_space()
+            # Not from in here: a resize queued during the window's own
+            # allocation is dropped, and the panel kept its old width until
+            # something else laid the window out again.
+            GLib.idle_add(self._apply_panel_width)
 
         # Below this width the grid needs the room more than the inspector
         # does. Crossing the line either way forgets a manual override, so
@@ -236,6 +243,11 @@ class PreviewController(HostMixin, FolderMixin, FileMixin, InfoMixin, WidgetsMix
             self._narrow = narrow
             self._override = None
             GLib.idle_add(self._apply_panel_visibility)
+
+    def _apply_panel_width(self):
+        self.panel.set_size_request(self.panel_width, -1)
+        self._reserve_space()
+        return GLib.SOURCE_REMOVE
 
     # --------------------------------------------------------------
     # Selection / preview
@@ -248,10 +260,24 @@ class PreviewController(HostMixin, FolderMixin, FileMixin, InfoMixin, WidgetsMix
             return
         self.location_uri = uri
         GLib.idle_add(self._terminal_follow)
-        if not self.last_selection:
-            # Deferred: Nautilus calls in here while it is building menus.
-            self._selection_key = None
-            GLib.idle_add(self.update_selection, [])
+        # Deferred: Nautilus calls in here while it is building menus.
+        GLib.idle_add(self._drop_selection_elsewhere)
+
+    def _drop_selection_elsewhere(self):
+        """Show the new folder unless what is selected is in it. Views such
+        as Other Locations never report a selection, so the last folder's
+        file would otherwise stay in the panel. Checked here, not when the
+        location changed, so a selection reported since then is kept."""
+        folder = Gio.File.new_for_uri(self.location_uri)
+        for item in self.last_selection:
+            parent = Gio.File.new_for_uri(item.get("uri") or "").get_parent()
+            if parent is None or not parent.equal(folder):
+                break
+        else:
+            if self.last_selection:
+                return GLib.SOURCE_REMOVE
+        self._selection_key = None
+        return self.update_selection([])
 
     def update_selection(self, selection):
         self.ensure_attached()

@@ -587,6 +587,28 @@ button.destructive-action:hover {{
     background-color: alpha(@ad_danger, 0.18);
 }}
 
+/* Yaru paints these buttons with a background image (green for suggested)
+ * in every state, which covers the colours above - Files' Rename button
+ * came out green. */
+button.suggested-action,
+button.suggested-action:hover,
+button.suggested-action:active,
+button.suggested-action:checked,
+button.suggested-action:backdrop,
+button.suggested-action:disabled,
+button.suggested-action:backdrop:disabled,
+button.destructive-action,
+button.destructive-action:hover,
+button.destructive-action:active,
+button.destructive-action:checked,
+button.destructive-action:backdrop,
+button.destructive-action:disabled,
+button.destructive-action:backdrop:disabled {{
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+}}
+
 .linked > button,
 .linked > entry {{
     border-radius: 0;
@@ -736,6 +758,21 @@ menu,
     background-color: @ad_menu;
     box-shadow: 0 10px 30px alpha(#000000, 0.50);
     color: @ad_text;
+}}
+
+/* A menu is its own popup window, sized to the menu plus its decoration's
+ * shadow. A shadow on the menu itself was cut off at the window's edge and
+ * showed as a dark box around every right-click menu, so the decoration
+ * carries it, shaped like the menu. */
+menu,
+.menu,
+.context-menu {{
+    box-shadow: none;
+}}
+
+.csd.popup decoration {{
+    border-radius: {radius["medium"] - 2}px;
+    box-shadow: 0 8px 24px alpha(#000000, 0.45);
 }}
 
 popover modelbutton,

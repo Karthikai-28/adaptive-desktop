@@ -44,9 +44,18 @@
 .nautilus-window scrolledwindow:not(.adaptive-preview-panel),
 .nautilus-window overlay,
 .nautilus-window layout.view,
-.nautilus-window layout.view:backdrop {
+.nautilus-window layout.view:backdrop,
+.nautilus-window placesview list,
+.nautilus-window placesview actionbar,
+.nautilus-window placesview actionbar > revealer > box {
     background-color: transparent;
     background-image: none;
+}
+
+/* Other Locations: the list sits on the glass like the file views do; only
+ * the Connect to Server bar keeps a rule above it. */
+.nautilus-window placesview actionbar > revealer > box {
+    border-top: 1px solid @ad_hairline;
 }
 
 /* One sheet of glass from the toolbar down: no toolbar material, no rule */

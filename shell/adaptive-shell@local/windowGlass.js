@@ -55,10 +55,12 @@ var WindowGlass = class WindowGlass {
     _watch(metaWindow) {
         if (!metaWindow || this._windows.has(metaWindow))
             return;
-        // The class can arrive after the window does, so decide on each change.
+        // The class and type can arrive after the window does, so decide on
+        // each change.
         const entry = { ids: [], blur: null };
         this._windows.set(metaWindow, entry);
         entry.ids.push(metaWindow.connect('notify::wm-class', () => this._update(metaWindow)));
+        entry.ids.push(metaWindow.connect('notify::window-type', () => this._update(metaWindow)));
         entry.ids.push(metaWindow.connect('unmanaged', () => this._forget(metaWindow)));
         this._update(metaWindow);
     }
@@ -67,7 +69,11 @@ var WindowGlass = class WindowGlass {
         const entry = this._windows.get(metaWindow);
         if (!entry)
             return;
-        const wanted = WM_CLASSES.has(metaWindow.get_wm_class() || '');
+        // Only the main windows are translucent. On X11 Files' menus, tooltips
+        // and dialogs carry the same class, and a blur behind them shows as a
+        // smeared box around their rounded edges.
+        const wanted = metaWindow.get_window_type() === Meta.WindowType.NORMAL &&
+            WM_CLASSES.has(metaWindow.get_wm_class() || '');
         if (wanted && !entry.blur)
             this._add(metaWindow, entry);
         else if (!wanted && entry.blur)

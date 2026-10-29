@@ -284,8 +284,7 @@ def _human_size(value):
 
 def _format_timestamp(seconds):
     try:
-        dt = _dt.datetime.fromtimestamp(int(seconds))
-        return dt.strftime("%b %d, %Y · %I:%M %p")
+        return media.format_moment(_dt.datetime.fromtimestamp(int(seconds)))
     except Exception:
         return "—"
 

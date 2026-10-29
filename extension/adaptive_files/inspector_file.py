@@ -822,6 +822,16 @@ class FileMixin:
                 except Exception:
                     language = None
 
+                # GtkSourceView 4's "python" is Python 2; ROS launch, URDF
+                # and Xacro files are XML it does not know by name.
+                if language is not None and language.get_id() == "python":
+                    language = manager.get_language("python3") or language
+                elif language is None and (
+                    path.suffix == ".launch"
+                    or (mime and Gio.content_type_is_a(mime, "application/xml"))
+                ):
+                    language = manager.get_language("xml")
+
                 if language is not None:
                     buffer.set_language(language)
 

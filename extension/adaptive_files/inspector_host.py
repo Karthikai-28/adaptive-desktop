@@ -144,7 +144,7 @@ class HostMixin:
             height = column.get_allocated_height()
             if height > 0:
                 column.set_position(max(160, height - 260))
-            self.terminal.grab_focus()
+            self._focus_terminal()
             self._terminal_follow()
 
         button = self._header_buttons.get("terminal")
@@ -153,12 +153,27 @@ class HostMixin:
             button.set_active(self._terminal_open())
             button.handler_unblock_by_func(self._on_terminal_button)
 
+    def _focus_terminal(self):
+        # The paned maps the drawer on its next layout, not when it is shown.
+        # Focused before then, the terminal was sent the release of Ctrl+`
+        # while it had no window, which GTK rejects with a critical.
+        terminal = self.terminal
+        if terminal.get_mapped():
+            terminal.grab_focus()
+            return
+
+        def on_map(widget):
+            widget.disconnect(handler)
+            widget.grab_focus()
+
+        handler = terminal.connect("map", on_map)
+
     def _spawn_terminal(self):
         terminal = Vte.Terminal()
         terminal.set_scrollback_lines(5000)
         terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.OFF)
         terminal.set_audible_bell(False)
-        terminal.set_font(Pango.FontDescription.from_string("JetBrainsMono Nerd Font 11"))
+        terminal.set_font(Pango.FontDescription.from_string("JetBrainsMono Nerd Font, monospace 11"))
 
         def rgba(value):
             color = Gdk.RGBA()
