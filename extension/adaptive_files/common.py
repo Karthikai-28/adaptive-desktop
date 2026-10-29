@@ -77,10 +77,13 @@ from . import share  # noqa: E402,F401
 from . import tags as filetags  # noqa: E402,F401
 
 # Finder's preview pane width. The panel is one inspector column, not a
-# dashboard, so it gives the file grid back every pixel it can.
-PANEL_WIDE = 260
-PANEL_MEDIUM = 244
-PANEL_NARROW = 228
+# dashboard, so it gives the file grid back every pixel it can. The card
+# floats 10 px in from the window edge (preview.css), and that margin comes
+# out of this width, so it is added here to keep the card itself this wide.
+PANEL_MARGIN = 10
+PANEL_WIDE = 260 + PANEL_MARGIN
+PANEL_MEDIUM = 244 + PANEL_MARGIN
+PANEL_NARROW = 228 + PANEL_MARGIN
 # Windows narrower than this hide the inspector until widened again.
 AUTO_HIDE_BELOW = 1000
 

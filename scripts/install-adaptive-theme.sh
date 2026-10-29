@@ -77,6 +77,9 @@ echo "Building theme from tokens..."
 echo "Building backgrounds from tokens..."
 "${REPO}/scripts/build-adaptive-backgrounds.py"
 
+echo "Building file icons..."
+"${REPO}/scripts/build-file-icons.py"
+
 echo
 echo "Installing:"
 
@@ -102,6 +105,16 @@ echo "  $BG_DST"
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -f "$ICONS_DST" 2>/dev/null || true
 fi
+
+# File types Ubuntu does not know (ROS, CUDA, ML weights, TOML...) so they
+# get their own icon instead of a blank document. Per user, like the rest;
+# it only classifies files, so the Ubuntu session is unaffected beyond
+# naming them correctly. `rm` the package and rerun update-mime-database to undo.
+MIME_DST="${HOME}/.local/share/mime"
+mkdir -p "${MIME_DST}/packages"
+cp "${REPO}/icons/adaptive-files-mime.xml" "${MIME_DST}/packages/adaptive-files.xml"
+update-mime-database "$MIME_DST" 2>/dev/null || true
+echo "  ${MIME_DST}/packages/adaptive-files.xml"
 
 echo
 if [ "${DCONF_PROFILE:-}" = "adaptive" ]; then

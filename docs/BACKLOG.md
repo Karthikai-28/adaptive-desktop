@@ -207,6 +207,18 @@ contains a Command icon. Search lives in the app process, never in the shell.
   selection, and for the current folder a kind breakdown, largest items,
   14-day activity, its project and a one-line disk bar.
 - ⬜ Files window skinned to the Figma frames.
+- 🔬 Liquid glass Files (2026-10-29). The window is a graphite tint over the
+  desktop and the shell blurs what is behind it (`windowGlass.js`); the
+  sidebar and the inspector float on it as rounded panes. Icon set redrawn
+  by `scripts/build-file-icons.py`: blue glass folders with the place
+  engraved, frosted pages with a glyph and extension per type, matching
+  sidebar glyphs. A per-user MIME package (`icons/adaptive-files-mime.xml`)
+  names the types Ubuntu did not know - ROS launch/URDF/msg/bag/MCAP, CUDA,
+  Arduino, TypeScript, TOML, Dockerfile, `.env`, lock files, model weights,
+  NumPy, Parquet, SQLite, meshes - and undoes foxglove-studio's package,
+  which gave every zip and unknown binary the document icon. Passed in the
+  nested shell (blur stays inside the rounded frame, header included) and
+  the Files sandbox; not yet verified live.
 
 ## Milestone 8 — Settings
 

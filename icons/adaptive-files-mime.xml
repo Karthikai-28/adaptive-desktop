@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  File types Ubuntu 22.04 does not know, so Files can give them the right
+  icon (icons/AdaptiveFilesIcons/scalable/mimetypes, built by
+  scripts/build-file-icons.py). Installed per user by
+  scripts/install-adaptive-theme.sh into ~/.local/share/mime/packages/.
+
+  Without this, every one of these files is application/octet-stream and
+  shows as a blank or wrong document. Weights of 80 win over the stock 50
+  where a pattern is shared (*.ts is also a Qt translation and an MPEG
+  transport stream; *.msg an Outlook message; *.obj a TGIF drawing; *.otf an
+  OpenDocument formula template) - on this machine they are code, ROS
+  interfaces, 3D meshes and fonts.
+
+  The first two entries undo foxglove-studio.xml (a system package), which
+  sets the icon of every zip and every unknown binary to x-office-document.
+  The per-user database is consulted first, so these names win.
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/zip">
+    <icon name="application-zip"/>
+  </mime-type>
+  <mime-type type="application/octet-stream">
+    <icon name="application-octet-stream"/>
+  </mime-type>
+
+  <!-- Code -->
+  <mime-type type="text/x-cuda">
+    <comment>CUDA source</comment>
+    <sub-class-of type="text/x-c++src"/>
+    <glob pattern="*.cu"/>
+    <glob pattern="*.cuh"/>
+  </mime-type>
+  <mime-type type="text/x-arduino">
+    <comment>Arduino sketch</comment>
+    <sub-class-of type="text/x-c++src"/>
+    <glob pattern="*.ino"/>
+    <glob pattern="*.pde"/>
+  </mime-type>
+  <mime-type type="text/x-typescript">
+    <comment>TypeScript source</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.ts" weight="80"/>
+    <glob pattern="*.mts"/>
+    <glob pattern="*.cts"/>
+  </mime-type>
+  <mime-type type="text/x-tsx">
+    <comment>TypeScript JSX source</comment>
+    <sub-class-of type="text/x-typescript"/>
+    <glob pattern="*.tsx"/>
+  </mime-type>
+  <mime-type type="text/x-jsx">
+    <comment>JavaScript JSX source</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.jsx"/>
+  </mime-type>
+  <mime-type type="text/x-swift">
+    <comment>Swift source</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.swift"/>
+  </mime-type>
+  <mime-type type="text/x-protobuf">
+    <comment>Protocol Buffers definition</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.proto"/>
+  </mime-type>
+  <mime-type type="text/x-dockerfile">
+    <comment>Dockerfile</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="Dockerfile" weight="80"/>
+    <glob pattern="Containerfile" weight="80"/>
+    <glob pattern="Dockerfile.*" weight="80"/>
+    <glob pattern="*.dockerfile"/>
+  </mime-type>
+
+  <!-- Configuration -->
+  <mime-type type="application/toml">
+    <comment>TOML document</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.toml"/>
+  </mime-type>
+  <mime-type type="text/x-config">
+    <comment>configuration file</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.ini"/>
+    <glob pattern="*.conf"/>
+    <glob pattern="*.cfg"/>
+    <glob pattern="*.cnf"/>
+    <glob pattern="*.editorconfig"/>
+  </mime-type>
+  <mime-type type="text/x-dotenv">
+    <comment>environment file</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern=".env" weight="80"/>
+    <glob pattern=".env.*" weight="80"/>
+    <glob pattern="*.env"/>
+  </mime-type>
+  <mime-type type="text/x-git-config">
+    <comment>Git configuration</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern=".gitignore" weight="80"/>
+    <glob pattern=".gitattributes" weight="80"/>
+    <glob pattern=".gitmodules" weight="80"/>
+    <glob pattern=".gitconfig" weight="80"/>
+  </mime-type>
+  <mime-type type="text/x-lockfile">
+    <comment>dependency lock file</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.lock" weight="80"/>
+    <glob pattern="package-lock.json" weight="90"/>
+  </mime-type>
+
+  <!-- Robotics (ROS 2) -->
+  <mime-type type="application/x-ros-launch">
+    <comment>ROS launch file</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.launch" weight="80"/>
+    <glob pattern="*.launch.py" weight="80"/>
+    <glob pattern="*.launch.xml" weight="80"/>
+    <glob pattern="*.launch.yaml" weight="80"/>
+    <glob pattern="*.launch.yml" weight="80"/>
+  </mime-type>
+  <mime-type type="application/x-urdf">
+    <comment>URDF robot description</comment>
+    <sub-class-of type="application/xml"/>
+    <glob pattern="*.urdf"/>
+  </mime-type>
+  <mime-type type="application/x-xacro">
+    <comment>Xacro robot description</comment>
+    <sub-class-of type="application/xml"/>
+    <glob pattern="*.xacro"/>
+    <glob pattern="*.urdf.xacro" weight="80"/>
+  </mime-type>
+  <mime-type type="text/x-ros-msg">
+    <comment>ROS message definition</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.msg" weight="80"/>
+  </mime-type>
+  <mime-type type="text/x-ros-srv">
+    <comment>ROS service definition</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.srv" weight="80"/>
+  </mime-type>
+  <mime-type type="text/x-ros-action">
+    <comment>ROS action definition</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.action" weight="80"/>
+  </mime-type>
+  <mime-type type="application/x-rosbag">
+    <comment>ROS 1 bag recording</comment>
+    <glob pattern="*.bag" weight="80"/>
+  </mime-type>
+  <mime-type type="application/x-mcap">
+    <comment>MCAP recording</comment>
+    <glob pattern="*.mcap" weight="80"/>
+  </mime-type>
+  <mime-type type="application/x-rosbag2">
+    <comment>ROS 2 bag recording</comment>
+    <glob pattern="*.db3" weight="80"/>
+  </mime-type>
+  <mime-type type="application/x-rviz">
+    <comment>RViz configuration</comment>
+    <sub-class-of type="application/x-yaml"/>
+    <glob pattern="*.rviz"/>
+  </mime-type>
+
+  <!-- Data and machine learning -->
+  <mime-type type="application/x-npy">
+    <comment>NumPy array</comment>
+    <glob pattern="*.npy"/>
+  </mime-type>
+  <mime-type type="application/x-npz">
+    <comment>NumPy array archive</comment>
+    <glob pattern="*.npz"/>
+  </mime-type>
+  <mime-type type="application/x-pickle">
+    <comment>Python pickle</comment>
+    <glob pattern="*.pkl"/>
+    <glob pattern="*.pickle"/>
+  </mime-type>
+  <mime-type type="application/x-pytorch">
+    <comment>PyTorch model</comment>
+    <glob pattern="*.pt"/>
+    <glob pattern="*.pth"/>
+    <glob pattern="*.ckpt"/>
+  </mime-type>
+  <mime-type type="application/x-onnx">
+    <comment>ONNX model</comment>
+    <glob pattern="*.onnx"/>
+  </mime-type>
+  <mime-type type="application/x-safetensors">
+    <comment>safetensors model</comment>
+    <glob pattern="*.safetensors"/>
+  </mime-type>
+  <mime-type type="application/vnd.apache.parquet">
+    <comment>Parquet table</comment>
+    <glob pattern="*.parquet"/>
+  </mime-type>
+  <mime-type type="application/vnd.sqlite3">
+    <comment>SQLite database</comment>
+    <glob pattern="*.sqlite"/>
+    <glob pattern="*.sqlite3"/>
+    <glob pattern="*.db"/>
+  </mime-type>
+
+  <!-- 3D, fonts, packages -->
+  <mime-type type="model/obj">
+    <comment>Wavefront OBJ mesh</comment>
+    <glob pattern="*.obj" weight="80"/>
+  </mime-type>
+  <mime-type type="model/vnd.collada+xml">
+    <comment>COLLADA mesh</comment>
+    <sub-class-of type="application/xml"/>
+    <glob pattern="*.dae"/>
+  </mime-type>
+  <mime-type type="model/gltf-binary">
+    <comment>glTF binary scene</comment>
+    <glob pattern="*.glb"/>
+  </mime-type>
+  <mime-type type="model/gltf+json">
+    <comment>glTF scene</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gltf"/>
+  </mime-type>
+  <mime-type type="model/x-ply">
+    <comment>PLY mesh</comment>
+    <glob pattern="*.ply"/>
+  </mime-type>
+  <mime-type type="font/otf">
+    <glob pattern="*.otf" weight="80"/>
+  </mime-type>
+  <mime-type type="application/x-wheel+zip">
+    <comment>Python wheel</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.whl"/>
+  </mime-type>
+</mime-info>

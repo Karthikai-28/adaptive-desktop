@@ -19,15 +19,64 @@
  * 1. Files window
  * ========================================================= */
 
+/* Liquid glass. Files is the one translucent application window: the
+ * window is a graphite tint over the desktop, and the shell blurs what is
+ * behind it (shell/.../windowGlass.js), so the wallpaper shows through as
+ * frosted colour, never as readable shapes. Every layer inside is clear so
+ * the tint is painted once; the sidebar floats on it as a lighter pane, as
+ * in Finder. Only Files does this - the session theme keeps other windows
+ * opaque. */
+@define-color ad_glass        alpha(#1C1C1E, 0.58);
+@define-color ad_glass_pane   alpha(#FFFFFF, 0.055);
+@define-color ad_glass_edge   alpha(#FFFFFF, 0.10);
+
 .nautilus-window,
+.nautilus-window.background,
+.nautilus-window:backdrop {
+    background-color: @ad_glass;
+    background-image: none;
+}
+
+/* The inspector and its text preview are scrolled windows too, and they
+ * must stay opaque (section 2). */
 .nautilus-window notebook,
-.nautilus-window notebook > stack {
-    background: @ad_bg;
+.nautilus-window notebook > stack,
+.nautilus-window scrolledwindow:not(.adaptive-preview-panel):not(.adaptive-text-frame),
+.nautilus-window overlay,
+.nautilus-window layout.view,
+.nautilus-window layout.view:backdrop {
+    background-color: transparent;
+    background-image: none;
+}
+
+/* One sheet of glass from the toolbar down: no toolbar material, no rule */
+.nautilus-window headerbar,
+.nautilus-window headerbar:backdrop,
+.nautilus-window .titlebar,
+.nautilus-window .titlebar:backdrop {
+    background-color: transparent;
+    background-image: none;
+    border-bottom-color: transparent;
+    box-shadow: none;
+}
+
+.nautilus-window headerbar button:not(.titlebutton):not(.text-button) {
+    border: 1px solid @ad_glass_edge;
+    background-color: alpha(#FFFFFF, 0.06);
+    box-shadow: inset 0 1px alpha(#FFFFFF, 0.08);
+}
+
+.nautilus-window headerbar button:not(.titlebutton):hover {
+    background-color: alpha(#FFFFFF, 0.12);
+}
+
+.nautilus-window headerbar .linked > button:not(:first-child) {
+    border-left-color: transparent;
 }
 
 /* Tabs */
 .nautilus-window notebook > header {
-    background-color: @ad_surface;
+    background-color: transparent;
     border-bottom: 1px solid @ad_hairline;
 }
 
@@ -106,10 +155,35 @@
     color: @ad_quaternary;
 }
 
-/* Sidebar: Finder's - accent glyphs, neutral selection */
-.nautilus-window placessidebar,
+/* Sidebar: Finder's - a pane of lighter glass floating inside the window,
+ * accent glyphs, neutral selection. The sidebar is
+ * placessidebar.frame > viewport.frame > list, and GTK 3 draws a scrolled
+ * window's frame without its border-radius, so the pane is the viewport. */
+.nautilus-window placessidebar {
+    margin: 2px 0 10px 10px;
+    border: none;
+    box-shadow: none;
+    background: none;
+}
+
+.nautilus-window placessidebar viewport {
+    padding: 6px 0;
+    border: 1px solid @ad_glass_edge;
+    border-radius: 14px;
+    background-color: @ad_glass_pane;
+    box-shadow: inset 0 1px alpha(#FFFFFF, 0.07);
+}
+
 .nautilus-window placessidebar list {
-    background-color: @ad_sidebar;
+    border: none;
+    background-color: transparent;
+}
+
+.nautilus-window paned > separator {
+    min-width: 6px;
+    background: none;
+    border: none;
+    box-shadow: none;
 }
 
 .nautilus-window .sidebar-row {
@@ -207,8 +281,9 @@
     border-bottom: 1px solid alpha(#FFFFFF, 0.03);
 }
 
-.nautilus-list-view .view {
-    background-color: @ad_bg;
+.nautilus-list-view .view,
+.nautilus-list-view treeview header button {
+    background-color: transparent;
 }
 
 .nautilus-list-view .view:selected {
@@ -326,18 +401,24 @@ rubberband,
  * 2. Inspector
  * ========================================================= */
 
-.adaptive-preview-panel viewport {
+/* A card floating on the window's glass, the twin of the sidebar pane. The
+ * card is the viewport: GTK 3 ignores border-radius on a scrolled window. */
+.adaptive-preview-panel {
+    margin: 2px 10px 10px 0;
     background: none;
+    border: none;
+    color: @ad_text;
 }
 
-.adaptive-preview-panel {
+.adaptive-preview-panel viewport {
     /* Opaque: the panel overlays the file grid, and any transparency lets
      * icons ghost through. This is the card material flattened over the
      * canvas - the same value as the sidebar. */
+    border: 1px solid @ad_glass_edge;
+    border-radius: 14px;
     background-color: @ad_sidebar;
     background-image: none;
-    border-left: 1px solid @ad_hairline;
-    color: @ad_text;
+    box-shadow: inset 0 1px alpha(#FFFFFF, 0.07);
 }
 
 /* Hero: icon or preview, name, kind */

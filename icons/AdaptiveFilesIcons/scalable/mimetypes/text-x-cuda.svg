@@ -1,15 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-<defs>
-  <linearGradient id="g" x1="12" y1="9" x2="52" y2="56" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#65D9B5"/>
-    <stop offset="1" stop-color="#78A9FF"/>
-  </linearGradient>
-</defs>
-<path d="M16 7h23l10 10v40H16z" fill="#101C2B" stroke="url(#g)" stroke-width="1.7"/>
-<path d="M39 7v10h10" fill="none" stroke="#78A9FF" stroke-width="1.7"/>
-<rect x="21" y="24" width="23" height="21" rx="6" fill="url(#g)" opacity=".12"/>
-<text x="32.5" y="38.5" text-anchor="middle"
-      font-family="DejaVu Sans, sans-serif" font-size="9.5"
-      font-weight="700" fill="#DDF5FF">CUDA</text>
-<path d="M22 49h20" stroke="#C7E9FF" stroke-width="1.3" opacity=".38" stroke-linecap="round"/>
+<defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="1.8"/></filter><linearGradient id="sheet" x1="0" y1="6" x2="0" y2="58" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".46"/><stop offset=".55" stop-color="#8DE6A3" stop-opacity=".2"/><stop offset="1" stop-color="#30D158" stop-opacity=".18"/></linearGradient><linearGradient id="rim" x1="14" y1="6" x2="51" y2="58" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".85"/><stop offset=".45" stop-color="#FFFFFF" stop-opacity=".22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity=".4"/></linearGradient><linearGradient id="sheen" x1="0" y1="6" x2="0" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient><linearGradient id="fold" x1="39" y1="6" x2="51" y2="18" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".9"/><stop offset="1" stop-color="#FFFFFF" stop-opacity=".45"/></linearGradient><linearGradient id="ink" x1="0" y1="0" x2="0" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6ADE87"/><stop offset="1" stop-color="#30D158"/></linearGradient></defs>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="#000" opacity=".4" filter="url(#shadow)" transform="translate(0,1.6)"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="#2C2C2E" fill-opacity=".42"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="url(#sheet)"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="url(#sheen)"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="none" stroke="url(#rim)" stroke-width="1"/>
+<path d="M37.6,17.5Q39.5,20.5 44,20H51V17.5Z" fill="#000" opacity=".12"/>
+<path d="M39.5,6V14.5Q39.5,17.5 42.5,17.5H51Z" fill="url(#fold)"/>
+<g transform="translate(22,18) scale(0.88)"><path fill="#000000" fill-opacity=".28" transform="translate(0,.7)" d="M8.78,7.21L3.78,12.71A1.05,1.05 0 0 1 2.22,11.29L7.22,5.79A1.05,1.05 0 0 1 8.78,7.21ZM3.78,11.29L8.78,16.79A1.05,1.05 0 0 1 7.22,18.21L2.22,12.71A1.05,1.05 0 0 1 3.78,11.29ZM16.78,5.79L21.78,11.29A1.05,1.05 0 0 1 20.22,12.71L15.22,7.21A1.05,1.05 0 0 1 16.78,5.79ZM21.78,12.71L16.78,18.21A1.05,1.05 0 0 1 15.22,16.79L20.22,11.29A1.05,1.05 0 0 1 21.78,12.71ZM15.01,4.77L11.01,19.77A1.05,1.05 0 0 1 8.99,19.23L12.99,4.23A1.05,1.05 0 0 1 15.01,4.77Z"/><path fill="url(#ink)" d="M8.78,7.21L3.78,12.71A1.05,1.05 0 0 1 2.22,11.29L7.22,5.79A1.05,1.05 0 0 1 8.78,7.21ZM3.78,11.29L8.78,16.79A1.05,1.05 0 0 1 7.22,18.21L2.22,12.71A1.05,1.05 0 0 1 3.78,11.29ZM16.78,5.79L21.78,11.29A1.05,1.05 0 0 1 20.22,12.71L15.22,7.21A1.05,1.05 0 0 1 16.78,5.79ZM21.78,12.71L16.78,18.21A1.05,1.05 0 0 1 15.22,16.79L20.22,11.29A1.05,1.05 0 0 1 21.78,12.71ZM15.01,4.77L11.01,19.77A1.05,1.05 0 0 1 8.99,19.23L12.99,4.23A1.05,1.05 0 0 1 15.01,4.77Z"/></g>
+<path d="M27.8,43.4H37.2A5.5,5.5 0 0 1 42.7,48.9V48.9A5.5,5.5 0 0 1 37.2,54.4H27.8A5.5,5.5 0 0 1 22.3,48.9V48.9A5.5,5.5 0 0 1 27.8,43.4Z" fill="#30D158" fill-opacity=".92"/>
+<path transform="translate(26.5,44.9)" d="M5.78,3.12C5.61,1.75,4.56,0.95,3.19,0.95C1.61,0.95,0.41,2.08,0.41,4.02C0.41,5.97,1.59,7.09,3.19,7.09C4.72,7.09,5.64,6.08,5.78,4.97L4.5,4.97C4.38,5.61,3.88,5.97,3.2,5.97C2.3,5.97,1.69,5.3,1.69,4.02C1.69,2.78,2.3,2.08,3.22,2.08C3.91,2.08,4.41,2.47,4.5,3.12ZM10.2,1.03L10.2,4.81C10.2,5.48,9.72,5.98,8.98,5.98C8.25,5.98,7.77,5.48,7.77,4.81L7.77,1.03L6.52,1.03L6.52,4.92C6.52,6.22,7.5,7.09,8.98,7.09C10.47,7.09,11.45,6.22,11.45,4.92L11.45,1.03ZM12,7" fill="#1C1C1E"/>
 </svg>

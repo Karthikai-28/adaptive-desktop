@@ -117,6 +117,7 @@ sys.exit(0 if module.controller_calls() else 1)
 PY
 }
 step "Files inspector: every method the controller calls is defined" quiet inspector_static
+step "Files icons match their generator (scripts/build-file-icons.py)" quiet python3 "$REPO/scripts/build-file-icons.py" --check
 
 if [ "$QUICK" = 0 ]; then
     step "Command palette window (virtual display)" quiet python3 "$REPO/scripts/verify-palette.py"

@@ -1,21 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-
-<defs>
-  <linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#78A9FF"/>
-    <stop offset="1" stop-color="#66E0FF"/>
-  </linearGradient>
-  <linearGradient id="g2" x1="10" y1="54" x2="54" y2="10" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#162233"/>
-    <stop offset="1" stop-color="#263D5B"/>
-  </linearGradient>
-</defs>
-
-
-<path d="M8 18.5C8 14.9 10.9 12 14.5 12h12l5 5H49.5c3.6 0 6.5 2.9 6.5 6.5v23C56 50.1 53.1 53 49.5 53h-35C10.9 53 8 50.1 8 46.5z"
-      fill="url(#g2)" stroke="#78A9FF" stroke-width="1.7"/>
-<path d="M10 25h44v21.5c0 2.5-2 4.5-4.5 4.5h-35A4.5 4.5 0 0 1 10 46.5z"
-      fill="url(#g)" opacity=".34"/>
-<path d="M15 31h25" stroke="#C7E9FF" stroke-width="1.4" opacity=".55" stroke-linecap="round"/>
-
+<defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="1.8"/></filter><linearGradient id="back" x1="0" y1="10" x2="0" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F86F0"/><stop offset="1" stop-color="#0B4FB4"/></linearGradient><linearGradient id="front" x1="0" y1="20" x2="0" y2="56" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8CC8FF" stop-opacity=".94"/><stop offset=".5" stop-color="#4AA2FF" stop-opacity=".9"/><stop offset="1" stop-color="#1679EC" stop-opacity=".92"/></linearGradient><linearGradient id="sheen" x1="0" y1="20" x2="0" y2="40" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".34"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient><linearGradient id="rim" x1="0" y1="20" x2="0" y2="56" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".75"/><stop offset=".35" stop-color="#FFFFFF" stop-opacity=".18"/><stop offset="1" stop-color="#FFFFFF" stop-opacity=".28"/></linearGradient></defs>
+<path d="M15,15H49A6,6 0 0 1 55,21V50A6,6 0 0 1 49,56H15A6,6 0 0 1 9,50V21A6,6 0 0 1 15,15Z" fill="#000" opacity=".42" filter="url(#shadow)" transform="translate(0,1.6)"/>
+<path d="M6,15.5Q6,11 10.5,11H23.4Q25.2,11 26.4,12.3L29,15H53.5Q58,15 58,19.5V48H6Z" fill="url(#back)"/>
+<path d="M8,15.6H24.6" stroke="#FFFFFF" stroke-opacity=".35" stroke-width=".8" fill="none" stroke-linecap="round"/>
+<path d="M12.5,18H51.5A2.5,2.5 0 0 1 54,20.5V35.5A2.5,2.5 0 0 1 51.5,38H12.5A2.5,2.5 0 0 1 10,35.5V20.5A2.5,2.5 0 0 1 12.5,18Z" fill="#FFFFFF" opacity=".5"/>
+<path d="M11.5,22H52.5A5.5,5.5 0 0 1 58,27.5V48.5A5.5,5.5 0 0 1 52.5,54H11.5A5.5,5.5 0 0 1 6,48.5V27.5A5.5,5.5 0 0 1 11.5,22Z" fill="url(#front)"/>
+<path d="M11.5,22H52.5A5.5,5.5 0 0 1 58,27.5V48.5A5.5,5.5 0 0 1 52.5,54H11.5A5.5,5.5 0 0 1 6,48.5V27.5A5.5,5.5 0 0 1 11.5,22Z" fill="url(#sheen)"/>
+<path d="M11.5,22H52.5A5.5,5.5 0 0 1 58,27.5V48.5A5.5,5.5 0 0 1 52.5,54H11.5A5.5,5.5 0 0 1 6,48.5V27.5A5.5,5.5 0 0 1 11.5,22Z" fill="none" stroke="url(#rim)" stroke-width="1"/>
+<path d="M11,22.9H53" stroke="#FFFFFF" stroke-opacity=".8" stroke-width=".9" stroke-linecap="round"/>
 </svg>

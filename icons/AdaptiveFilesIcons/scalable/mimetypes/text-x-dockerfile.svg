@@ -1,15 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-<defs>
-  <linearGradient id="g" x1="12" y1="9" x2="52" y2="56" gradientUnits="userSpaceOnUse">
-    <stop offset="0" stop-color="#66E0FF"/>
-    <stop offset="1" stop-color="#78A9FF"/>
-  </linearGradient>
-</defs>
-<path d="M16 7h23l10 10v40H16z" fill="#101C2B" stroke="url(#g)" stroke-width="1.7"/>
-<path d="M39 7v10h10" fill="none" stroke="#78A9FF" stroke-width="1.7"/>
-<rect x="21" y="24" width="23" height="21" rx="6" fill="url(#g)" opacity=".12"/>
-<text x="32.5" y="38.5" text-anchor="middle"
-      font-family="DejaVu Sans, sans-serif" font-size="12"
-      font-weight="700" fill="#DDF5FF">DKR</text>
-<path d="M22 49h20" stroke="#C7E9FF" stroke-width="1.3" opacity=".38" stroke-linecap="round"/>
+<defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="1.8"/></filter><linearGradient id="sheet" x1="0" y1="6" x2="0" y2="58" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".46"/><stop offset=".55" stop-color="#78BBFF" stop-opacity=".2"/><stop offset="1" stop-color="#0A84FF" stop-opacity=".18"/></linearGradient><linearGradient id="rim" x1="14" y1="6" x2="51" y2="58" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".85"/><stop offset=".45" stop-color="#FFFFFF" stop-opacity=".22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity=".4"/></linearGradient><linearGradient id="sheen" x1="0" y1="6" x2="0" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient><linearGradient id="fold" x1="39" y1="6" x2="51" y2="18" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".9"/><stop offset="1" stop-color="#FFFFFF" stop-opacity=".45"/></linearGradient><linearGradient id="ink" x1="0" y1="0" x2="0" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4FA6FF"/><stop offset="1" stop-color="#0A84FF"/></linearGradient></defs>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="#000" opacity=".4" filter="url(#shadow)" transform="translate(0,1.6)"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="#2C2C2E" fill-opacity=".42"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="url(#sheet)"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="url(#sheen)"/>
+<path d="M19,6H39.5L51,17.5V53Q51,58 46,58H19Q14,58 14,53V11Q14,6 19,6Z" fill="none" stroke="url(#rim)" stroke-width="1"/>
+<path d="M37.6,17.5Q39.5,20.5 44,20H51V17.5Z" fill="#000" opacity=".12"/>
+<path d="M39.5,6V14.5Q39.5,17.5 42.5,17.5H51Z" fill="url(#fold)"/>
+<g transform="translate(21,21.5) scale(0.96)"><path fill="#000000" fill-opacity=".28" transform="translate(0,.7)" d="M3.7,12.6H6.9A1.1,1.1 0 0 1 8,13.7V16.9A1.1,1.1 0 0 1 6.9,18H3.7A1.1,1.1 0 0 1 2.6,16.9V13.7A1.1,1.1 0 0 1 3.7,12.6ZM10.4,12.6H13.6A1.1,1.1 0 0 1 14.7,13.7V16.9A1.1,1.1 0 0 1 13.6,18H10.4A1.1,1.1 0 0 1 9.3,16.9V13.7A1.1,1.1 0 0 1 10.4,12.6ZM17.1,12.6H20.3A1.1,1.1 0 0 1 21.4,13.7V16.9A1.1,1.1 0 0 1 20.3,18H17.1A1.1,1.1 0 0 1 16,16.9V13.7A1.1,1.1 0 0 1 17.1,12.6ZM7.1,5.9H10.3A1.1,1.1 0 0 1 11.4,7V10.2A1.1,1.1 0 0 1 10.3,11.3H7.1A1.1,1.1 0 0 1 6,10.2V7A1.1,1.1 0 0 1 7.1,5.9ZM13.8,5.9H17A1.1,1.1 0 0 1 18.1,7V10.2A1.1,1.1 0 0 1 17,11.3H13.8A1.1,1.1 0 0 1 12.7,10.2V7A1.1,1.1 0 0 1 13.8,5.9ZM2.6,19.75L21.4,19.75A0.85,0.85 0 0 1 21.4,21.45L2.6,21.45A0.85,0.85 0 0 1 2.6,19.75Z"/><path fill="url(#ink)" d="M3.7,12.6H6.9A1.1,1.1 0 0 1 8,13.7V16.9A1.1,1.1 0 0 1 6.9,18H3.7A1.1,1.1 0 0 1 2.6,16.9V13.7A1.1,1.1 0 0 1 3.7,12.6ZM10.4,12.6H13.6A1.1,1.1 0 0 1 14.7,13.7V16.9A1.1,1.1 0 0 1 13.6,18H10.4A1.1,1.1 0 0 1 9.3,16.9V13.7A1.1,1.1 0 0 1 10.4,12.6ZM17.1,12.6H20.3A1.1,1.1 0 0 1 21.4,13.7V16.9A1.1,1.1 0 0 1 20.3,18H17.1A1.1,1.1 0 0 1 16,16.9V13.7A1.1,1.1 0 0 1 17.1,12.6ZM7.1,5.9H10.3A1.1,1.1 0 0 1 11.4,7V10.2A1.1,1.1 0 0 1 10.3,11.3H7.1A1.1,1.1 0 0 1 6,10.2V7A1.1,1.1 0 0 1 7.1,5.9ZM13.8,5.9H17A1.1,1.1 0 0 1 18.1,7V10.2A1.1,1.1 0 0 1 17,11.3H13.8A1.1,1.1 0 0 1 12.7,10.2V7A1.1,1.1 0 0 1 13.8,5.9ZM2.6,19.75L21.4,19.75A0.85,0.85 0 0 1 21.4,21.45L2.6,21.45A0.85,0.85 0 0 1 2.6,19.75Z"/></g>
 </svg>

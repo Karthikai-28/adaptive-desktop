@@ -35,6 +35,7 @@ const NetworkPanel = Me.imports.networkPanel;
 const RosPanel = Me.imports.rosPanel;
 const SystemPanel = Me.imports.systemPanel;
 const MinimizeEffect = Me.imports.minimizeEffect;
+const WindowGlass = Me.imports.windowGlass;
 const ClipboardHistory = Me.imports.clipboardHistory;
 const ProjectSnapshots = Me.imports.projectSnapshots;
 const ProjectIndicator = Me.imports.projectIndicator;
@@ -314,6 +315,8 @@ class AdaptiveShellV16 {
         this._installRail();
         this._minimizeFx = new MinimizeEffect.GenieMinimize(w => this._dockIconRect(w));
         this._minimizeFx.attach();
+        this._windowGlass = new WindowGlass.WindowGlass();
+        this._windowGlass.attach();
 
         this._monitorChangedId = Main.layoutManager.connect(
             'monitors-changed',
@@ -630,6 +633,11 @@ class AdaptiveShellV16 {
         if (this._minimizeFx) {
             this._minimizeFx.detach();
             this._minimizeFx = null;
+        }
+
+        if (this._windowGlass) {
+            this._windowGlass.detach();
+            this._windowGlass = null;
         }
 
         this._removeDockDnd();
