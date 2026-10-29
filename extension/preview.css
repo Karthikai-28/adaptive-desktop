@@ -23,9 +23,9 @@
  * window is a graphite tint over the desktop, and the shell blurs what is
  * behind it (shell/.../windowGlass.js), so the wallpaper shows through as
  * frosted colour, never as readable shapes. Every layer inside is clear so
- * the tint is painted once; the sidebar floats on it as a lighter pane, as
- * in Finder. Only Files does this - the session theme keeps other windows
- * opaque. */
+ * the tint is painted once; the sidebar and the inspector float on it as
+ * lighter panes, as in Finder. Only Files does this - the session theme
+ * keeps other windows opaque. */
 @define-color ad_glass        alpha(#1C1C1E, 0.58);
 @define-color ad_glass_pane   alpha(#FFFFFF, 0.055);
 @define-color ad_glass_edge   alpha(#FFFFFF, 0.10);
@@ -37,8 +37,8 @@
     background-image: none;
 }
 
-/* The inspector and its text preview are scrolled windows too, and they
- * must stay opaque (section 2). */
+/* The inspector and its text preview are scrolled windows too; they draw
+ * their own glass pane and code well (section 2). */
 .nautilus-window notebook,
 .nautilus-window notebook > stack,
 .nautilus-window scrolledwindow:not(.adaptive-preview-panel):not(.adaptive-text-frame),
@@ -411,12 +411,12 @@ rubberband,
 }
 
 .adaptive-preview-panel viewport {
-    /* Opaque: the panel overlays the file grid, and any transparency lets
-     * icons ghost through. This is the card material flattened over the
-     * canvas - the same value as the sidebar. */
+    /* Glass, the same pane as the sidebar. The panel sits beside the file
+     * view in a box (inspector_host.py), never over it, so only the
+     * blurred desktop shows through. */
     border: 1px solid @ad_glass_edge;
     border-radius: 14px;
-    background-color: @ad_sidebar;
+    background-color: @ad_glass_pane;
     background-image: none;
     box-shadow: inset 0 1px alpha(#FFFFFF, 0.07);
 }
