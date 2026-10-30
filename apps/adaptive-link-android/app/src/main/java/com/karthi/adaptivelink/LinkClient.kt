@@ -260,14 +260,17 @@ class LinkClient(
     }
 
     /** Drop candidates bound to the old Wi-Fi/mobile interface before reconnecting. */
-    suspend fun networkChanged() = connectLock.withLock {
-        tunnel?.close()
-        tunnel = null
-        host = null
-        port = computer.port
-        viaCable = false
-        http.connectionPool.evictAll()
-        awayProblem = ""
+    suspend fun networkChanged() = withContext(Dispatchers.IO) {
+        connectLock.withLock {
+            tunnel?.close()
+            tunnel = null
+            host = null
+            port = computer.port
+            viaCable = false
+            // Closing a TLS socket writes to it: on the main thread Android stops the app.
+            http.connectionPool.evictAll()
+            awayProblem = ""
+        }
     }
 
     /**
