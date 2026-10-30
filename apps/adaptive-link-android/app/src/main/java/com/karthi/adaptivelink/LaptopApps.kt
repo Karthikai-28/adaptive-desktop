@@ -10,11 +10,14 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.AtomicFile
 import android.util.Base64
+import android.util.LruCache
 import android.view.View
 import android.widget.RemoteViews
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -82,22 +85,40 @@ internal object LaptopApps {
 
     // --- Icons -----------------------------------------------------------
 
+    private val seen = LruCache<String, Bitmap>(64)
+
+    /** The icon if it is already in memory: a tile that has one draws it at once. */
+    fun seenIcon(appId: String): Bitmap? = seen[appId]
+
     private fun iconFile(context: Context, appId: String): File {
         val name = MessageDigest.getInstance("SHA-256").digest(appId.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
-        return File(File(context.filesDir, "app-icons").apply { mkdirs() }, "$name.png")
+        return File(File(context.filesDir, "app-icons-2").apply { mkdirs() }, "$name.png")
     }
 
-    fun cachedIcon(context: Context, appId: String): Bitmap? =
-        iconFile(context, appId).takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.path) }
+    fun cachedIcon(context: Context, appId: String): Bitmap? = seen[appId]
+        ?: iconFile(context, appId).takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.path) }?.also { seen.put(appId, it) }
+
+    /** Icons bring their own margins: without them they all fill a tile the same. */
+    private fun trimmed(picture: Bitmap): Bitmap {
+        val pixels = IntArray(picture.width * picture.height)
+        picture.getPixels(pixels, 0, picture.width, 0, 0, picture.width, picture.height)
+        val (left, top, right, bottom) = HomeMetrics.visibleBounds(pixels, picture.width, picture.height)?.toList() ?: return picture
+        return Bitmap.createBitmap(picture, left, top, right - left, bottom - top)
+    }
 
     /** The app's icon, from the phone if it has been seen, else from the laptop (and kept). */
-    suspend fun icon(context: Context, client: LinkClient, appId: String): Bitmap? {
-        cachedIcon(context, appId)?.let { return it }
+    suspend fun icon(context: Context, client: LinkClient, appId: String): Bitmap? = withContext(Dispatchers.IO) {
+        cachedIcon(context, appId)?.let { return@withContext it }
         val text = client.get("/v1/apps/icon?id=" + Uri.encode(appId))?.optString("png").orEmpty()
-        val bytes = runCatching { Base64.decode(text, Base64.DEFAULT) }.getOrNull() ?: return null
-        val picture = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-        runCatching { iconFile(context, appId).writeBytes(bytes) }
-        return picture
+        val bytes = runCatching { Base64.decode(text, Base64.DEFAULT) }.getOrNull() ?: return@withContext null
+        val fetched = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext null
+        val picture = trimmed(fetched)
+        // A daemon from before sharp icons sends 48 px: shown for now, not kept.
+        if (maxOf(fetched.width, fetched.height) >= 96) {
+            runCatching { iconFile(context, appId).outputStream().use { picture.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+            seen.put(appId, picture)
+        }
+        picture
     }
 
     // --- What the widget and the launcher show ---------------------------
@@ -143,8 +164,20 @@ internal object LaptopApps {
         val canvas = android.graphics.Canvas(out)
         canvas.drawColor(0xFF1C1C1E.toInt())
         val inset = 54
-        canvas.drawBitmap(picture, null, android.graphics.Rect(inset, inset, size - inset, size - inset), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+        val art = size - 2 * inset
+        val wide = picture.width >= picture.height
+        val width = if (wide) art else art * picture.width / picture.height
+        val height = if (wide) art * picture.height / picture.width else art
+        val left = (size - width) / 2; val top = (size - height) / 2
+        canvas.drawBitmap(picture, null, android.graphics.Rect(left, top, left + width, top + height), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
         return out
+    }
+
+    /** Eight full-size icons would strain the one binder call that updates a widget. */
+    fun forWidget(picture: Bitmap): Bitmap {
+        val longest = maxOf(picture.width, picture.height)
+        if (longest <= 96) return picture
+        return Bitmap.createScaledBitmap(picture, maxOf(1, picture.width * 96 / longest), maxOf(1, picture.height * 96 / longest), true)
     }
 
     /** Asks the launcher to put this laptop app on the phone's home screen. */
@@ -176,7 +209,7 @@ class AppsWidget : LinkWidgetBase() {
             val id = app.optString("id")
             views.setTextViewText(labels[index], app.optString("name"))
             val picture = LaptopApps.cachedIcon(context, id)
-            if (picture != null) views.setImageViewBitmap(icons[index], picture) else views.setImageViewResource(icons[index], R.drawable.ic_launcher)
+            if (picture != null) views.setImageViewBitmap(icons[index], LaptopApps.forWidget(picture)) else views.setImageViewResource(icons[index], R.drawable.ic_launcher)
             views.setOnClickPendingIntent(slot, PendingIntent.getActivity(context, 300 + index,
                 LaptopApps.intent(context, computer, id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }

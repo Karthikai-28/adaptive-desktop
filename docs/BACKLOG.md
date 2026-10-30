@@ -692,6 +692,11 @@ comparing the set of methods before and after and by the sandboxes above.
 
 ## Milestone 17 — Adaptive Link: the computer from your phone
 
+- 🔬 **Launcher Home (2026-10-30):** pins and All Apps share one grid sized from
+  the screen and text size, the dock stays on screen and shrinks together, laptop
+  icons arrive at 192 px and fill tiles evenly. Checked on the emulator at phone,
+  fold, large-text and Moto Edge 50 Pro resolutions; not yet seen on the real phone.
+
 - 🔬 **Phone appearance + Dynamic Island (2026-10-29):** adaptive linked-device
   launcher mark, shared dark/blue typography and shapes, grouped Control Center,
   rounded navigation, pairing artwork, and expandable connection activity. Optional

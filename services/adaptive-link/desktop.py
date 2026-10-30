@@ -428,7 +428,10 @@ def _icon_files(names, size):
         if "scalable" in path.parts:
             return 0
         found = re.search(r"(\d+)(?:x\d+)?(?:@\d+)?$", path.parent.name) or re.search(r"(\d+)", path.parent.parent.name)
-        return abs(int(found.group(1)) - size) if found else 1000
+        if not found:
+            return 1000
+        # Scaling down keeps an icon sharp, scaling up does not: larger files first.
+        return int(found.group(1)) - size if int(found.group(1)) >= size else 500 + size - int(found.group(1))
 
     for name in names:
         if "/" in name or name.startswith("."):
@@ -447,7 +450,7 @@ def _icon_files(names, size):
                 yield Path("/usr/share/pixmaps") / (name + suffix)
 
 
-def app_icon_png(icon, size=48):
+def app_icon_png(icon, size=192):
     """An app's icon (as Gio writes it, a name or a path) as PNG bytes, or None."""
     import gi
     gi.require_version("GdkPixbuf", "2.0")

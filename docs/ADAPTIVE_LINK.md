@@ -426,8 +426,12 @@ on the phone, at the phone's size, while the laptop stays free for someone
 else. This is the app's landing screen.
 
 - **Home** has the laptop and whether it is connected, your pins and pinned
-  folders, recent apps, *Continue* for what is running, and a dock of up to
-  six. Long-press anything to pin it, move it first, put it in the dock or a
+  folders first, *Continue* for what is running, recent apps and AI usage, with
+  a dock of up to six that stays above the navigation bar. Pins and All Apps
+  are one launcher grid (`HomeGrid.kt`): four or five across on a phone, fewer
+  with large text, and every icon is trimmed of its own margins and drawn on the
+  same tile. A corner dot on a tile means running (green) or a past launch
+  problem (orange, explained on long-press). Long-press anything to pin it, move it first, put it in the dock or a
   drawer folder, see what it is, or edit its custom controls.
 - **All Apps** (the drawer) lists every app installed on the laptop by its real
   name and icon, with search, categories, favourites and your folders, beside

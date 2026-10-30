@@ -95,6 +95,12 @@ private val NativeApps = listOf(
     ShellApp("native:connections", "Laptop tools", icon = Icons.Default.Laptop),
     ShellApp("native:drawer", "All apps"), ShellApp("native:recents", "Running apps", icon = Icons.Default.ViewCarousel),
 )
+/** The symbol of a phone-side entry; null for a laptop app, which brings its own icon. */
+private fun nativeSymbol(id: String): ImageVector? = when {
+    !id.startsWith("native:") -> null
+    id.startsWith("native:folder:") -> Icons.Default.Folder
+    else -> NativeApps.firstOrNull { it.id == id }?.icon ?: Icons.Default.Apps
+}
 /** What a launch in a phone session showed about an app (scripts/link-mobile-compat.py). */
 private fun compatibilityNote(app: JSONObject) = when (app.optString("compatibility")) {
     "no-window" -> "May not open on phone"
@@ -607,42 +613,17 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         val live = liveWindows.firstOrNull { it.first.optString("id") == appId }
         if (live != null) continueWindow(live.first, live.second) else open(appId)
     }
+    val columns = HomeMetrics.columns(configuration.screenWidthDp, configuration.fontScale)
+    @Composable fun cell(app: JSONObject, modifier: Modifier = Modifier) {
+        val aid = app.optString("id")
+        AppCell(app.optString("name"), if (aid in running) "Running" else compatibilityNote(app), if (aid in running) Color(0xFF30D158) else Color(0xFFFF9F0A), modifier,
+            onLongClick = { organizing = app; folderName = folders.optString(aid) }, onClick = { activate(aid) }) {
+            AppTile(client, app, nativeSymbol(aid), HomeMetrics.TILE.dp)
+        }
+    }
     @Composable fun grid(entries: List<JSONObject>, modifier: Modifier = Modifier) {
-        LazyVerticalGrid(GridCells.Adaptive(96.dp), modifier, contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(entries, key = { it.optString("id") }) { app ->
-                val aid = app.optString("id")
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
-                    modifier = Modifier.animateItem().heightIn(min = 108.dp).clip(RoundedCornerShape(22.dp))
-                        .pressable(onLongClick = { organizing = app; folderName = folders.optString(aid) }) { activate(aid) },
-                ) {
-                    Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (aid.startsWith("native:")) Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Folder,
-                                null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
-                            else AppIcon(client, app)
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(app.optString("name"), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        if (aid in running) {
-                            Spacer(Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                PulseDot(Color(0xFF30D158), 5)
-                                Spacer(Modifier.width(2.dp))
-                                Text("Running", color = Color(0xFF30D158), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        } else compatibilityNote(app).takeIf { it.isNotEmpty() }?.let {
-                            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                        }
-                    }
-                }
-            }
+        LazyVerticalGrid(GridCells.Fixed(columns), modifier, contentPadding = PaddingValues(horizontal = HomeMetrics.GUTTER.dp, vertical = 4.dp)) {
+            items(entries, key = { it.optString("id") }) { app -> cell(app, Modifier.animateItem()) }
         }
     }
     Box(Modifier.fillMaxSize()) {
@@ -867,7 +848,8 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     layout.optJSONObject("offline_copy")?.let { copy -> TextButton(onClick = {
                         persist(copy.copyJson().put("revision", layout.optInt("revision")))
                     }) { Text("Restore offline Home organization") } }
-                    AiUsageCard(aiUsage, usageLoading, usageMessage) { usageRetry++ }
+                    Text("Pinned", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
+                    PinnedRows(pinned.mapNotNull { pin -> all.firstOrNull { it.optString("id") == pin } }, columns) { app, modifier -> cell(app, modifier) }
                     if (liveWindows.isNotEmpty()) {
                         Text("Continue", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -907,10 +889,6 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                         }
                     }
                     val recent = layout.optJSONArray("recent").strings().take(6)
-                    Text("Pinned", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
-                    val pinnedEntries = pinned.mapNotNull { pin -> all.firstOrNull { it.optString("id") == pin } }
-                    val columns = ((configuration.screenWidthDp - 14) / 106).coerceAtLeast(1)
-                    grid(pinnedEntries, Modifier.height((((pinnedEntries.size + columns - 1) / columns) * 128 + 24).dp))
                     if (recent.isNotEmpty()) {
                         Text("Recent", Modifier.padding(start = 16.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
                         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -924,8 +902,9 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                                 ) {
                                     Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                                            if (aid.startsWith("native:")) Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Apps, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                            else AppIcon(client, app ?: JSONObject().put("id", aid))
+                                            val symbol = nativeSymbol(aid)
+                                            if (symbol != null) Icon(symbol, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                            else AppIcon(client, app ?: JSONObject().put("id", aid), 20.dp)
                                         }
                                         Spacer(Modifier.width(6.dp))
                                         Text(app?.optString("name") ?: aid, fontSize = 12.sp, color = Color(0xFFF5F5F7), fontWeight = FontWeight.Medium)
@@ -934,52 +913,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                             }
                         }
                     }
-                    // Apple iOS Floating Frosted Glass Dock
-                    Box(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(28.dp),
-                            color = Color(0x77202024),
-                            border = BorderStroke(0.5.dp, Color(0x33FFFFFF)),
-                            tonalElevation = 8.dp,
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                layout.optJSONArray("dock").strings().forEach { aid ->
-                                    val app = all.firstOrNull { it.optString("id") == aid }
-                                    val isRunning = aid in running
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.combinedClickable(onClick = { activate(aid) }, onLongClick = { organizing = app }),
-                                    ) {
-                                        Box(
-                                            Modifier.size(48.dp).clip(RoundedCornerShape(13.dp))
-                                                .background(Color(0xFF2C2C2E)),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            if (aid.startsWith("native:")) {
-                                                Icon(NativeApps.firstOrNull { it.id == aid }?.icon ?: Icons.Default.Apps,
-                                                    null, Modifier.size(26.dp), tint = MaterialTheme.colorScheme.primary)
-                                            } else {
-                                                AppIcon(client, app ?: JSONObject().put("id", aid))
-                                            }
-                                        }
-                                        Spacer(Modifier.height(3.dp))
-                                        if (isRunning) {
-                                            Box(Modifier.size(4.dp).clip(CircleShape).background(Color(0xFF30D158)))
-                                        } else {
-                                            Spacer(Modifier.height(4.dp))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    AiUsageCard(aiUsage, usageLoading, usageMessage) { usageRetry++ }
                 }
             }
         } } } }
@@ -991,6 +925,11 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         // The Office has its own tabs and connection line: it fills the screen without the shell's.
         val ownChrome = (location == "native" && nativePage == Page.Office) || location == "continue"
         if (!ownChrome && (location != "app" || !online || note.startsWith("Step"))) Text(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
+        if (location == "home" && !editLayouts) HomeDock(
+            layout.optJSONArray("dock").strings().map { aid -> DockEntry(aid, all.firstOrNull { it.optString("id") == aid }?.optString("name") ?: aid, aid in running) },
+            onOpen = { activate(it) },
+            onOrganize = { aid -> organizing = all.firstOrNull { it.optString("id") == aid } },
+        ) { aid, size -> AppTile(client, all.firstOrNull { it.optString("id") == aid } ?: JSONObject().put("id", aid), nativeSymbol(aid), size) }
         if (!ownChrome) NavigationBar(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).clip(RoundedCornerShape(30.dp)),
             containerColor = Color(0xFF1C1C1E),
@@ -1015,7 +954,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         }
     }
     LaunchOverlay(launching != null, launching?.optString("name").orEmpty(), launching?.optString("layout").orEmpty()) {
-        launching?.let { app -> AppIcon(client, app) }
+        launching?.let { app -> AppIcon(client, app, 60.dp) }
     }
     }
     organizing?.let { app ->

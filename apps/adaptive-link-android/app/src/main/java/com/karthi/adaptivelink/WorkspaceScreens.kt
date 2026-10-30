@@ -26,12 +26,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -151,14 +153,13 @@ internal fun AppsPage(activity: MainActivity, client: LinkClient, store: Store, 
 }
 
 @Composable
-internal fun AppIcon(client: LinkClient, app: JSONObject) {
-    var picture by remember(app.optString("id")) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(app.optString("id")) {
-        val text = client.get("/v1/apps/icon?id=" + URLEncoder.encode(app.optString("id"), "UTF-8"))?.optString("png").orEmpty()
-        picture = runCatching { Base64.decode(text, Base64.DEFAULT).let { BitmapFactory.decodeByteArray(it, 0, it.size) } }.getOrNull()
-    }
-    picture?.let { Image(it.asImageBitmap(), null, Modifier.size(40.dp)) }
-        ?: Icon(Icons.Default.Apps, null, Modifier.size(40.dp))
+internal fun AppIcon(client: LinkClient, app: JSONObject, size: Dp = 40.dp) {
+    val id = app.optString("id")
+    val context = LocalContext.current.applicationContext
+    var picture by remember(id) { mutableStateOf(LaptopApps.seenIcon(id)) }
+    LaunchedEffect(id) { if (picture == null) picture = LaptopApps.icon(context, client, id) }
+    picture?.let { Image(it.asImageBitmap(), null, Modifier.size(size), filterQuality = FilterQuality.High) }
+        ?: Icon(Icons.Default.Apps, null, Modifier.size(size * .7f), tint = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

@@ -37,7 +37,7 @@ internal fun LinkActivityIsland(online: Boolean, busy: Boolean, count: Int, comp
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { expanded = !expanded }.padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(if (online) Icons.Default.Link else Icons.Default.LinkOff, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(12.dp))
-                Text(if (busy) "Working…" else if (!online) "Reconnecting" else if (count > 0) "$count apps running" else computer,
+                Text(if (busy) "Working…" else if (!online) "Reconnecting" else if (count > 0) "$count app${if (count > 1) "s" else ""} running" else computer,
                     Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 else Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Collapse activity" else "Expand activity", Modifier.size(20.dp))
