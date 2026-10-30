@@ -36,12 +36,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
-
-internal fun nextListenWait(current: Long) = (current * 2).coerceAtMost(15_000L)
 
 /**
  * The phone's standing connection to the computer, for everything the two
@@ -67,6 +67,7 @@ internal fun nextListenWait(current: Long) = (current * 2).coerceAtMost(15_000L)
 class EventsService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var listening: Job? = null
+    private val listenLock = Mutex()
     private var networkChange: Job? = null
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -152,7 +153,9 @@ class EventsService : Service() {
     @Synchronized
     private fun restartListening() {
         listening?.cancel()
-        listening = scope.launch { listen() }
+        listening = scope.launch {
+            listenLock.withLock { listen() }
+        }
     }
 
     private fun kinds(store: Store): List<String> = listOfNotNull(
@@ -166,41 +169,47 @@ class EventsService : Service() {
     )
 
     private suspend fun listen() {
-        var wait = 3_000L
-        while (true) {
-            val store = Store(this)
-            val client = Link.client(this) ?: return
-            if (!store.listens) return
-            if (client.host != null || client.connect() != null) {
-                val ended = CompletableDeferred<Unit>()
-                val path = "/v1/events?after=${store.lastEvent}&kinds=${kinds(store).joinToString(",")}" +
-                    if (store.presence) "&present=1" else ""
-                val socket = client.socket(path, object : WebSocketListener() {
-                    override fun onOpen(webSocket: WebSocket, response: Response) {
-                        wait = 3_000L
-                        scope.launch {
-                            client.post("/v1/phone/state", PhoneState.read(this@EventsService))
-                            Outbox.deliver(this@EventsService, client)
-                            if (store.copyPhotos && !client.tunnelled) Photos.copy(this@EventsService, client)
+        keepConnected(
+            wanted = { Store(this).listens && Store(this).computer != null },
+            connect = { Link.client(this)?.connect() != null },
+            session = {
+                val store = Store(this)
+                val client = Link.client(this)
+                if (client != null && store.listens) {
+                    val ended = CompletableDeferred<Unit>()
+                    val opened = java.util.concurrent.atomic.AtomicBoolean(false)
+                    val path = "/v1/events?after=${store.lastEvent}&kinds=${kinds(store).joinToString(",")}" +
+                        if (store.presence) "&present=1" else ""
+                    val socket = client.socket(path, object : WebSocketListener() {
+                        override fun onOpen(webSocket: WebSocket, response: Response) {
+                            opened.set(true)
+                            scope.launch {
+                                client.post("/v1/phone/state", PhoneState.read(this@EventsService))
+                                Outbox.deliver(this@EventsService, client)
+                                if (store.copyPhotos && !client.tunnelled) Photos.copy(this@EventsService, client)
+                            }
                         }
-                    }
 
-                    override fun onMessage(webSocket: WebSocket, text: String) {
-                        runCatching { JSONObject(text) }.getOrNull()?.let { runCatching { handle(client, it) } }
-                    }
+                        override fun onMessage(webSocket: WebSocket, text: String) {
+                            runCatching { JSONObject(text) }.getOrNull()?.let { runCatching { handle(client, it) } }
+                        }
 
-                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { ended.complete(Unit) }
-                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { ended.complete(Unit) }
-                })
-                try {
-                    ended.await()
-                } finally {
-                    socket.cancel()
-                }
-            }
-            delay(wait)
-            wait = nextListenWait(wait)
-        }
+                        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { ended.complete(Unit) }
+                        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                            webSocket.close(1000, null)
+                            ended.complete(Unit)
+                        }
+                        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { ended.complete(Unit) }
+                    })
+                    try {
+                        ended.await()
+                    } finally {
+                        socket.cancel()
+                    }
+                    opened.get()
+                } else false
+            },
+        )
     }
 
     private fun handle(client: LinkClient, event: JSONObject) {
@@ -293,6 +302,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) Store(context).needsUnlock = true
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED)
             EventsService.sync(context)
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) UsageRefreshJob.schedule(context)
     }
 }
 

@@ -1,7 +1,10 @@
 package com.karthi.adaptivelink
 
+import kotlin.coroutines.resume
+
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
@@ -203,6 +206,7 @@ class LinkClient(
             tunnel = null
             host = null
             port = computer.port
+            if (e is CancellationException) throw e
             awayProblem = Protocol.awayProblem(e.message ?: e.javaClass.simpleName,
                 Store(appContext).relay.isNotBlank())
             null
@@ -256,14 +260,13 @@ class LinkClient(
     }
 
     /** Drop candidates bound to the old Wi-Fi/mobile interface before reconnecting. */
-    fun networkChanged() {
-        val wasTunnelled = tunnelled
+    suspend fun networkChanged() = connectLock.withLock {
         tunnel?.close()
         tunnel = null
-        if (wasTunnelled) {
-            host = null
-            port = computer.port
-        }
+        host = null
+        port = computer.port
+        viaCable = false
+        http.connectionPool.evictAll()
         awayProblem = ""
     }
 
@@ -333,15 +336,24 @@ class LinkClient(
         call(Request.Builder().url(url(path)).header("X-Clipboard-Hash", hash).header("X-Clipboard-Size", bytes.size.toString())
             .post(bytes.toRequestBody(mime.toMediaType())).build())
 
-    private suspend fun call(request: Request): JSONObject? = withContext(Dispatchers.IO) {
-        runCatching {
-            http.newCall(request).execute().use { response ->
-                val text = response.body?.string().orEmpty()
-                val json = runCatching { JSONObject(text) }.getOrElse { JSONObject() }
-                if (!response.isSuccessful && !json.has("error")) json.put("error", "HTTP ${response.code}")
-                json
+    private suspend fun call(request: Request): JSONObject? = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+        val call = http.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, error: java.io.IOException) {
+                if (continuation.isActive) continuation.resume(null)
             }
-        }.getOrNull()
+            override fun onResponse(call: okhttp3.Call, response: Response) {
+                val json = runCatching {
+                    response.use {
+                        val value = runCatching { JSONObject(it.body?.string().orEmpty()) }.getOrElse { JSONObject() }
+                        if (!it.isSuccessful && !value.has("error")) value.put("error", "HTTP ${it.code}")
+                        value
+                    }
+                }.getOrNull()
+                if (continuation.isActive) continuation.resume(json)
+            }
+        })
     }
 
     /** A raw response, for downloads. The caller closes it. */

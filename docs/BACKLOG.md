@@ -692,6 +692,14 @@ comparing the set of methods before and after and by the sandboxes above.
 
 ## Milestone 17 — Adaptive Link: the computer from your phone
 
+- 🔬 **Phone appearance + Dynamic Island (2026-10-29):** adaptive linked-device
+  launcher mark, shared dark/blue typography and shapes, grouped Control Center,
+  rounded navigation, pairing artwork, and expandable connection activity. Optional
+  Android-wide overlay uses notification access for media, notification actions and
+  ongoing activity, plus charging; setup includes permission links, preview privacy
+  and vertical offset. Build/unit validation is recorded in `docs/ADAPTIVE_LINK.md`;
+  physical Moto Edge 50 Pro placement/background behavior remains unverified.
+
 Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
 
 - ✅ **Daemon** (`services/adaptive-link/`). Mutual TLS to one paired phone;
@@ -783,6 +791,17 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   requires one new biometric/device-credential confirmation. The foreground
   connection uses one shared client, network-triggered bounded reconnect and
   boot/package recovery without duplicate sockets.
+- 🔬 **Reconnect after an ended session.** The foreground listener now
+  validates its route on every retry instead of repeatedly using a stale
+  address, handles server closes and setup exceptions, and serializes socket
+  replacement. Network handoffs clear direct routes and tunnels under the
+  connection lock. APK build and 41 Android unit tests pass, including
+  repeated-session, outage, and cancellation regressions. Physical phone
+  installation and Wi-Fi/mobile/background recovery checks remain pending;
+  restrictive networks still require an owner-controlled public TURN relay.
+  The repeated-handoff instrumentation test is added but not verified: the
+  local emulator run stalled in instrumentation startup with missing shared
+  storage and was stopped; it is not recorded as a pass.
 - ✅ **Protected clipboard v2.** Text, links, PNG and JPEG travel both ways by
   content hash, with a one-time migration enabling sync, persistent opt-out,
   20,000-character and 8 MiB/64-megapixel limits, sensitive-target filtering,

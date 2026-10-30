@@ -9,6 +9,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONObject
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -128,6 +129,9 @@ class LinkInstrumentedTest {
 
         // Requests the app makes: the file listing, and a notification.
         assertNotNull(client.get("/v1/files?path=~")?.optJSONArray("entries"))
+        val usage = client.get("/v1/ai-usage")
+        assertTrue("backend usage response must be consumable by both the card and widget", UsageState.valid(usage))
+        assertFalse("usage must not expose desktop paths", usage.toString().contains("_watch"))
         assertNotNull(client.post("/v1/notify", JSONObject().put("key", "k").put("app", "Test").put("title", "Hi").put("text", "x")))
 
         // The screen again, as video: the offer and answer go over the
@@ -242,6 +246,14 @@ class LinkInstrumentedTest {
         assertTrue("no screen frame arrived through the direct connection", frame.await(20, TimeUnit.SECONDS))
         screen.close(1000, null)
         assertTrue("the frame through the direct connection is empty", size > 1000)
+        // The same cached client must work after multiple network handoffs.
+        repeat(2) {
+            away.networkChanged()
+            assertNull("the old route survived a handoff", away.host)
+            assertNotNull("could not reconnect after handoff: ${away.awayProblem}", away.connect())
+            assertTrue(away.tunnelled)
+            assertNotNull(away.get("/v1/files?path=~")?.optJSONArray("entries"))
+        }
         away.close()
 
         // Another account's space does not have the computer in it, and

@@ -5,6 +5,16 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +30,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -70,6 +81,7 @@ internal class ShellStore(activity: MainActivity, fingerprint: String) {
 
 private data class ShellApp(val id: String, val name: String, val page: Page? = null, val icon: ImageVector = Icons.Default.Apps)
 private val NativeApps = listOf(
+    ShellApp("native:island", "Dynamic Island", Page.Island, Icons.Default.HorizontalRule),
     ShellApp("native:office", "Office", Page.Office, Icons.Default.Groups),
     ShellApp("native:control", "Control Center", icon = Icons.Default.Tune), ShellApp("native:files", "Files", Page.Files, Icons.Default.Folder),
     ShellApp("native:tasks", "Tasks", Page.Tasks, Icons.Default.Memory), ShellApp("native:remote", "Desktop Remote", Page.Screen, Icons.Default.DesktopWindows),
@@ -89,7 +101,7 @@ private fun compatibilityNote(app: JSONObject) = when (app.optString("compatibil
     "failed" -> "Did not start on phone"
     else -> ""
 }
-private val ControlSections = listOf("Network & Wi-Fi" to Page.Network, "Bluetooth" to Page.Bluetooth,
+private val ControlSections = listOf("Dynamic Island" to Page.Island, "Network & Wi-Fi" to Page.Network, "Bluetooth" to Page.Bluetooth,
     "Sound & displays" to Page.DisplaySound, "Power & accessories" to Page.More, "Storage & devices" to Page.Devices,
     "Desktop & projects" to Page.Desktop, "Tasks & resources" to Page.Tasks, "User services" to Page.Services)
 
@@ -100,40 +112,57 @@ private fun usageColour(used: Double) = when {
 }
 
 @Composable
-private fun AiUsageCard(usage: JSONObject?) {
+private fun AiUsageCard(usage: JSONObject?, loading: Boolean, message: String, retry: () -> Unit) {
+    var weekly by remember { mutableStateOf(false) }
+    val providers = listOf("codex" to "Codex", "claude" to "Claude", "gemini" to "Gemini")
+    fun window(provider: JSONObject?, week: Boolean): JSONObject? = provider?.optJSONArray("windows").rows()
+        .firstOrNull { !it.optBoolean("expired") && it.optString("label").startsWith("Weekly", true) == week }
     Surface(
         shape = RoundedCornerShape(14.dp), color = Color(0xFF1C1C1E),
         border = BorderStroke(0.5.dp, Color(0x22FFFFFF)),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+            .pointerInput(Unit) {
+                var distance = 0f
+                detectHorizontalDragGestures(onHorizontalDrag = { _, amount -> distance += amount }, onDragEnd = {
+                    if (kotlin.math.abs(distance) > 48f) weekly = distance < 0
+                    distance = 0f
+                })
+            }) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp), tint = Color(0xFFA28BFE))
+                Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(6.dp))
                 Text("AI usage", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                if (usage == null) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.5.dp)
+                if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp)
+                else IconButton(onClick = retry, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Refresh, "Refresh AI usage", Modifier.size(20.dp)) }
             }
+            if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("codex" to "Codex", "claude" to "Claude", "gemini" to "Gemini").forEach { (key, label) ->
-                    val provider = usage?.optJSONObject(key)
-                    val windows = provider?.optJSONArray("windows").rows().filterNot { it.optBoolean("expired") }
-                    val short = windows.firstOrNull { !it.optString("label").startsWith("Weekly") } ?: windows.firstOrNull()
-                    val used = short?.optDouble("used")?.takeIf { it.isFinite() }
-                    Column(
-                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C2E))
-                            .padding(horizontal = 8.dp, vertical = 7.dp),
-                    ) {
-                        Text(label, fontSize = 11.sp, color = Color(0xFFAEAEB2), fontWeight = FontWeight.Medium)
-                        Text(
-                            if (used == null) "—" else "${used.toInt()}% used",
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                            color = used?.let(::usageColour) ?: Color(0xFF8E8E93), maxLines = 1,
-                        )
-                        Text(short?.optString("label").orEmpty().ifBlank {
-                            if (provider?.optString("error").isNullOrBlank()) "Waiting" else "Unavailable"
-                        }, fontSize = 10.sp, color = Color(0xFF8E8E93), maxLines = 1)
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                listOf(false to "Current", true to "Weekly").forEachIndexed { index, (week, title) ->
+                    SegmentedButton(selected = weekly == week, onClick = { weekly = week },
+                        shape = SegmentedButtonDefaults.itemShape(index, 2), label = { Text(title) })
+                }
+            }
+            Spacer(Modifier.height(5.dp))
+            AnimatedContent(weekly, transitionSpec = { fadeIn(spring()) togetherWith fadeOut(spring()) }, label = "usage-window") { selectedWeek ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    providers.forEach { (key, label) ->
+                        val provider = usage?.optJSONObject(key)
+                        val reading = UsageState.window(usage, key, selectedWeek)
+                        val used = reading?.optDouble("used")?.takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 100f)
+                        val progress by animateFloatAsState(used ?: 0f, animationSpec = spring(), label = "$key-progress")
+                        val tint by animateColorAsState(used?.let { usageColour(it.toDouble()) } ?: Color(0xFF48484A), label = "$key-color")
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C2E)).padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, Modifier.width(62.dp), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Column(Modifier.weight(1f)) {
+                                LinearProgressIndicator(progress = { progress / 100f }, Modifier.fillMaxWidth().height(5.dp).clip(CircleShape), color = tint, trackColor = Color(0xFF48484A))
+                                Text(reading?.optString("label").orEmpty().ifBlank { if (provider?.optString("error").isNullOrBlank()) "Not reported" else "Unavailable" }, fontSize = 10.sp, color = Color(0xFFAEAEB2), maxLines = 1)
+                            }
+                            Text(used?.let { "${it.toInt()}%" } ?: "—", Modifier.width(42.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = tint, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                        }
                     }
                 }
             }
@@ -177,9 +206,18 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     var restoringLive by remember { mutableStateOf(false) }
     var folderPath by rememberSaveable { mutableStateOf(restoredShell.optString("folder", "~")) }
     var query by rememberSaveable { mutableStateOf(restoredShell.optString("query")) }
+    var drawerFocused by remember { mutableStateOf(false) }
+    val compactDrawer = location == "drawer" && (drawerFocused || WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0)
     var category by rememberSaveable { mutableStateOf(restoredShell.optString("category", "All")) }
     var note by remember { mutableStateOf("Connecting to your laptop…") }
-    var aiUsage by remember(client.computer.fingerprint) { mutableStateOf<JSONObject?>(null) }
+    val usageCache = remember(client.computer.fingerprint) { UsageCache(activity, client.computer.fingerprint) }
+    var aiUsage by remember(client.computer.fingerprint) { mutableStateOf(usageCache.read()) }
+    var usageLoading by remember { mutableStateOf(false) }
+    var usageMessage by remember { mutableStateOf("Waiting for computer connection") }
+    var usageRetry by remember { mutableIntStateOf(0) }
+    var refreshEpoch by remember { mutableIntStateOf(0) }
+    var reconnectEpoch by remember { mutableIntStateOf(0) }
+    var handledReconnect by remember { mutableIntStateOf(0) }
     var online by remember { mutableStateOf(false) }
     var supported by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -255,11 +293,25 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         if (index >= 0) routeStack = known.take(index + 1).joinToString("|")
     }
     LaunchedEffect(externalPage) { if (externalPage != Page.Home) { nativePage = externalPage; visit("native"); consumed() } }
-    LaunchedEffect(client.computer.fingerprint, online) {
-        if (!online) return@LaunchedEffect
+    LaunchedEffect(client.computer.fingerprint, online, usageRetry) {
+        if (!online) { usageLoading = false; usageMessage = if (aiUsage == null) "Computer offline · reconnect to load usage" else "Saved usage · computer offline"; return@LaunchedEffect }
+        var usagePolls = 0
         while (isActive) {
-            client.get("/v1/ai-usage")?.let { aiUsage = it }
-            delay(60_000)
+            usageLoading = true
+            try {
+                val reply = withTimeoutOrNull(12_000) { client.get("/v1/ai-usage") }
+                if (UsageState.valid(reply)) {
+                    aiUsage = reply
+                    usageCache.save(reply!!)
+                    if (usagePolls++ % 4 == 0) UsageWidget.refresh(activity)
+                    usageMessage = if (UsageState.stale(reply)) "Some providers have older or missing reports" else "Updated just now"
+                } else {
+                    usageMessage = if (aiUsage != null) "Showing saved usage · refresh failed" else "Usage unavailable · check the laptop service and retry"
+                }
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (_: Exception) { usageMessage = "Could not load usage · tap refresh to retry"
+            } finally { usageLoading = false }
+            delay(30_000)
         }
     }
     LaunchedEffect(location, routeStack, nativePage, query, category, selectedApp, folderPath) {
@@ -325,17 +377,32 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         scope.launch { client.post("/v1/mobile/runs", JSONObject().put("operation", "cancel")) }
     }
     val foreground = WorkspaceForeground(activity) { stop() }
-    LaunchedEffect(client, foreground) {
+    LaunchedEffect(client, foreground, refreshEpoch, reconnectEpoch) {
         if (!foreground) return@LaunchedEffect
+        if (handledReconnect != reconnectEpoch) {
+            client.networkChanged()
+            handledReconnect = reconnectEpoch
+        }
         var count = 0
         while (true) {
-            val status = client.connect()
+            state.connecting = true
+            val status = try {
+                withTimeoutOrNull(45_000) { client.connect() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                note = "Connection failed · ${error.message?.takeIf { it.isNotBlank() } ?: "tap Retry to try again"}"
+                null
+            }
+            state.connecting = false
             state.status = status
             online = status != null
             val capability = status?.optJSONObject("capabilities")?.optJSONObject("mobile_desktop")
             val continuity = status?.optJSONObject("capabilities")?.optInt("continuity") == 1
             supported = capability?.optBoolean("available") == true
-            if (!online) note = "Disconnected · your phone apps stay open on the laptop"
+            if (!online && !note.startsWith("Connection failed")) note = client.awayProblem.ifBlank {
+                "Disconnected · your phone apps stay open on the laptop"
+            }
             else if (!supported) note = "Connected · ${client.computer.name} · " + (if (capability == null) "update the laptop service for phone apps; Desktop Remote is available"
                 else "phone apps need ${capability.optJSONArray("missing").strings().joinToString()} on the laptop")
             else {
@@ -580,6 +647,9 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
     }
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().systemBarsPadding()) {
+        if (location != "continue" && location != "app" && !compactDrawer && !(location == "native" && nativePage == Page.Office)) LinkActivityIsland(online, busy, running.size, client.computer.name, note,
+            onOpen = { visit("recents") }, onSettings = { nativePage = Page.Island; visit("native") },
+            onRefresh = { refreshEpoch++; usageRetry++ }, onReconnect = { online = false; state.status = null; note = "Reconnecting…"; reconnectEpoch++; usageRetry++ })
         if (editLayouts) {
             Box(Modifier.weight(1f)) { LayoutManager(activity, client, cache, selectedApp,
                 apps.firstOrNull { it.optString("id") == selectedApp }?.optString("name") ?: "Custom controls", profile,
@@ -635,11 +705,28 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             "connections" -> Box(Modifier.fillMaxSize()) { connections() }
             "control" -> Column(Modifier.fillMaxSize()) {
                 TopBar("Control Center", ::back)
-                Text("Laptop settings · changes apply directly", Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
-                LazyColumn { items(ControlSections) { (title, page) ->
-                    ListItem(headlineContent = { Text(title) }, leadingContent = { Icon(Icons.Default.Tune, null) },
-                        modifier = Modifier.combinedClickable(onClick = { nativePage = page; visit("native") }))
-                } }
+                Text("Everything within reach", Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(ControlSections) { (title, page) ->
+                        val symbol = when (page) {
+                            Page.Island -> Icons.Default.HorizontalRule
+                            Page.Network -> Icons.Default.Wifi
+                            Page.Bluetooth -> Icons.Default.Bluetooth
+                            Page.DisplaySound -> Icons.Default.VolumeUp
+                            Page.More -> Icons.Default.PowerSettingsNew
+                            Page.Devices -> Icons.Default.Storage
+                            Page.Desktop -> Icons.Default.DesktopWindows
+                            Page.Tasks -> Icons.Default.Memory
+                            else -> Icons.Default.Settings
+                        }
+                        ListItem(headlineContent = { Text(title, fontWeight = FontWeight.Medium) },
+                            leadingContent = { Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                                Icon(symbol, null, Modifier.padding(10.dp).size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                            } }, trailingContent = { Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            modifier = Modifier.clip(RoundedCornerShape(20.dp)).combinedClickable(onClick = { nativePage = page; visit("native") }))
+                    }
+                }
             }
             "recents" -> Column(Modifier.fillMaxSize()) {
                 TopBar("Running apps", ::back) { TextButton(onClick = { confirmEnd = true }, enabled = id.isNotEmpty()) { Text("End session") } }
@@ -713,16 +800,17 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     profile?.let { ControlGrid(it, online && !pending && run?.optString("state") != "running", onPress = { c -> submit(c) }, onRelease = ::stop) }
                 } }
             }
-            else -> Column(Modifier.fillMaxSize()) {
+            else -> Column(Modifier.fillMaxSize().then(if (destination == "home") Modifier.verticalScroll(rememberScrollState()) else Modifier)) {
+                if (!compactDrawer) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(if (location == "drawer") "All apps" else "Home", style = MaterialTheme.typography.headlineMedium)
                         Text(client.computer.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    IconButton(onClick = { visit("control") }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
+                    IconButton(onClick = { visit("control") }, modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
                         Icon(Icons.Default.Tune, "Control Center", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
                     }
                     Spacer(Modifier.width(8.dp))
                     Box {
-                        IconButton(onClick = { homeMenu = true }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
+                        IconButton(onClick = { homeMenu = true }, modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0x22FFFFFF))) {
                             Icon(Icons.Default.MoreVert, "Phone apps settings", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
                         }
                         DropdownMenu(homeMenu, { homeMenu = false }) {
@@ -743,11 +831,16 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                         }
                     }
                 }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { refreshEpoch++; usageRetry++ }, enabled = !busy) { Icon(Icons.Default.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Refresh") }
+                    TextButton(onClick = { online = false; state.status = null; note = "Reconnecting…"; reconnectEpoch++; usageRetry++ }, enabled = !busy) { Icon(Icons.Default.Link, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Reconnect") }
+                }
+                }
                 if (location == "drawer") {
                     OutlinedTextField(
                         value = query, onValueChange = { query = it },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        placeholder = { Text("Spotlight Search…", color = Color(0xFF8E8E93)) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).onFocusChanged { drawerFocused = it.isFocused },
+                        placeholder = { Text("Search your apps", color = Color(0xFF8E8E93)) },
                         leadingIcon = { Icon(Icons.Default.Search, null, tint = Color(0xFF8E8E93)) },
                         trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, null, tint = Color(0xFF8E8E93)) } },
                         shape = RoundedCornerShape(16.dp),
@@ -774,7 +867,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     layout.optJSONObject("offline_copy")?.let { copy -> TextButton(onClick = {
                         persist(copy.copyJson().put("revision", layout.optInt("revision")))
                     }) { Text("Restore offline Home organization") } }
-                    AiUsageCard(aiUsage)
+                    AiUsageCard(aiUsage, usageLoading, usageMessage) { usageRetry++ }
                     if (liveWindows.isNotEmpty()) {
                         Text("Continue", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -815,7 +908,9 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
                     }
                     val recent = layout.optJSONArray("recent").strings().take(6)
                     Text("Pinned", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
-                    grid(pinned.mapNotNull { pin -> all.firstOrNull { it.optString("id") == pin } }, Modifier.weight(1f))
+                    val pinnedEntries = pinned.mapNotNull { pin -> all.firstOrNull { it.optString("id") == pin } }
+                    val columns = ((configuration.screenWidthDp - 14) / 106).coerceAtLeast(1)
+                    grid(pinnedEntries, Modifier.height((((pinnedEntries.size + columns - 1) / columns) * 128 + 24).dp))
                     if (recent.isNotEmpty()) {
                         Text("Recent", Modifier.padding(start = 16.dp), style = MaterialTheme.typography.titleSmall, color = Color(0xFF8E8E93))
                         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -897,8 +992,10 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         val ownChrome = (location == "native" && nativePage == Page.Office) || location == "continue"
         if (!ownChrome && (location != "app" || !online || note.startsWith("Step"))) Text(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
         if (!ownChrome) NavigationBar(
-            containerColor = Color(0xFF141416),
-            tonalElevation = 8.dp,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).clip(RoundedCornerShape(30.dp)),
+            containerColor = Color(0xFF1C1C1E),
+            windowInsets = WindowInsets(0, 0, 0, 0),
+            tonalElevation = 0.dp,
         ) {
             NavigationBarItem(
                 selected = location == "home", onClick = { goHome() },
@@ -913,7 +1010,7 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
             NavigationBarItem(
                 selected = location == "recents", onClick = { editLayouts = false; visit("recents") },
                 icon = { Icon(Icons.Default.ViewCarousel, "Recents") },
-                label = { Text("Stage", fontWeight = FontWeight.Medium) },
+                label = { Text("Running", fontWeight = FontWeight.Medium) },
             )
         }
     }

@@ -37,7 +37,7 @@ object QuickActions {
     suspend fun run(context: Context, what: String): String {
         val client = Link.client(context) ?: return "Not paired with a computer"
         return withTimeoutOrNull(15_000) {
-            if (client.host == null && client.connect() == null) return@withTimeoutOrNull "Cannot reach ${client.computer.name}"
+            if (client.connect() == null) return@withTimeoutOrNull "Cannot reach ${client.computer.name}"
             val reply = when (what) {
                 "lock" -> client.post("/v1/power", JSONObject().put("action", "lock"))
                 "play-pause", "next" -> client.post("/v1/media", JSONObject().put("action", what))
@@ -70,12 +70,8 @@ class QuickReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val what = intent.getStringExtra(QuickActions.EXTRA)
         if (intent.action != QuickActions.ACTION || what !in QuickActions.NAMES) return
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            val said = runCatching { QuickActions.run(context.applicationContext, what!!) }.getOrDefault("It did not work")
-            withContext(Dispatchers.Main) { Toast.makeText(context.applicationContext, said, Toast.LENGTH_SHORT).show() }
-            pending.finish()
-        }
+        WidgetRefreshJob.schedule(context, "QuickActions", what)
+
     }
 }
 

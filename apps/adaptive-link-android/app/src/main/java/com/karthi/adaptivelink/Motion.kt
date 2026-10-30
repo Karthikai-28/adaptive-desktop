@@ -89,7 +89,7 @@ internal object Motion {
 internal fun Modifier.pressable(onLongClick: (() -> Unit)? = null, onClick: () -> Unit): Modifier = composed {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) .9f else 1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium), label = "press")
+    val scale by animateFloatAsState(if (pressed) .97f else 1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium), label = "press")
     this.graphicsLayer { scaleX = scale; scaleY = scale }
         .combinedClickable(interactionSource = source, indication = ripple(), onLongClick = onLongClick, onClick = onClick)
 }

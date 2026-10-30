@@ -7,12 +7,14 @@ machine-local implementation details.
 
 import importlib.util
 import math
+import threading
 from pathlib import Path
 
 
 PROVIDERS = ("codex", "claude", "gemini")
 SNAPSHOT = Path(__file__).resolve().parents[2] / "shell" / "adaptive-shell@local" / "quotaSnapshot.py"
 _reader = None
+_reader_lock = threading.Lock()
 
 
 def _number(value):
@@ -48,12 +50,15 @@ def clean_snapshot(raw):
 def snapshot():
     global _reader
     try:
-        if _reader is None:
-            spec = importlib.util.spec_from_file_location("adaptive_quota_snapshot", SNAPSHOT)
-            if spec is None or spec.loader is None:
-                raise RuntimeError("AI usage reader is unavailable")
-            _reader = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(_reader)
+        with _reader_lock:
+            if _reader is None:
+                spec = importlib.util.spec_from_file_location("adaptive_quota_snapshot", SNAPSHOT)
+                if spec is None or spec.loader is None:
+                    raise RuntimeError("AI usage reader is unavailable")
+                reader = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(reader)
+                # Publish only a fully initialized reader to concurrent widget/app requests.
+                _reader = reader
         return clean_snapshot(_reader.snapshot())
     except Exception as error:  # usage is advisory; it must never break Link
         unavailable = {"stale": True, "error": str(error)[:160], "windows": [], "ts": 0}

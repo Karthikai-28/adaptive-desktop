@@ -238,7 +238,12 @@ Android's foreground listener keeps the route alive while the app is closed.
 Wi-Fi/mobile handoffs are debounced into one reconnect, all app surfaces share
 one negotiation at a time, and a temporary WebRTC `DISCONNECTED` state is
 allowed to recover. Failed background retries are capped at 15 seconds. This
-removes avoidable disconnects; a TURN relay is still the only way through a
+listener revalidates the route after each ended session, acknowledges server
+closes, and retries setup errors without needing the app to be reopened.
+Network changes clear old direct addresses as well as tunnels, serialized
+with ongoing connection negotiation. Listener restarts wait for the previous
+socket to be cancelled before opening another one. These changes
+remove avoidable disconnects; a TURN relay is still the only way through a
 network that forbids peer-to-peer traffic altogether.
 
 ### A relay of your own
@@ -317,7 +322,11 @@ Adaptive Link's native tools. Every screen in this table is in its drawer,
 and all of them together are under *Laptop tools*, which is pinned to Home to
 begin with. A compact **AI usage** card on Home shows the current Codex,
 Claude and Gemini plan windows from the same snapshot as the desktop's
-Activity Center.
+Activity Center. **Refresh** reloads status and usage; **Reconnect** discards the
+old transport and discovers the paired computer again without unpairing. Usage
+shows explicit loading, unavailable and saved states, with a retry button. The
+current provider window keeps its real label (for example Gemini's daily window),
+rather than calling every short window five hours.
 
 | In the app | On the computer |
 | --- | --- |
@@ -346,12 +355,16 @@ And without opening the app:
 - **Share** in any other app → *Send to computer*: a link opens in the
   computer's browser, text goes to its clipboard or the project's notes,
   files go to `~/Downloads/Phone`.
-- **Home-screen widgets and quick-settings tiles.** Five widgets: quick
+- **Home-screen widgets and quick-settings tiles.** Six widgets: laptop-app shortcuts, quick
   actions (lock, play/pause, next, mute, focus), the computer's status at a
   glance, AI usage for Codex/Claude/Gemini in a compact phone card, what it is
   playing with previous/play/next, and six of your own buttons from the
   Controls screen. The AI widget keeps its last reading while the laptop is
-  offline; tapping it refreshes. The quick actions and the tiles do only
+  offline, separately for each paired computer. Its explicit **Refresh** and
+  **Reconnect** buttons request fresh data or rebuild the connection. It uses a
+  minimum 250×220 dp layout (normally 4×3 cells), with readable current/week
+  columns. Network refreshes and quick actions run in `WidgetRefreshJob`, outside
+  the widget broadcast deadline. The quick actions and the tiles do only
   what is harmless by accident. The Controls widget runs your own buttons -
   including commands - from the home screen, without the app's lock: put on
   it only what you would be content for anyone holding the unlocked phone to
@@ -1065,3 +1078,47 @@ cmdline-tools/latest/bin/sdkmanager --sdk_root=$PWD \
 
 Gradle 8.13 and JDK 17 or newer build it (`scripts/build-link-app.sh`). Where the system
 Java is older, unpack a JDK 17 into `.local/jdk-17` (not tracked) and the script uses it.
+
+
+### Phone appearance and Dynamic Island
+
+The phone uses a shared OLED dark palette, system blue, rounded grouped surfaces and
+larger navigation targets (`LinkDesign.kt`). The launcher has an adaptive linked-device
+mark with a monochrome layer for themed Android icons. Native screens inherit the shared
+font scale and shapes; streamed laptop applications keep their own interfaces.
+
+Open **Control Center → Dynamic Island**, find it in **All Apps**, or use **Set up
+Dynamic Island** before pairing. Turn on the switch, then grant Android's **Display over
+other apps** and **Notification access** permissions. These permissions are separate
+from forwarding phone notifications to the laptop; the island works without pairing.
+
+The Android-wide island shows incoming notifications for eight seconds, media-session
+notifications with supported previous/play/pause/next actions, charging percentage, and ongoing call/alarm/progress notifications. Expanded notifications
+expose up to three actions supplied by their app (text-input replies are omitted).
+Tap to expand/collapse; long press or tap Hide to hide until the next activity. Message
+previews are off by default. The overlay disappears on screen lock, permission loss,
+listener disconnection, or disabling its switch. It does not persist notification text.
+Position can be adjusted below the status bar/camera using the offset slider. Android
+keeps critical system UI above overlays; this does not replace the physical camera cutout.
+
+An in-app activity pill separately shows actual laptop connectivity, running app count
+and work in progress, with shortcuts to running apps and island settings.
+
+Validation: build and unit tests via `scripts/build-link-app.sh`; overlay rendering,
+preview privacy, notification removal and switch cleanup via `IslandInstrumentedTest`
+on an unlocked emulator with overlay access granted. Moto Edge 50 Pro placement,
+background persistence and touch behavior still need a physical-device check.
+
+
+Phone validation commands:
+
+- `python3 scripts/check-link-health.py`: read-only live daemon and usage-source health.
+- `python3 scripts/verify-ai-usage.py`: concurrent first requests, failed-import retry and safe projection.
+- `python3 scripts/verify-quota-snapshot.py`: provider-window parsing and fallbacks.
+- `python3 scripts/verify-link.py`: backend integration, transport, authentication and feature checks.
+- `scripts/verify-link-island.sh`: unit tests, lint, actual widget inflation/rendering and island checks on `emulator-5584`.
+- `LINK_ANDROID_DEVICE=emulator-5584 python3 scripts/verify-link-android.py`: full disposable Android/daemon flow suite. Never point this at an owner's phone; it resets test pairing and lock state.
+
+Widget preview images are generated under the test app's external files directory,
+`widget-previews/`. Compile/lint results do not replace visual review or physical
+Moto checks. Backend and emulator results are recorded separately from live phone verification.

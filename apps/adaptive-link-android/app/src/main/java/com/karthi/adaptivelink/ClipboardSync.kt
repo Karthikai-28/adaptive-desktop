@@ -67,7 +67,7 @@ internal object ClipboardSync {
         if (imageType != null && first.uri != null) {
             val bytes = runCatching {
                 context.contentResolver.openInputStream(first.uri!!)?.use { input ->
-                    input.readNBytes(IMAGE_MAX + 1)
+                    input.readBounded(IMAGE_MAX + 1)
                 }
             }.getOrNull() ?: return skipped(context, description, "image-read", "Clipboard image couldn’t be read")
             if (bytes.isEmpty()) return skipped(context, description, "image-empty", "Empty clipboard image wasn’t shared")
@@ -128,7 +128,7 @@ internal object ClipboardSync {
             ?: return@withContext false
         val bytes = response.use { reply ->
             if (!reply.isSuccessful || reply.body == null) return@withContext false
-            reply.body!!.byteStream().readNBytes(IMAGE_MAX + 1)
+            reply.body!!.byteStream().readBounded(IMAGE_MAX + 1)
         }
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
         android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)

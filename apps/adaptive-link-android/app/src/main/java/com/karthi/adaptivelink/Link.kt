@@ -16,8 +16,9 @@ import org.json.JSONObject
 object Link {
     @Volatile private var cached: LinkClient? = null
 
+    @Synchronized
     fun client(context: Context): LinkClient? {
-        val computer = Store(context).computer ?: return null.also { cached = null }
+        val computer = Store(context).computer ?: return null.also { forget() }
         // The same computer is the same certificate; its addresses may have
         // been updated since, and that is no reason for a new connection.
         cached?.let { if (it.computer.fingerprint == computer.fingerprint) return it }
@@ -26,13 +27,14 @@ object Link {
         return LinkClient(context, computer).also { cached = it }
     }
 
+    @Synchronized
     fun forget() {
         cached?.close()
         cached = null
     }
 
     /** The default Android network changed; candidates from the old one are no longer useful. */
-    fun networkChanged() {
+    suspend fun networkChanged() {
         cached?.networkChanged()
     }
 }

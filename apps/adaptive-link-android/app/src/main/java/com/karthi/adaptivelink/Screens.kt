@@ -1,6 +1,8 @@
 package com.karthi.adaptivelink
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -81,6 +83,8 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
 
 // ------------------------------------------------------------ building blocks
 
@@ -93,13 +97,13 @@ fun TopBar(title: String, onBack: (() -> Unit)? = null, trailing: @Composable ()
         if (onBack != null) {
             IconButton(
                 onClick = onBack,
-                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF)),
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0x22FFFFFF)),
             ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", modifier = Modifier.size(18.dp), tint = Color(0xFFF5F5F7)) }
             Spacer(Modifier.width(10.dp))
         } else {
             Spacer(Modifier.width(8.dp))
         }
-        Text(title, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF5F5F7), modifier = Modifier.weight(1f))
+        Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF5F5F7), modifier = Modifier.weight(1f))
         trailing()
     }
 }
@@ -116,14 +120,14 @@ fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
             .clip(RoundedCornerShape(22.dp))
             .background(Color(0xFF1C1C1E))
             .border(0.5.dp, Color(0x22FFFFFF), RoundedCornerShape(22.dp))
-            .padding(18.dp)
+            .padding(20.dp)
     ) { content() }
 }
 
 // ------------------------------------------------------------------ pairing
 
 @Composable
-fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
+fun PairScreen(activity: MainActivity, onIsland: () -> Unit = {}, onPaired: () -> Unit) {
     val scope = rememberCoroutineScope()
     var stage by remember { mutableStateOf("start") }   // start, asking, confirm, failed
     var code by remember { mutableStateOf("") }
@@ -269,10 +273,17 @@ fun PairScreen(activity: MainActivity, onPaired: () -> Unit) {
     }
 
     Column(
-        Modifier.fillMaxSize().systemBarsPadding().padding(28.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Adaptive Link", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.size(96.dp).clip(RoundedCornerShape(24.dp)).background(Brush.verticalGradient(listOf(Color(0xFF409CFF), Color(0xFF0054D6))))) {
+            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), "Adaptive Link logo", Modifier.fillMaxSize())
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("Adaptive Link", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text("Your devices. Beautifully together.", color = Color(0xFFAEAEB2), fontSize = 15.sp, textAlign = TextAlign.Center)
+        TextButton(onClick = onIsland) { Text("Set up Dynamic Island") }
         Spacer(Modifier.height(12.dp))
         // A computer on this network that is waiting to be paired with: no code to scan.
         if (stage == "start") NearbyComputers { ask(it) }
@@ -415,12 +426,23 @@ fun HomeScreen(
 
     suspend fun refresh() {
         state.connecting = state.status == null
-        val status = client.connect()
-        state.status = status
-        state.connecting = false
-        state.message = if (status == null) "Cannot reach ${client.computer.name}" else ""
-        // Reached: what was kept for it while it could not be goes now.
-        if (status != null && Outbox.waiting(context) > 0) Outbox.deliver(context, client)
+        try {
+            val status = withTimeoutOrNull(45_000) { client.connect() }
+            state.status = status
+            state.message = if (status == null) client.awayProblem.ifBlank {
+                "Could not reach ${client.computer.name}. Check the network and tap Retry."
+            } else ""
+            // Reached: what was kept for it while it could not be goes now.
+            if (status != null && Outbox.waiting(context) > 0) Outbox.deliver(context, client)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            state.status = null
+            state.message = error.message?.takeIf { it.isNotBlank() }
+                ?: "Connection failed. Check the network and tap Retry."
+        } finally {
+            state.connecting = false
+        }
     }
 
     // Keep the status fresh while this screen is showing.
@@ -436,7 +458,7 @@ fun HomeScreen(
         Box {
             IconButton(
                 onClick = { choosing = true },
-                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0x22FFFFFF)),
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0x22FFFFFF)),
             ) { Icon(Icons.Filled.Computer, "Computers", modifier = Modifier.size(18.dp), tint = Color(0xFFF5F5F7)) }
             DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
                 computers.forEach { other ->
@@ -526,7 +548,7 @@ fun HomeScreen(
                         Text("Not Connected", fontWeight = FontWeight.SemiBold, color = Color(0xFFFF453A))
                     }
                     Spacer(Modifier.height(6.dp))
-                    Muted(client.awayProblem.ifBlank {
+                    Muted(client.awayProblem.ifBlank { state.message }.ifBlank {
                         "Computer must be awake with Adaptive Link active. Away from local Wi-Fi, both devices must be signed in to the same Google account."
                     })
                     Spacer(Modifier.height(10.dp))

@@ -60,13 +60,26 @@ import kotlinx.coroutines.launch
 
 enum class Page {
     Home, Apps, Screen, Trackpad, Ink, Media, Presenter, Run, Files, Camera, Tasks, Devices, Network, Desktop,
-    Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More, Office,
+    Bluetooth, DisplaySound, Services, Windows, Controls, Gamepad, Scan, More, Office, Island,
 }
 
 /** Apple dark appearance with true OLED black canvas and curated accents. */
 private val Colors = darkColorScheme(
     primary = Color(0xFF0A84FF),
     onPrimary = Color.White,
+    primaryContainer = Color(0xFF102B48),
+    onPrimaryContainer = Color(0xFFD6E9FF),
+    secondary = Color(0xFF64AFFF),
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFF263345),
+    onSecondaryContainer = Color(0xFFE5EFFF),
+    tertiary = Color(0xFFAEAEB2),
+    tertiaryContainer = Color(0xFF2C2C2E),
+    outline = Color(0xFF636366),
+    outlineVariant = Color(0xFF38383A),
+    surfaceContainer = Color(0xFF1C1C1E),
+    surfaceContainerHigh = Color(0xFF2C2C2E),
+    surfaceContainerHighest = Color(0xFF3A3A3C),
     background = Color(0xFF000000),
     onBackground = Color(0xFFF5F5F7),
     surface = Color(0xFF1C1C1E),
@@ -121,11 +134,12 @@ class MainActivity : FragmentActivity() {
         registerReceiver(screenLockReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
 
         EventsService.sync(this)
+        UsageRefreshJob.schedule(this)
 
         setContent {
             val scheme = if (wallpaperColours && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(this)
                 .copy(background = Color.Black) else Colors
-            MaterialTheme(colorScheme = scheme) {
+            MaterialTheme(colorScheme = scheme, typography = LinkTypography, shapes = LinkShapes) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (unlocked) App(this) else Locked(lockMessage) { unlock() }
                 }
@@ -308,12 +322,17 @@ private fun App(activity: MainActivity) {
     // Pairing with another computer, beside the ones there already are.
     var adding by remember { mutableStateOf(false) }
 
+    if (page == Page.Island) {
+        BackHandler { page = Page.Home }
+        Column(Modifier.fillMaxSize().systemBarsPadding()) { IslandSettings(activity) { page = Page.Home } }
+        return
+    }
     val paired = computer
     if (paired == null || adding) {
         BackHandler(enabled = adding) { adding = false }
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
             if (adding) TopBar("Pair another computer", onBack = { adding = false })
-            PairScreen(activity) {
+            PairScreen(activity, onIsland = { page = Page.Island }) {
                 adding = false
                 page = Page.Home
                 state.status = null
@@ -361,6 +380,7 @@ private fun Pages(
     Column(Modifier.fillMaxSize()) {
         when (page) {
             Page.Home -> Unit
+            Page.Island -> IslandSettings(activity) { go(Page.Home) }
             Page.Apps -> AppsPage(activity, client, store) { go(Page.Home) }
             Page.Screen -> ScreenPage(activity, client, store) { go(Page.Home) }
             Page.Trackpad -> TrackpadPage(activity, client, onInk = { go(Page.Ink) }) { go(Page.Home) }

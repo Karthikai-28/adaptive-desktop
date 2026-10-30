@@ -21,9 +21,24 @@ import org.json.JSONObject
  * simply not sent; nothing is queued or stored.
  */
 class NotificationRelay : NotificationListenerService() {
+    private var island: IslandOverlay? = null
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        island?.close()
+        island = IslandOverlay(this)
+        activeNotifications?.filter { it.notification.category == Notification.CATEGORY_TRANSPORT }?.forEach { island?.posted(it) }
+    }
+
+    override fun onListenerDisconnected() {
+        island?.close(); island = null
+        super.onListenerDisconnected()
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onDestroy() {
+        island?.close(); island = null
         scope.cancel()
         super.onDestroy()
     }
@@ -42,6 +57,7 @@ class NotificationRelay : NotificationListenerService() {
     }.getOrDefault(packageName)
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        island?.posted(sbn)
         if (!wanted(sbn)) return
         val extras = sbn.notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
@@ -54,6 +70,7 @@ class NotificationRelay : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        island?.removed(sbn.key)
         if (!Store(this).relayNotifications || sbn.packageName == packageName) return
         send("/v1/notify/dismiss", JSONObject().put("key", sbn.key))
     }

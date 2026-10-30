@@ -64,7 +64,7 @@ internal fun LayoutManager(activity: MainActivity, client: LinkClient, cache: Wo
     }
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) runCatching {
-            val text = activity.contentResolver.openInputStream(uri)!!.use { it.readNBytes(1_048_577) }
+            val text = activity.contentResolver.openInputStream(uri)!!.use { it.readBounded(1_048_577) }
             require(text.size <= 1_048_576) { "Layout is too large" }
             publicProfile(JSONObject(String(text))).put("id", freshId()).put("revision", 0).put("app_id", app).put("default", false)
         }.onSuccess { imported = it }.onFailure { note = "Import failed: ${it.message}" }

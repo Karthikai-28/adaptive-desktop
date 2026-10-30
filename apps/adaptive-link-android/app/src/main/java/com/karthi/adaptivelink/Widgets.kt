@@ -1,6 +1,10 @@
 package com.karthi.adaptivelink
 
 import android.app.PendingIntent
+import android.app.job.JobInfo
+import android.app.job.JobParameters
+import android.app.job.JobService
+import android.app.job.JobScheduler
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
@@ -11,7 +15,10 @@ import android.widget.RemoteViews
 import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -39,20 +46,7 @@ abstract class LinkWidgetBase : AppWidgetProvider() {
     open suspend fun tapped(context: Context, client: LinkClient, what: String): String? = null
 
     private fun refresh(context: Context, what: String?) {
-        val app = context.applicationContext
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                val client = Link.client(app)
-                val reached = client != null && (withTimeoutOrNull(12_000) { client.host != null || client.connect() != null } ?: false)
-                val said = if (what != null && client != null && reached) tapped(app, client, what) else null
-                val views = draw(app, client?.takeIf { reached || it.host != null })
-                val manager = AppWidgetManager.getInstance(app)
-                manager.updateAppWidget(manager.getAppWidgetIds(ComponentName(app, this@LinkWidgetBase.javaClass)), views)
-                if (said != null) withContext(Dispatchers.Main) { Toast.makeText(app, said, Toast.LENGTH_SHORT).show() }
-            }
-            pending.finish()
-        }
+        WidgetRefreshJob.schedule(context, javaClass.simpleName, what)
     }
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) = refresh(context, null)
@@ -76,7 +70,7 @@ abstract class LinkWidgetBase : AppWidgetProvider() {
         /** Draw every widget again: the computer changed, or the owner's buttons did. */
         fun refreshAll(context: Context) {
             for (kind in listOf(StatusWidget::class.java, MediaWidget::class.java, ControlsWidget::class.java,
-                UsageWidget::class.java)) {
+                UsageWidget::class.java, AppsWidget::class.java)) {
                 val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, kind))
                 if (ids.isNotEmpty()) context.sendBroadcast(Intent(context, kind).setAction(TAP))
             }
@@ -85,49 +79,118 @@ abstract class LinkWidgetBase : AppWidgetProvider() {
 }
 
 class UsageWidget : LinkWidgetBase() {
-    private val cache = "ai-usage-widget"
 
-    private fun line(usage: JSONObject?, provider: String): Pair<String, Int> {
-        val windows = usage?.optJSONObject(provider)?.optJSONArray("windows")
-        val current = (0 until (windows?.length() ?: 0)).mapNotNull { windows?.optJSONObject(it) }
-            .firstOrNull { !it.optBoolean("expired") && !it.optString("label").startsWith("Weekly") }
-            ?: (0 until (windows?.length() ?: 0)).mapNotNull { windows?.optJSONObject(it) }
-                .firstOrNull { !it.optBoolean("expired") }
-        if (current == null || !current.has("used")) return "Unavailable" to 0xFF8E8E93.toInt()
-        val used = current.optDouble("used").coerceIn(0.0, 100.0).toInt()
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        UsageRefreshJob.schedule(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        UsageRefreshJob.cancel(context)
+        super.onDisabled(context)
+    }
+
+    companion object {
+        /** Refresh this widget while the phone app is already polling live usage. */
+        fun refresh(context: Context) {
+            val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, UsageWidget::class.java))
+            if (ids.isNotEmpty()) context.sendBroadcast(Intent(context, UsageWidget::class.java)
+                .setAction(LinkWidgetBase.TAP).putExtra(LinkWidgetBase.WHAT, "look"))
+        }
+    }
+
+    private fun line(usage: JSONObject?, provider: String, weekly: Boolean): Pair<String, Int> {
+        val used = UsageState.percent(usage, provider, weekly)?.toInt()
+            ?: return "—" to 0xFF8E8E93.toInt()
         val colour = when {
             used >= 95 -> 0xFFFF453A.toInt()
             used >= 80 -> 0xFFFF9F0A.toInt()
             else -> 0xFF0A84FF.toInt()
         }
-        return "$used% used · ${current.optString("label")}" to colour
+        return "$used%" to colour
     }
 
     override suspend fun draw(context: Context, client: LinkClient?): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_usage)
-        val prefs = context.getSharedPreferences(cache, Context.MODE_PRIVATE)
-        val fresh = client?.get("/v1/ai-usage")
-        if (fresh != null && fresh.has("codex")) prefs.edit().putString("snapshot", fresh.toString()).apply()
-        val usage = fresh ?: prefs.getString("snapshot", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val computer = Store(context).computer
+        val cache = computer?.let { UsageCache(context, it.fingerprint) }
+        val fresh = client?.get("/v1/ai-usage")?.takeIf { UsageState.valid(it) }
+        if (fresh != null) cache?.save(fresh)
+        val usage = fresh ?: cache?.read()
         listOf(
-            Triple("codex", R.id.usage_codex_value, R.id.usage_codex_name),
-            Triple("claude", R.id.usage_claude_value, R.id.usage_claude_name),
-            Triple("gemini", R.id.usage_gemini_value, R.id.usage_gemini_name),
-        ).forEach { (provider, value, name) ->
-            val (text, colour) = line(usage, provider)
-            views.setTextViewText(value, text)
-            views.setTextColor(value, colour)
+            Triple("codex", R.id.usage_codex_name, R.id.usage_codex_five),
+            Triple("claude", R.id.usage_claude_name, R.id.usage_claude_five),
+            Triple("gemini", R.id.usage_gemini_name, R.id.usage_gemini_five),
+        ).forEach { (provider, name, five) ->
+            val weekly = when (provider) { "codex" -> R.id.usage_codex_week; "claude" -> R.id.usage_claude_week; else -> R.id.usage_gemini_week }
+            val (fiveText, fiveColour) = line(usage, provider, false)
+            val (weekText, weekColour) = line(usage, provider, true)
+            views.setTextViewText(five, fiveText)
+            views.setTextColor(five, fiveColour)
+            views.setTextViewText(weekly, weekText)
+            views.setTextColor(weekly, weekColour)
             views.setOnClickPendingIntent(name, open(context))
         }
         views.setTextViewText(R.id.usage_state, when {
-            fresh != null -> "Live from ${Store(context).computer?.name ?: "computer"}"
-            usage != null -> "Last reading · tap to refresh"
+            fresh != null && !UsageState.stale(fresh) -> "Updated now"
+            fresh != null -> "Some data is old"
+            usage != null -> "Saved · tap to retry"
             Store(context).computer == null -> "Open Adaptive Link to pair"
             else -> "Tap to check the computer"
         })
         views.setOnClickPendingIntent(R.id.usage_root, tap(context, "look"))
         views.setOnClickPendingIntent(R.id.usage_title, open(context))
+        views.setOnClickPendingIntent(R.id.usage_refresh, tap(context, "look"))
+        views.setOnClickPendingIntent(R.id.usage_reconnect, tap(context, "reconnect"))
         return views
+    }
+}
+
+/** Android widgets are otherwise refreshed at most every 30 minutes. */
+class UsageRefreshJob : JobService() {
+    private var task: kotlinx.coroutines.Job? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onStartJob(params: JobParameters): Boolean {
+        task = scope.launch {
+            try {
+                val manager = AppWidgetManager.getInstance(this@UsageRefreshJob)
+                val ids = manager.getAppWidgetIds(ComponentName(this@UsageRefreshJob, UsageWidget::class.java))
+                if (ids.isNotEmpty()) {
+                    val client = Link.client(this@UsageRefreshJob)
+                    val reached = client != null && (withTimeoutOrNull(12_000) { client.host != null || client.connect() != null } ?: false)
+                    val views = UsageWidget().draw(this@UsageRefreshJob, client?.takeIf { reached || it.host != null })
+                    manager.updateAppWidget(ids, views)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+            } catch (_: Exception) {
+                // The next scheduled run will retry. Never crash the process for advisory data.
+            } finally { if (kotlinx.coroutines.currentCoroutineContext().isActive) jobFinished(params, false) }
+        }
+        return true
+    }
+
+    override fun onStopJob(params: JobParameters): Boolean { task?.cancel(); return true }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val JOB_ID = 478231
+        fun schedule(context: Context) {
+            if (AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, UsageWidget::class.java)).isEmpty()) return
+            val scheduler = context.getSystemService(JobScheduler::class.java)
+            val info = JobInfo.Builder(JOB_ID, ComponentName(context, UsageRefreshJob::class.java))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .setPeriodic(15 * 60 * 1000L)
+                .build()
+            scheduler.schedule(info)
+        }
+        fun cancel(context: Context) {
+            context.getSystemService(JobScheduler::class.java).cancel(JOB_ID)
+        }
     }
 }
 
@@ -136,7 +199,7 @@ class StatusWidget : LinkWidgetBase() {
         val views = RemoteViews(context.packageName, R.layout.widget_status)
         val computer = Store(context).computer
         views.setTextViewText(R.id.status_name, computer?.name ?: "Adaptive Link")
-        val status = client?.get("/v1/status")
+        val status = client?.get("/v1/status")?.takeIf { !it.has("error") && it.has("capabilities") }
         when {
             computer == null -> {
                 views.setTextViewText(R.id.status_line, "Not paired")

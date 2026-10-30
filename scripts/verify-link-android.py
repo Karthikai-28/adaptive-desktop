@@ -147,7 +147,7 @@ def screens(check, adb, device, control, build_env, sandbox):
 
     # The home screen's tiles: more of them than fit, so one may need scrolling to.
     TILES = {"Apps", "Screen", "Trackpad", "Media", "Presenter", "Run", "Files", "Webcam", "Tasks", "Devices", "Network", "Desktop",
-             "Controls", "Scan", "Windows", "Display", "Bluetooth", "Services", "More"}
+             "Controls", "Scan", "Windows", "Display", "Bluetooth", "Services", "More", "Laptop tools", "Control Center", "Office"}
 
     def tap(label, wait=1.5, exact=True):
         for attempt in range(2):
@@ -197,7 +197,8 @@ def screens(check, adb, device, control, build_env, sandbox):
             # What was on screen instead, to make the failure readable.
             print("     on screen:", [label[:28] for label, _x, _y in nodes()][:14], "| focus:", focused().strip()[-50:])
         if dead:
-            print(sh("logcat", "-d", "-s", "AndroidRuntime:E")[-2500:])
+            crash_log = sh("logcat", "-d", "-s", "AndroidRuntime:E")
+            print(crash_log[:3500] + "\n...\n" + crash_log[-1500:])
             sh("logcat", "-c")
             sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
             time.sleep(3)
@@ -208,8 +209,9 @@ def screens(check, adb, device, control, build_env, sandbox):
             if "adaptivelink" not in focused():
                 sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
                 unlock_app()
-            if has("Pinned", "Stage"):
-                return True
+            if has("Home", "Running"):
+                tap("Home", wait=.5)
+                return reach("Pinned")
             back()
         return False
 
@@ -327,7 +329,7 @@ def screens(check, adb, device, control, build_env, sandbox):
             time.sleep(1)
         step(matched and account == "me@example.com",
              "sign-in: with the computer's account the phone asks without a code, and shows the same six digits")
-        step(has("Connected", "Pinned", "Stage"), "sign-in: approved on the computer, connected, at the mobile desktop")
+        step(has("Connected", "Pinned", "Running"), "sign-in: approved on the computer, connected, at the mobile desktop")
     else:
         open_app()
         step(has("Use a pairing code instead") or has("Scan pairing code"), "first run: unlocked with the screen lock")
@@ -337,13 +339,24 @@ def screens(check, adb, device, control, build_env, sandbox):
     if not office_only:
         # ------------------------------------------------ the mobile desktop
         # Opening the app lands on the laptop's mobile desktop, not a dashboard.
-        step(shell_home() and has("Home", "Apps", "Stage") and has("Files", "Control Center", "Laptop tools"),
-             "mobile desktop: the app opens at Home, with its pins and Home, All Apps and Stage")
+        step(shell_home() and has("Home", "Apps", "Running") and reach("Laptop tools") and has("Files", "Control Center", "Laptop tools"),
+             "mobile desktop: the app opens at Home, with its pins and Home, All Apps and Running")
+        if os.environ.get("LINK_ANDROID_ONLY") == "refresh":
+            # Home is scrollable; return to its visible connection actions.
+            for _ in range(3):
+                sh("shell", "input", "swipe", "540", "700", "540", "1700", "250")
+            step(tap("Refresh", wait=2) and until(lambda: has("Connected", "AI usage"), 30),
+                 "refresh: the visible button reloads status and leaves usage available")
+            step(tap("Reconnect", wait=2) and until(lambda: has("Connected", "AI usage"), 45),
+                 "reconnect: the visible button rebuilds transport without unpairing")
+            step(not has("Could not load usage") and not has("Usage unavailable"), "usage: the live response is rendered after reconnect")
+            sh("shell", "locksettings", "clear", "--old", PIN)
+            return
         tap("All Apps", wait=3)
-        step(has("Spotlight Search", "All apps", "Favorites"),
+        step(has("Search your apps", "All apps", "Favorites"),
              "mobile desktop: the drawer lists the laptop's installed apps beside the phone's own tools")
         # Typed straight in: Back, to hide the keyboard, would leave the drawer.
-        tap("Spotlight Search…", wait=1)
+        tap("Search your apps", wait=1)
         sh("shell", "input", "text", "Pocket")
         time.sleep(1.5)
         step(has("Pocket fixture") and not has("Laptop tools"), "mobile desktop: the drawer is searched by name")
@@ -372,8 +385,8 @@ def screens(check, adb, device, control, build_env, sandbox):
              "mobile desktop: an app opens in the phone's own session, filling the screen with its controls on demand")
         tap("Controls", wait=2)
         step(has("Edit layouts"), "mobile desktop: an app's saved controls open beside it when asked for")
-        tap("Stage", wait=3)
-        step(has("Pocket fixture", "End session"), "mobile desktop: Stage lists the apps running on the phone")
+        tap("Running", wait=3)
+        step(has("Pocket fixture", "End session"), "mobile desktop: Running lists the apps running on the phone")
         tap("Home", wait=2)
         step(has("Phone workspace"), "mobile desktop: Home keeps private phone-session apps separate")
         tap("Control Center", wait=2)
@@ -387,11 +400,11 @@ def screens(check, adb, device, control, build_env, sandbox):
         step("adaptivelink" not in focused(), "navigation: Back at Home backgrounds the task normally")
         sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
         time.sleep(2)
-        tap("Stage", wait=2)
+        tap("Running", wait=2)
         tap("End session", wait=1.5)
         tap("Close normally", wait=6)
         closed = until((sandbox / "home" / "pocket-closed.txt").exists, 10)
-        tap("Stage", wait=3)
+        tap("Running", wait=3)
         step(closed and has("No phone applications are open"), "mobile desktop: ending the session closes its apps normally")
         home()
 
@@ -433,9 +446,9 @@ def screens(check, adb, device, control, build_env, sandbox):
     tap("+ New", wait=2)
     step(has("New task", "WHO", "WHAT"), "office: a task is written on the phone")
     type_into("Title", "Phone test task")
-    tap("Assign to Maya", wait=4)
+    step(reach("Assign to Maya") and tap("Assign to Maya", wait=4), "office: the assignment button is reachable and submits")
     tap("All", wait=2)
-    step(until(lambda: has("Phone test task"), 15), "office: it is assigned and appears on the board")
+    step(until(lambda: has("Phone test task") and not has("New task"), 15), "office: it is assigned and appears on the board")
     shot("office-tasks")
     tap("Phone test task", exact=False, wait=3)
     # Section headings are drawn in capitals.
@@ -1163,7 +1176,7 @@ def main():
             build_env["JAVA_HOME"] = str(REPO / ".local" / "jdk-17")
         # LINK_ANDROID_ONLY=office: the screens below pair through the app itself; the full
         # instrumented run is left out.
-        if os.environ.get("LINK_ANDROID_ONLY") != "office":
+        if os.environ.get("LINK_ANDROID_ONLY") not in ("office", "refresh"):
             # The owner's part: when the phone asks, compare and press Pair.
             seen = {}
 
