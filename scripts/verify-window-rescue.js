@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 
 const source = fs.readFileSync(
-    path.join(__dirname, '..', 'shell', 'adaptive-shell@local', 'extension.js'),
+    path.join(__dirname, '..', 'shell', 'adaptive-shell@local', 'shellDisplays.js'),
     'utf8'
 );
 
@@ -21,7 +21,7 @@ const match = source.match(
 );
 
 if (!match) {
-    console.error('FAIL: _windowVisibleFraction not found in extension.js');
+    console.error('FAIL: _windowVisibleFraction not found in shellDisplays.js');
     process.exit(1);
 }
 

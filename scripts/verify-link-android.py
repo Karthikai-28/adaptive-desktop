@@ -163,11 +163,12 @@ def screens(check, adb, device, control, build_env, sandbox):
         return False
 
     def reach(label):
-        """Scroll down until `label` is on screen."""
-        for _ in range(6):
+        """Scroll until `label` is on screen: down, then back up, as a page can
+        reopen where it was left, past what is wanted now."""
+        for start, end in [("1500", "700")] * 6 + [("700", "1500")] * 10:
             if has(label):
                 return True
-            sh("shell", "input", "swipe", "540", "1700", "540", "900", "300")
+            sh("shell", "input", "swipe", "540", start, "540", end, "300")
             time.sleep(1)
         return has(label)
 
@@ -210,7 +211,11 @@ def screens(check, adb, device, control, build_env, sandbox):
                 sh("shell", "am", "start", "-n", "com.karthi.adaptivelink/.MainActivity")
                 unlock_app()
             if has("Home", "Running"):
-                tap("Home", wait=.5)
+                # The navigation bar's, the last on screen: a page can have its own "Home",
+                # as Network does for the Wi-Fi of that name, and that one asks to join it.
+                _label, x, y = [node for node in nodes() if node[0] == "Home"][-1]
+                sh("shell", "input", "tap", str(x), str(y))
+                time.sleep(.5)
                 return reach("Pinned")
             back()
         return False
@@ -608,7 +613,7 @@ def screens(check, adb, device, control, build_env, sandbox):
         sh("shell", "input", "text", "xvfb")
         sh("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(5)
-    step(has("xvfb-run"), "tasks: a process is found by name")
+    step(reach("xvfb-run"), "tasks: a process is found by name")
     tap("xvfb-run", wait=1.5)
     step(has("End", "Kill", "Pause"), "tasks: a process can be paused, ended or killed")
     step(has("Priority", "And everything it started"), "tasks: its priority, and whether to act on what it started")
@@ -955,11 +960,14 @@ def screens(check, adb, device, control, build_env, sandbox):
     step(until(lambda: (control.status().get("phone_screen") or {}).get("frames", 0) >= 1, 30),
          f"phone screen: this phone's screen is shown on the computer ({control.status().get('phone_screen')})")
     open_app()
-    seen = control.status()["phone_screen"]["frames"]
+    def phone_frames():
+        return (control.status().get("phone_screen") or {}).get("frames", 0)
+
+    seen = phone_frames()
     step(until(lambda: "adaptivelink" in focused(), 8) and control.call("POST", "/cast", {"input": {"t": "key", "k": "home"}})["ok"]
          and until(lambda: "adaptivelink" not in focused(), 12),
          "phone screen: what is done in its window on the computer is done on the phone (its home key)")
-    step(until(lambda: control.status()["phone_screen"]["frames"] > seen, 15),
+    step(until(lambda: phone_frames() > seen, 15),
          "phone screen: and what the phone then shows is sent as it changes")
     step(control.call("POST", "/cast", {"stop": True})["ok"]
          and until(lambda: "CastService" not in sh("shell", "dumpsys", "activity", "services", "com.karthi.adaptivelink"), 15),
@@ -1165,15 +1173,18 @@ def main():
             time.sleep(0.2)
         check(control.status().get("account") == "me@example.com", "the computer is signed in to its owner's account")
 
-        offer = json.loads(control.call("POST", "/pair/start")["payload"])
-        offer["h"] = [EMULATOR_HOST] if on_emulator else offer["h"]
-        encoded = base64.urlsafe_b64encode(json.dumps(offer).encode()).decode()
-
         build_env = dict(os.environ, ANDROID_HOME=str(SDK), ANDROID_SERIAL=device)
         build_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
         # The Android Gradle plugin needs JDK 17; use the same private one as build-link-app.sh.
         if (REPO / ".local" / "jdk-17" / "bin" / "java").exists():
             build_env["JAVA_HOME"] = str(REPO / ".local" / "jdk-17")
+        # Built before pairing opens: a rebuild takes minutes, longer than the pairing window.
+        subprocess.run([gradle(), "--no-daemon", "-q", "assembleDebug", "assembleDebugAndroidTest", ABIS],
+                       cwd=APP, env=build_env, capture_output=True, text=True, timeout=1500)
+
+        offer = json.loads(control.call("POST", "/pair/start")["payload"])
+        offer["h"] = [EMULATOR_HOST] if on_emulator else offer["h"]
+        encoded = base64.urlsafe_b64encode(json.dumps(offer).encode()).decode()
         # LINK_ANDROID_ONLY=office: the screens below pair through the app itself; the full
         # instrumented run is left out.
         if os.environ.get("LINK_ANDROID_ONLY") not in ("office", "refresh"):

@@ -87,14 +87,18 @@ SHELL_SOURCES=("${REPO}/shell/adaptive-shell@local/extension.js" "${REPO}/shell/
   # Parse it rather than grepping for an import line. The theme used to import
   # Yaru's gtk.css, which is a stub pointing at a GResource that is only
   # registered when GTK loads Yaru by name - so the base silently never loaded
-  # while a grep for the import string still passed.
+  # while a grep for the import string still passed. It now imports the resource
+  # itself, from the gtk.gresource GTK registers when it loads a theme by name:
+  # that is registered here too, so a missing or dangling symlink fails.
   python3 - "${HOME}/.local/share/themes/Adaptive/gtk-3.0/gtk.css" <<'PY' \
     || fail "Adaptive GTK theme does not parse cleanly"
 import sys
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk
+from gi.repository import Gio, Gtk
+from pathlib import Path
 
+Gio.resources_register(Gio.Resource.load(str(Path(sys.argv[1]).with_name("gtk.gresource"))))
 errors = []
 provider = Gtk.CssProvider()
 provider.connect("parsing-error", lambda p, s, e: errors.append(e.message))

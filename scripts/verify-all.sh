@@ -88,6 +88,8 @@ step "Every this._method() is defined" quiet shell_methods
 step "What one shell module takes from another is exported" quiet python3 "$REPO/scripts/verify-shell-imports.py" "$SHELL_DIR"
 step "No undefined names in the shell" undefined_names
 step "Shell helpers (git, watchdog, battery, clipboard, drop-down)" quiet node "$REPO/scripts/verify-shell-helpers.js"
+step "Window rescue geometry" quiet node "$REPO/scripts/verify-window-rescue.js"
+step "Bottom dock source" quiet "$REPO/scripts/verify-bottom-dock.sh"
 step "Screen text geometry and selection" quiet node "$REPO/scripts/verify-screen-text.js"
 step "Notification order (urgent, then newest)" quiet node "$REPO/scripts/verify-notification-order.js"
 step "ROS 2 New package dialog logic" quiet node "$REPO/scripts/verify-ros-package-model.js"

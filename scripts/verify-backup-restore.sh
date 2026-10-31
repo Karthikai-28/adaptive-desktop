@@ -31,7 +31,7 @@ grep -q "gnome-extensions disable adaptive-shell@local" <<<"$recover_output" \
   || fail "recover output does not disable Adaptive Shell"
 grep -q "remove-adaptive-session.sh" <<<"$recover_output" \
   || fail "recover output does not include Adaptive session removal"
-grep -q "Choose Ubuntu from the GDM gear menu" <<<"$recover_output" \
+grep -q "session-cli.py login ubuntu" <<<"$recover_output" \
   || fail "recover output does not include Ubuntu fallback session"
 pass "recovery command plan is present"
 

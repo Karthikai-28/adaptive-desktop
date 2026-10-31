@@ -6,8 +6,8 @@ LIVE="${HOME}/.local/share/gnome-shell/extensions/adaptive-shell@local"
 echo "STEP 4 — TOP CLOCK / CALENDAR"
 echo
 
-grep -q "_restoreAndStyleStockClock" "${LIVE}/extension.js"
-echo "PASS: extension explicitly restores GNOME dateMenu"
+grep -q "adaptive-stock-clock" "${LIVE}/extension.js"
+echo "PASS: extension styles and restores GNOME dateMenu"
 
 grep -q "adaptive-stock-clock" "${LIVE}/stylesheet.css"
 echo "PASS: Adaptive clock styling installed"

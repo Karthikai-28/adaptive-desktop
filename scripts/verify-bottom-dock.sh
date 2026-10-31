@@ -13,11 +13,12 @@ python3 -m py_compile "$REPO/scripts/window-cli.py"
 python3 -m json.tool "$REPO/tokens/adaptive.tokens.json" >/dev/null
 
 grep -q 'const AppFavorites = imports.ui.appFavorites' "${EXT[@]}"
-grep -q 'Keep in Dock' "${EXT[@]}"
+grep -q 'Add to Favorites' "${EXT[@]}"
+grep -q 'Remove from Favorites' "${EXT[@]}"
 grep -q 'Remove from Dock' "${EXT[@]}"
 grep -q '_magnifyDock' "${EXT[@]}"
 grep -q 'adaptive-running-dot' "$CSS"
-grep -q 'monitor.y + monitor.height - height - 12' "${EXT[@]}"
+grep -q '_dock26BottomGap' "${EXT[@]}"
 
 if grep -q "'Command'.*=> this._openCommand" "${EXT[@]}"; then
     echo "FAIL: permanent Command dock button still found" >&2
