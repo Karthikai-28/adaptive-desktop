@@ -27,6 +27,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -234,6 +236,7 @@ fun ControlsPage(activity: MainActivity, client: LinkClient, store: Store, onBac
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddControl(onDismiss: () -> Unit, onAdd: (Control) -> Unit) {
     var label by remember { mutableStateOf("") }
@@ -253,7 +256,8 @@ private fun AddControl(onDismiss: () -> Unit, onAdd: (Control) -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = label, onValueChange = { label = it.take(24) }, singleLine = true,
                     placeholder = { Text("What the button says") }, modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Four kinds are wider than a dialog: in one row the last could not be reached.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Control.KINDS.forEach { name ->
                         FilterChip(selected = kind == name, onClick = { kind = name }, label = { Text(name.replaceFirstChar { it.uppercase() }) })
                     }

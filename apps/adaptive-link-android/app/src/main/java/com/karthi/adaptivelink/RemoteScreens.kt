@@ -238,7 +238,7 @@ private fun DisplaySettings(store: Store, onDone: (changed: Boolean) -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Size of things on it", fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("larger" to "Larger", "standard" to "Standard", "more" to "More space").forEach { (name, label) ->
                         FilterChip(selected = size == name, onClick = { size = name }, label = { Text(label) })
                     }

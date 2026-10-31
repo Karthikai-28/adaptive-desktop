@@ -1,5 +1,7 @@
 package com.karthi.adaptivelink
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -93,6 +95,7 @@ internal fun Heading(text: String) {
 
 // -------------------------------------------------------------------- tasks
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TasksPage(client: LinkClient, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -136,85 +139,92 @@ fun TasksPage(client: LinkClient, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar("Tasks", onBack)
-        Column(Modifier.padding(horizontal = 14.dp).weight(1f)) {
-            summary?.let { s ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column {
-                        val memory = s.optJSONObject("memory")
-                        val total = memory?.optLong("total") ?: 0L
-                        val used = total - (memory?.optLong("available") ?: 0L)
-                        val load = s.optJSONArray("load")?.optDouble(0) ?: 0.0
-                        val cpus = s.optInt("cpus", 1)
-                        Muted("Load ${"%.2f".format(load)} on $cpus processors")
-                        LinearProgressIndicator(
-                            progress = { (load / cpus).toFloat().coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        )
-                        Muted("Memory ${Protocol.formatSize(used)} of ${Protocol.formatSize(total)}")
-                        LinearProgressIndicator(
-                            progress = { if (total > 0) (used.toFloat() / total).coerceIn(0f, 1f) else 0f },
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        )
-                        s.optJSONArray("disks").objects().forEach { disk ->
-                            Muted("${disk.optString("mount")}  ${Protocol.formatSize(disk.optLong("free"))} free of ${Protocol.formatSize(disk.optLong("total"))}")
-                        }
-                        Muted("Up ${Protocol.formatDuration(s.optInt("uptime"))}")
-                        health?.let { h ->
-                            h.optJSONObject("battery")?.let { battery ->
-                                val left = if (battery.isNull("minutes")) "" else
-                                    ", ${Protocol.formatMinutes(battery.optInt("minutes"))} " +
-                                        if (battery.optBoolean("charging")) "to full" else "left"
-                                Muted("Battery ${battery.optInt("percent")}% · ${battery.optString("state").lowercase()}$left" +
-                                    if (battery.isNull("health")) "" else " · health ${battery.optInt("health")}%")
+        // One scroll, with the sort and the search kept in view: with the summary held
+        // above the list, three processes fitted on a phone.
+        LazyColumn(Modifier.padding(horizontal = 14.dp).weight(1f)) {
+            item {
+                summary?.let { s ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column {
+                            val memory = s.optJSONObject("memory")
+                            val total = memory?.optLong("total") ?: 0L
+                            val used = total - (memory?.optLong("available") ?: 0L)
+                            val load = s.optJSONArray("load")?.optDouble(0) ?: 0.0
+                            val cpus = s.optInt("cpus", 1)
+                            Muted("Load ${"%.2f".format(load)} on $cpus processors")
+                            LinearProgressIndicator(
+                                progress = { (load / cpus).toFloat().coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            )
+                            Muted("Memory ${Protocol.formatSize(used)} of ${Protocol.formatSize(total)}")
+                            LinearProgressIndicator(
+                                progress = { if (total > 0) (used.toFloat() / total).coerceIn(0f, 1f) else 0f },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            )
+                            s.optJSONArray("disks").objects().forEach { disk ->
+                                Muted("${disk.optString("mount")}  ${Protocol.formatSize(disk.optLong("free"))} free of ${Protocol.formatSize(disk.optLong("total"))}")
                             }
-                            val warm = h.optJSONArray("temperatures").objects()
-                                .joinToString("  ·  ") { "${it.optString("name")} ${it.optDouble("celsius").toInt()}°" }
-                            if (warm.isNotEmpty()) Muted(warm)
-                            val fans = h.optJSONArray("fans").objects()
-                                .joinToString("  ·  ") { "${it.optString("name")} ${it.optInt("rpm")} rpm" }
-                            if (fans.isNotEmpty()) Muted(fans)
-                            val offered = h.optJSONArray("profiles")
-                            if (offered != null && offered.length() > 0) {
-                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    repeat(offered.length()) { index ->
-                                        val name = offered.optString(index)
-                                        FilterChip(selected = name == h.optString("profile"), onClick = { profile(name) },
-                                            label = { Text(Protocol.profileName(name)) })
+                            Muted("Up ${Protocol.formatDuration(s.optInt("uptime"))}")
+                            health?.let { h ->
+                                h.optJSONObject("battery")?.let { battery ->
+                                    val left = if (battery.isNull("minutes")) "" else
+                                        ", ${Protocol.formatMinutes(battery.optInt("minutes"))} " +
+                                            if (battery.optBoolean("charging")) "to full" else "left"
+                                    Muted("Battery ${battery.optInt("percent")}% · ${battery.optString("state").lowercase()}$left" +
+                                        if (battery.isNull("health")) "" else " · health ${battery.optInt("health")}%")
+                                }
+                                val warm = h.optJSONArray("temperatures").objects()
+                                    .joinToString("  ·  ") { "${it.optString("name")} ${it.optDouble("celsius").toInt()}°" }
+                                if (warm.isNotEmpty()) Muted(warm)
+                                val fans = h.optJSONArray("fans").objects()
+                                    .joinToString("  ·  ") { "${it.optString("name")} ${it.optInt("rpm")} rpm" }
+                                if (fans.isNotEmpty()) Muted(fans)
+                                val offered = h.optJSONArray("profiles")
+                                if (offered != null && offered.length() > 0) {
+                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        repeat(offered.length()) { index ->
+                                            val name = offered.optString(index)
+                                            FilterChip(selected = name == h.optString("profile"), onClick = { profile(name) },
+                                                label = { Text(Protocol.profileName(name)) })
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = !byMemory, onClick = { byMemory = false }, label = { Text("Processor") })
-                FilterChip(selected = byMemory, onClick = { byMemory = true }, label = { Text("Memory") })
-                OutlinedTextField(
-                    value = query, onValueChange = { query = it }, singleLine = true,
-                    placeholder = { Text("Find a process") }, modifier = Modifier.weight(1f),
-                )
+            stickyHeader {
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = !byMemory, onClick = { byMemory = false }, label = { Text("Processor") })
+                    FilterChip(selected = byMemory, onClick = { byMemory = true }, label = { Text("Memory") })
+                    OutlinedTextField(
+                        value = query, onValueChange = { query = it }, singleLine = true,
+                        placeholder = { Text("Find a process") }, modifier = Modifier.weight(1f),
+                    )
+                }
             }
-            listOf(problem, note).filter { it.isNotEmpty() }.distinct().forEach {
-                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 6.dp))
+            item {
+                listOf(problem, note).filter { it.isNotEmpty() }.distinct().forEach {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 6.dp))
+                }
             }
-            LazyColumn(Modifier.weight(1f).padding(top = 6.dp)) {
-                items(list, key = { it.optInt("pid") }) { process ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { chosen = process }.padding(vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(process.optString("name"), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Muted(listOf(process.optInt("pid").toString(), process.optString("user"),
-                                if (process.optBoolean("paused")) "paused" else "",
-                                if (process.optInt("nice") > 0) "low priority" else "").filter { it.isNotBlank() }.joinToString(" · "))
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("${process.optDouble("cpu")}%", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                            Muted(Protocol.formatSize(process.optLong("rss")))
-                        }
+            items(list, key = { it.optInt("pid") }) { process ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { chosen = process }.padding(vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(process.optString("name"), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Muted(listOf(process.optInt("pid").toString(), process.optString("user"),
+                            if (process.optBoolean("paused")) "paused" else "",
+                            if (process.optInt("nice") > 0) "low priority" else "").filter { it.isNotBlank() }.joinToString(" · "))
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("${process.optDouble("cpu")}%", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                        Muted(Protocol.formatSize(process.optLong("rss")))
                     }
                 }
             }
@@ -644,9 +654,9 @@ fun DesktopPage(client: LinkClient, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar("Desktop", onBack)
+        // Above the scroll: typing a note scrolls this page, and the answer must still be seen.
+        if (said.isNotEmpty()) Muted(said, Modifier.padding(start = 14.dp, end = 14.dp, bottom = 4.dp))
         Column(Modifier.padding(horizontal = 14.dp).verticalScroll(rememberScrollState())) {
-            if (said.isNotEmpty()) Muted(said, Modifier.padding(bottom = 4.dp))
-
             val active = projects.firstOrNull { it.optBoolean("active") }
             Heading("Project")
             Card(Modifier.fillMaxWidth()) {
