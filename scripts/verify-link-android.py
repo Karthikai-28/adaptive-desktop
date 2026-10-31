@@ -533,10 +533,23 @@ def screens(check, adb, device, control, build_env, sandbox):
 
     # ---------------------------------------------------------- trackpad
     tap("Trackpad")
-    time.sleep(2)  # entering the surface rotates the activity to landscape
+    time.sleep(2)
     sh("shell", "input", "swipe", "300", "700", "600", "900", "300")
     sh("shell", "input", "tap", "400", "800")
-    step(has("Show trackpad controls", "Move"), "trackpad: an edge-to-edge landscape surface")
+    step(has("Show trackpad controls", "Move"), "trackpad: an edge-to-edge surface, held upright")
+    if on_emulator:
+        # Turned by the (emulated) accelerometer, as a hand turns it, with
+        # auto-rotate off: the trackpad follows, and is still the trackpad.
+        sh("emu", "sensor", "set", "acceleration", "9.8:0:0")
+        time.sleep(3)
+        turned = "mCurrentRotation=ROTATION_0" not in sh("shell", "dumpsys", "window", "displays")
+        sh("shell", "input", "swipe", "300", "400", "600", "500", "300")
+        sh("shell", "input", "tap", "400", "400")
+        step(turned and has("Show trackpad controls", "Move"), "trackpad: turns sideways with the phone and keeps working")
+        sh("emu", "sensor", "set", "acceleration", "0:9.8:0")
+        time.sleep(3)
+        upright = "mCurrentRotation=ROTATION_0" in sh("shell", "dumpsys", "window", "displays")
+        step(upright and has("Show trackpad controls", "Move"), "trackpad: turns upright again and keeps working")
     tap("Show trackpad controls")
     for label in ("Left", "Middle", "Right"):
         tap(label, wait=0.8)
@@ -547,7 +560,7 @@ def screens(check, adb, device, control, build_env, sandbox):
     tap("Hide keyboard", wait=1)
     home()
     # With auto-rotate off (the navigation checks turn it off), Android keeps the
-    # trackpad's landscape as the locked rotation after the app lets go of it, so
+    # trackpad's last rotation as the locked one after the app lets go of it, so
     # once it has (not before), lock it back to portrait through the window manager,
     # which overrides the user_rotation setting.
     sh("shell", "wm", "user-rotation", "-d", "0", "lock", "0")

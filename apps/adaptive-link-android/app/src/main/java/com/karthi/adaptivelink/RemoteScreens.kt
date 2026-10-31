@@ -726,7 +726,8 @@ fun TrackpadPage(activity: Activity, client: LinkClient, workspaceId: String = "
 
     DisposableEffect(Unit) {
         val previousOrientation = activity.requestedOrientation
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Upright or sideways, however it is held, whatever auto-rotate is set to.
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
         fullScreen(activity, true)
         onDispose {
             fullScreen(activity, false)

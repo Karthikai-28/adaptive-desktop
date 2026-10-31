@@ -1,7 +1,7 @@
 # Adaptive Link: Full-Screen Trackpad and Ink Studio
 
 Status: specification with an initial Android implementation. The first build provides
-the edge-to-edge landscape multi-touch trackpad with a floating control palette,
+the edge-to-edge multi-touch trackpad, upright or sideways, with a floating control palette,
 blank pressure-aware tablet, mirrored tablet
 handoff, durable local ink, undo/redo, stroke erasing, width control, and PNG/SVG
 export. Selection/transforms, pan/zoom, calibrated pressure curves, protocol-v2
