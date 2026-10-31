@@ -347,6 +347,12 @@ def unlock(device):
     serial, model = device["serial"], device["model"] or "the phone"
     if not locked(serial):
         return True
+    # `input` goes to the focused display, and each Phone window has its own:
+    # with one open, the password would land in its app, Enter and all.
+    if others(serial):
+        tell(f"{model} stays locked", "The password is not typed while another Phone window is open. "
+             "Close it first, or unlock the phone in your hand.")
+        return False
     store, key = keyring(), phone_key(serial)
     secret = store.get(key)
     asked = not secret

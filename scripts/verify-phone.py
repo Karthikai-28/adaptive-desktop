@@ -148,6 +148,9 @@ esac
     keys = root / "keyring.json"
     keys.write_text(json.dumps({"ZD2TEST": "right pass"}))
     env["ADAPTIVE_PHONE_KEYRING"] = str(keys)
+    (root / "pgrep").write_text("#!/bin/sh\n")   # a real Phone window open here must not count
+    (root / "pgrep").chmod(0o755)
+    env["PATH"] = f"{root}:{env['PATH']}"
     log.write_text("")
     done = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
@@ -170,6 +173,19 @@ esac
     assert sum(line.startswith("script:") for line in lines) == 1, lines
     assert "--turn-screen-off" not in lines[-1] and "pressed" not in "".join(lines), lines
     assert "did not unlock" in done.stderr
+
+    # Another Phone window has the focused display: the password goes to that
+    # window's app, so nothing is typed, and nothing kept is forgotten.
+    keys.write_text(json.dumps({"ZD2TEST": "right pass"}))
+    (root / "pgrep").write_text("#!/bin/sh\necho '1 scrcpy --serial 192.168.31.15:40005 --new-display'\n")
+    log.write_text("")
+    done = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    lines = log.read_text().splitlines()
+    assert not any(line.startswith("script:") for line in lines), lines
+    assert json.loads(keys.read_text()) == {"ZD2TEST": "right pass"}, keys.read_text()
+    assert "stays locked" in done.stderr
+    (root / "pgrep").write_text("#!/bin/sh\n")
 
     # The palette's ordinary search: phone apps by their own names, marked
     # Phone, under a laptop app of the same name.
