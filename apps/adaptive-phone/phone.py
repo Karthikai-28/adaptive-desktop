@@ -143,7 +143,10 @@ def scrcpy_argv(binary, serial, title, app="", screen_off=False):
     if app:
         # A display of the phone's own for this app, resized with the window;
         # closing it moves the app back to the phone's screen, not away.
-        argv += ["--new-display", "--flex-display", "--no-vd-destroy-content", "--start-app", app, "--no-audio"]
+        # --legacy-paste: Android's programmatic clipboard doesn't reach apps
+        # on virtual displays, so paste injects text as key events instead.
+        argv += ["--new-display", "--flex-display", "--no-vd-destroy-content", "--start-app", app,
+                 "--no-audio", "--legacy-paste"]
     if screen_off:
         argv += ["--turn-screen-off"]
     return argv
