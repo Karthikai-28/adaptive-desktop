@@ -102,7 +102,7 @@ step "Zero-State Protocol guards" quiet "$REPO/scripts/verify-zero-state-protoco
 step "The checkout works from any folder, for any user" quiet "$REPO/scripts/verify-portable-paths.sh"
 step "Feature logic (palette, projects, backup, power, annotate)" quiet python3 "$REPO/scripts/verify-feature-logic.py"
 step "Terminal routes and ROS shell setup" quiet python3 "$REPO/scripts/verify-terminal.py"
-step "agy, claude and codex as apps: shared sessions" quiet python3 "$REPO/scripts/verify-agent-apps.py"
+step "agy and claude as apps: shared sessions" quiet python3 "$REPO/scripts/verify-agent-apps.py"
 step "Phone: phone choice, its apps, scrcpy arguments" quiet python3 "$REPO/scripts/verify-phone.py"
 step "Adaptive Settings backend" quiet python3 "$REPO/scripts/verify-adaptive-settings.py"
 step "Cast: Miracast elements, RTSP framing, format choice" quiet python3 "$REPO/scripts/verify-cast.py"

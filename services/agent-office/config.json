@@ -8,15 +8,6 @@
       "label": "Gemini",
       "model": "gemini-3.8-flash-high"
     },
-    "codex": {
-      "engine": "codex",
-      "label": "Codex",
-      "model": "gpt-5.6-luna",
-      "meeting_reasoning": "medium",
-      "web_search": true,
-      "reasoning": "low",
-      "fallback": "haiku"
-    },
     "haiku": {
       "engine": "claude",
       "label": "Claude Haiku",
@@ -35,9 +26,8 @@
     }
   },
   "provider": "gemini",
-  "fallback": "codex",
+  "fallback": "haiku",
   "study_on_fallback": true,
-  "meeting_provider": "codex",
   "max_parallel_tasks": 3,
   "task_timeout_min": 45,
   "chat_timeout_min": 15,
@@ -48,9 +38,6 @@
     "role": "Manager",
     "model": "claude-sonnet-5-5",
     "complex_model": "claude-opus-5",
-    "planner_provider": "codex",
-    "planner_reasoning": "medium",
-    "planner_timeout_min": 10,
     "opus_max_per_hour": 6,
     "rotate_context_tokens": 120000,
     "voice": "en-US-AndrewMultilingualNeural",

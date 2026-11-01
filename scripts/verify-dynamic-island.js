@@ -48,7 +48,7 @@ async function main() {
     // =========================================================================
     // 1. AI Quota Provider Tests
     // =========================================================================
-    console.log('-- Provider 1: AI usage (Codex, Claude, Gemini) --');
+    console.log('-- Provider 1: AI usage (Claude, Gemini) --');
 
     let quotaEvents = [];
     const mockBus = {
@@ -57,13 +57,12 @@ async function main() {
 
     // Test 1.1: one shape for every provider, in % used
     const nowS = Math.floor(Date.now() / 1000);
-    const snap = (codex5h, claude5h) => ({
-        codex: { ts: nowS, stale: false, error: '', windows: [
-            { label: '5h', used: codex5h, resetsAt: nowS + 3600, expired: false },
-            { label: 'Weekly', used: 28, resetsAt: nowS + 86400, expired: false }] },
+    const snap = (claude5h, gemini5h) => ({
         claude: { ts: nowS, stale: false, error: '', windows: [
-            { label: '5h', used: claude5h, resetsAt: nowS + 7200, expired: false }] },
-        gemini: { ts: 0, stale: true, error: 'The Agent Office is not running', windows: [] },
+            { label: '5h', used: claude5h, resetsAt: nowS + 3600, expired: false },
+            { label: 'Weekly', used: 28, resetsAt: nowS + 86400, expired: false }] },
+        gemini: { ts: nowS, stale: false, error: '', windows: [
+            { label: '5h', used: gemini5h, resetsAt: nowS + 7200, expired: false }] },
     });
     const mockUsageData = snap(40, 17);
     let nextSnap = mockUsageData;
@@ -75,9 +74,8 @@ async function main() {
 
     quota.poll();
     const qData = quota.getData();
-    check(qData.codex.windows[0].used === 40, 'quota: Codex 5h used (40%)');
-    check(qData.claude.windows[0].used === 17, 'quota: Claude 5h used (17%)');
-    check(qData.gemini.windows.length === 0 && qData.gemini.error.includes('not running'), 'quota: Gemini unavailable says why');
+    check(qData.claude.windows[0].used === 40, 'quota: Claude 5h used (40%)');
+    check(qData.gemini.windows[0].used === 17, 'quota: Gemini 5h used (17%)');
     check(quotaEvents.length === 0, 'quota: a routine reading surfaces nothing');
     let refreshed = null;
     quota.refresh(ok => { refreshed = ok; });
@@ -89,7 +87,7 @@ async function main() {
     quota.poll();
     const caution = quotaEvents.find(e => e.type === 'QUOTA_CAUTION_BREACH');
     check(!!caution, 'quota: emitted QUOTA_CAUTION_BREACH at 82% used');
-    check(caution && caution.payload.message === 'Codex 5h limit 82% used', 'quota: caution names the provider and window');
+    check(caution && caution.payload.message === 'Claude 5h limit 82% used', 'quota: caution names the provider and window');
     check(quota.getData().cautionBreach === true, 'quota: caution flag set for the pill');
     quotaEvents = [];
     quota.poll();
@@ -100,30 +98,34 @@ async function main() {
     nextSnap = snap(82, 96);
     quota.poll();
     const critEvent = quotaEvents.find(e => e.type === 'QUOTA_CRITICAL_BREACH');
-    check(!!critEvent && critEvent.payload.message === 'Claude 5h limit 96% used', 'quota: emitted QUOTA_CRITICAL_BREACH at 96% used');
+    check(!!critEvent && critEvent.payload.message === 'Gemini 5h limit 96% used', 'quota: emitted QUOTA_CRITICAL_BREACH at 96% used');
     check(critEvent && critEvent.payload.dwellMs === -1, 'quota: critical breach has sticky dwell (-1)');
 
     // Test 1.4: a reset is announced once usage falls back
     quotaEvents = [];
     nextSnap = snap(82, 3);
     quota.poll();
-    check(quotaEvents.some(e => e.type === 'QUOTA_RESET_CONFIRMED'), 'quota: reset confirmed when Claude drops to 3%');
+    check(quotaEvents.some(e => e.type === 'QUOTA_RESET_CONFIRMED'), 'quota: reset confirmed when Gemini drops to 3%');
 
     // Test 1.5: failure keeps the last reading, marked stale
     quota.handleFailure('Usage snapshot unavailable');
     const staleData = quota.getData();
-    check(staleData.claude.stale === true, 'quota: marked stale on failure');
-    check(staleData.claude.windows[0].used === 3, 'quota: retained last values when stale');
+    check(staleData.gemini.stale === true, 'quota: marked stale on failure');
+    check(staleData.gemini.windows[0].used === 3, 'quota: retained last values when stale');
     check(staleData.error === 'Usage snapshot unavailable', 'quota: recorded error message');
 
     // Test 1.6: the card's model
     const { describeUsage } = require(path.join(shellDir, 'islandQuota.js'));
-    const model = describeUsage({ ...snap(82, 96), codex: { ts: nowS, windows: [
-        { label: '5h', used: 100, resetsAt: nowS - 10, expired: true }] } }, nowS);
-    check(model.map(p => p.name).join() === 'Codex,Claude,Gemini', 'quota: card lists Codex, Claude, Gemini');
+    const model = describeUsage({
+        claude: { ts: nowS, windows: [
+            { label: '5h', used: 100, resetsAt: nowS - 10, expired: true },
+            { label: 'Weekly', used: 96, resetsAt: nowS + 86400, expired: false }] },
+        gemini: { ts: 0, stale: true, error: 'The Agent Office is not running', windows: [] },
+    }, nowS);
+    check(model.map(p => p.name).join() === 'Claude,Gemini', 'quota: card lists Claude, Gemini');
     check(model[0].rows[0].text === 'reset, awaiting update', 'quota: an ended window never invents a refill');
-    check(model[1].rows[0].text === '96% used' && model[1].rows[0].level === 'critical', 'quota: card shows % used with its level');
-    check(model[2].unavailable.includes('not running'), 'quota: card says why Gemini is missing');
+    check(model[0].rows[1].text === '96% used' && model[0].rows[1].level === 'critical', 'quota: card shows % used with its level');
+    check(model[1].unavailable.includes('not running'), 'quota: card says why Gemini is missing');
 
     // Test 1.7: agy log parsing and Google AI Pro server gap representation
     const sampleLogLines = [
@@ -318,18 +320,18 @@ async function main() {
 
     // Test 5.2: Preemption (P1 interrupts P3 immediately)
     island.emitEvent('QUOTA_CRITICAL_BREACH', {
-        provider: 'quota', source: 'codex',
+        provider: 'quota', source: 'claude',
         priority: Types.IslandPriority.P1_URGENT,
         dwellMs: -1,
         message: 'Quota Critical!',
     });
     check(island.getState().surfacedEvent.type === 'QUOTA_CRITICAL_BREACH', 'bus: P1 urgent event preempted P3');
     check(island.getState().queueLength === 1, 'bus: interrupted P3 re-queued with remaining dwell');
-    island.resolveQuotaAlerts({ codex: 'normal', claude: 'normal', gemini: 'normal' });
+    island.resolveQuotaAlerts({ claude: 'normal', gemini: 'normal' });
     check(island.getState().surfacedEvent.type === 'TRACK_CHANGED',
         'bus: a recovered quota automatically clears its stale sticky alert');
     island.emitEvent('QUOTA_CRITICAL_BREACH', {
-        provider: 'quota', source: 'codex',
+        provider: 'quota', source: 'claude',
         priority: Types.IslandPriority.P1_URGENT,
         dwellMs: -1,
         message: 'Quota Critical!',

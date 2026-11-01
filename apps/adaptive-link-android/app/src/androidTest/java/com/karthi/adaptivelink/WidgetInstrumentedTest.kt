@@ -56,14 +56,14 @@ class WidgetInstrumentedTest {
         }
         val computer = Computer("Test laptop", listOf("127.0.0.1"), 47933, 47934, "a".repeat(64))
         Store(isolated).computer = computer
-        UsageCache(isolated, computer.fingerprint).save(org.json.JSONObject("""{"ok":true,"codex":{"stale":false,"windows":[{"label":"5h","used":26},{"label":"Weekly","used":63}]},"claude":{"stale":true,"windows":[]},"gemini":{"stale":false,"windows":[{"label":"24h","used":18}]}}"""))
+        UsageCache(isolated, computer.fingerprint).save(org.json.JSONObject("""{"ok":true,"claude":{"stale":true,"windows":[{"label":"5h","used":26},{"label":"Weekly","used":63}]},"gemini":{"stale":false,"windows":[{"label":"24h","used":18}]}}"""))
         val views = UsageWidget().draw(isolated, null)
         instrumentation.runOnMainSync {
             val view = views.apply(context, FrameLayout(context))
-            assertEquals("26%", view.findViewById<TextView>(R.id.usage_codex_five).text.toString())
-            assertEquals("63%", view.findViewById<TextView>(R.id.usage_codex_week).text.toString())
+            assertEquals("26%", view.findViewById<TextView>(R.id.usage_claude_five).text.toString())
+            assertEquals("63%", view.findViewById<TextView>(R.id.usage_claude_week).text.toString())
             assertEquals("18%", view.findViewById<TextView>(R.id.usage_gemini_five).text.toString())
-            assertEquals("—", view.findViewById<TextView>(R.id.usage_claude_five).text.toString())
+            assertEquals("—", view.findViewById<TextView>(R.id.usage_gemini_week).text.toString())
             assertTrue(view.findViewById<TextView>(R.id.usage_state).text.startsWith("Saved"))
             val density = context.resources.displayMetrics.density
             val w = (250 * density).toInt(); val h = (220 * density).toInt()
@@ -82,7 +82,7 @@ class WidgetInstrumentedTest {
         context.getSharedPreferences("usage-test-widget-a", 0).edit().clear().commit()
         context.getSharedPreferences("usage-test-widget-b", 0).edit().clear().commit()
         try {
-            a.save(org.json.JSONObject("""{"ok":true,"codex":{},"claude":{},"gemini":{}}"""))
+            a.save(org.json.JSONObject("""{"ok":true,"claude":{},"gemini":{}}"""))
             assertNotNull(a.read()); assertNull(b.read())
             a.save(org.json.JSONObject("""{"error":"offline"}"""))
             assertNotNull(a.read())

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open agy, claude or codex in a terminal, as one session the laptop and the phone share.
+"""Open agy or claude in a terminal, as one session the laptop and the phone share.
 
     adaptive-agent claude            a session not already open on this screen
     adaptive-agent claude --new      always a new session
@@ -25,7 +25,7 @@ import subprocess
 import sys
 
 
-AGENTS = {"claude": "Claude Code", "codex": "Codex", "agy": "Antigravity CLI"}
+AGENTS = {"claude": "Claude Code", "agy": "Antigravity CLI"}
 SOCKET = os.environ.get("ADAPTIVE_AGENT_SOCKET", "adaptive-agents")
 # What the phone session (or any other launcher) adds that must not reach an
 # agent: it would talk to the phone's display and bus, at the phone's scale.

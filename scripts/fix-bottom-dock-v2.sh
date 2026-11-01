@@ -785,7 +785,7 @@ gsettings get org.gnome.shell favorite-apps || true
 
 echo
 echo "Manual checks:"
-echo "  1. Maximized ChatGPT/browser composer stays above the dock."
+echo "  1. Maximized browser composer stays above the dock."
 echo "  2. Moving across icons does not rapidly shrink/grow the dock."
 echo "  3. Right-click menu stays open."
 echo "  4. Non-favorite app shows Add to Favorites."

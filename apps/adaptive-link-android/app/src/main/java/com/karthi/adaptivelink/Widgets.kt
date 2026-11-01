@@ -30,7 +30,7 @@ import org.json.JSONObject
  *    project. A tap looks again.
  *  - Media: what it is playing, with previous, play and next.
  *  - Controls: six of the owner's own buttons from the Controls screen.
- *  - AI usage: Codex, Claude and Gemini plan limits in a compact phone card.
+ *  - AI usage: Claude and Gemini plan limits in a compact phone card.
  *
  * A widget cannot keep a connection, so each asks the computer when it is
  * tapped (and the status one every half hour, which is as often as Android
@@ -118,11 +118,10 @@ class UsageWidget : LinkWidgetBase() {
         if (fresh != null) cache?.save(fresh)
         val usage = fresh ?: cache?.read()
         listOf(
-            Triple("codex", R.id.usage_codex_name, R.id.usage_codex_five),
             Triple("claude", R.id.usage_claude_name, R.id.usage_claude_five),
             Triple("gemini", R.id.usage_gemini_name, R.id.usage_gemini_five),
         ).forEach { (provider, name, five) ->
-            val weekly = when (provider) { "codex" -> R.id.usage_codex_week; "claude" -> R.id.usage_claude_week; else -> R.id.usage_gemini_week }
+            val weekly = if (provider == "claude") R.id.usage_claude_week else R.id.usage_gemini_week
             val (fiveText, fiveColour) = line(usage, provider, false)
             val (weekText, weekColour) = line(usage, provider, true)
             views.setTextViewText(five, fiveText)

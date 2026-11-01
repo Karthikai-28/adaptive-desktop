@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** Shared parsing keeps the app and RemoteViews honest about stale/missing measurements. */
 internal object UsageState {
-    val providers = listOf("codex", "claude", "gemini")
+    val providers = listOf("claude", "gemini")
     fun valid(value: JSONObject?): Boolean = value != null && !value.has("error") &&
         value.optBoolean("ok", true) && providers.all { value.optJSONObject(it) != null }
     fun window(value: JSONObject?, provider: String, weekly: Boolean): JSONObject? =

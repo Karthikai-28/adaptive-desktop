@@ -199,14 +199,14 @@ usageOverlay._titleIcon = {};
 usageOverlay._titleLabel = {};
 usageOverlay._badgeLabel = {};
 const nowS = Date.now() / 1000;
-usageOverlay._renderQuotaData({ quota: { codex: { ts: nowS, windows: [
+usageOverlay._renderQuotaData({ quota: { claude: { ts: nowS, windows: [
     { label: "5h", used: 100, resetsAt: nowS + 3600 },
     { label: "Weekly", used: 75, resetsAt: nowS - 10 },
 ] } } });
 const usage = usageOverlay._usageModel;
-check(usage[0].rows[0].text === "100% used", "Exhausted Codex window shows 100% used");
-check(usage[0].rows[1].text === "reset, awaiting update", "Ended Codex window never invents a refill");
-check(usage[1].unavailable && usage[1].rows.length === 0, "Missing Claude limits never display sample values");
+check(usage[0].rows[0].text === "100% used", "Exhausted Claude window shows 100% used");
+check(usage[0].rows[1].text === "reset, awaiting update", "Ended Claude window never invents a refill");
+check(usage[1].unavailable && usage[1].rows.length === 0, "Missing Gemini limits never display sample values");
 check(usageOverlay._badgeLabel.text === "USED", "Usage card is labelled as used");
 
 // -- Suite 5b: Overview, tab badges, and drawing only what is visible --

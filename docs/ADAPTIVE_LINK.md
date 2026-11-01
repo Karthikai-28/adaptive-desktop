@@ -320,7 +320,7 @@ active and recent first; **Phone workspace** contains apps running in the
 private phone-sized session; and **Apps** contains installed laptop apps and
 Adaptive Link's native tools. Every screen in this table is in its drawer,
 and all of them together are under *Laptop tools*, which is pinned to Home to
-begin with. A compact **AI usage** card on Home shows the current Codex,
+begin with. A compact **AI usage** card on Home shows the current
 Claude and Gemini plan windows from the same snapshot as the desktop's
 Activity Center. **Refresh** reloads status and usage; **Reconnect** discards the
 old transport and discovers the paired computer again without unpairing. Usage
@@ -357,7 +357,7 @@ And without opening the app:
   files go to `~/Downloads/Phone`.
 - **Home-screen widgets and quick-settings tiles.** Six widgets: laptop-app shortcuts, quick
   actions (lock, play/pause, next, mute, focus), the computer's status at a
-  glance, AI usage for Codex/Claude/Gemini in a compact phone card, what it is
+  glance, AI usage for Claude and Gemini in a compact phone card, what it is
   playing with previous/play/next, and six of your own buttons from the
   Controls screen. The AI widget keeps its last reading while the laptop is
   offline, separately for each paired computer. Its explicit **Refresh** and
@@ -515,9 +515,9 @@ Needs `xvfb`, `xfwm4`, `dbus`, `xauth`, `x11-utils` and `xdotool` on the
 laptop; `scripts/link-cli.py doctor` says which are missing. The laptop's
 own screen, shared as it is, stays available as *Desktop Remote*.
 
-#### agy, Claude Code and Codex
+#### agy and Claude Code
 
-**Claude Code**, **Codex** and **Antigravity CLI** (agy) are apps in the
+**Claude Code** and **Antigravity CLI** (agy) are apps in the
 Apps grid, on the phone and on the laptop alike (`terminal/agent.py`,
 installed as `adaptive-agent` by `./install.sh --only terminal`). Each opens
 a terminal on a session that the laptop and the phone share: start a
@@ -537,7 +537,7 @@ of whichever screen was used last.
   reaches the agent. The wheel scrolls back; a drag copies to the laptop's
   clipboard.
 - In any terminal, `adaptive-agent claude` attaches in place;
-  `adaptive-agent codex --new ~/project` starts in a folder.
+  `adaptive-agent agy --new ~/project` starts in a folder.
 
 The sessions live on a private tmux server, `tmux -L adaptive-agents ls`.
 Check: `scripts/verify-agent-apps.py`.

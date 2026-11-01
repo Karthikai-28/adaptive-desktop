@@ -2,7 +2,7 @@ Start the bounded india-av planning and research project requested by the operat
 
 Review the research plan appended to this message as the source brief. Its repository copy is docs/INDIA_AV_RESEARCH_PLAN.md in adaptive-desktop. It contains the initial legal reading, primary sources, failure cases, ODD proposal, gates and acceptance criteria. Treat its legal findings as preliminary, not a permission to test. The operator shortlisted Bengaluru, Karnataka, and Chennai, Tamil Nadu; compare both before recommending one. Vehicle, budget, exact site and human team remain undecided. The appended content lets you review and dispatch through your normal office commands without reading repository files yourself.
 
-Run the normal planning and manager verification gate. Check existing tasks first and avoid duplicate assignments with the following story IDs under project india-av. Do not resume or assign any unrelated work or former company study. Account for all eight staff, respecting the existing three-task concurrency setting and provider/quota policy.
+Plan and dispatch as usual. Check existing tasks first and avoid duplicate assignments with the following story IDs under project india-av. Do not resume or assign any unrelated work or former company study. Account for all eight staff, respecting the existing three-task concurrency setting and provider/quota policy.
 
 Create one bounded research story for each:
 IAV-001 Maya: charter, operating design domain, Bengaluru-versus-Chennai and use-case comparison, cost/runway and staged roadmap.

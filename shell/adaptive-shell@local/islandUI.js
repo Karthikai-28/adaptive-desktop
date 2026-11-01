@@ -2,7 +2,7 @@
 //
 // Implements in-panel IslandAnchor on dateMenu and IslandOverlay on (Main && Main.layoutManager).uiGroup.
 // Provides idle, compact, satellite, and expanded presentation states for the 4 MVP features:
-// 1. AI usage (how much of the Codex, Claude and Gemini limits is used, with reset times)
+// 1. AI usage (how much of the Claude and Gemini limits is used, with reset times)
 // 2. Background AI Tasks (every running Agent Office task, its live event log, Cancel)
 // 3. Now-Playing Media (cover art, elapsed/length, seekable scrubber, transport, player switch)
 // 4. Focus Timers (Big digits, Pomodoro presets, +5m extend, Do Not Disturb while focusing)

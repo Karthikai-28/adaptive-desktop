@@ -1,8 +1,8 @@
 // Dynamic Island AI Quota Provider
 //
-// How much of each AI plan's limits is used: Codex, Claude and Gemini, side by side.
-// quotaSnapshot.py reads what each tool already records on this machine (Codex session rollouts,
-// Claude Code's cached plan usage, agy's /usage via the Agent Office on loopback) and prints one
+// How much of each AI plan's limits is used: Claude and Gemini, side by side.
+// quotaSnapshot.py reads what each tool already records on this machine (Claude Code's
+// cached plan usage, agy's /usage via the Agent Office on loopback) and prints one
 // shape per provider: { ts, stale, error, windows: [{ label, used, resetsAt, expired }] }.
 // Hard rule: NEVER reads credentials, tokens, or calls external APIs.
 
@@ -44,7 +44,7 @@ const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {} } = Types;
 const DEFAULT_ACTIVE_POLL_MS = 15000;   // fallback while visible; file events are normally immediate
 const DEFAULT_IDLE_POLL_MS   = 300000;  // 300s when dormant/idle
 
-var PROVIDERS = [['codex', 'Codex'], ['claude', 'Claude'], ['gemini', 'Gemini']];
+var PROVIDERS = [['claude', 'Claude'], ['gemini', 'Gemini']];
 const CAUTION_USED = 80;
 const CRITICAL_USED = 95;
 const LEVELS = { normal: 0, caution: 1, critical: 2 };
@@ -113,9 +113,9 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         this._isDormant = false;
         this._destroyed = false;
 
-        this._usage = { codex: _blank(), claude: _blank(), gemini: _blank() };
-        this._levels = { codex: 'normal', claude: 'normal', gemini: 'normal' };
-        this._peak = { codex: 0, claude: 0, gemini: 0 };
+        this._usage = { claude: _blank(), gemini: _blank() };
+        this._levels = { claude: 'normal', gemini: 'normal' };
+        this._peak = { claude: 0, gemini: 0 };
         this._error = '';
 
         this._agyData = {
@@ -184,7 +184,7 @@ var IslandQuotaProvider = class IslandQuotaProvider {
         }
     }
 
-    // kept for callers written before Codex and Gemini were added
+    // kept for older callers
     pollClaude() {
         this.poll();
     }
@@ -520,7 +520,6 @@ var IslandQuotaProvider = class IslandQuotaProvider {
     getData() {
         const levels = Object.values(this._levels);
         return {
-            codex: { ...this._usage.codex },
             claude: { ...this._usage.claude },
             gemini: { ...this._usage.gemini },
             agy: { ...this._agyData },

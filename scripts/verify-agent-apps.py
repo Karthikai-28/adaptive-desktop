@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check adaptive-agent (agy, claude, codex as apps) on a private tmux server, without opening windows.
+"""Check adaptive-agent (agy and claude as apps) on a private tmux server, without opening windows.
 
 Stand-ins replace the agents and the login shell; nothing real is started.
 """
@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix="adaptive-agent-") as temporary:
         record = Path(str(out) + ".terminal").read_text().split()
         assert record[1:4] == ["--title", "Claude", "Code"] and record[4] == "4", record
         assert record[5:7] == ["-x", "tmux"] and record[-2:] == ["-t", "claude-4"], record
-        assert agent.AGENTS.keys() == {"agy", "claude", "codex"}
+        assert agent.AGENTS.keys() == {"agy", "claude"}
         print("PASS adaptive-agent: laptop environment, shared sessions, one terminal per screen")
     finally:
         for client in clients:

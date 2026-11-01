@@ -1,9 +1,9 @@
-"""Codex plans; Claude verifies, dispatches and reviews through one long-lived manager session.
+"""Claude plans, dispatches and reviews through one long-lived manager session.
 
-For owner work requests, autopilot follow-ups and meeting action items, a fresh tool-free Codex turn
-drafts the plan first. Claude receives the draft, corrects it where necessary, and only then may use
-the `office` CLI to dispatch it. The manager checks that every available staff agent has useful work
-before it reports completion. Claude also reviews finished work (autopilot) and chairs meetings.
+For owner work requests, autopilot follow-ups and meeting action items, Claude decides whether staff
+work is needed, plans it and dispatches it with the `office` CLI. When a turn assigned work, the manager
+checks that every available staff agent has useful work before it reports completion. Claude also
+reviews finished work (autopilot) and chairs meetings.
 
 Models (config.json "manager"): every turn runs on "model" (Sonnet). A turn goes to "complex_model"
 (Opus, capped at Opus 5) only when it needs it: the owner asks for it ("opus:", "think hard"), or
@@ -16,7 +16,7 @@ import re
 import signal
 import time
 
-from . import agy, codex, operator
+from . import agy, operator
 from .config import COMPANY, HOME, ROOT
 
 ALLOWED = ["Bash(office:*)", "Bash(office *)", "Read", "Glob", "Grep", "LS",
@@ -27,9 +27,6 @@ LIMIT_RETRY_S = 10 * 60
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_COMPLEX_MODEL = "claude-opus-5"
 ESCALATE = "ESCALATE_TO_OPUS"
-WORK_PLAN = "WORK_PLAN"
-NO_WORK_PLAN = "NO_WORK_PLAN"
-PLAN_GATE = "[office plan gate]"
 PLAN_KINDS = ("chat", "autopilot", "minutes")
 ROTATE_CONTEXT = 120_000        # start a fresh session once one call re-reads more context than this
 _OPUS_ASK_RE = re.compile(r"(^|\]:)\s*(opus\s*[:,]|/opus\b)|\b(think hard|think deeply|use opus|deep dive)\b", re.I)
@@ -38,12 +35,6 @@ _LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|resets? (at|in)|ov
 
 def _usage_limited(err):
     return bool(err and _LIMIT_RE.search(err))
-
-
-def _plan_marker(text):
-    """The planner must make the work/no-work decision explicit; an ambiguous draft cannot dispatch."""
-    first = next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
-    return first if first in (WORK_PLAN, NO_WORK_PLAN) else ""
 
 
 class Manager:
@@ -55,7 +46,6 @@ class Manager:
         self.busy = False
         self.proc = None
         self.pids = set()           # running manager processes: the server tells their `office` calls apart
-        self.planner_run = None
         self.finished = []          # tasks waiting for an autopilot review
         self._flush_handle = None
         self._cancelled = False
@@ -143,8 +133,6 @@ class Manager:
 
     def cancel(self):
         self._cancelled = True
-        if self.planner_run:
-            self.planner_run.cancel()
         if self.proc and self.proc.returncode is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)
@@ -160,35 +148,20 @@ class Manager:
                 continue
             prompt, kind, fut = job
             self.busy, self._cancelled, self._held_now = True, False, False
-            work_plan = prompt.startswith(PLAN_GATE) and f"\n{WORK_PLAN}\n" in prompt
+            started = time.time()
             try:
-                if kind in PLAN_KINDS and not prompt.startswith(PLAN_GATE):
-                    await self.o.activity(self.id, "think", "Codex is drafting the plan")
-                    draft, plan_err = await self._codex_plan(prompt, kind)
-                    marker = _plan_marker(draft)
-                    if plan_err or not marker:
-                        prompt = self._planning_failed_prompt(prompt, plan_err or
-                                                              "the draft did not declare WORK_PLAN or NO_WORK_PLAN")
-                        work_plan = False
-                    else:
-                        work_plan = marker == WORK_PLAN
-                        prompt = self._verification_prompt(prompt, draft, kind)
-                    if self._cancelled:
-                        raise RuntimeError("cancelled")
-                    await self.o.activity(self.id, "think", "Claude is verifying and correcting the plan")
-                else:
-                    await self.o.activity(self.id, "think", {"chat": "Thinking about your message",
-                                                             "autopilot": "Reviewing finished work",
-                                                             "meeting": "Listening in the meeting",
-                                                             "minutes": "Writing meeting minutes"}.get(kind, "Thinking"))
+                await self.o.activity(self.id, "think", {"chat": "Thinking about your message",
+                                                         "autopilot": "Reviewing finished work",
+                                                         "meeting": "Listening in the meeting",
+                                                         "minutes": "Writing meeting minutes"}.get(kind, "Thinking"))
                 text, err = await self._turn(prompt, kind)
-                if work_plan and text and not err and not self._cancelled:
+                if kind in PLAN_KINDS and text and not err and not self._cancelled and self._assigned_since(started):
                     missing = self._unoccupied_agents()
                     if missing:
                         names = ", ".join(f"{aid} ({self.o.agents[aid]['role']})" for aid in missing)
-                        await self.o.activity(self.id, "think", "Claude is filling gaps in the verified plan")
+                        await self.o.activity(self.id, "think", "Claude is filling gaps in the plan")
                         fix, fix_err = await self._turn(
-                            f"{PLAN_GATE}\nYour verified plan left these staff agents without running or queued "
+                            f"[office coverage check]\nYour plan left these staff agents without running or queued "
                             f"work: {names}. Correct that now. Assign each one a useful, non-duplicative task that "
                             "advances the owner's original goal. Existing active study programs count as work and "
                             "will not appear in this list. Do not report completion until every listed agent has a "
@@ -232,100 +205,9 @@ class Manager:
                 await self.o.activity(self.id, "error", f"Claude turn failed: {err[:150]}")
             await self.o.activity(self.id, "done" if text else "error", "Ready" if text else "Turn failed")
 
-    # ------------------------------------------------------------------ plan gate
-    def _planning_context(self):
-        lines = []
-        for aid, a in self.o.agents.items():
-            rt = self.o.rt[aid]
-            queued = self.o.store.next_queued(aid)
-            current = f"running #{rt['task']['id']} {rt['task']['title']}" if rt["task"] else "free"
-            if queued:
-                current += "; queued: " + "; ".join(f"#{t['id']} {t['title']}" for t in queued[:4])
-            studies = [p["title"] for p in self.o.study.for_agent(aid) if self.o.study.state(p["id"])["active"]]
-            if studies:
-                current += "; active study: " + "; ".join(studies)
-            lines.append(f"- {aid}: {a['name']}, {a['role']} — {current}. Strength: {a['brief']}")
-        return "\n".join(lines)
-
-    async def _codex_plan(self, request, kind):
-        """Run a fresh, tool-free Codex turn. It can propose work but cannot assign or execute any of it."""
-        pid = self.cfg.get("planner_provider", "codex")
-        p = self.o.providers.get(pid)
-        if not p or p.get("engine") != "codex":
-            return "", f"planner provider {pid!r} is not a Codex provider"
-        if self.o.provider_paused(pid, tools=False):
-            return "", f"{self.o._label(pid)} is out of quota"
-        prompt = f"""You are the planning stage for {self.o.company}. You cannot run tools or assign work. Claude
-will independently verify and correct your draft before any task starts.
-
-Classify the input first. If it is a question, status request, casual conversation, or needs no staff work, output
-exactly {NO_WORK_PLAN} on the first line, then a short note explaining what Claude should answer or do itself.
-If it calls for staff work, output exactly {WORK_PLAN} on the first line, then a concise execution plan.
-
-For a work plan:
-- Map every staff id below to either existing work that already advances this goal or one new, useful,
-  non-duplicative task. An active study program counts as work; otherwise no staff member may be left free.
-- Match tasks to roles, give each a concrete deliverable and acceptance criteria, and identify dependencies.
-- Preserve the owner's scope. Do not invent permission to publish, push, buy, contact people, use credentials,
-  or change a repository. Name a writable repo only when the owner explicitly requested changes to it.
-- End with a Coverage section containing every staff id exactly once.
-
-Current staff and workload:
-{self._planning_context()}
-
-Input kind: {kind}
-Input for Claude:
-{request}
-"""
-        cfg = dict(p, web_search=False)
-
-        async def on_event(event, _text):
-            if event == "think":
-                await self.o.activity(self.id, "think", "Codex is refining the plan")
-
-        self.planner_run = codex.CodexRun(
-            prompt, agent_name="Codex Planner", agent_id="planner", provider=pid, cfg=cfg,
-            timeout_min=self.cfg.get("planner_timeout_min", 10), on_event=on_event, tools=False,
-            reasoning=self.cfg.get("planner_reasoning", "medium"))
-        try:
-            result = await self.planner_run.wait()
-        finally:
-            self.planner_run = None
-        if result.quota:
-            await self.o.provider_quota(pid, None, result.error)
-        return (result.text.strip(), "") if result.ok else ("", result.error or "Codex planning failed")
-
-    def _verification_prompt(self, request, draft, kind):
-        return f"""{PLAN_GATE}
-The office has completed its non-executing Codex planning stage. No task has been assigned yet.
-
-ORIGINAL INPUT ({kind}):
-{request}
-
-CODEX DRAFT (untrusted until you verify it):
-{draft}
-
-You are the verification and dispatch stage. Check the draft against the original input, current office status,
-agent roles, dependencies, safety and scope. Correct any wrong owner, missing step, duplicated work, bad dependency,
-unsafe action or unnecessary task. Do not ask Codex to revise it.
-
-If the first draft line is {NO_WORK_PLAN}, answer or handle the non-work request normally and do not assign tasks.
-If it is {WORK_PLAN}, only after you are satisfied with the corrected plan, assign it with `office assign`. Ensure
-every staff agent ends with useful goal-aligned work: already running/queued work or an active study counts; assign
-each remaining free agent at least one task. Dependencies may be queued with --after. Do not merely describe the
-plan: dispatch it, then give the owner a short summary of the corrected plan and assignments.
-"""
-
-    def _planning_failed_prompt(self, request, error):
-        return f"""{PLAN_GATE}
-The required Codex planning stage failed: {error}.
-Original input:
-{request}
-
-The planning gate is mandatory. Do not assign, retry or start staff work without a Codex draft. You may still
-answer a non-work question or report current status. If this input asks for work, tell the owner briefly that no
-tasks were dispatched because Codex planning is unavailable.
-"""
+    # ------------------------------------------------------------------ coverage
+    def _assigned_since(self, started):
+        return any(t["created_by"] in ("manager", "meeting") for t in self.o.store.tasks(created_since=started))
 
     def _unoccupied_agents(self):
         active_study = {p["agent"] for p in self.o.study.programs.values()
@@ -357,17 +239,18 @@ Your shell runs only `office`, the same in meetings as in chat: one plain `offic
 already in the workspace, so no `cd`, `mkdir`, shell variables, `;`/`&&` chains or heredocs - a compound command is
 denied as a whole. To give several people a shared brief, repeat it inside each one's --body (one assign per call).
 How to manage well:
-- Codex is the planner. For owner work, autopilot follow-ups and meeting action items, never assign anything until
-  the office gives you an `[office plan gate]` message containing Codex's draft. Verify it, correct it yourself,
-  then dispatch the corrected plan. For WORK_PLAN, keep every staff agent occupied with useful work; active study
-  and existing running or queued work count. Chain dependent work with --after (e.g. spec -> build -> test).
+- You are the planner. A question, status request or casual message needs no staff work: just answer it. When owner
+  work, an autopilot follow-up or a meeting action item does need staff, plan it yourself, then dispatch it with
+  `office assign` rather than merely describing it: match tasks to roles, give each a concrete deliverable and
+  acceptance criteria, and keep to the owner's scope. Name a writable repo only when the owner explicitly asked for
+  changes to it. Keep every staff agent occupied with useful work; active study and existing running or queued work
+  count. Chain dependent work with --after (e.g. spec -> build -> test). Then give the owner a short summary.
 - Agents cannot ask questions mid-task, so put everything they need in --body.
 - Every agent can read and write non-secret files throughout {HOME}; credentials and private Office records are
   inaccessible. Keep changes within the owner's requested scope and use `office repos` to list repositories.
   Nobody pushes, pulls or fetches - the owner does that.
 - Coordinate; don't do the team's work yourself. Review their output by reading the files. Send work back with specific fixes when it falls short. Have Omar test or review engineering work before you call it done.
 - Every task spends the owner's Gemini quota: no busywork, no duplicate tasks. Check `office status` before assigning.
-- Codex (GPT) is about as capable as Gemini and has the same tools; tasks continue normally on it.
 - A local model is much weaker and slower than Gemini (a few billion parameters on the laptop's CPU). While agents run on it, give small, concrete, well-specified tasks, expect simpler output, and review it more carefully.
 - Never touch credentials, never publish, push, buy or send anything outside this machine unless the owner explicitly asks.
 Your replies appear in the office chat and may be read aloud: plain conversational text, short, most important thing first, no tables.

@@ -11,8 +11,8 @@ the other's conversation.
 Providers: every agent runs on the office's provider (settings "provider", or the agent's own "provider" in
 config.json). When that provider is out of quota and a "fallback" is set, agents carry on with the fallback
 until the quota resets. A provider can name its own "fallback" in config.json, which makes a chain:
-Gemini -> Codex -> Claude Haiku -> local; each turn runs on the first provider in the chain that can take work.
-Meetings can have their own: "meeting_provider" (e.g. Codex) answers every agent's meeting turn, and only those; while it is out of quota, meetings use the agent's usual provider.
+Gemini -> Claude Haiku -> local; each turn runs on the first provider in the chain that can take work.
+Meetings can have their own: "meeting_provider" answers every agent's meeting turn, and only those; while it is out of quota, meetings use the agent's usual provider.
 
 Pause: the owner can stop the whole office (settings "paused"). Running tasks are interrupted and go back in
 the queue with their conversation kept (kv "resume:<task id>"), so on resume they continue where they
@@ -26,7 +26,7 @@ import os
 import re
 import time
 
-from . import agy, claude_agent, codex, local
+from . import agy, claude_agent, local
 from .config import COMPANY, HOME
 from .manager import Manager
 from .quota import QuotaGuard
@@ -215,12 +215,12 @@ class Office:
 
     # ------------------------------------------------------------------ providers
     def provider_paused(self, pid, tools=True):
-        """Can't take work right now: Gemini, Codex or Claude out of quota, or a local server down or
+        """Can't take work right now: Gemini or Claude out of quota, or a local server down or
         without its model (unknown until the first status check, a second after start)."""
         p = self.providers.get(pid) or {}
         if p.get("engine") == "agy":
             return self.quota_until > time.time()
-        if p.get("engine") in ("claude", "codex"):
+        if p.get("engine") == "claude":
             return self.paused_until.get(pid, 0) > time.time()
         st = self.provider_status.get(pid)
         return not (st and st.get("up") and st.get("pulled"))
@@ -263,8 +263,7 @@ class Office:
         if self.providers[pid]["engine"] == "agy":
             await self.quota.hit(aid, error)
             return
-        mod = claude_agent if self.providers[pid]["engine"] == "claude" else codex
-        until = mod.reset_from_error(error) or time.time() + 3600
+        until = claude_agent.reset_from_error(error) or time.time() + 3600
         if until > self.paused_until.get(pid, 0):
             self.paused_until[pid] = until
             self.store.set("paused_until", self.paused_until)
@@ -319,10 +318,6 @@ class Office:
             run = local.LocalRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p, conv_id=conv_id,
                                  timeout_min=timeout_min, on_event=on_event, tools=tools, max_steps=max_steps,
                                  **opts)
-        elif p["engine"] == "codex":
-            run = codex.CodexRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p, conv_id=conv_id,
-                                 timeout_min=timeout_min, on_event=on_event, tools=tools,
-                                 reasoning=None if tools else p.get("meeting_reasoning"), **opts)
         elif p["engine"] == "claude":
             run = claude_agent.ClaudeRun(prompt, agent_name=a["name"], agent_id=aid, provider=pid, cfg=p,
                                          conv_id=conv_id, timeout_min=timeout_min, on_event=on_event, tools=tools,
@@ -1045,10 +1040,10 @@ class Office:
                 say = _clean_speech(r.text)
                 if say and say.upper().rstrip(".") != "PASS":
                     await self.post(f"meeting:{m['id']}", aid, say)
-            elif r.quota and self.providers[pid]["engine"] == "codex":
-                await self.provider_quota(pid, None, r.error)        # meetings fall back to the usual provider
+            elif r.quota and self.providers[pid]["engine"] != "agy":
+                await self.provider_quota(pid, None, r.error)        # the next turn moves down the chain
                 await self.post(f"meeting:{m['id']}", "system", f"{self._label(pid)} is out of quota for now; "
-                                                                "the team continues on their usual model.")
+                                                                "the team continues on another model.")
             elif r.quota:
                 await self.post(f"meeting:{m['id']}", "system", f"{a['name']} is out of Gemini quota for now.")
                 self._spawn(self.quota.hit(aid, r.error))

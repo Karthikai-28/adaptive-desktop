@@ -21,7 +21,7 @@ TICK_S = 30
 _RESETS_IN = re.compile(r"resets? in\s*(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?!s))?\s*(?:(\d+)\s*s)?", re.I)
 _USAGE_FAMILIES = {
     "gemini models": ("gemini", "Gemini"),
-    "claude and gpt models": ("claude-gpt", "Claude + GPT"),
+    "claude and gpt models": ("claude", "Claude"),     # the heading agy prints
 }
 
 

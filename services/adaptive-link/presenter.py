@@ -390,7 +390,6 @@ def list_available_decks(force=False):
     search_dirs = [
         Path.home() / "mke" / "mkeICC" / "presentations",
         Path.home() / "presentation",
-        Path.home() / "Documents" / "Codex",
         Path.home() / "Downloads" / "Presentations",
         Path.home() / "Documents",
         Path.home() / "Downloads",

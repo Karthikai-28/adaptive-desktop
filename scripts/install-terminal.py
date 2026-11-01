@@ -86,12 +86,11 @@ Icon=kterm-terminal
         previous = [line for line in previous if line not in ("terminal.desktop", "kterm-terminal.desktop", "terminator.desktop", "org.gnome.Terminal.desktop")]
         write(path, "\n".join(["terminal.desktop", "kterm-terminal.desktop", *previous]) + "\n")
 
-    # agy, claude and codex as apps: each opens one session the laptop and
+    # agy and claude as apps: each opens one session the laptop and
     # the phone (Adaptive Link) share. See terminal/agent.py.
     write(BIN / "adaptive-agent", (REPO / "terminal/agent.py").read_bytes(), 0o755)
     write(CONFIG / "karthi-shell/agents.tmux.conf", (REPO / "terminal/agents.tmux.conf").read_bytes())
     agents = {"claude": ("Claude Code", "Anthropic's coding agent", "claude;anthropic;"),
-              "codex": ("Codex", "OpenAI's coding agent", "codex;openai;gpt;"),
               "agy": ("Antigravity CLI", "Gemini through the Antigravity CLI", "agy;antigravity;gemini;google;")}
     for agent, (name, comment, keywords) in agents.items():
         entry = DATA / f"applications/adaptive-agent-{agent}.desktop"

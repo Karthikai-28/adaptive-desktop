@@ -23,7 +23,7 @@
   office meeting start "<topic>" --with maya,arjun[,claude]
   office meeting say "<text>" | office meeting invite a,b | office meeting end | office meeting show
   office study [status|pause|resume|now] [PROGRAM]  a learning program (e.g. Max studying the MKE repos)
-  office provider [ID] [--fallback ID|none]       which model provider agents run on (gemini, codex, haiku, local)
+  office provider [ID] [--fallback ID|none]       which model provider agents run on (gemini, haiku, local)
   office tokens [--since 24h] [--provider ID]     token usage, split by provider
   office autopilot on|off | office pause | office resume
   office open                                     open the office in the browser

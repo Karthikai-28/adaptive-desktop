@@ -459,9 +459,6 @@ finish() {
             sudo tailscale up || true
         fi
     fi
-    if ! command -v codex >/dev/null; then
-        note "optional: the Codex CLI (the office's first backup) is not installed; see docs/AGENT_OFFICE.md"
-    fi
     echo
 
     bold "== your phone"

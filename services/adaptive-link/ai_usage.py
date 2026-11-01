@@ -1,6 +1,6 @@
 """Read the desktop's existing AI-plan usage snapshot for a paired phone.
 
-The shell already has one source of truth for Codex, Claude and Gemini usage.
+The shell already has one source of truth for Claude and Gemini usage.
 Only its display data is returned here: never its watched file paths or other
 machine-local implementation details.
 """
@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 
 
-PROVIDERS = ("codex", "claude", "gemini")
+PROVIDERS = ("claude", "gemini")
 SNAPSHOT = Path(__file__).resolve().parents[2] / "shell" / "adaptive-shell@local" / "quotaSnapshot.py"
 _reader = None
 _reader_lock = threading.Lock()

@@ -17,45 +17,6 @@ class SnapshotTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
-    def record(self, name='one', stamp='2026-10-12T00:00:00Z', used=25, limit='codex'):
-        data = {'timestamp': stamp, 'payload': {'type': 'token_count', 'rate_limits': {
-            'limit_id': limit, 'primary': {'used_percent': used, 'window_minutes': 300, 'resets_at': 2000000000},
-            'secondary': {'used_percent': 40, 'window_minutes': 10080, 'resets_at': 2100000000}}}}
-        (self.root / f'rollout-{name}.jsonl').write_text(json.dumps(data) + '\n{"unfinished"')
-
-    def test_missing(self):
-        self.assertEqual(quota.codex_snapshot(self.root)['windows'], [])
-
-    def test_windows_and_partial_line(self):
-        self.record()
-        sources = []
-        data = quota.codex_snapshot(self.root, now=1791763200, source_out=sources)
-        self.assertEqual([w['used'] for w in data['windows']], [25, 40])
-        self.assertEqual([w['label'] for w in data['windows']], ['5h', 'Weekly'])
-        self.assertFalse(data['stale'])
-        self.assertEqual(sources, [self.root / 'rollout-one.jsonl'])
-
-    def test_stale_and_expired_do_not_assume_refill(self):
-        self.record(used=100)
-        data = quota.codex_snapshot(self.root, now=2050000000)
-        self.assertTrue(data['stale'])
-        self.assertTrue(data['windows'][0]['expired'])
-        self.assertEqual(data['windows'][0]['used'], 100)
-        self.assertFalse(data['windows'][1]['expired'])
-
-    def test_newest_timestamp_not_file_order(self):
-        self.record('newer', '2026-10-12T01:00:00Z', 80)
-        self.record('older', used=20)
-        self.assertEqual(quota.codex_snapshot(self.root)['windows'][0]['used'], 80)
-
-    def test_separate_limit_bucket(self):
-        self.record(limit='other-product')
-        self.assertEqual(quota.codex_snapshot(self.root)['windows'], [])
-
-    def test_invalid_percentage(self):
-        self.record(used=-1)
-        self.assertEqual(len(quota.codex_snapshot(self.root)['windows']), 1)
-
     # ---- Claude: Claude Code's cached plan usage; nothing else from the file comes out
     def claude_config(self, cached):
         path = self.root / 'claude.json'
@@ -87,9 +48,9 @@ class SnapshotTests(unittest.TestCase):
         path = self.claude_config({'fetchedAtMs': 1791763200000, 'utilization': {
             'seven_day': {'utilization': 31.5, 'resets_at': '2026-10-16T13:59:59+00:00'}}})
         office = {'ts': 1791763260, 'rows': [
-            {'family': 'claude-gpt', 'window': '5h', 'percent': 75,
+            {'family': 'claude', 'window': '5h', 'percent': 75,
              'resets': '2026-10-12T06:29:59Z'},
-            {'family': 'claude-gpt', 'window': 'week', 'percent': 10,
+            {'family': 'claude', 'window': 'week', 'percent': 10,
              'resets': '2026-10-16T20:18:26Z'}]}
         data = quota.claude_snapshot(path, now=1791763260, office=office)
         self.assertEqual([(w['label'], w['used']) for w in data['windows']],
@@ -97,7 +58,7 @@ class SnapshotTests(unittest.TestCase):
 
     def test_claude_office_fills_all_windows_without_local_cache(self):
         office = {'ts': 1791763260, 'rows': [
-            {'family': 'claude-gpt', 'window': '5h', 'remaining': '100%',
+            {'family': 'claude', 'window': '5h', 'remaining': '100%',
              'resets': '2026-10-12T06:29:59Z'}]}
         data = quota.claude_snapshot(self.root / 'nope.json', now=1791763260, office=office)
         self.assertEqual([(w['label'], w['used']) for w in data['windows']], [('5h', 0)])
@@ -109,7 +70,7 @@ class SnapshotTests(unittest.TestCase):
              'resets': '2026-10-15T20:18:26Z'},
             {'family': 'gemini', 'window': '5h', 'remaining': '0%', 'percent': 0,
              'resets': '2026-10-12T02:43:41Z'},
-            {'family': 'claude-gpt', 'window': 'week', 'remaining': '2%', 'percent': 2,
+            {'family': 'claude', 'window': 'week', 'remaining': '2%', 'percent': 2,
              'resets': '2026-10-16T20:18:26Z'},
             {'family': 'gemini', 'window': '5h', 'remaining': 'disabled', 'percent': None,
              'resets': ''}]}, now=1791763300)

@@ -355,7 +355,7 @@ function renderQuota() {
     const cls = disabled ? 'disabled' : pct == null ? '' : pct < 10 ? 'out' : pct < 30 ? 'low' : '';
     const date = r.resets ? new Date(r.resets) : null;
     const reset = date && !Number.isNaN(date.getTime()) ? ` · resets ${date.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
-    const label = r.label || (r.family === 'claude-gpt' ? 'Claude + GPT' : 'Gemini');
+    const label = r.label || (r.family === 'claude' ? 'Claude' : 'Gemini');
     const limit = r.window === 'week' ? 'weekly' : r.window === '5h' ? '5-hour' : r.window;
     const title = disabled ? `${label} ${limit} limit is disabled` : `${label} ${limit} limit remaining${reset}`;
     q.append(h('span', { class: `q ${cls}`, title }, `${label} ${r.window}`,
@@ -546,7 +546,7 @@ async function renderBody() {
     V.chat = h('div', { class: 'chat' });
     const msgs = S.threads[th];
     if (!msgs.length) V.chat.append(h('div', { class: 'empty' }, id === MGR
-      ? `Tell Claude what you want built, researched or written. Codex drafts the plan; Claude verifies and corrects it, then puts the whole team to work and reports back.`
+      ? `Tell Claude what you want built, researched or written. Claude plans it, puts the whole team to work and reports back.`
       : `Say hi to ${S.roster[id].name}. Messages are answered right away, even while they work on tasks.`));
     for (const m of msgs) V.chat.append(msgEl(m, false));
     V.typing = h('div', { class: 'typing hidden' }, h('i'), h('i'), h('i'));
@@ -881,7 +881,7 @@ function openAssign(agent) {
     h('label', { class: 'f' }, 'Project'), project, h('datalist', { id: 'projlist' }, ...projects.map(p => h('option', { value: p }))),
     h('label', { class: 'f' }, 'Writable repo'), repo, repolist,
     h('label', { class: 'f' }, 'When'), after,
-    h('div', { class: 'hintline' }, 'Every agent can read every repo on the laptop; only the repo named here can be changed, and nobody pushes. Tip: tell Claude what you want — Codex drafts the plan, then Claude verifies and dispatches it.')),
+    h('div', { class: 'hintline' }, 'Every agent can read every repo on the laptop; only the repo named here can be changed, and nobody pushes. Tip: tell Claude what you want — Claude plans it and dispatches the work.')),
   [h('button', { class: 'act', style: 'flex:none;padding:0 16px', onclick: closeModal }, 'Cancel'), go]);
 }
 
@@ -1301,7 +1301,7 @@ function openSettings() {
   lang.onchange = () => { prefs.lang = lang.value; savePrefs(); mic?.stop(); mic = null; micOwner = null; };
   const body = h('div', null,
     h('div', { class: 'section' }, 'Company'),
-    sw('Autopilot', 'Codex plans follow-ups; Claude verifies them, dispatches corrections and reports back.', S.settings.autopilot, v => api('POST', '/api/settings', { autopilot: v }).then(s => { S.settings = s; })),
+    sw('Autopilot', 'Claude reviews finished work, dispatches follow-ups and corrections, and reports back.', S.settings.autopilot, v => api('POST', '/api/settings', { autopilot: v }).then(s => { S.settings = s; })),
     sw('Pause the office', 'Every agent stops: running tasks, replies, meetings and Claude wait, and continue where they stopped when you resume, even after a restart.', S.settings.paused, v => setPaused(v)),
     h('label', { class: 'switch' }, h('div', null, 'Agents working at the same time', h('small', null, 'More is faster but spends Gemini quota quicker.')), par),
     h('label', { class: 'switch' }, h('div', null, 'Agents run on', h('small', null, 'Gemini on your AI Pro plan, or a local model through Ollama (private, free, much slower and weaker).')), prov),

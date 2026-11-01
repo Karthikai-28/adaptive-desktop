@@ -5,8 +5,7 @@ Never opens account credentials and never calls a remote API. Each provider come
   {"ts": <when the provider recorded it>, "stale": bool, "error": "",
    "windows": [{"label": "5h" | "Weekly" | ..., "used": 0-100, "resetsAt": <unix>, "expired": bool}]}
 
-  codex   the rate_limits Codex writes into its session rollouts (~/.codex/sessions)
-  claude  Claude Code's cached usage, completed with Claude + GPT rows from Agent Office
+  claude  Claude Code's cached usage, completed with the Claude rows from Agent Office
   gemini  agy's /usage, as the Agent Office serves it on its loopback port
 
 A window whose reset time has passed is marked expired: the record says nothing about it since, so
@@ -22,7 +21,7 @@ import time
 import urllib.request
 
 OFFICE_USAGE = 'http://127.0.0.1:8790/api/usage'
-STALE_S = {'codex': 900, 'claude': 3600, 'gemini': 900}
+STALE_S = {'claude': 3600, 'gemini': 900}
 
 
 def _empty(error=''):
@@ -47,58 +46,6 @@ def _iso(s):
         return dt.datetime.fromisoformat(text).timestamp()
     except ValueError:
         return None
-
-
-def codex_snapshot(root, now=None, source_out=None):
-    now = time.time() if now is None else now
-    latest = None
-    # Bounded tails keep polling cheap and avoid loading conversation histories.
-    try:
-        files = sorted(root.glob('**/rollout-*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)[:20]
-    except OSError:
-        files = []
-    for path in files:
-        try:
-            with path.open('rb') as stream:
-                stream.seek(max(0, path.stat().st_size - 524288))
-                lines = stream.read().splitlines()
-            for line in reversed(lines):
-                if b'"rate_limits"' not in line:
-                    continue
-                try:
-                    record = json.loads(line)
-                    payload = record.get('payload', {})
-                    limits = payload.get('rate_limits')
-                    if payload.get('type') != 'token_count' or not isinstance(limits, dict):
-                        continue
-                    if limits.get('limit_id') not in (None, 'codex'):
-                        continue
-                    stamp = _iso(record['timestamp'])
-                    if stamp is not None and (latest is None or stamp > latest[0]):
-                        latest = (stamp, limits, path)
-                    break
-                except (ValueError, KeyError, TypeError, AttributeError):
-                    continue
-        except OSError:
-            continue
-    if latest is None:
-        return _empty('No Codex session has recorded its limits yet')
-    stamp, limits, source = latest
-    if source_out is not None:
-        source_out.append(source)
-    result = {'ts': stamp, 'stale': now - stamp > STALE_S['codex'], 'error': '', 'windows': []}
-    for key in ('primary', 'secondary'):
-        window = limits.get(key)
-        if not isinstance(window, dict):
-            continue
-        minutes = window.get('window_minutes')
-        if not _num(minutes) or minutes <= 0:
-            continue
-        name = 'Weekly' if minutes == 10080 else f'{minutes / 60:g}h'
-        w = _window(name, window.get('used_percent'), window.get('resets_at'), now)
-        if w:
-            result['windows'].append(w)
-    return result
 
 
 CLAUDE_WINDOWS = (('five_hour', '5h'), ('seven_day', 'Weekly'),
@@ -153,11 +100,11 @@ def claude_snapshot(config, now=None, office=None):
     except (OSError, ValueError, AttributeError):
         local = _empty('Claude Code settings not found')
         return _merge_windows(local, _office_family_snapshot(
-            office, 'claude-gpt', 'claude', now, 'The Agent Office is not running'))
+            office, 'claude', 'claude', now, 'The Agent Office is not running'))
     if not isinstance(cached, dict) or not isinstance(cached.get('utilization'), dict):
         local = _empty('Claude Code has not fetched plan usage yet')
         return _merge_windows(local, _office_family_snapshot(
-            office, 'claude-gpt', 'claude', now, 'The Agent Office is not running'))
+            office, 'claude', 'claude', now, 'The Agent Office is not running'))
     stamp = cached.get('fetchedAtMs')
     stamp = stamp / 1000 if _num(stamp) else 0
     result = {'ts': stamp, 'stale': now - stamp > STALE_S['claude'], 'error': '', 'windows': []}
@@ -168,7 +115,7 @@ def claude_snapshot(config, now=None, office=None):
             if w:
                 result['windows'].append(w)
     office_result = _office_family_snapshot(
-        office, 'claude-gpt', 'claude', now, 'The Agent Office is not running')
+        office, 'claude', 'claude', now, 'The Agent Office is not running')
     return _merge_windows(result, office_result)
 
 
@@ -190,19 +137,10 @@ def snapshot(refresh=False):
     except (OSError, ValueError):
         office = None
     home = Path.home()
-    codex_sources = []
-    codex = codex_snapshot(home / '.codex' / 'sessions', source_out=codex_sources)
     claude_config = home / '.claude.json'
-    watch = {'claude': str(claude_config)}
-    if codex_sources:
-        watch['codex'] = str(codex_sources[0])
-        # A newly started Codex session creates a sibling rollout. Watching the
-        # directory lets the shell discover it without waiting for a timer.
-        watch['codexDirectory'] = str(codex_sources[0].parent)
-    return {'codex': codex,
-            'claude': claude_snapshot(claude_config, office=office),
+    return {'claude': claude_snapshot(claude_config, office=office),
             'gemini': gemini_snapshot(office),
-            '_watch': watch}
+            '_watch': {'claude': str(claude_config)}}
 
 
 if __name__ == '__main__':

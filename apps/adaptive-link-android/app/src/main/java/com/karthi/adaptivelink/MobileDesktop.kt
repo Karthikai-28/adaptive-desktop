@@ -120,7 +120,7 @@ private fun usageColour(used: Double) = when {
 @Composable
 private fun AiUsageCard(usage: JSONObject?, loading: Boolean, message: String, retry: () -> Unit) {
     var weekly by remember { mutableStateOf(false) }
-    val providers = listOf("codex" to "Codex", "claude" to "Claude", "gemini" to "Gemini")
+    val providers = listOf("claude" to "Claude", "gemini" to "Gemini")
     fun window(provider: JSONObject?, week: Boolean): JSONObject? = provider?.optJSONArray("windows").rows()
         .firstOrNull { !it.optBoolean("expired") && it.optString("label").startsWith("Weekly", true) == week }
     Surface(

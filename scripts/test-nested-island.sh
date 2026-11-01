@@ -141,11 +141,10 @@ island.contract({
     surfacedEvent: {
         type: 'QUOTA_CAUTION_BREACH',
         priority: 2,
-        payload: { message: 'Codex 5h limit 82% used', source: 'codex', used: 82 }
+        payload: { message: 'Claude 5h limit 82% used', source: 'claude', used: 82 }
     },
     multiActivity: { primary: null, secondary: null },
     quota: {
-        codex: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 78, resetsAt: Date.now() / 1000 + 9000 }, { label: 'Weekly', used: 28, resetsAt: Date.now() / 1000 + 400000 }] },
         claude: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 17, resetsAt: Date.now() / 1000 + 12000 }, { label: 'Weekly', used: 31, resetsAt: Date.now() / 1000 + 300000 }] },
         gemini: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 100, resetsAt: Date.now() / 1000 + 3000 }, { label: 'Weekly', used: 85, resetsAt: Date.now() / 1000 + 250000 }] },
         cautionBreach: true,
@@ -248,7 +247,6 @@ const state = {
     surfacedEvent: null,
     multiActivity: { primary: null, secondary: null },
     quota: {
-        codex: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 78, resetsAt: Date.now() / 1000 + 9000 }, { label: 'Weekly', used: 28, resetsAt: Date.now() / 1000 + 400000 }] },
         claude: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 17, resetsAt: Date.now() / 1000 + 12000 }, { label: 'Weekly', used: 31, resetsAt: Date.now() / 1000 + 300000 }] },
         gemini: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 100, resetsAt: Date.now() / 1000 + 3000 }, { label: 'Weekly', used: 85, resetsAt: Date.now() / 1000 + 250000 }] },
         cautionBreach: false,
@@ -360,7 +358,6 @@ const state = {
     surfacedEvent: null,
     multiActivity: { primary: null, secondary: null },
     quota: {
-        codex: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 82, resetsAt: Date.now() / 1000 + 9000 }, { label: 'Weekly', used: 40, resetsAt: Date.now() / 1000 + 400000 }] },
         claude: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 28, resetsAt: Date.now() / 1000 + 12000 }, { label: 'Weekly', used: 55, resetsAt: Date.now() / 1000 + 300000 }] },
         gemini: { ts: Date.now() / 1000, windows: [{ label: '5h', used: 12, resetsAt: Date.now() / 1000 + 3000 }, { label: 'Weekly', used: 60, resetsAt: Date.now() / 1000 + 250000 }] },
         cautionBreach: true,

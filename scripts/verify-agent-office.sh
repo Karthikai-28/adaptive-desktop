@@ -45,12 +45,9 @@ for k in ("model", "complex_model"):
 assert "sonnet" in (m.get("model") or "claude-sonnet-5-5"), "manager model must be Sonnet; Opus is only the complex_model"
 provs = cfg.get("providers") or {"gemini": {"engine": "agy", "model": cfg.get("gemini_model")}}
 for pid, pv in provs.items():
-    assert pv.get("engine") in ("agy", "ollama", "codex", "claude") and pv.get("model"), f"provider {pid}: needs engine agy|ollama|codex|claude and a model"
+    assert pv.get("engine") in ("agy", "ollama", "claude") and pv.get("model"), f"provider {pid}: needs engine agy|ollama|claude and a model"
     assert "@" not in pid and pid != "claude", f"provider id {pid!r} is reserved or invalid"
 assert any(pv["engine"] == "agy" for pv in provs.values()), "keep one agy (Gemini) provider"
-planner = m.get("planner_provider", "codex")
-assert planner in provs and provs[planner]["engine"] == "codex", "manager planner_provider must be Codex"
-assert m.get("planner_reasoning", "medium") in ("low", "medium", "high"), "invalid planner_reasoning"
 for k in ("provider", "fallback"):
     assert not cfg.get(k) or cfg[k] in provs, f"{k} {cfg.get(k)!r} is not a provider"
 for a in cfg["agents"]:
@@ -58,21 +55,6 @@ for a in cfg["agents"]:
 used = [a["desk"] for a in cfg["agents"]]
 assert len(used) == len(set(used)), "two agents share a desk"
 print(f"roster ok: {len(ids)} agents + {cfg['manager']['name']}; providers: {', '.join(provs)}")
-PY
-OFFICE_STATE="$TMP/plan-gate" PYTHONPATH="$APP" python3 - <<'PY' || fail "manager plan gate"
-from office.codex import CodexRun, TALK_ONLY
-from office.manager import NO_WORK_PLAN, PLAN_GATE, WORK_PLAN, _plan_marker
-
-assert _plan_marker(f"{WORK_PLAN}\n- task") == WORK_PLAN
-assert _plan_marker(f"\n{NO_WORK_PLAN}\nanswer") == NO_WORK_PLAN
-assert not _plan_marker("Here is a plan without the required gate")
-assert PLAN_GATE.startswith("[office")
-run = CodexRun("plan", agent_name="Codex Planner", agent_id="planner", provider="codex",
-               cfg={"model": "test", "web_search": False}, tools=False, reasoning="medium")
-cmd = run._cmd()
-assert all(any(x == f or x.endswith(f"={f}") for x in cmd) for f in TALK_ONLY), cmd
-assert 'sandbox_mode="read-only"' in cmd and 'web_search="disabled"' in cmd, cmd
-assert not any("permissions.office.filesystem" in x for x in cmd), cmd
 PY
 PYTHONPATH="$APP" python3 - <<'PY' || fail "usage parser"
 from office.quota import QuotaGuard, parse_usage
@@ -85,7 +67,7 @@ Claude and GPT models\tFive Hour Limit Remaining\tdisabled\t
 rows = parse_usage(raw)
 assert [(r["family"], r["window"], r["percent"]) for r in rows] == [
     ("gemini", "week", 17), ("gemini", "5h", None),
-    ("claude-gpt", "week", 42), ("claude-gpt", "5h", None),
+    ("claude", "week", 42), ("claude", "5h", None),
 ], rows
 assert rows[1]["remaining"] == "disabled"
 guard = object.__new__(QuotaGuard)
@@ -244,9 +226,8 @@ def office(store):
     o._run = run
     o.study.start = o.quota.start = o.graphs.start = o.ledger.start = lambda: None
     o._provider_loop = lambda: asyncio.sleep(0)
-    async def plan(prompt, kind): return "NO_WORK_PLAN\nnothing to dispatch", ""
     async def turn(prompt, kind): return "manager reply", ""
-    o.manager._codex_plan, o.manager._turn = plan, turn
+    o.manager._turn = turn
     return o
 
 async def settle(cond):
@@ -297,6 +278,30 @@ async def main():
     await settle(lambda: len(runs) == 3 and store.task(t2["id"])["status"] == "running")
     await o2.shutdown()                             # not paused: the task still continues after the restart
     assert store.task(t2["id"])["status"] == "queued" and store.get(f"resume:{t2['id']}")["conv"] == "conv-1"
+
+    # Claude plans by itself: only a turn that assigned work gets the coverage pass
+    o3 = office(store)
+    await o3.start()
+    prompts = []
+    async def answers(prompt, kind):
+        prompts.append(prompt)
+        return "an answer", ""
+    o3.manager._turn = answers
+    o3.manager.chat("how is it going?")
+    await settle(lambda: prompts and any(m["text"] == "an answer" for m in store.messages("manager")))
+    await asyncio.sleep(0.05)
+    assert len(prompts) == 1, "a turn that assigned nothing got a coverage pass"
+    async def assigns(prompt, kind):
+        prompts.append(prompt)
+        if len(prompts) == 2:
+            await o3.add_task(agent, "One job", "do it", "", "manager")
+        return "dispatched", ""
+    o3.manager._turn = assigns
+    o3.manager.chat("build it")
+    await settle(lambda: len(prompts) == 3)
+    assert prompts[2].startswith("[office coverage check]"), prompts[2]
+    assert all(a in prompts[2] for a in o3.agents if a != agent), prompts[2]
+    await o3.shutdown()
 
 asyncio.run(main())
 PY
@@ -468,7 +473,6 @@ curl -fsS "$B/api/study" | python3 -c 'import json,sys; json.load(sys.stdin)' ||
 # providers: switching is validated, the token ledger keeps every provider apart
 [ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"provider":"nope"}' "$B/api/settings")" = 400 ] || fail "unknown provider was accepted"
 curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["providers"] and d["settings"]["provider"] in [p["id"] for p in d["providers"]]' || fail "providers in state"
-curl -fsS "$B/api/tokens/agent/planner" | python3 -c 'import json,sys; assert json.load(sys.stdin)["summary"]["total"] == 0' || fail "planner token view"
 mkdir -p "$TMP/state/data/usage"
 echo '{"ts": 1700000000, "turn": 1700000000, "agent": "maya", "provider": "local", "model": "test", "kind": "chat", "fresh": 100, "cached": 0, "out": 20, "step": "answer"}' > "$TMP/state/data/usage/local.jsonl"
 sleep 11   # one ledger scan

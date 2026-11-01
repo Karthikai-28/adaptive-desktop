@@ -112,8 +112,7 @@ any time to go through it again.
 - Agent Office: http://127.0.0.1:8790 (Chrome, for voice input).
 - Things to record by hand on this machine (reboot, suspend, external
   monitor, TTY recovery): `scripts/record-live-verification.py status`.
-- Optional extras not installed for you: the Codex CLI (the office's first
-  backup, [AGENT_OFFICE.md](AGENT_OFFICE.md)) and KDE Connect/GSConnect.
+- Optional extra not installed for you: KDE Connect/GSConnect.
 
 ## If something goes wrong
 

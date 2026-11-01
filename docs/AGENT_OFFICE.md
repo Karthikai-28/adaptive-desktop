@@ -1,8 +1,7 @@
 # Agent Office
 
-A pixel-art office where an AI company works for you. **Codex plans** each work request, then
-**Claude verifies and corrects the plan** as the manager and your single point of contact. Only after
-that gate does Claude dispatch the staff. The staff are **Gemini 3.8 Flash (High)** agents running through the Antigravity
+A pixel-art office where an AI company works for you. **Claude plans** each work request and
+dispatches the staff, as the manager and your single point of contact. The staff are **Gemini 3.8 Flash (High)** agents running through the Antigravity
 CLI (`agy`) on your Google AI Pro subscription, so there is no API billing. When the Gemini quota runs
 out they carry on with a **local model** through Ollama ([Model providers](#model-providers-gemini-and-local-models-officelocalpy)).
 
@@ -46,7 +45,7 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 |---|---|
 | **Watch the team** | Each agent sits at a desk. The name-tag dot shows their state: green free, amber working, violet replying, blue in a meeting, red out of quota, grey paused. The bubble shows what they are doing now (typing, running a command, browsing, generating an image). Hover over someone for details, or click them for their card. Free agents wander to the kitchen and lounge. |
 | **Talk to anyone** | Click an agent, or walk up to them (WASD / arrows / click) and press **E**. They reply right away, even mid-task. Click the mic to speak; it sends when you pause. Replies are read aloud in each agent's own voice (🔊). |
-| **Ask Claude** | Tell Claude what you want. A tool-free Codex turn drafts the plan; Claude verifies and corrects it, then assigns useful work across the whole available team (chaining dependencies), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
+| **Ask Claude** | Tell Claude what you want. Claude plans it, then assigns useful work across the whole available team (chaining dependencies), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
 | **Meetings and calls** | **Call meeting** → pick people → everyone walks to the meeting room. Type or talk; agents answer out loud. Say a name ("Arjun, …") to ask one person. **Hands-free** keeps listening and pauses while agents speak. With Claude in the room, it chairs the meeting, writes minutes at the end and assigns the agreed action items. **Call** on an agent's card starts a 1:1 call. |
 | **Pause and resume** | **Pause** in the top bar stops every agent at once: running tasks, replies, meeting turns, study sessions and Claude. Nothing starts again until you press **Resume**; then each task continues its own conversation where it stopped. The pause survives a restart or reboot. Same as `office pause` / `office resume`. |
 | **Tasks** | Kanban board of every task with live activity, full reports, cancel and retry. |
@@ -117,13 +116,10 @@ office autopilot on|off · office pause · office resume · office open
   --output-format stream-json`. The tool-call events are the live activity you see. Each agent
   keeps separate agy conversations for its tasks, its direct messages and each meeting, so it can
   chat while it works.
-- **Plan gate.** Owner work requests, autopilot follow-ups and meeting action items first go to a
-  fresh Codex planning turn (`manager.planner_provider`, medium reasoning by default). That turn is
-  tool-free: it cannot run commands, edit files or assign tasks. It must mark the input `WORK_PLAN`
-  or `NO_WORK_PLAN` and account for every staff member. Claude then verifies and corrects the draft.
-  Only Claude can dispatch it. Afterward the manager checks that every agent without an active study
-  has running or queued work and asks Claude for an immediate correction pass if somebody was missed.
-  Planner usage appears separately as **Codex Planner** in the Tokens view.
+- **Planning.** Claude decides whether owner work requests, autopilot follow-ups and meeting action
+  items need staff at all, plans what does and dispatches it. After any turn that assigned work, the
+  manager checks that every agent without an active study has running or queued work and asks Claude
+  for an immediate correction pass if somebody was missed.
 - **Manager.** One long-lived Claude Code session (`claude -p --resume`) with a brief describing
   the team. It works only through the `office` command. Existing running/queued work and active study
   programs count as occupied; the scheduler's parallel-work setting still controls how many run at once.
@@ -191,7 +187,7 @@ office autopilot on|off · office pause · office resume · office open
   probes this from inside the sandbox).
 - **Quota.** Autopilot reviews are capped at 20 per hour and Claude may queue at most 40 tasks per
   hour. A typical task uses 50-100k tokens. The top bar shows the remaining 5-hour and weekly limits
-  for Gemini and Claude/GPT; a limit that the subscription disables is shown as off, not as 0%.
+  for Gemini and Claude; a limit that the subscription disables is shown as off, not as 0%.
 
 ## Knowledge graphs and token economy (`office/graphs.py`)
 
@@ -311,22 +307,12 @@ single-step tool-call checks (list a folder, write a file, run a command).
 Too big for this machine: `gpt-oss:20b` (14 GB), `qwen3:30b-a3b` (19 GB). Change the model with the local
 provider's `model` in `config.json` after `ollama pull <model>`, and restart the office.
 
-### Backup chain: Gemini -> Codex -> Claude Haiku -> local
+### Backup chain: Gemini -> Claude Haiku -> local
 
-`"fallback": "codex"`; the codex provider names `"fallback": "haiku"` and haiku names `"fallback": "local"`.
+`"fallback": "haiku"`, and haiku names `"fallback": "local"`.
 Each turn runs on the first provider in the chain that can take work. When one reports its usage limit it
 is paused until the reset named in the message (an hour if none) and turns move down the chain.
 `office provider` shows the chain; a fallback set with `office provider --fallback` overrides config.json.
-
-#### Codex (`office/codex.py`): GPT-5.6-Luna, low effort for work, medium for meetings
-
-Every Codex turn uses the operator's own `~/.codex` login, which the office never reads; the operator's
-Codex config, rules and AGENTS.md are ignored. Apps, plugins, browser, computer use and hooks are off.
-- **Meetings** (`"meeting_provider": "codex"`) are talk only: no shell or exec tools; live web search on.
-- **Work turns** (tasks, direct messages, study) run shell commands and file edits under a Codex permission
-  profile that grants the non-secret home folder read/write access, explicitly denies credential and private
-  Office paths, and keeps system folders read-only. `/run` is left out (session bus, keyring) apart from the
-  DNS resolver. `code_local_only` agents get no network and no web search.
 
 #### Claude Haiku (`office/claude_agent.py`)
 
