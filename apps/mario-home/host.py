@@ -5,7 +5,7 @@
                        every other window and on every workspace (started at login, Adaptive
                        session only)
     host.py --panel    the Mario panel: a window at the right edge, above the others; running it
-                       again while it is open closes it (Super+Space)
+                       again while it is open closes it (Super+J)
 
 Both load http://127.0.0.1:<port>/ from Mario Hub and retry until it answers. GTK 3 + WebKitGTK
 (gir1.2-webkit2-4.1, or 4.0), as on Ubuntu 22.04; X11, where GNOME 42 honours the desktop hint.
@@ -88,6 +88,7 @@ class Home(Gtk.Application):
         win.set_skip_taskbar_hint(True)
         win.set_skip_pager_hint(True)
         win.set_keep_below(True)
+        win.set_focus_on_map(False)   # appearing at login never takes focus from an app
         win.stick()
 
         def place(*_):
@@ -95,6 +96,20 @@ class Home(Gtk.Application):
             win.move(area.x, area.y)
             win.resize(area.width, area.height)
 
+        # The shell's dock hides for fullscreen or maximized windows and the top bar treats them
+        # as covering the screen. Home is neither: it fills the work area (which already leaves
+        # out the top bar, the rail and a fixed dock) and stays a plain desktop layer, so the
+        # dock, the top bar and everything on them keep working exactly as without it.
+        def stay_plain(_win, event):
+            state = event.new_window_state
+            if state & Gdk.WindowState.FULLSCREEN:
+                win.unfullscreen()
+            if state & Gdk.WindowState.MAXIMIZED:
+                win.unmaximize()
+                GLib.idle_add(lambda: (place(), False)[1])
+            return False
+
+        win.connect("window-state-event", stay_plain)
         place()
         Gdk.Screen.get_default().connect("monitors-changed", place)
         win.add(make_view("/"))

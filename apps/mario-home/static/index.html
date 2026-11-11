@@ -26,9 +26,8 @@
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></symbol>
   <symbol id="i-calc" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/></symbol>
-  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
   <symbol id="i-shot" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2"/><circle cx="12" cy="12" r="3"/></symbol>
-  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
   <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></symbol>
   <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></symbol>
   <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M2 13v2M22 13v2"/></symbol>
@@ -52,7 +51,7 @@
       <label for="ask" class="sr">Ask Mario</label>
       <input id="ask" placeholder="Ask Mario: your day, mail, repos, anything">
       <span id="brain" class="pill" title="Where Mario answers from">local first</span>
-      <kbd>Super Space</kbd>
+      <kbd>Super J</kbd>
       <div id="answer" class="answer" hidden></div>
     </form>
   </header>
@@ -74,13 +73,13 @@
         <section class="card" id="c-today"><header class="ch"><svg class="ci"><use href="#i-cal"/></svg><h3>Today</h3><span class="count"></span><button class="open" type="button" data-open="https://calendar.google.com/" aria-label="Open Google Calendar"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card" id="c-tasks"><header class="ch"><svg class="ci"><use href="#i-check"/></svg><h3>Tasks</h3><span class="count"></span></header><div class="body"></div></section>
       </div>
-      <div class="row r2a">
-        <section class="card" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="count"></span></header><div class="body"></div></section>
+      <div class="row lower">
+        <div class="stack">
+          <section class="card slim" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="meta" id="agents"></span></header><div class="body"></div></section>
+          <section class="card slim" id="c-recent"><header class="ch"><svg class="ci"><use href="#i-file"/></svg><h3>Recent files</h3></header><div class="body"></div></section>
+          <section class="card slim" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
+        </div>
         <section class="card" id="c-thinking"><header class="ch"><svg class="ci"><use href="#i-layers"/></svg><h3>Thinking Space</h3><span class="count"></span><button class="open" type="button" data-open-hub aria-label="Open the Thinking Space hub"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
-      </div>
-      <div class="row r2b">
-        <section class="card" id="c-recent"><header class="ch"><svg class="ci"><use href="#i-file"/></svg><h3>Recent files</h3></header><div class="body"></div></section>
-        <section class="card" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
       </div>
     </div>
 
@@ -94,23 +93,18 @@
           <button class="app" type="button" data-launch="browser"><svg><use href="#i-globe"/></svg>Browser</button>
           <button class="app" type="button" data-launch="settings"><svg><use href="#i-gear"/></svg>Settings</button>
           <button class="app" type="button" data-launch="calculator"><svg><use href="#i-calc"/></svg>Calculator</button>
+          <button class="app" type="button" data-launch="screenshot"><svg><use href="#i-shot"/></svg>Screenshot</button>
+          <button class="app" type="button" data-launch="monitor"><svg><use href="#i-pulse"/></svg>System Monitor</button>
         </div>
       </section>
       <section class="card" id="c-ai"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>AI assistants</h3></header><div class="body"></div></section>
       <button class="card compact row-card" id="c-phone" type="button"><svg class="ci"><use href="#i-phone"/></svg><span class="body"></span><svg class="chev"><use href="#i-chev"/></svg></button>
-      <section class="card" id="c-quick">
-        <div class="apps a3">
-          <button class="app" type="button" data-launch="downloads"><svg><use href="#i-down"/></svg>Downloads</button>
-          <button class="app" type="button" data-launch="screenshot"><svg><use href="#i-shot"/></svg>Screenshot</button>
-          <button class="app" type="button" data-launch="lock"><svg><use href="#i-lock"/></svg>Lock</button>
-        </div>
-        <div class="status" id="status"></div>
-      </section>
+      <section class="card compact row-card" id="c-quick"><span id="status" class="status"></span></section>
     </aside>
   </div>
 </main>
 
-<!-- Panel: Super+Space opens this page at /panel in its own window -->
+<!-- Panel: Super+J opens this page at /panel in its own window -->
 <section id="panel" class="panel" hidden>
   <header class="panel-head">
     <span class="mark big" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>

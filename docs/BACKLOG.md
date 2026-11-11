@@ -1056,8 +1056,7 @@ Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `d
 ### Live, not yet tried
 
 - 🔬 `host.py` as the desktop layer under GNOME 42 X11 (desktop hint, work area, all workspaces).
-- 🔬 `host.py --panel` toggle on Super+Space after `install-keybindings.sh` releases it from
-  input-source switching.
+- 🔬 `host.py --panel` toggle on Super+J after `install-keybindings.sh`.
 - 🔬 Against the real LOOM backend, Ollama on the GTX 1050, and `claude -p` in a repo.
 
 ### Next

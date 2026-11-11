@@ -84,7 +84,7 @@ set_binding "adaptive-annotate" "Adaptive Annotate Screenshot" "${REPO}/apps/ada
 set_binding "adaptive-screen-text" "Adaptive Copy Text from Screen" "gdbus call --session -d org.gnome.Shell -o /org/adaptive/Shell -m org.adaptive.Shell.CopyScreenText" "<Super><Shift>t"
 # Cast to the last TV, or stop casting (apps/adaptive-cast).
 set_binding "adaptive-cast" "Adaptive Cast to TV" "${REPO}/scripts/adaptive-cast-launch.sh --toggle" "<Super>k"
-set_binding "adaptive-mario" "Mario" "${REPO}/apps/mario-home/host.py --panel" "<Super>space"
+set_binding "adaptive-mario" "Mario" "${REPO}/apps/mario-home/host.py --panel" "<Super>j"
 
 #
 # GNOME's own switch-to-workspace-left/right also list Super+Alt+Left/Right.
@@ -163,8 +163,9 @@ PY
 echo "Resolving accelerator conflicts:"
 release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-left '<Super><Alt>Left'
 release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-right '<Super><Alt>Right'
-# Super+Space opens Mario; switching keyboard layouts keeps its keyboard key and Shift+Super+Space.
-release_accelerator org.gnome.desktop.wm.keybindings switch-input-source '<Super>space'
+# Super+Space stays GNOME's keyboard-layout switch (the top bar's input source). An earlier
+# Mario build borrowed it; give it back. Mario is on Super+J.
+claim_accelerator org.gnome.desktop.wm.keybindings switch-input-source '<Super>space'
 
 # Project mode moved to Alt+P so Super+P stays with Mutter's switch-monitor -
 # the display projection switcher (mirror / extend / single). Earlier versions
@@ -201,5 +202,5 @@ Installed Adaptive Desktop shortcuts:
   Super+/            Keyboard shortcuts (this list, searchable)
   Super+Shift+S      Annotate a screenshot
   Super+Shift+T      Select and copy text from screen
-  Super+Space        Mario (again or Esc closes it)
+  Super+J            Mario (again or Esc closes it)
 EOF

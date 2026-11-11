@@ -1,7 +1,7 @@
 # Mario
 
 Mario is the assistant layer of Adaptive Desktop: a live **Home** on the desktop, a **panel** on
-Super+Space, and **Mario Hub**, the loopback service both read from. The brain is hybrid: LOOM
+Super+J, and **Mario Hub**, the loopback service both read from. The brain is hybrid: LOOM
 answers on this laptop with its memory and router; multi-step work in a repo goes to Claude Code,
 and only after you say yes. Design: <https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy>.
 
@@ -31,18 +31,27 @@ updates live over the hub's WebSocket. The top bar keeps the clock.
 
 | Card | Shows | Opens / does |
 | --- | --- | --- |
-| Mail | Unread count and the newest unread (sender, subject, time), read-only over IMAP | Gmail |
+| Mail | Unread count and up to five newest unread (sender, subject, time), read-only over IMAP | Gmail |
 | Today | Date and today's events on a timeline, the current one highlighted (private iCal address) | Google Calendar |
-| Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; tick to finish; add a task; up to two "Mario suggests" (unpushed work, stopped services) with their action or + to make it a task | `/api/task`, `/api/task/done` |
-| Projects | The three most recent repos: last commit, branch, changes / to push / up to date; agents running in the terminal (`adaptive-agent` tmux) and Agent Office | Open in Code, Agent Office |
+| Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; tick to finish; add a task; "Mario suggests" in the rows left over (unpushed work, stopped services) with their action or + to make it a task | `/api/task`, `/api/task/done` |
+| Projects (half height) | The two most recent repos on one line each: last commit, branch, changes / to push / up to date; agents running in the header | Open in Code |
+| Recent files (half height) | The two newest files you opened, with type, size and when | The file |
+| Quick note (half height) | Capture a thought; the latest note (`~/.local/share/adaptive-desktop/mario/notes.md`) | `/api/note` |
 | Thinking Space | The four boards with their sections, or what is waiting in their Inbox | The board, the hub |
-| Recent files | Newest files you opened, with type, size and when | The file |
-| Quick note | Capture a thought; the latest notes (`~/.local/share/adaptive-desktop/mario/notes.md`) | `/api/note` |
 | Weather | Now, feels-like, rain chance (Open-Meteo) | |
-| Apps | Terminal, Files, Code, Browser, Settings, Calculator | `LAUNCH` |
+| Apps | Terminal, Files, Code, Browser, Settings, Calculator, Screenshot, System Monitor | `LAUNCH` |
 | AI assistants | Claude and Gemini: usage of the fullest window and when each resets | claude.ai, Gemini |
 | Phone | Adaptive Link state | The phone's screen |
-| Quick actions | Downloads, Screenshot, Lock; one status line: pending (security) updates, disk over 90 %, low battery, a failed user service, or "All systems up to date" | `LAUNCH` |
+| Status | One line: pending (security) updates, disk over 90 %, low battery, a failed user service, or "All systems up to date" | |
+
+### The shell around it stays as it is
+
+Home is only the desktop layer. It fills the work area, which already leaves out the top bar, the
+rail and a fixed dock; it sits below every window, is off the taskbar and the dock, never takes
+focus when it appears, and is kept from being maximized or fullscreen (the dock hides only for
+those). So the dock, the top bar and everything on it (the island, ROS 2, the system monitor,
+network, Control Center, the keyboard-layout switch on Super+Space) work exactly as without it.
+Mario's panel is on Super+J.
 
 The ask bar shows where Mario will answer from (LOOM ready / Ollama only / local brain off), and
 "Your day" sums it up: events, open tasks, unread mail. Brief me now includes the calendar, mail and
@@ -65,7 +74,7 @@ the installer puts in `.local/mario-pydeps`; without them only one-off events sh
 
 ```sh
 ./install.sh --only mario          # or scripts/install-mario.sh; --status changes nothing
-./scripts/install-keybindings.sh   # Super+Space opens Mario (layout switching keeps its own key)
+./scripts/install-keybindings.sh   # Super+J opens Mario; Super+Space stays the keyboard-layout switch
 apps/mario-home/host.py &          # Home now, instead of at the next Adaptive login
 ```
 
@@ -115,7 +124,7 @@ strand). Reduced motion stops every animation.
 | Phase | What | Notes |
 | --- | --- | --- |
 | 2 | Read the Google Sheet directly; Calendar card | Through the Link's Google project (`--link-cloud`), read-only scopes |
-| 3 | Voice: push-to-talk and a "Mario" wake word | `services/mario-voice/`: faster-whisper on the GTX 1050 (int8, `small`), openWakeWord with a custom "Mario" model; both local. Super+Space toggles listening (GNOME gives no key-up), silence ends it; the listener sets presence through `/api/presence` and posts the text to `/api/ask`. Answers spoken with Piper. The mic light in the top bar shows whenever the wake word is listening |
+| 3 | Voice: push-to-talk and a "Mario" wake word | `services/mario-voice/`: faster-whisper on the GTX 1050 (int8, `small`), openWakeWord with a custom "Mario" model; both local. Super+J toggles listening (GNOME gives no key-up), silence ends it; the listener sets presence through `/api/presence` and posts the text to `/api/ask`. Answers spoken with Piper. The mic light in the top bar shows whenever the wake word is listening |
 | 4 | "Mario, note that…" writes a sticky into the right board's Inbox | Through the Thinking Space boards' database, confirmed |
 | 4 | Island and phone | The shell island shows presence and the current plan; the Link app gets the ask box |
 | 5 | Council mode, nightly review, routines | Three local models on big questions; a nightly look back that proposes one fix; "remember this as…" |

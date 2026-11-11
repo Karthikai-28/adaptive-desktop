@@ -41,7 +41,7 @@ OPEN_URL_PREFIXES = ("https://claude.ai/", "https://gemini.google.com/", "https:
                      "https://mail.google.com/", "https://calendar.google.com/",
                      "https://www.instagram.com/", "http://127.0.0.1:", "http://localhost:")
 REPO = config_mod.ADAPTIVE_REPO
-# Commands Home may start: 1x1 launchers, and tiles that open a place (phone, downloads folder).
+# Commands Home may start: the Apps card, and the Phone card (the phone's screen).
 # Only these run; a missing program shows its launcher dimmed.
 LAUNCH = {
     "terminal": ["gnome-terminal"],
@@ -50,11 +50,10 @@ LAUNCH = {
     "browser": ["sh", "-c", 'gtk-launch "$(xdg-settings get default-web-browser)"'],
     "settings": ["gnome-control-center"],
     "phone": [sys.executable, str(REPO / "apps" / "adaptive-phone" / "phone.py")],
-    "downloads": ["xdg-open", str(Path.home() / "Downloads")],
     "screenshot": ["gnome-screenshot", "--interactive"],
     "cast": [str(REPO / "scripts" / "adaptive-cast-launch.sh"), "--toggle"],
     "calculator": ["gnome-calculator"],
-    "lock": ["loginctl", "lock-session"],
+    "monitor": ["gnome-system-monitor"],
 }
 
 

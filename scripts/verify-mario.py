@@ -325,6 +325,19 @@ def test_page():
     check("every app button is a known command", launches and all(k in hub_mod.LAUNCH for k in launches),
           str([k for k in launches if k not in hub_mod.LAUNCH]))
     opens = _re.findall(r'data-open="([^"]+)"', html)
+    for gone in ("downloads", "lock"):
+        check(f"no {gone} button", f'data-launch="{gone}"' not in html)
+    check("Projects, Recent files and Quick note are half-height cards",
+          all(_re.search(rf'class="card slim" id="c-{c}"', html) for c in ("projects", "recent", "note")))
+    host = (REPO / "apps" / "mario-home" / "host.py").read_text()
+    check("Home stays a plain desktop layer (no focus grab, never maximized or fullscreen, off the taskbar)",
+          all(x in host for x in ("WindowTypeHint.DESKTOP", "set_focus_on_map(False)", "unmaximize()", "unfullscreen()",
+                                  "set_skip_taskbar_hint(True)", "get_workarea()")))
+    keys = (REPO / "scripts" / "install-keybindings.sh").read_text()
+    check("Mario is on Super+J and Super+Space stays the keyboard-layout switch",
+          '"adaptive-mario" "Mario"' in keys and '--panel" "<Super>j"' in keys
+          and "claim_accelerator org.gnome.desktop.wm.keybindings switch-input-source '<Super>space'" in keys
+          and "release_accelerator org.gnome.desktop.wm.keybindings switch-input-source" not in keys)
     check("header links open only allowed sites", all(u.startswith(hub_mod.OPEN_URL_PREFIXES) for u in opens), str(opens))
     check("cards draw through fill(), which drops empty slots", script.count(".replaceChildren(") <= 3)
     check("page has the panel and its script", "panel-form" in html and "/static/home.js" in html)

@@ -82,7 +82,7 @@ const render = {
     }
     const items = m.items || [];
     fill(body("mail"), 
-      items.length ? el("ul", { class: "rows" }, items.slice(0, 3).map((i) => el("li", {},
+      items.length ? el("ul", { class: "rows" }, items.slice(0, 5).map((i) => el("li", {},
         el("span", { class: "avatar", style: `background:${hue(i.from)}33;color:${hue(i.from)}` }, (i.from || "?").trim()[0].toUpperCase()),
         el("div", { class: "grow" }, el("div", { class: "ttl" }, i.from), el("div", { class: "sub" }, i.subject)),
         el("span", { class: "time" }, when(i.when)))))
@@ -103,7 +103,7 @@ const render = {
         c.setup ? "It reads your calendar's private iCal address, read-only." : null));
     }
     const nowIndex = events.findIndex((e) => e.start && e.start > hm) - 1;
-    fill(body("today"), head, events.length ? el("ul", { class: "timeline" }, events.slice(0, 4).map((e, i) => {
+    fill(body("today"), head, events.length ? el("ul", { class: "timeline" }, events.slice(0, 5).map((e, i) => {
       const end = e.start && e.minutes ? (() => { const [h, m] = e.start.split(":").map(Number); const t = h * 60 + m + e.minutes; return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; })() : "";
       const past = e.start && (end ? end <= hm : e.start < hm && i < nowIndex);
       const live = e.start && e.start <= hm && end && end > hm;
@@ -123,9 +123,9 @@ const render = {
     const add = el("form", { class: "add", onsubmit: async (e) => {
       e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/task", { text });
     } }, icon("i-plus"), input);
-    // four rows in all: your tasks first, then Mario's suggestions in whatever room is left
-    const shown = open.slice(0, open.length > 3 ? 4 : 3);
-    const suggestions = (state.next || []).filter((s) => s.action).slice(0, Math.max(0, Math.min(2, 4 - shown.length - (open.length ? 0 : 1))));
+    // six rows in all: your tasks first, then Mario's suggestions in whatever room is left
+    const shown = open.slice(0, open.length > 4 ? 6 : 4);
+    const suggestions = (state.next || []).filter((s) => s.action).slice(0, Math.max(0, Math.min(2, 6 - shown.length - (open.length ? 0 : 1))));
     fill(body("tasks"), 
       open.length ? el("ul", { class: "rows" }, shown.map((x) => el("li", {},
         el("button", { class: "tick", type: "button", "aria-label": `Done: ${x.text}`, onclick: () => post("/api/task/done", { path: x.path, line: x.line }) }),
@@ -141,27 +141,25 @@ const render = {
   },
 
   projects() {
-    const repos = (data("builds").repos || []).slice(0, 3);
+    // half-height card: the two most recent repos on one line each; agents in the header
+    const repos = (data("builds").repos || []).slice(0, 2);
     const sessions = data("agent_sessions").sessions || [];
     const office = data("agent_office");
     const busy = (office.agents || []).filter((a) => /work|busy|run/i.test(a.status)).length;
-    count("projects", "");
-    const agents = sessions.length
-      ? `${sessions.length} agent${sessions.length > 1 ? "s" : ""} in the terminal: ${sessions.slice(0, 2).map((s) => `${s.agent} · ${s.folder}`).join(", ")}`
-      : "No agents running";
-    fill(body("projects"), 
-      repos.length ? el("ul", { class: "rows" }, repos.map((r) => el("li", {},
-        el("span", { class: `dot ${r.dirty || r.ahead ? "warn" : ""}` }),
-        el("div", { class: "grow" }, el("div", { class: "ttl" }, r.name), el("div", { class: "sub" }, r.subject || "")),
-        el("span", { class: "chipi" }, icon("i-branch"), r.branch || "–"),
-        r.dirty ? el("span", { class: "chipi warn" }, `${r.dirty} changes`) : r.ahead ? el("span", { class: "chipi warn" }, `${r.ahead} to push`)
-          : el("span", { class: "chipi ok" }, "Up to date"),
-        el("button", { class: "mini", type: "button", onclick: () => act({ id: "code", arg: r.path }) }, icon("i-code"), "Open in Code"))))
-        : empty("No git checkouts found. Set ", code("repos"), " in ~/.config/adaptive-desktop/mario.json."),
-      el("div", { class: "foot", style: "color:" + (sessions.length || busy ? "#9FF0B5" : "var(--muted)") }, icon("i-bot"),
-        el("span", { class: "grow", style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis" }, agents,
-          office.running ? ` · Agent Office ${busy ? `${busy} working` : "idle"}` : ""),
-        office.running ? el("button", { class: "link", type: "button", onclick: () => openUrl("http://127.0.0.1:8790/") }, "Office", icon("i-chev")) : null));
+    const meta = $("#agents");
+    meta.className = `meta ${sessions.length || busy ? "on" : ""}`;
+    fill(meta, icon("i-bot"), sessions.length
+      ? `${sessions.length} agent${sessions.length > 1 ? "s" : ""}: ${sessions.slice(0, 2).map((x) => `${x.agent} · ${x.folder}`).join(", ")}`
+      : office.running ? `Agent Office ${busy ? `${busy} working` : "idle"}` : "No agents running");
+    fill(body("projects"), repos.length ? el("ul", { class: "rows" }, repos.map((r) => el("li", {},
+      el("span", { class: `dot ${r.dirty || r.ahead ? "warn" : ""}` }),
+      el("div", { class: "grow", style: "display:flex;align-items:baseline;gap:8px;min-width:0" },
+        el("span", { class: "ttl", style: "flex:none" }, r.name), el("span", { class: "sub" }, r.subject || "")),
+      el("span", { class: "chipi" }, icon("i-branch"), r.branch || "–"),
+      r.dirty ? el("span", { class: "chipi warn" }, `${r.dirty} changes`) : r.ahead ? el("span", { class: "chipi warn" }, `${r.ahead} to push`)
+        : el("span", { class: "chipi ok" }, "Up to date"),
+      el("button", { class: "mini", type: "button", "aria-label": `Open ${r.name} in Code`, onclick: () => act({ id: "code", arg: r.path }) }, icon("i-code"), "Code"))))
+      : empty("No git checkouts found. Set ", code("repos"), " in ~/.config/adaptive-desktop/mario.json."));
   },
 
   thinking() {
@@ -174,39 +172,41 @@ const render = {
     fill(body("thinking"), el("div", { class: "boards" }, boards.slice(0, 4).map((b) => {
       const [ic, col] = ICON[b.slug] || ["i-layers", hue(b.slug)];
       return el("button", { class: "board", type: "button", onclick: () => openUrl(b.url) },
-        el("span", { class: "bi", style: `background:${col}26;color:${col}` }, icon(ic)),
-        el("div", { class: "grow" }, el("div", { class: "ttl" }, b.title),
-          el("div", { class: "sub" }, b.inbox && b.inbox.length ? `${b.inbox.length} in Inbox · ${b.inbox[0]}` : (b.sections || []).slice(0, 2).join(", "))));
+        el("div", { class: "board-head" }, el("span", { class: "bi", style: `background:${col}26;color:${col}` }, icon(ic)),
+          el("div", { class: "grow" }, el("div", { class: "ttl" }, b.title),
+            el("div", { class: "sub" }, b.inbox && b.inbox.length ? `${b.inbox.length} waiting in Inbox` : "Inbox clear"))),
+        el("ul", { class: "sections" }, [...(b.inbox || []).slice(0, 2).map((x) => el("li", { class: "new" }, x)),
+          ...(b.sections || []).slice(0, 4 - Math.min(2, (b.inbox || []).length)).map((x) => el("li", {}, x))]));
     })));
   },
 
   recent() {
+    // half-height card: the two newest files on one line each
     const files = data("recent").files || [];
-    fill(body("recent"), files.length ? el("ul", { class: "rows" }, files.slice(0, 4).map((f) => {
+    fill(body("recent"), files.length ? el("ul", { class: "rows" }, files.slice(0, 2).map((f) => {
       const kind = kindOf(f.name);
       const ic = /Python|JavaScript|TypeScript|C\+\+|^C$|Shell|JSON|YAML|HTML|CSS/.test(kind) ? "i-code" : "i-file";
       return el("li", { style: "cursor:pointer", onclick: () => act({ id: "open_file", arg: f.path }) },
-        el("span", { class: "bi", style: `width:34px;height:34px;border-radius:10px;background:${hue(kind)}26;color:${hue(kind)}` }, icon(ic)),
-        el("div", { class: "grow" }, el("div", { class: "ttl", style: "font-weight:500" }, f.name), el("div", { class: "sub" }, [kind, size(f.size)].filter(Boolean).join(" · "))),
+        el("span", { class: "bi", style: `width:26px;height:26px;border-radius:8px;background:${hue(kind)}26;color:${hue(kind)}` }, icon(ic)),
+        el("div", { class: "grow", style: "display:flex;align-items:baseline;gap:8px;min-width:0" },
+          el("span", { class: "ttl", style: "font-weight:500;flex:none;max-width:60%" }, f.name), el("span", { class: "sub" }, [kind, size(f.size)].filter(Boolean).join(" · "))),
         el("span", { class: "time" }, whenLong(f.when)));
     })) : empty("Files you open in any app show up here."));
   },
 
   note() {
+    // half-height card: the capture box and the latest note
     const old = $("#note-in");
     const keep = old ? { value: old.value, focused: document.activeElement === old } : null;
     const items = data("notes").items || [];
     const input = el("input", { id: "note-in", class: "note-in", placeholder: "Capture a thought…", "aria-label": "Capture a thought" });
-    const form = el("form", { class: "note-box", onsubmit: async (e) => {
+    const form = el("form", { class: "note-box", style: "padding:6px 8px 6px 12px", onsubmit: async (e) => {
       e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/note", { text });
     } }, input, el("button", { class: "mini", type: "submit" }, "Save"));
-    fill(body("note"), form,
-      items.length ? el("ul", { class: "rows" }, items.slice(0, 2).map((n) => {
-        const [stamp, ...rest] = n.split(" · ");
-        return el("li", {}, el("span", { class: "bi", style: "width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.06);color:var(--soft)" }, icon("i-file")),
-          el("div", { class: "grow ttl", style: "font-weight:500" }, rest.join(" · ")), el("span", { class: "time" }, stamp));
-      })) : empty("Thoughts stay on this laptop, in ~/.local/share/adaptive-desktop/mario/notes.md."),
-      el("div", { class: "foot" }, el("button", { class: "link", type: "button", onclick: () => input.focus() }, icon("i-plus"), "New note")));
+    const last = items[0] ? items[0].split(" · ") : null;
+    fill(body("note"), form, last ? el("div", { class: "between", style: "min-width:0" },
+      el("span", { class: "sub", style: "color:var(--soft)" }, last.slice(1).join(" · ")), el("span", { class: "time" }, last[0]))
+      : el("div", { class: "sub" }, "Kept on this laptop"));
     if (keep) { input.value = keep.value; if (keep.focused) input.focus(); }
   },
 

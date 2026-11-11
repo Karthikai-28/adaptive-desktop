@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Mario: the live Home on the desktop, the Mario panel (Super+Space) and Mario Hub.
+# Install Mario: the live Home on the desktop, the Mario panel (Super+J) and Mario Hub.
 #
 #   scripts/install-mario.sh             install whatever is missing and start the hub
 #   scripts/install-mario.sh --status    say what is missing; change nothing
@@ -9,7 +9,7 @@
 # It installs: python3-aiohttp and WebKitGTK for Python (apt, asks for sudo), the
 # adaptive-mario-hub user service (127.0.0.1:8791), the Mario Home autostart entry (Adaptive session
 # only) and, if missing, ~/.config/adaptive-desktop/mario.json with the checkouts it finds.
-# The Super+Space shortcut is in scripts/install-keybindings.sh. Optional, reported only: LOOM's
+# The Super+J shortcut is in scripts/install-keybindings.sh. Optional, reported only: LOOM's
 # backend (local answers with your memory), Ollama, Claude Code, the Thinking Space checkout.
 # Undo with ./uninstall.sh. See docs/MARIO.md.
 set -Eeuo pipefail
@@ -54,7 +54,7 @@ check() {
     systemctl --user is-active --quiet "$UNIT" 2>/dev/null && ok "Mario Hub running on 127.0.0.1:$(port)" || need "Mario Hub running"
     [ -f "$AUTOSTART" ] && ok "Mario Home starts at login (Adaptive session)" || need "Mario Home autostart entry"
     gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings 2>/dev/null | grep -q adaptive-mario \
-        && ok "Super+Space opens Mario" || opt "Super+Space: run scripts/install-keybindings.sh"
+        && ok "Super+J opens Mario" || opt "Super+J: run scripts/install-keybindings.sh"
     local ts
     ts="$(python3 -c "import json,os,sys;print(os.path.expanduser(json.load(open(sys.argv[1])).get('thinking_space','~/thinking-space')))" "$CONFIG" 2>/dev/null || echo "$HOME/thinking-space")"
     [ -d "$ts/boards" ] && ok "Thinking Space checkout: $ts" \
@@ -170,5 +170,5 @@ echo
 check || true
 echo
 echo "  Home appears at the next Adaptive login, or now: $REPO/apps/mario-home/host.py &"
-echo "  Super+Space opens Mario once scripts/install-keybindings.sh has run."
+echo "  Super+J opens Mario once scripts/install-keybindings.sh has run."
 echo "  Connect Mail and Today: scripts/install-mario.sh --mail, then --calendar."
