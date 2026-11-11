@@ -24,18 +24,18 @@ The shell's top bar, rail and island stay the shell's; Home fills only the work 
 
 ## Live tiles
 
-Home is fifteen live tiles packed on a 12 × 6 grid (the check proves every cell is used once).
-A tile with more than one face turns by itself on its own beat: small tiles flip, wide ones
-peek-slide. It pauses while the pointer is on it, keeps its face when new data arrives, and stops
-animating under reduced motion. The dots in a corner say how many faces it has.
+Home is 36 tiles packed on a 14 × 8 grid of near-square cells (the check proves every cell is
+used once): 20 live tiles and 16 one-cell launchers. A tile with more than one face turns by itself
+on its own beat: small tiles flip, wide ones peek-slide. It pauses while the pointer is on it, keeps
+its face when new data arrives, and stops animating under reduced motion. The dots in a corner say
+how many faces it has.
 
-| Tile | Size | Faces |
+| Tile | Cells | Faces |
 | --- | --- | --- |
 | Next step | 4 × 2 | Up to three suggestions with their action; commits, reels done, Inbox items, battery |
 | Today | 2 × 2 | Clock, week number · countdown to the nightly backup and its last commit |
 | Builds | 4 × 2 | Repos with branch, last commit, changed and unpushed counts · 14-day commit heatmap |
-| Weather | 2 × 1 | Now and today's range · next six hours with rain chance |
-| Phone | 2 × 1 | Adaptive Link state · laptop battery |
+| Weather, Phone | 2 × 1 each | Now and today's range · next six hours · Adaptive Link state · laptop battery |
 | Thinking Space | 4 × 2 | Four boards with their sections and Inbox counts · Inbox items · hub summary; opens the hub |
 | Thinking map | 2 × 2 | Every board as a cluster; opens the hub |
 | Saved Reels | 4 × 2 | Progress per tracker · newest saves · version history; opens the Google Sheet |
@@ -44,8 +44,17 @@ animating under reduced motion. The dots in a corner say how many faces it has.
 | AI usage | 2 × 2 | Claude and Gemini, fullest window first, and when each window resets |
 | Agent Office | 2 × 2 | Agents working · current mission; opens the office |
 | Try next | 2 × 2 | Newest named AI tools, Claude ideas and websites still to try; opens the reel |
-| Cook next | 2 × 1 | Recipes still to cook; opens the reel |
-| LOOM | 2 × 1 | Backend ready and model · Ollama and the loaded model |
+| Cook next, LOOM | 2 × 1 each | Recipes still to cook · LOOM backend and model · Ollama and the loaded model |
+| Recent files | 4 × 2 | Newest files you opened (GTK's recently-used list), with the app; opens them |
+| Downloads | 2 × 2 | Newest downloads with size; opens them |
+| Focus | 2 × 2 | 25 / 50 / 90-minute block with a live ring; a desktop notification when it ends (`/api/focus`) |
+| Busiest now | 2 × 2 | Top processes by CPU over the last half second |
+| Jot | 2 × 2 | Quick notes kept in `~/.local/share/adaptive-desktop/mario/notes.md` (`/api/note`) |
+
+Launchers (1 × 1, live badge): Terminal, Files, Code, Settings, Boards (Inbox count), Trackers
+(reels done), Claude and Gemini (usage %), Office (agents working), Phone (here / away), Mario,
+Downloads (count), Screenshot, Cast to TV, Calculator, Lock. They run only the commands in
+`hub.py`'s `LAUNCH` table or open their own links; a program that is not installed shows dimmed.
 
 ## Install
 

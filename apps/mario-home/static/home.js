@@ -63,6 +63,10 @@ const tiles = {};
 
 function setupTiles() {
   document.querySelectorAll(".tile").forEach((node, idx) => {
+    if (node.dataset.launch) {  // 1x1 launchers: a button, a name, a live badge; no faces
+      node.querySelector(".launch").addEventListener("click", () => launch(node.dataset.launch));
+      return;
+    }
     const t = { name: node.dataset.tile, el: node, stage: node.querySelector(".stage"), faces: [], i: 0, hover: false, open: null };
     t.dots = el("span", { class: "dots", "aria-hidden": "true" });
     node.append(t.dots);
@@ -366,15 +370,114 @@ const render = {
   },
 };
 
+// ------------------------------------------------------------- launchers
+const LAUNCH_URLS = {
+  hub: () => (data("thinking_space").hub || {}).url,
+  sheet: () => data("reels").sheet,
+  claude: () => "https://claude.ai/",
+  gemini: () => "https://gemini.google.com/app",
+  office: () => "http://127.0.0.1:8790/",
+};
+function launch(key) {
+  if (LAUNCH_URLS[key]) return openUrl(LAUNCH_URLS[key]());
+  return act({ id: "launch", arg: key });
+}
+function renderLaunchers() {
+  const usage = data("usage").providers || {};
+  const reels = data("reels"), ts = data("thinking_space"), office = data("agent_office"), phone = data("phone");
+  const trackers = reels.trackers || [];
+  const inbox = (ts.boards || []).reduce((s, b) => s + (b.inbox || []).length, 0);
+  const badges = {
+    claude: usage.claude && usage.claude.used != null ? pct(usage.claude.used) : "",
+    gemini: usage.gemini && usage.gemini.used != null ? pct(usage.gemini.used) : "",
+    hub: inbox ? String(inbox) : "",
+    sheet: trackers.reduce((s, t) => s + t.done, 0) ? `${trackers.reduce((s, t) => s + t.done, 0)} done` : "",
+    office: office.running ? String((office.agents || []).filter((a) => /work|busy|run/i.test(a.status)).length || "") : "off",
+    phone: phone.linked ? (phone.present ? "here" : "away") : "",
+    downloads: data("downloads").count ? String(data("downloads").count) : "",
+  };
+  const available = state.config.launch || {};
+  document.querySelectorAll("[data-launch]").forEach((node) => {
+    const key = node.dataset.launch;
+    node.querySelector(".badge").textContent = badges[key] || "";
+    node.classList.toggle("off", !LAUNCH_URLS[key] && available[key] === false);
+  });
+}
+
+Object.assign(render, {
+  recent() {
+    const files = data("recent").files || [];
+    setFaces("recent", [[
+      files.length ? el("ul", { class: "list grow" }, files.slice(0, 5).map((f) => el("li", {},
+        el("span", {}, el("button", { class: "link", type: "button", onclick: () => act({ id: "open_file", arg: f.path }) }, f.name)),
+        muted(`${f.app ? f.app + " · " : ""}${ago(f.when)}`))))
+        : muted("Files you open show up here"),
+    ]]);
+  },
+
+  downloads() {
+    const d = data("downloads");
+    const size = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`);
+    const files = d.files || [];
+    setFaces("downloads", files.length ? files.slice(0, 3).map((f) => ({
+      n: [muted(ago(f.when)), el("div", { class: "t clamp3", style: "word-break:break-all" }, f.name), muted(size(f.size))],
+      open: () => act({ id: "open_file", arg: f.path }),
+    })) : [[muted(d.error || "Nothing downloaded")]], { badge: d.count ? String(d.count) : "" });
+  },
+
+  focus() {
+    const f = data("focus");
+    const left = Math.max(0, (f.until || 0) - Date.now() / 1000);
+    if (left > 0) {
+      const total = (f.minutes || 1) * 60, r = 26, c = 2 * Math.PI * r;
+      const ring = svgEl("svg", { class: "ring", viewBox: "0 0 64 64", "aria-hidden": "true" });
+      ring.append(svgEl("circle", { cx: 32, cy: 32, r, stroke: "rgba(255,255,255,.12)" }));
+      ring.append(svgEl("circle", { cx: 32, cy: 32, r, stroke: "#FF453A", "stroke-dasharray": c,
+        "stroke-dashoffset": c * (1 - left / total), transform: "rotate(-90 32 32)", "stroke-linecap": "round" }));
+      const mm = Math.floor(left / 60), ss = String(Math.floor(left % 60)).padStart(2, "0");
+      setFaces("focus", [[el("div", { class: "row", style: "flex-wrap:nowrap" }, ring,
+        el("div", {}, el("div", { class: "big", style: "font-size:26px" }, `${mm}:${ss}`), muted(`of ${f.minutes} min`))),
+        el("button", { class: "btn", type: "button", style: "margin-top:auto;align-self:flex-start", onclick: () => post("/api/focus", { minutes: 0 }) }, "Stop")]]);
+    } else {
+      setFaces("focus", [[el("div", { class: "t" }, "Start a focus block"), muted("Mario pings you when it ends"),
+        el("div", { class: "row", style: "margin-top:auto" }, [25, 50, 90].map((m) =>
+          el("button", { class: "btn", type: "button", onclick: () => post("/api/focus", { minutes: m }) }, `${m}m`)))]]);
+    }
+  },
+
+  processes() {
+    const top = data("processes").top || [];
+    setFaces("processes", [[el("ul", { class: "list grow" }, top.slice(0, 5).map((p) => el("li", {},
+      el("span", {}, p.name), muted(`${Math.round(p.cpu)}% · ${p.mem.toFixed(1)}% mem`))))]]);
+  },
+
+  notes() {
+    const old = document.querySelector("#jot");
+    const keep = old ? { value: old.value, focused: document.activeElement === old } : null;
+    const items = data("notes").items || [];
+    const input = el("input", { id: "jot", placeholder: "Jot something…", "aria-label": "Jot a note" });
+    const form = el("form", { class: "field", onsubmit: async (e) => {
+      e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/note", { text });
+    } }, input, el("button", { class: "btn", type: "submit" }, "Add"));
+    setFaces("notes", [[el("ul", { class: "list grow" }, items.slice(0, 3).map((n) => el("li", {}, el("span", { style: "white-space:normal" }, n)))), form]]);
+    if (keep) { input.value = keep.value; if (keep.focused) input.focus(); }
+  },
+});
+
 // card -> tiles that read it
 const FEEDS = {
-  builds: ["builds", "next"], thinking_space: ["thinking", "clock", "next"], reels: ["reels", "tonight", "trynext", "cook"],
-  system: ["system"], phone: ["phone"], usage: ["usage"], agent_office: ["office"], loom: ["loom"], weather: ["weather"],
+  builds: ["builds", "next"], thinking_space: ["thinking", "clock", "next", "launchers"],
+  reels: ["reels", "tonight", "trynext", "cook", "launchers"], system: ["system"], phone: ["phone", "launchers"],
+  usage: ["usage", "launchers"], agent_office: ["office", "launchers"], loom: ["loom"], weather: ["weather"],
+  recent: ["recent"], downloads: ["downloads", "launchers"], processes: ["processes"], focus: ["focus"], notes: ["notes"],
 };
 
-function renderTile(name) { try { render[name](); } catch (e) { console.error(name, e); } }
+function renderTile(name) {
+  try { if (name === "launchers") renderLaunchers(); else render[name](); } catch (e) { console.error(name, e); }
+}
 function renderAll() {
   Object.keys(render).forEach(renderTile);
+  renderLaunchers();
   renderPresence(); greet();
 }
 
@@ -472,6 +575,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#talk").addEventListener("click", () => { const i = $("#ask"); i.placeholder = "Voice comes with the listener; type for now"; i.focus(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#answer").hidden = true; });
     setInterval(() => { greet(); renderTile("clock"); }, 30000);
+    setInterval(() => { if ((data("focus").until || 0) > Date.now() / 1000 - 1) renderTile("focus"); }, 1000);
   }
   connect();
 });

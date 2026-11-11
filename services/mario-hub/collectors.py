@@ -493,6 +493,80 @@ def weather(cfg):
             "rain": first("precipitation_probability_max"), "hours": hours}
 
 
+# ------------------------------------------------------------ local files
+
+def parse_xbel(text, limit=6):
+    """GTK's recently-used.xbel -> newest local files that still exist: name, path, app, when."""
+    import xml.etree.ElementTree as ET
+    from datetime import datetime
+    from urllib.parse import unquote, urlparse
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    out = []
+    for bm in root.findall("bookmark"):
+        href = bm.get("href", "")
+        if not href.startswith("file://"):
+            continue
+        path = unquote(urlparse(href).path)
+        stamp = bm.get("visited") or bm.get("modified") or ""
+        try:
+            when = datetime.fromisoformat(stamp.replace("Z", "+00:00")[:26] + ("+00:00" if stamp.endswith("Z") else "")).timestamp()
+        except ValueError:
+            when = 0
+        app = next((a.get("name", "") for a in bm.iter() if a.tag.endswith("application")), "")
+        out.append({"name": Path(path).name, "path": path, "app": app, "when": int(when)})
+    out.sort(key=lambda r: r["when"], reverse=True)
+    return [r for r in out if Path(r["path"]).exists()][:limit]
+
+
+def recent(cfg):
+    xbel = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "recently-used.xbel"
+    try:
+        return {"files": parse_xbel(xbel.read_text(errors="replace"))}
+    except OSError:
+        return {"files": []}
+
+
+def downloads(cfg):
+    folder = Path(os.path.expanduser(cfg.get("downloads", "~/Downloads")))
+    try:
+        entries = [p for p in folder.iterdir() if p.is_file() and not p.name.startswith(".")
+                   and not p.name.endswith((".part", ".crdownload"))]
+    except OSError:
+        return {"files": [], "error": f"no {folder}"}
+    entries.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return {"folder": str(folder), "count": len(entries),
+            "files": [{"name": p.name, "path": str(p), "size": p.stat().st_size, "when": int(p.stat().st_mtime)}
+                      for p in entries[:5]]}
+
+
+def processes(cfg):
+    """Busiest processes right now (top's one-shot sample, not lifetime averages)."""
+    out, err = _run(["top", "-b", "-n", "2", "-d", "0.5", "-w", "200", "-o", "%CPU"], timeout=6)
+    rows = []
+    last = (out or "").split("\ntop - ")[-1]  # the second sample: CPU over the last half second
+    for line in last.splitlines():
+        f = line.split()
+        if len(f) >= 12 and f[0].isdigit():
+            try:
+                rows.append({"name": " ".join(f[11:])[:28], "cpu": float(f[8].replace(",", ".")),
+                             "mem": float(f[9].replace(",", "."))})
+            except ValueError:
+                continue
+    rows = [r for r in rows if r["name"] not in ("top",)]
+    return {"top": rows[:5], "error": err if out is None else ""}
+
+
+def read_notes(path, limit=4):
+    try:
+        lines = [l for l in Path(path).read_text().splitlines() if l.startswith("- ")]
+    except OSError:
+        return []
+    return [l[2:] for l in lines[-limit:]][::-1]
+
+
 # ------------------------------------------------------------- schedule
 
 # card name -> (collector, seconds between runs)
@@ -506,4 +580,7 @@ SCHEDULE = {
     "reels": (reels, 120),
     "loom": (loom, 15),
     "weather": (weather, 900),
+    "recent": (recent, 20),
+    "downloads": (downloads, 20),
+    "processes": (processes, 5),
 }

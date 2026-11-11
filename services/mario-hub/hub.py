@@ -10,6 +10,8 @@
   POST /api/handoff/ID   {"decision": "run" | "cancel"}: runs a plan only after you say so
   POST /api/action       {"id", "arg"}: a short whitelist (open a repo's terminal, a folder, ...)
   POST /api/presence     {"state", "detail"}: for the voice listener (listening, ...)
+  POST /api/focus        {"minutes"}: start (25/50/90...) or stop (0) a focus block
+  POST /api/note         {"text"}: add a line to Jot (~/.local/share/adaptive-desktop/mario/notes.md)
 
 Collectors (collectors.py) run on their own intervals in threads; a card is pushed only when it
 changed. --once prints one full state as JSON and exits (the check uses it).
@@ -34,8 +36,23 @@ import config as config_mod  # noqa: E402
 
 STATIC = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "static"
 PRESENCE = ("ready", "listening", "thinking", "doing", "needs_you")
-OPEN_URL_PREFIXES = ("https://claude.ai/", "https://docs.google.com/", "https://github.com/",
+OPEN_URL_PREFIXES = ("https://claude.ai/", "https://gemini.google.com/", "https://docs.google.com/", "https://github.com/",
                      "https://www.instagram.com/", "http://127.0.0.1:", "http://localhost:")
+REPO = config_mod.ADAPTIVE_REPO
+# 1x1 launcher tiles: id -> command. Only these run; a missing program shows the tile dimmed.
+LAUNCH = {
+    "terminal": ["gnome-terminal"],
+    "files": ["xdg-open", str(Path.home())],
+    "code": ["code"],
+    "settings": ["gnome-control-center"],
+    "phone": [sys.executable, str(REPO / "apps" / "adaptive-phone" / "phone.py")],
+    "mario": [sys.executable, str(REPO / "apps" / "mario-home" / "host.py"), "--panel"],
+    "downloads": ["xdg-open", str(Path.home() / "Downloads")],
+    "screenshot": ["gnome-screenshot", "--interactive"],
+    "cast": [str(REPO / "scripts" / "adaptive-cast-launch.sh"), "--toggle"],
+    "calculator": ["gnome-calculator"],
+    "lock": ["loginctl", "lock-session"],
+}
 
 
 class Hub:
@@ -48,14 +65,21 @@ class Hub:
         self.handoffs = {}
         self.loom_session = None
         self.tasks = []
+        self.focus = {"until": 0, "minutes": 0}
+        self.notes_file = config_mod.DATA_DIR / "notes.md"
 
     # ------------------------------------------------------------ state
     def public_config(self):
         return {"backup_at": self.cfg.get("backup_at", ""), "cards_off": self.cfg.get("cards_off", []),
-                "host": os.uname().nodename}
+                "host": os.uname().nodename,
+                "launch": {k: bool(shutil.which(v[0]) or Path(v[0]).exists() or (len(v) > 1 and Path(v[1]).exists()))
+                           for k, v in LAUNCH.items()}}
 
     def snapshot(self):
-        state = {"cards": self.cards, "config": self.public_config()}
+        cards = dict(self.cards)
+        cards["focus"] = {"data": self.focus, "at": 0}
+        cards["notes"] = {"data": {"items": collectors.read_notes(self.notes_file)}, "at": 0}
+        state = {"cards": cards, "config": self.public_config()}
         state["next"] = brain.next_steps(state)
         state["presence"] = self.presence
         return state
@@ -192,6 +216,34 @@ class Hub:
         await self.set_presence("ready")
         await self.collect_once("builds")
 
+    # ------------------------------------------------------- focus, notes
+    async def set_focus(self, minutes):
+        minutes = max(0, min(int(minutes or 0), 180))
+        self.focus = {"until": time.time() + minutes * 60 if minutes else 0, "minutes": minutes}
+        await self.broadcast({"type": "card", "name": "focus", "data": self.focus, "at": time.time()})
+        if minutes:
+            until = self.focus["until"]
+
+            async def ring():
+                await asyncio.sleep(minutes * 60)
+                if self.focus.get("until") == until:
+                    self.focus = {"until": 0, "minutes": 0}
+                    await self.broadcast({"type": "card", "name": "focus", "data": self.focus, "at": time.time()})
+                    if shutil.which("notify-send"):
+                        subprocess.Popen(["notify-send", "-a", "Mario", "Focus done", f"{minutes} minutes. Take a break."])
+            asyncio.create_task(ring())
+
+    async def add_note(self, text):
+        text = " ".join(str(text or "").split())[:300]
+        if not text:
+            return {"ok": False, "error": "empty note"}
+        self.notes_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.notes_file, "a") as f:
+            f.write(f"- {time.strftime('%d %b %H:%M')} · {text}\n")
+        await self.broadcast({"type": "card", "name": "notes",
+                              "data": {"items": collectors.read_notes(self.notes_file)}, "at": time.time()})
+        return {"ok": True}
+
     # ----------------------------------------------------------- actions
     def action(self, aid, arg):
         repos = {str(p) for p in self.cfg["repos"]} | {str(self.cfg["thinking_space"])}
@@ -209,6 +261,16 @@ class Hub:
             cmd = ["xdg-open", str(arg)]
         elif aid == "start_office":
             cmd = ["systemctl", "--user", "start", "adaptive-agent-office.service"]
+        elif aid == "launch":
+            if arg not in LAUNCH:
+                return {"ok": False, "error": "not one of Mario's launchers"}
+            cmd = LAUNCH[arg]
+        elif aid == "open_file":
+            listed = {f["path"] for name in ("recent", "downloads")
+                      for f in (self.cards.get(name, {}).get("data") or {}).get("files", [])}
+            if str(arg) not in listed:
+                return {"ok": False, "error": "only files shown on Home open from here"}
+            cmd = ["xdg-open", str(arg)]
         else:
             return {"ok": False, "error": f"unknown action {aid}"}
         try:
@@ -291,6 +353,15 @@ def make_app(hub, port):
         await hub.set_presence(data["state"], data.get("detail", ""))
         return web.json_response({"ok": True})
 
+    async def focus(request):
+        await hub.set_focus((await read(request)).get("minutes"))
+        return web.json_response({"ok": True, **hub.focus})
+
+    async def note(request):
+        return web.json_response(await hub.add_note((await read(request)).get("text")))
+
+    app.router.add_post("/api/focus", focus)
+    app.router.add_post("/api/note", note)
     app.router.add_get("/", page)
     app.router.add_get("/panel", page)
     app.router.add_get("/api/state", state)

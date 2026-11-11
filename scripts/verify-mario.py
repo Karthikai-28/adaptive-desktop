@@ -132,6 +132,13 @@ def test_collectors(cfg, work):
           and collectors.net_rates("h\nh\n  eth0: 3000 0 0 0 0 0 0 0 1500 0 0 0 0 0 0 0\n", now=12) == {"down": 1000.0, "up": 500.0})
     check("weather can be turned off (no network)", collectors.weather({**cfg, "cards_off": ["weather"]}) == {"off": True})
     check("LOOM stopped reads as stopped", collectors.loom({"loom_url": "http://127.0.0.1:9"})["running"] is False)
+    xbel = ('<xbel><bookmark href="file://%s" visited="2026-11-11T09:00:00Z"><info><metadata><a:applications xmlns:a="x">'
+            '<a:application name="gedit"/></a:applications></metadata></info></bookmark>'
+            '<bookmark href="file:///gone/x" visited="2026-11-12T09:00:00Z"/></xbel>') % (Path(cfg["repos"][0]) / "a.txt")
+    rec = collectors.parse_xbel(xbel)
+    check("recent files: existing only, with the app", len(rec) == 1 and rec[0]["app"] == "gedit" and rec[0]["name"] == "a.txt", str(rec))
+    dl = collectors.downloads({"downloads": str(cfg["repos"][0])})
+    check("downloads: newest first, hidden files skipped", dl["count"] == 2 and dl["files"][0]["name"] in ("a.txt", "b.txt"))
     check("meminfo", collectors.parse_meminfo("MemTotal: 16000000 kB\nMemAvailable: 8000000 kB\n")["used_gb"] == 7.6)
     check("a stopped service reads as stopped, not an error",
           collectors.agent_office({"agent_office_url": "http://127.0.0.1:9"})["running"] is False)
@@ -191,6 +198,7 @@ async def test_hub(cfg):
         return {"n": calls["n"]}
 
     hub = hub_mod.Hub(cfg, schedule={"fake": (fake, 0.2)})
+    hub.notes_file = Path(cfg["thinking_space"]).parent / "notes.md"
     port = 18791
     app = hub_mod.make_app(hub, port)
     runner = web.AppRunner(app)
@@ -241,6 +249,20 @@ async def test_hub(cfg):
                 check("actions only open known kinds of links", (await r.json())["ok"] is False)
             async with s.post(base + "/api/presence", json={"state": "listening"}) as r:
                 check("the voice listener can set presence", (await r.json()).get("ok") is True)
+            async with s.post(base + "/api/action", json={"id": "launch", "arg": "rm"}) as r:
+                check("launchers run only their own commands", (await r.json())["ok"] is False)
+            async with s.post(base + "/api/action", json={"id": "open_file", "arg": "/etc/shadow"}) as r:
+                check("only files shown on Home open", (await r.json())["ok"] is False)
+            async with s.post(base + "/api/focus", json={"minutes": 25}) as r:
+                f = await r.json()
+            check("focus block starts", f["minutes"] == 25 and f["until"] > time.time() + 1400)
+            async with s.post(base + "/api/focus", json={"minutes": 0}) as r:
+                check("focus block stops", (await r.json())["until"] == 0)
+            async with s.post(base + "/api/note", json={"text": "  try   whichllm  "}) as r:
+                check("a jotted note is saved", (await r.json())["ok"] is True)
+            async with s.get(base + "/api/state") as r:
+                notes = (await r.json())["cards"]["notes"]["data"]["items"]
+            check("notes come back newest first, tidied", notes and notes[0].endswith("· try whichllm"), str(notes))
     finally:
         await runner.cleanup()
 
@@ -254,12 +276,20 @@ def test_page():
     html = (REPO / "apps" / "mario-home" / "static" / "index.html").read_text()
     import re as _re
     tiles = _re.findall(r'data-tile="([a-z]+)"', html)
+    launchers = _re.findall(r'data-launch="([a-z]+)"', html)
     areas = _re.findall(r'grid-area:(\d+)/(\d+)/(\d+)/(\d+)', html)
-    check("fifteen live tiles", len(tiles) == 15 and len(areas) == 15, str(tiles))
+    check("20 live tiles and 16 launchers", len(tiles) == 36 and len(launchers) == 16 and len(areas) == 36,
+          f"{len(tiles)} tiles, {len(launchers)} launchers")
     cells = [(r, c) for r0, c0, r1, c1 in (map(int, a) for a in areas) for r in range(r0, r1) for c in range(c0, c1)]
-    check("tiles fill the 12 x 6 grid exactly once", sorted(cells) == [(r, c) for r in range(1, 7) for c in range(1, 13)])
+    check("tiles fill the 14 x 8 grid exactly once", sorted(cells) == [(r, c) for r in range(1, 9) for c in range(1, 15)])
     script = js.read_text()
-    check("every tile has a renderer", all(f"  {t}(" in script for t in tiles), str([t for t in tiles if f"  {t}(" not in script]))
+    named = [t for t in tiles if t != "launch"]
+    check("every tile has a renderer", all(f"  {t}(" in script for t in named), str([t for t in named if f"  {t}(" not in script]))
+    sys.path.insert(0, str(REPO / "services" / "mario-hub"))
+    import hub as hub_mod
+    url_keys = set(_re.findall(r"^  (\w+): \(\) =>", script, _re.M))
+    check("every launcher is a known command or link", all(k in hub_mod.LAUNCH or k in url_keys for k in launchers),
+          str([k for k in launchers if k not in hub_mod.LAUNCH and k not in url_keys]))
     check("page has the panel and its script", "panel-form" in html and "/static/home.js" in html)
     check("no innerHTML in the page script", "innerHTML" not in script)
     try:
