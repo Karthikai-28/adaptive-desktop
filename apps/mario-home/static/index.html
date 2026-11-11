@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mario</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/home.css">
+</head>
+<body>
+
+<!-- Home: the desktop layer. The shell's top bar and rail stay the shell's. -->
+<main id="home" class="home">
+  <section class="hero">
+    <div class="greet"><h1 id="greeting">Hello</h1><span id="date" class="muted"></span></div>
+    <div class="ask-wrap">
+      <form id="ask-form" class="ask" autocomplete="off">
+        <span class="mark" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>
+        <label for="ask" class="sr">Ask Mario</label>
+        <input id="ask" placeholder="Ask Mario, or hold Super+Space and talk">
+        <span class="pill mono">local first</span>
+        <button type="button" id="talk" class="talk" aria-label="Talk to Mario">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+      </form>
+      <div class="chips">
+        <button class="chip" data-ask="Brief me">Brief me</button>
+        <button class="chip" data-ask="What changed today?">What changed today</button>
+        <button class="chip" data-ask="Plan my tomorrow from my boards and repos">Plan tomorrow</button>
+        <button class="chip" data-ask="Pick a movie for tonight">Pick a movie for tonight</button>
+      </div>
+      <div id="answer" class="answer" hidden></div>
+    </div>
+  </section>
+
+  <!-- Live tiles: twelve columns by six rows; a tile with more than one face turns on its own. -->
+  <section class="tiles" id="tiles">
+    <article class="tile" data-tile="next" data-anim="none" style="grid-area:1/1/3/5;--tint:94,92,230"><div class="stage"></div><span class="label">Next step</span></article>
+    <article class="tile" data-tile="clock" data-anim="flip" style="grid-area:1/5/3/7;--tint:10,132,255"><div class="stage"></div><span class="label">Today</span></article>
+    <article class="tile" data-tile="builds" data-anim="slide" style="grid-area:1/7/3/11;--tint:48,209,88"><div class="stage"></div><span class="label">Builds</span><span class="badge"></span></article>
+    <article class="tile" data-tile="weather" data-anim="flip" style="grid-area:1/11/2/13;--tint:100,210,255"><div class="stage"></div><span class="label">Weather</span></article>
+    <article class="tile" data-tile="phone" data-anim="flip" style="grid-area:2/11/3/13;--tint:142,142,147"><div class="stage"></div><span class="label">Phone</span></article>
+
+    <article class="tile" data-tile="thinking" data-anim="slide" style="grid-area:3/1/5/5;--tint:191,90,242"><div class="stage"></div><span class="label">Thinking Space</span><span class="badge"></span></article>
+    <article class="tile" data-tile="map" data-anim="none" style="grid-area:3/5/5/7;--tint:94,92,230"><div class="stage"></div><span class="label">Thinking map</span></article>
+    <article class="tile" data-tile="reels" data-anim="slide" style="grid-area:3/7/5/11;--tint:255,159,10"><div class="stage"></div><span class="label">Saved Reels</span><span class="badge"></span></article>
+    <article class="tile" data-tile="tonight" data-anim="flip" style="grid-area:3/11/5/13;--tint:255,69,58"><div class="stage"></div><span class="label">Tonight</span></article>
+
+    <article class="tile" data-tile="system" data-anim="slide" style="grid-area:5/1/7/5;--tint:100,210,255"><div class="stage"></div><span class="label" data-k="host">This laptop</span></article>
+    <article class="tile" data-tile="usage" data-anim="flip" style="grid-area:5/5/7/7;--tint:217,162,122"><div class="stage"></div><span class="label">AI usage</span></article>
+    <article class="tile" data-tile="office" data-anim="flip" style="grid-area:5/7/7/9;--tint:48,209,88"><div class="stage"></div><span class="label">Agent Office</span></article>
+    <article class="tile" data-tile="trynext" data-anim="slide" style="grid-area:5/9/7/11;--tint:255,214,10"><div class="stage"></div><span class="label">Try next</span><span class="badge"></span></article>
+    <article class="tile" data-tile="cook" data-anim="flip" style="grid-area:5/11/6/13;--tint:255,159,10"><div class="stage"></div><span class="label">Cook next</span></article>
+    <article class="tile" data-tile="loom" data-anim="flip" style="grid-area:6/11/7/13;--tint:94,92,230"><div class="stage"></div><span class="label">LOOM</span></article>
+  </section>
+</main>
+
+<!-- Panel: Super+Space opens this page at /panel in its own window -->
+<section id="panel" class="panel" hidden>
+  <header class="panel-head">
+    <span class="mark big" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>
+    <div><div class="title">Mario</div><div class="muted" id="panel-sub">answers locally first</div></div>
+  </header>
+  <div id="log" class="log" aria-live="polite"></div>
+  <form id="panel-form" class="composer" autocomplete="off">
+    <label for="panel-input" class="sr">Message Mario</label>
+    <input id="panel-input" placeholder="Message Mario">
+    <button class="talk" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6"/></svg></button>
+  </form>
+</section>
+
+<div id="offline" class="offline" hidden>Mario Hub is not answering. Retrying…</div>
+<script src="/static/home.js"></script>
+</body>
+</html>

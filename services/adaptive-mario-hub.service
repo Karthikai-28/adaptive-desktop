@@ -1,0 +1,21 @@
+[Unit]
+Description=Mario Hub: live data for Mario's Home and Mario's ask box (http://127.0.0.1:8791)
+After=default.target
+
+[Service]
+# A template: scripts/install-mario.sh puts this checkout's path in place of @ADAPTIVE_REPO@
+WorkingDirectory=@ADAPTIVE_REPO@/services/mario-hub
+ExecStart=/usr/bin/python3 @ADAPTIVE_REPO@/services/mario-hub/hub.py
+Environment=PYTHONUNBUFFERED=1
+Environment=ADAPTIVE_REPO=@ADAPTIVE_REPO@
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+# xdg-open, gnome-terminal and the Adaptive Link socket need the session's display and bus
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

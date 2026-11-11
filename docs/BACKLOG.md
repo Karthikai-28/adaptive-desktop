@@ -1035,6 +1035,35 @@ Everything about it, and its security model, is in `docs/ADAPTIVE_LINK.md`.
   guards; phone use stays behind Adaptive Link's paired gateway and Commands permission. A
   health endpoint reports this local-only state. The integration suite verifies these guards.
 
+## Milestone 20 — Mario: the assistant layer
+
+Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `docs/MARIO.md`.
+
+### Done (sandbox)
+
+- ✅ **Mario Hub** (`services/mario-hub/`, 127.0.0.1:8791): collectors for builds, Thinking Space,
+  Saved Reels, Agent Office, AI usage, system/GPU/Ollama, phone; changed cards pushed over `/ws`;
+  loopback Host and Origin guards; action whitelist.
+- ✅ **Ask**: instant answers from state, LOOM locally (Ollama fallback), Claude Code plans held
+  until Run, with folder-only edits and no push/send.
+- ✅ **Home as live tiles** (`apps/mario-home/static/`): fifteen tiles packed on a 12 × 6 grid,
+  multi-face tiles turning on their own (flip / peek-slide), AI usage for Claude and Gemini only;
+  checked in headless Chrome against a live hub, with the panel, plan card and presence marks.
+- ✅ `scripts/verify-mario.py` in `verify-all.sh --quick`.
+
+### Live, not yet tried
+
+- 🔬 `host.py` as the desktop layer under GNOME 42 X11 (desktop hint, work area, all workspaces).
+- 🔬 `host.py --panel` toggle on Super+Space after `install-keybindings.sh` releases it from
+  input-source switching.
+- 🔬 Against the real LOOM backend, Ollama on the GTX 1050, and `claude -p` in a repo.
+
+### Next
+
+- Phase 2: Google Sheet and Calendar read directly. Phase 3: voice (push-to-talk + "Mario" wake
+  word, local). Phase 4: notes into board Inboxes, island and phone. Phase 5: council, nightly
+  review, routines.
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the

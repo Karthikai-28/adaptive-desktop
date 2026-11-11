@@ -37,14 +37,15 @@ run() { [ "$DRY" = 1 ] || "$@"; }
 
 echo "Timers and services"
 for unit in adaptive-wallpaper.timer adaptive-index.timer adaptive-power-auto.service adaptive-link.service \
-    adaptive-agent-office.service; do
+    adaptive-agent-office.service adaptive-mario-hub.service; do
     if [ -f "$UNITS/$unit" ]; then
         run systemctl --user disable --now "$unit" 2>/dev/null || true
         say "disable $unit"
     fi
 done
 for file in adaptive-wallpaper.service adaptive-wallpaper.timer adaptive-index.service \
-    adaptive-index.timer adaptive-power-auto.service adaptive-link.service adaptive-agent-office.service; do
+    adaptive-index.timer adaptive-power-auto.service adaptive-link.service adaptive-agent-office.service \
+    adaptive-mario-hub.service; do
     if [ -f "$UNITS/$file" ]; then
         run rm -f "$UNITS/$file"
         say "remove $UNITS/$file"
@@ -57,7 +58,7 @@ echo "Autostart and app-grid entries"
 # logged into, it is what puts the laptop to sleep when the lid closes
 # (docs/POWER_POLICY.md). It goes with the session, below.
 for file in "$AUTOSTART/adaptive-project-context.desktop" "$AUTOSTART/adaptive-gestures.desktop" \
-    "$AUTOSTART/adaptive-first-login.desktop" \
+    "$AUTOSTART/adaptive-first-login.desktop" "$AUTOSTART/adaptive-mario-home.desktop" \
     "$APPS/adaptive-project-context.desktop" "$APPS/com.karthi.AdaptiveSettings.desktop" \
     "$APPS/com.karthi.AdaptiveGestures.desktop" \
     "$HOME/.local/share/gnome-shell/search-providers/org.adaptive.ProjectContext.search-provider.ini"; do
@@ -112,7 +113,7 @@ fi
 echo "Background processes"
 for pid in $(pgrep -x python3 || true); do
     if tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null |
-        grep -qE "adaptive-gestures\.py|project-context/main\.py|adaptive-power-auto\.py|adaptive-link/server\.py|agent-office/server\.py"; then
+        grep -qE "adaptive-gestures\.py|project-context/main\.py|adaptive-power-auto\.py|adaptive-link/server\.py|agent-office/server\.py|mario-hub/hub\.py|mario-home/host\.py"; then
         run kill "$pid" 2>/dev/null || true
         say "stop process $pid"
     fi

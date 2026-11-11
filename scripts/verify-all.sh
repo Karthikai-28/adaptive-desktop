@@ -106,6 +106,7 @@ step "Adaptive Settings backend" quiet python3 "$REPO/scripts/verify-adaptive-se
 step "Cast: Miracast elements, RTSP framing, format choice" quiet python3 "$REPO/scripts/verify-cast.py"
 step "Adaptive Home on the TV: tiles, remote navigation, socket frames" quiet node "$REPO/scripts/verify-tv-home.js"
 step "Agent Office (syntax, roster, API guards; no quota)" quiet "$REPO/scripts/verify-agent-office.sh"
+step "Mario: collectors, decisions, hub guards, page" quiet python3 "$REPO/scripts/verify-mario.py"
 
 inspector_static() {
     python3 - "$REPO" <<'PY'
