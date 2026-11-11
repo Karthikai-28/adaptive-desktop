@@ -45,12 +45,16 @@ button { font: inherit; color: var(--text); cursor: pointer; }
 .tile:hover { border-color: rgba(var(--tint), .5); }
 .tile.clickable { cursor: pointer; }
 .tile.clickable:active { transform: scale(.985); }
-.stage { position: absolute; inset: 0; padding: 10px 12px 24px; display: flex; flex-direction: column; gap: 5px; font-size: 12px;
+.stage { position: absolute; inset: 30px 0 0 0; padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 5px; font-size: 12px;
   transform-origin: 50% 50%; transition: transform var(--turn) cubic-bezier(.3,.7,.2,1), opacity var(--turn); backface-visibility: hidden; }
-.tile .label { position: absolute; left: 12px; bottom: 6px; font-size: 11px; font-weight: 600; color: var(--soft); pointer-events: none; }
-.tile .badge { position: absolute; right: 9px; bottom: 6px; font-size: 10px; font-weight: 600; color: var(--text); background: rgba(var(--tint), .45); border-radius: 999px; padding: 1px 7px; pointer-events: none; }
+/* every tile's header: icon, name, then its count and face dots */
+.th { position: absolute; top: 0; left: 0; right: 0; height: 30px; z-index: 2; display: flex; align-items: center; gap: 7px;
+  padding: 0 10px 0 11px; background: rgba(var(--tint), .16); border-bottom: 1px solid rgba(var(--tint), .2); pointer-events: none; }
+.ti { width: 15px; height: 15px; flex: none; fill: none; stroke: rgb(var(--tint)); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tt { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; letter-spacing: .01em; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .badge { flex: none; font-size: 10px; font-weight: 600; color: var(--text); background: rgba(var(--tint), .45); border-radius: 999px; padding: 1px 7px; }
 .tile .badge:empty { display: none; }
-.tile .dots { position: absolute; right: 10px; top: 8px; display: flex; gap: 3px; }
+.tile .dots { flex: none; display: flex; gap: 3px; }
 .tile .dots i { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.25); }
 .tile .dots i.on { background: rgba(255,255,255,.8); }
 
@@ -62,11 +66,11 @@ button { font: inherit; color: var(--text); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .stage { transition: none !important; } }
 
 /* 1x1 launchers: an icon, a name and a live badge */
-.tile.small .label { left: 9px; font-size: 10px; }
-.launch { position: absolute; inset: 0; border: 0; background: transparent; display: grid; place-items: center; padding-bottom: 14px; border-radius: 12px; }
+.tile.small .th { padding: 0 9px; }
+.tile.small .tt { font-size: 11px; }
+.launch { position: absolute; inset: 30px 0 0 0; border: 0; background: transparent; display: grid; place-items: center; border-radius: 0 0 12px 12px; }
 .launch svg { width: 30px; height: 30px; fill: none; stroke: var(--text); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tile.small.off { opacity: .45; }
-.tile.small .badge { bottom: auto; top: 7px; right: 7px; }
 .tile .btn { padding: 4px 9px; min-height: 26px; font-size: 11px; }
 .field { display: flex; gap: 6px; margin-top: auto; }
 .field input { flex: 1; min-width: 0; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: var(--text); font: 12px Inter, system-ui, sans-serif; padding: 5px 8px; outline: 0; }

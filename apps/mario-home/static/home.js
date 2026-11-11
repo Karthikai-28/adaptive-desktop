@@ -69,7 +69,7 @@ function setupTiles() {
     }
     const t = { name: node.dataset.tile, el: node, stage: node.querySelector(".stage"), faces: [], i: 0, hover: false, open: null };
     t.dots = el("span", { class: "dots", "aria-hidden": "true" });
-    node.append(t.dots);
+    node.querySelector(".th").append(t.dots);
     node.addEventListener("mouseenter", () => { t.hover = true; });
     node.addEventListener("mouseleave", () => { t.hover = false; });
     node.addEventListener("click", (e) => {
@@ -126,8 +126,7 @@ const render = {
   next() {
     const items = state.next || [];
     setFaces("next", [[
-      el("div", { class: "mid" }, items.length ? `${items.length} thing${items.length > 1 ? "s" : ""} worth doing` : "All clear"),
-      el("ul", { class: "list grow", style: "gap:7px;font-size:12px" },
+      el("ul", { class: "list grow", style: "gap:9px;font-size:13px" },
         (items.length ? items : [{ text: "Nothing needs you right now." }]).map((s) => el("li", {},
           el("span", { style: "white-space:normal" }, s.text),
           s.action ? el("button", { class: "btn", type: "button", onclick: () => act(s.action) }, s.action.label || "Open") : null))),
@@ -224,7 +223,7 @@ const render = {
   system() {
     const d = data("system");
     const label = tiles.system && tiles.system.el.querySelector("[data-k=host]");
-    if (label) label.textContent = d.host || "This laptop";
+    if (label) label.textContent = d.host ? `This laptop · ${d.host}` : "This laptop";
     if (d.cpu != null) { cpuHistory.push(d.cpu); if (cpuHistory.length > 60) cpuHistory.shift(); }
     const spark = svgEl("svg", { class: "spark grow", viewBox: "0 0 300 36", preserveAspectRatio: "none", "aria-hidden": "true" });
     spark.append(svgEl("polyline", { points: cpuHistory.map((v, i) => `${(i / 59) * 300},${34 - (v / 100) * 30}`).join(" ") }));

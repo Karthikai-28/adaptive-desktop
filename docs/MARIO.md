@@ -28,8 +28,9 @@ Home is 28 tiles packed on a 14 × 7 grid of near-square cells (the check proves
 once and that no tile appears twice): 18 live tiles and 10 one-cell launchers. Each tile shows
 something no other tile does. A tile with more than one face turns by itself on its own beat: small
 tiles flip, wide ones peek-slide. It pauses while the pointer is on it, keeps its face when new
-data arrives, and stops animating under reduced motion. The dots in a corner say how many faces it
-has. The top bar keeps the clock; Home does not repeat it.
+data arrives, and stops animating under reduced motion. Every tile has a header in its own tint:
+an icon and its name, then its count and the dots that say how many faces it has. The top bar
+keeps the clock; Home does not repeat it.
 
 | Tile | Cells | Faces |
 | --- | --- | --- |

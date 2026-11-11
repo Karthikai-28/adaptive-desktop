@@ -287,6 +287,8 @@ def test_page():
     areas = _re.findall(r'grid-area:(\d+)/(\d+)/(\d+)/(\d+)', html)
     check("18 live tiles and 10 launchers", len(tiles) == 28 and len(launchers) == 10 and len(areas) == 28,
           f"{len(tiles)} tiles, {len(launchers)} launchers")
+    check("every tile has a header with its name", html.count('<header class="th">') == 28
+          and all(n.strip() for n in _re.findall(r'<span class="tt"[^>]*>([^<]*)</span>', html)))
     check("no tile appears twice", len(set(t for t in tiles if t != "launch")) == 18 and len(set(launchers)) == 10)
     cells = [(r, c) for r0, c0, r1, c1 in (map(int, a) for a in areas) for r in range(r0, r1) for c in range(c0, c1)]
     check("tiles fill the 14 x 7 grid exactly once", sorted(cells) == [(r, c) for r in range(1, 8) for c in range(1, 15)])
