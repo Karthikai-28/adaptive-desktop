@@ -8,63 +8,106 @@
 <link rel="stylesheet" href="/static/home.css">
 </head>
 <body>
+<!-- Icons: one stroke set, used by id -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l3 3 5-6"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 4-6 3-11 8"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></symbol>
+  <symbol id="i-apps" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4zM19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></symbol>
+  <symbol id="i-calc" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></symbol>
+  <symbol id="i-shot" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M2 13v2M22 13v2"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-cap" viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 19h10a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.5A3.3 3.3 0 0 0 7 19z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6L19 19M5 19l1.4-1.4M17.6 6.4L19 5"/></symbol>
+  <symbol id="i-rain" viewBox="0 0 24 24"><path d="M7 15h10a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.5A3.3 3.3 0 0 0 7 15zM8 18l-1 3M12 18l-1 3M16 18l-1 3"/></symbol>
+</svg>
 
 <!-- Home: the desktop layer. The shell's top bar and rail stay the shell's. -->
 <main id="home" class="home">
-  <section class="hero">
+  <header class="top">
     <div class="greet"><h1 id="greeting">Hello</h1><span id="date" class="muted"></span></div>
-    <div class="ask-wrap">
-      <form id="ask-form" class="ask" autocomplete="off">
-        <span class="mark" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>
-        <label for="ask" class="sr">Ask Mario</label>
-        <input id="ask" placeholder="Ask Mario, or hold Super+Space and talk">
-        <span class="pill mono">local first</span>
-        <button type="button" id="talk" class="talk" aria-label="Talk to Mario">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
-        </button>
-      </form>
-      <div class="chips">
-        <button class="chip" data-ask="Brief me">Brief me</button>
-        <button class="chip" data-ask="What changed today?">What changed today</button>
-        <button class="chip" data-ask="Plan my tomorrow from my boards and repos">Plan tomorrow</button>
-      </div>
+    <form id="ask-form" class="ask" autocomplete="off">
+      <span class="mark" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>
+      <label for="ask" class="sr">Ask Mario</label>
+      <input id="ask" placeholder="Ask Mario: your day, mail, repos, anything">
+      <span id="brain" class="pill" title="Where Mario answers from">local first</span>
+      <kbd>Super Space</kbd>
       <div id="answer" class="answer" hidden></div>
+    </form>
+  </header>
+
+  <div class="dayhead">
+    <h2>Your day</h2>
+    <span id="daysum" class="muted"></span>
+    <span class="chips">
+      <button class="chip" data-ask="Brief me">Brief me</button>
+      <button class="chip" data-ask="What changed today?">What changed</button>
+      <button class="chip" data-ask="Plan my tomorrow from my calendar, tasks and repos">Plan tomorrow</button>
+    </span>
+  </div>
+
+  <div class="main">
+    <div class="left">
+      <div class="row r3">
+        <section class="card" id="c-mail"><header class="ch"><svg class="ci"><use href="#i-mail"/></svg><h3>Mail</h3><span class="count"></span><button class="open" type="button" data-open="https://mail.google.com/" aria-label="Open Gmail"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+        <section class="card" id="c-today"><header class="ch"><svg class="ci"><use href="#i-cal"/></svg><h3>Today</h3><span class="count"></span><button class="open" type="button" data-open="https://calendar.google.com/" aria-label="Open Google Calendar"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+        <section class="card" id="c-tasks"><header class="ch"><svg class="ci"><use href="#i-check"/></svg><h3>Tasks</h3><span class="count"></span></header><div class="body"></div></section>
+      </div>
+      <div class="row r2a">
+        <section class="card" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="count"></span></header><div class="body"></div></section>
+        <section class="card" id="c-thinking"><header class="ch"><svg class="ci"><use href="#i-layers"/></svg><h3>Thinking Space</h3><span class="count"></span><button class="open" type="button" data-open-hub aria-label="Open the Thinking Space hub"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+      </div>
+      <div class="row r2b">
+        <section class="card" id="c-recent"><header class="ch"><svg class="ci"><use href="#i-file"/></svg><h3>Recent files</h3></header><div class="body"></div></section>
+        <section class="card" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
+      </div>
     </div>
-  </section>
 
-  <!-- Live tiles: fourteen columns by seven rows of near-square cells; each tile shows something no other tile does.
-       A tile with more than one face turns on its own. -->
-  <section class="tiles" id="tiles">
-    <article class="tile" data-tile="next" data-anim="none" style="grid-area:1/1/3/5;--tint:94,92,230"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6"/></svg><span class="tt">Next step</span><span class="badge"></span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="builds" data-anim="slide" style="grid-area:1/5/3/9;--tint:48,209,88"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-11 7"/></svg><span class="tt">Builds</span><span class="badge"></span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="weather" data-anim="none" style="grid-area:1/9/3/11;--tint:100,210,255"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="3"/><path d="M9 2v2M3.5 4.5l1.4 1.4M2 9h2M7 20h10a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.5A3.3 3.3 0 0 0 7 20z"/></svg><span class="tt">Weather</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="tonight" data-anim="flip" style="grid-area:1/11/3/13;--tint:255,69,58"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5l2 4M14 5l2 4"/></svg><span class="tt">Tonight</span></header><div class="stage"></div></article>
-    <article class="tile small" data-tile="launch" data-launch="terminal" data-anim="none" style="grid-area:1/13/2/14;--tint:142,142,147"><header class="th"><span class="tt">Terminal</span></header><button type="button" class="launch" aria-label="Terminal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-5-6-5M12 19h8"/></svg></button></article>
-    <article class="tile small" data-tile="launch" data-launch="files" data-anim="none" style="grid-area:1/14/2/15;--tint:10,132,255"><header class="th"><span class="tt">Files</span></header><button type="button" class="launch" aria-label="Files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button></article>
-    <article class="tile small" data-tile="launch" data-launch="code" data-anim="none" style="grid-area:2/13/3/14;--tint:10,132,255"><header class="th"><span class="tt">Code</span></header><button type="button" class="launch" aria-label="Code"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg></button></article>
-    <article class="tile small" data-tile="launch" data-launch="settings" data-anim="none" style="grid-area:2/14/3/15;--tint:142,142,147"><header class="th"><span class="tt">Settings</span></header><button type="button" class="launch" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></button></article>
-    <article class="tile" data-tile="thinking" data-anim="slide" style="grid-area:3/1/5/5;--tint:191,90,242"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="tt">Thinking Space</span><span class="badge"></span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="reels" data-anim="slide" style="grid-area:3/5/5/9;--tint:255,159,10"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span class="tt">Saved Reels</span><span class="badge"></span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="trynext" data-anim="slide" style="grid-area:3/9/5/11;--tint:255,214,10"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4zM19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg><span class="tt">Try next</span><span class="badge"></span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="usage" data-anim="none" style="grid-area:3/11/5/13;--tint:217,162,122"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg><span class="tt">AI usage</span></header><div class="stage"></div></article>
-    <article class="tile small" data-tile="launch" data-launch="claude" data-anim="none" style="grid-area:3/13/4/14;--tint:217,162,122"><header class="th"><span class="tt">Claude</span></header><button type="button" class="launch" aria-label="Claude"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/></svg></button></article>
-    <article class="tile small" data-tile="launch" data-launch="gemini" data-anim="none" style="grid-area:3/14/4/15;--tint:10,132,255"><header class="th"><span class="tt">Gemini</span></header><button type="button" class="launch" aria-label="Gemini"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 5 5 9 10 10-5 1-9 5-10 10-1-5-5-9-10-10 5-1 9-5 10-10z"/></svg></button></article>
-    <article class="tile small" data-tile="launch" data-launch="screenshot" data-anim="none" style="grid-area:4/13/5/14;--tint:255,159,10"><header class="th"><span class="tt">Screenshot</span></header><button type="button" class="launch" aria-label="Screenshot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2"/><circle cx="12" cy="12" r="3"/></svg></button></article>
-    <article class="tile small" data-tile="launch" data-launch="cast" data-anim="none" style="grid-area:4/14/5/15;--tint:255,69,58"><header class="th"><span class="tt">Cast to TV</span></header><button type="button" class="launch" aria-label="Cast to TV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6M3 12a8 8 0 0 1 8 8M3 16a4 4 0 0 1 4 4"/></svg></button></article>
-    <article class="tile" data-tile="system" data-anim="slide" style="grid-area:5/1/7/5;--tint:100,210,255"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg><span class="tt" data-k="host">This laptop</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="recent" data-anim="none" style="grid-area:5/5/7/9;--tint:10,132,255"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="tt">Recent files</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="agents" data-anim="flip" style="grid-area:5/9/7/11;--tint:48,209,88"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-5-5-5M11 19h9"/></svg><span class="tt">Agents</span><span class="badge"></span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="downloads" data-anim="flip" style="grid-area:5/11/7/13;--tint:100,210,255"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg><span class="tt">Downloads</span><span class="badge"></span></header><div class="stage"></div></article>
-    <article class="tile small" data-tile="launch" data-launch="calculator" data-anim="none" style="grid-area:5/13/6/14;--tint:142,142,147"><header class="th"><span class="tt">Calculator</span></header><button type="button" class="launch" aria-label="Calculator"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/></svg></button></article>
-    <article class="tile small" data-tile="launch" data-launch="lock" data-anim="none" style="grid-area:5/14/6/15;--tint:142,142,147"><header class="th"><span class="tt">Lock</span></header><button type="button" class="launch" aria-label="Lock"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></button></article>
-    <article class="tile" data-tile="phone" data-anim="none" style="grid-area:6/13/7/15;--tint:142,142,147"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg><span class="tt">Phone</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="focus" data-anim="none" style="grid-area:7/1/8/5;--tint:255,69,58"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".5"/></svg><span class="tt">Focus</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="notes" data-anim="none" style="grid-area:7/5/8/9;--tint:255,214,10"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><span class="tt">Jot</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="cook" data-anim="flip" style="grid-area:7/9/8/11;--tint:255,159,10"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h16v3a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6zM2 11h20M9 4c0 2 2 2 2 4M14 4c0 2 2 2 2 4"/></svg><span class="tt">Cook next</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="loom" data-anim="none" style="grid-area:7/11/8/13;--tint:94,92,230"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12C7 4 12 20 17 12s4-6 5 0"/><path d="M2 12C7 20 12 4 17 12s4 6 5 0"/></svg><span class="tt">LOOM</span></header><div class="stage"></div></article>
-    <article class="tile" data-tile="exposure" data-anim="flip" style="grid-area:7/13/8/15;--tint:255,159,10"><header class="th"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg><span class="tt">Open to network</span></header><div class="stage"></div></article>
-  </section>
-
+    <aside class="side">
+      <section class="card compact" id="c-weather"><div class="body"></div></section>
+      <section class="card" id="c-apps"><header class="ch"><svg class="ci"><use href="#i-apps"/></svg><h3>Apps</h3></header>
+        <div class="apps">
+          <button class="app" type="button" data-launch="terminal"><svg><use href="#i-term"/></svg>Terminal</button>
+          <button class="app" type="button" data-launch="files"><svg><use href="#i-folder"/></svg>Files</button>
+          <button class="app" type="button" data-launch="code"><svg><use href="#i-code"/></svg>Code</button>
+          <button class="app" type="button" data-launch="browser"><svg><use href="#i-globe"/></svg>Browser</button>
+          <button class="app" type="button" data-launch="settings"><svg><use href="#i-gear"/></svg>Settings</button>
+          <button class="app" type="button" data-launch="calculator"><svg><use href="#i-calc"/></svg>Calculator</button>
+        </div>
+      </section>
+      <section class="card" id="c-ai"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>AI assistants</h3></header><div class="body"></div></section>
+      <button class="card compact row-card" id="c-phone" type="button"><svg class="ci"><use href="#i-phone"/></svg><span class="body"></span><svg class="chev"><use href="#i-chev"/></svg></button>
+      <section class="card" id="c-quick">
+        <div class="apps a3">
+          <button class="app" type="button" data-launch="downloads"><svg><use href="#i-down"/></svg>Downloads</button>
+          <button class="app" type="button" data-launch="screenshot"><svg><use href="#i-shot"/></svg>Screenshot</button>
+          <button class="app" type="button" data-launch="lock"><svg><use href="#i-lock"/></svg>Lock</button>
+        </div>
+        <div class="status" id="status"></div>
+      </section>
+    </aside>
+  </div>
 </main>
 
 <!-- Panel: Super+Space opens this page at /panel in its own window -->
@@ -77,7 +120,7 @@
   <form id="panel-form" class="composer" autocomplete="off">
     <label for="panel-input" class="sr">Message Mario</label>
     <input id="panel-input" placeholder="Message Mario">
-    <button class="talk" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6"/></svg></button>
+    <button class="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6"/></svg></button>
   </form>
 </section>
 

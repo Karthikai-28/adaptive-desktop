@@ -516,9 +516,13 @@ def parse_xbel(text, limit=8):
         except ValueError:
             when = 0
         app = next((a.get("name", "") for a in bm.iter() if a.tag.endswith("application")), "")
-        out.append({"name": Path(path).name, "path": path, "app": app, "when": int(when)})
+        try:
+            size = Path(path).stat().st_size
+        except OSError:
+            size = None
+        out.append({"name": Path(path).name, "path": path, "app": app, "when": int(when), "size": size})
     out.sort(key=lambda r: r["when"], reverse=True)
-    return [r for r in out if Path(r["path"]).exists()][:limit]
+    return [r for r in out if r["size"] is not None][:limit]
 
 
 def recent(cfg):
@@ -620,6 +624,186 @@ def read_notes(path, limit=4):
     return [l[2:] for l in lines[-limit:]][::-1]
 
 
+# ------------------------------------------------------------- your day
+
+def keyring(**attrs):
+    """A secret from the GNOME keyring (secret-tool), or "" when it is not stored. Never logged."""
+    if not shutil.which("secret-tool"):
+        return ""
+    args = ["secret-tool", "lookup"]
+    for k, v in attrs.items():
+        args += [k, str(v)]
+    out, _ = _run(args, timeout=5)
+    return (out or "").strip()
+
+
+def _decode(value):
+    from email.header import decode_header, make_header
+    try:
+        return str(make_header(decode_header(value or "")))
+    except Exception:  # noqa: BLE001 - a broken header still shows something
+        return value or ""
+
+
+def mail(cfg):
+    """Unread mail in the inbox, newest first, read-only over IMAP (nothing is marked read).
+    The password (a Google app password) lives in the keyring: install-mario.sh --mail."""
+    import imaplib
+    from email.utils import parseaddr, parsedate_to_datetime
+    m = cfg.get("mail") or {}
+    user, host = m.get("user", ""), m.get("imap_host", "imap.gmail.com")
+    if not user:
+        return {"setup": True, "error": "Mail is not set up: scripts/install-mario.sh --mail"}
+    password = keyring(service="mario-mail", account=user)
+    if not password:
+        return {"setup": True, "error": "No mail password in the keyring: scripts/install-mario.sh --mail"}
+    try:
+        box = imaplib.IMAP4_SSL(host, timeout=15)
+        box.login(user, password)
+        box.select("INBOX", readonly=True)
+        _, ids = box.search(None, "UNSEEN")
+        unread = ids[0].split() if ids and ids[0] else []
+        items = []
+        for num in reversed(unread[-4:]):
+            _, data = box.fetch(num, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+            raw = data[0][1].decode(errors="replace") if data and data[0] else ""
+            head = {}
+            for line in raw.replace("\r\n ", " ").splitlines():
+                key, _, val = line.partition(":")
+                head[key.strip().lower()] = val.strip()
+            name, addr = parseaddr(_decode(head.get("from", "")))
+            try:
+                when = int(parsedate_to_datetime(head.get("date", "")).timestamp())
+            except (TypeError, ValueError):
+                when = 0
+            items.append({"from": name or addr, "subject": _decode(head.get("subject", "")) or "(no subject)", "when": when})
+        box.logout()
+    except (imaplib.IMAP4.error, OSError) as exc:
+        return {"error": f"Mail: {str(exc)[:80]}", "unread": None, "items": []}
+    return {"unread": len(unread), "items": items, "user": user}
+
+
+def _ics_events(text, day):
+    """Events on `day` (a date) from an iCal feed, recurring ones included when the
+    icalendar / recurring_ical_events packages are there (install-mario.sh puts them in
+    .local/mario-pydeps); otherwise single events only."""
+    import datetime as dt
+    pydeps = Path(__file__).resolve().parents[2] / ".local" / "mario-pydeps"
+    if pydeps.is_dir() and str(pydeps) not in sys.path:
+        sys.path.append(str(pydeps))
+    start = dt.datetime.combine(day, dt.time.min).astimezone()
+    end = start + dt.timedelta(days=1)
+    out = []
+    try:
+        import icalendar
+        import recurring_ical_events
+        cal = icalendar.Calendar.from_ical(text)
+        for ev in recurring_ical_events.of(cal).between(start, end):
+            s, e = ev.get("DTSTART").dt, (ev.get("DTEND").dt if ev.get("DTEND") else None)
+            all_day = not isinstance(s, dt.datetime)
+            if not all_day:
+                s = s.astimezone()
+                e = e.astimezone() if isinstance(e, dt.datetime) else None
+            out.append({"title": str(ev.get("SUMMARY", "")), "all_day": all_day,
+                        "start": "" if all_day else s.strftime("%H:%M"),
+                        "minutes": int((e - s).total_seconds() // 60) if e and not all_day else 0,
+                        "where": str(ev.get("LOCATION", "") or "")})
+        return sorted(out, key=lambda x: (not x["all_day"], x["start"])), ""
+    except ImportError:
+        pass
+    # plain fallback: one-off timed events only
+    for block in text.split("BEGIN:VEVENT")[1:]:
+        if "RRULE:" in block:
+            continue
+        fields = {}
+        for line in block.replace("\r\n ", "").replace("\n ", "").splitlines():
+            key, _, val = line.partition(":")
+            fields[key.split(";")[0]] = val
+        raw = fields.get("DTSTART", "")
+        try:
+            if raw.endswith("Z"):
+                s = dt.datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc).astimezone()
+            elif "T" in raw:
+                s = dt.datetime.strptime(raw, "%Y%m%dT%H%M%S").astimezone()
+            else:
+                continue
+        except ValueError:
+            continue
+        if s.date() == day:
+            out.append({"title": fields.get("SUMMARY", ""), "all_day": False, "start": s.strftime("%H:%M"),
+                        "minutes": 0, "where": fields.get("LOCATION", "")})
+    return sorted(out, key=lambda x: x["start"]), "recurring events need: scripts/install-mario.sh"
+
+
+def calendar(cfg):
+    """Today's events from your calendar's private iCal address (kept in the keyring:
+    install-mario.sh --calendar). Read-only."""
+    import datetime as dt
+    url = keyring(service="mario-calendar", account="ical")
+    if not url:
+        return {"setup": True, "error": "Calendar is not set up: scripts/install-mario.sh --calendar"}
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            text = resp.read().decode(errors="replace")
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"Calendar: {str(getattr(exc, 'reason', exc))[:80]}", "events": []}
+    events, note = _ics_events(text, dt.date.today())
+    return {"events": events[:8], "note": note}
+
+
+NOTES_DIR = Path.home() / ".local/share/adaptive-desktop/notes"
+
+
+def tasks(cfg, notes_dir=None):
+    """Open tasks from every Quick Note inbox (Super+Alt+N, the palette's todo mode),
+    newest first, with the project each belongs to."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "project-context"))
+    import extras
+    notes_dir = Path(notes_dir or NOTES_DIR)
+    out = []
+    for inbox in sorted(notes_dir.glob("*/Inbox.md")):
+        try:
+            text = inbox.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for t in extras.parse_tasks(text):
+            if not t["done"]:
+                out.append({"text": t["text"], "stamp": t["stamp"], "line": t["line"],
+                            "path": str(inbox), "project": inbox.parent.name})
+    out.sort(key=lambda t: t["stamp"], reverse=True)
+    return {"open": out[:8], "count": len(out)}
+
+
+def health(cfg):
+    """One line for the status strip: pending updates, disk, battery, failed user services."""
+    issues = []
+    out = ""
+    if Path("/usr/lib/update-notifier/apt-check").exists():
+        try:  # apt-check prints "updates;security" on stderr
+            out = subprocess.run(["/usr/lib/update-notifier/apt-check"], capture_output=True, text=True, timeout=30).stderr
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+    try:
+        updates, security = [int(x) for x in (out or "").strip().split(";")[:2]]
+    except ValueError:
+        updates = security = 0
+    if security:
+        issues.append(f"{security} security update{'s' * (security > 1)}")
+    elif updates:
+        issues.append(f"{updates} update{'s' * (updates > 1)} available")
+    du = shutil.disk_usage("/")
+    if du.used / du.total > 0.9:
+        issues.append(f"disk {round(100 * du.used / du.total)}% full")
+    bat = _battery()
+    if bat and bat["percent"] < 15 and bat["status"] != "charging":
+        issues.append(f"battery {bat['percent']}%")
+    failed, _ = _run(["systemctl", "--user", "--failed", "--no-legend", "--plain"], timeout=5)
+    names = [l.split()[0] for l in (failed or "").splitlines() if l.strip()]
+    if names:
+        issues.append(f"{names[0]} failed")
+    return {"ok": not issues, "issues": issues, "battery": bat}
+
+
 # ------------------------------------------------------------- schedule
 
 # card name -> (collector, seconds between runs)
@@ -638,4 +822,8 @@ SCHEDULE = {
     "processes": (processes, 5),
     "agent_sessions": (agent_sessions, 10),
     "listening": (listening, 30),
+    "mail": (mail, 120),
+    "calendar": (calendar, 300),
+    "tasks": (tasks, 5),
+    "health": (health, 300),
 }

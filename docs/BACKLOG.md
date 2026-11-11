@@ -1046,8 +1046,9 @@ Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `d
   loopback Host and Origin guards; action whitelist.
 - ✅ **Ask**: instant answers from state, LOOM locally (Ollama fallback), Claude Code plans held
   until Run, with folder-only edits and no push/send.
-- ✅ **Home as live tiles** (`apps/mario-home/static/`): 18 tiles and 10 launchers packed on a 14 × 7 grid,
-  no tile repeating another (recent files, downloads, focus, Jot, agent sessions, open ports),
+- ✅ **Home as "Your day"** (`apps/mario-home/static/`): Mail (IMAP, read-only), Today (iCal), Tasks
+  (Quick Note inboxes, tick and add, Mario's suggestions), Projects, Thinking Space, Recent files,
+  Quick note; side column with weather, apps, AI assistants, phone, quick actions and system status,
   multi-face tiles turning on their own (flip / peek-slide), AI usage for Claude and Gemini only;
   checked in headless Chrome against a live hub, with the panel, plan card and presence marks.
 - ✅ `scripts/verify-mario.py` in `verify-all.sh --quick`.

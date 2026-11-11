@@ -84,15 +84,35 @@ def quick_answer(text, state, now=None):
         if t.get("titles"):
             return f"On {t['service']}: {' or '.join(t['titles'])}. Both are in your Movies tracker as yet to watch."
         return "Nothing from your Movies tracker is on a subscription you have right now."
+    if re.fullmatch(r"(what('s| is)? on (my calendar )?today|my day|today|my calendar|agenda)", low):
+        events = (cards.get("calendar") or {}).get("events") or []
+        if not events:
+            return "Nothing on your calendar today." if "events" in (cards.get("calendar") or {}) else \
+                "Your calendar isn't connected yet: scripts/install-mario.sh --calendar"
+        return "Today: " + "; ".join(f"{e['start'] or 'all day'} {e['title']}" for e in events) + "."
+    if re.fullmatch(r"(any |unread |check )?(new )?(mail|email|emails|inbox)", low):
+        m = cards.get("mail") or {}
+        if m.get("unread") is None:
+            return m.get("error") or "Mail isn't connected yet: scripts/install-mario.sh --mail"
+        if not m["unread"]:
+            return "No unread mail."
+        top = "; ".join(f"{i['from']}: {i['subject']}" for i in m.get("items", [])[:3])
+        return f"{m['unread']} unread. Newest: {top}."
     if re.fullmatch(r"(brief me|morning brief|evening brief|status)", low):
         parts = []
+        events = (cards.get("calendar") or {}).get("events") or []
+        if events:
+            nxt = next((e for e in events if e["start"] and e["start"] >= dt.datetime.fromtimestamp(now).strftime("%H:%M")), None)
+            parts.append(f"{len(events)} event{'s' * (len(events) > 1)} today" + (f", next {nxt['title']} at {nxt['start']}." if nxt else "."))
+        unread = (cards.get("mail") or {}).get("unread")
+        if unread:
+            parts.append(f"{unread} unread mail.")
+        open_tasks = (cards.get("tasks") or {}).get("count")
+        if open_tasks:
+            parts.append(f"{open_tasks} open task{'s' * (open_tasks > 1)}.")
         steps = next_steps(state, now)
         if steps:
             parts.append(" ".join(s["text"] + "." for s in steps))
-        reels = cards.get("reels") or {}
-        open_items = sum(t["total"] - t["done"] for t in reels.get("trackers", []))
-        if open_items:
-            parts.append(f"{open_items} saved reels are still to watch or try.")
         office = cards.get("agent_office") or {}
         if office.get("missions"):
             parts.append(f"Agent Office is working on {office['missions'][0]['title']}.")

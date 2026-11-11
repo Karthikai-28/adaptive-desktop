@@ -138,6 +138,27 @@ def test_collectors(cfg, work):
         'tcp LISTEN 0 5 [::1]:631 [::]:*\n')
     check("open to network: loopback left out, ports in order, process named",
           [(r["port"], r["proc"]) for r in open_ports] == [(22, ""), (8443, "python3")], str(open_ports))
+    import datetime as _dt
+    today = _dt.date.today().strftime("%Y%m%d")
+    ics = ("BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:%sT093000\nDTEND:%sT100000\nSUMMARY:Stand-up\nEND:VEVENT\n"
+           "BEGIN:VEVENT\nDTSTART:20200101T150000\nDTEND:20200101T160000\nRRULE:FREQ=DAILY\nSUMMARY:Planning\nEND:VEVENT\n"
+           "BEGIN:VEVENT\nDTSTART:20200101T080000\nSUMMARY:Long ago\nEND:VEVENT\nEND:VCALENDAR") % (today, today)
+    events, _ = collectors._ics_events(ics, _dt.date.today())
+    titles = [e["title"] for e in events]
+    check("calendar: today's events in time order, old ones left out", titles[:1] == ["Stand-up"] and "Long ago" not in titles, str(titles))
+    check("calendar: recurring events when the iCal packages are present",
+          "Planning" in titles or not (REPO / ".local" / "mario-pydeps").is_dir(), str(titles))
+    check("mail without setup says how to set it up", "install-mario.sh --mail" in collectors.mail({"mail": {}})["error"])
+    check("calendar without setup says how to set it up", collectors.calendar({}).get("setup") is True
+          or "error" in collectors.calendar({}))
+    inbox_dir = Path(cfg["thinking_space"]).parent / "notes-fixture" / "LOOM"
+    inbox_dir.mkdir(parents=True)
+    (inbox_dir / "Inbox.md").write_text("# LOOM inbox\n\n- 2026-11-10 09:00  older\n- [x] 2026-11-11 09:00  done\n- 2026-11-12 09:00  newer\n")
+    t = collectors.tasks(cfg, notes_dir=inbox_dir.parent)
+    check("tasks: open ones only, newest first, with the project", [x["text"] for x in t["open"]] == ["newer", "older"]
+          and t["open"][0]["project"] == "LOOM" and t["count"] == 2, str(t))
+    h = collectors.health(cfg)
+    check("health: an ok flag and a list of issues", isinstance(h.get("ok"), bool) and isinstance(h.get("issues"), list))
     check("LOOM stopped reads as stopped", collectors.loom({"loom_url": "http://127.0.0.1:9"})["running"] is False)
     xbel = ('<xbel><bookmark href="file://%s" visited="2026-11-11T09:00:00Z"><info><metadata><a:applications xmlns:a="x">'
             '<a:application name="gedit"/></a:applications></metadata></info></bookmark>'
@@ -206,6 +227,7 @@ async def test_hub(cfg):
 
     hub = hub_mod.Hub(cfg, schedule={"fake": (fake, 0.2)})
     hub.notes_file = Path(cfg["thinking_space"]).parent / "notes.md"
+    collectors.NOTES_DIR = Path(cfg["thinking_space"]).parent / "notes"
     port = 18791
     app = hub_mod.make_app(hub, port)
     runner = web.AppRunner(app)
@@ -260,11 +282,18 @@ async def test_hub(cfg):
                 check("launchers run only their own commands", (await r.json())["ok"] is False)
             async with s.post(base + "/api/action", json={"id": "open_file", "arg": "/etc/shadow"}) as r:
                 check("only files shown on Home open", (await r.json())["ok"] is False)
-            async with s.post(base + "/api/focus", json={"minutes": 25}) as r:
-                f = await r.json()
-            check("focus block starts", f["minutes"] == 25 and f["until"] > time.time() + 1400)
-            async with s.post(base + "/api/focus", json={"minutes": 0}) as r:
-                check("focus block stops", (await r.json())["until"] == 0)
+            async with s.post(base + "/api/task", json={"text": "  write   the hub docs "}) as r:
+                check("a task is added to the General inbox", (await r.json())["ok"] is True)
+            inbox = collectors.NOTES_DIR / "General" / "Inbox.md"
+            check("in the Quick Note format", inbox.read_text().rstrip().endswith("  write the hub docs"))
+            open_tasks = collectors.tasks(cfg)["open"]
+            mine = next(t for t in open_tasks if t["text"] == "write the hub docs")
+            async with s.post(base + "/api/task/done", json={"path": "/etc/passwd", "line": 0}) as r:
+                check("ticking works only inside Quick Note inboxes", (await r.json())["ok"] is False)
+            async with s.post(base + "/api/task/done", json={"path": mine["path"], "line": mine["line"]}) as r:
+                check("a task is ticked", (await r.json())["ok"] is True)
+            check("and leaves the open list", all(t["text"] != "write the hub docs" for t in collectors.tasks(cfg)["open"]))
+            check("ticked as - [x], text kept", "- [x] " in inbox.read_text() and "write the hub docs" in inbox.read_text())
             async with s.post(base + "/api/note", json={"text": "  try   whichllm  "}) as r:
                 check("a jotted note is saved", (await r.json())["ok"] is True)
             async with s.get(base + "/api/state") as r:
@@ -282,26 +311,22 @@ def test_page():
         check("home.js parses", out.returncode == 0, out.stderr[:200])
     html = (REPO / "apps" / "mario-home" / "static" / "index.html").read_text()
     import re as _re
-    tiles = _re.findall(r'data-tile="([a-z]+)"', html)
-    launchers = _re.findall(r'data-launch="([a-z]+)"', html)
-    areas = _re.findall(r'grid-area:(\d+)/(\d+)/(\d+)/(\d+)', html)
-    check("18 live tiles and 10 launchers", len(tiles) == 28 and len(launchers) == 10 and len(areas) == 28,
-          f"{len(tiles)} tiles, {len(launchers)} launchers")
-    check("every tile has a header with its name", html.count('<header class="th">') == 28
-          and all(n.strip() for n in _re.findall(r'<span class="tt"[^>]*>([^<]*)</span>', html)))
-    check("no tile appears twice", len(set(t for t in tiles if t != "launch")) == 18 and len(set(launchers)) == 10)
-    cells = [(r, c) for r0, c0, r1, c1 in (map(int, a) for a in areas) for r in range(r0, r1) for c in range(c0, c1)]
-    check("tiles fill the 14 x 7 grid exactly once", sorted(cells) == [(r, c) for r in range(1, 8) for c in range(1, 15)])
-    for gone in ("phone", "office", "downloads", "hub", "sheet", "mario"):
-        check(f"no launcher repeats a tile ({gone})", gone not in launchers)
     script = js.read_text()
-    named = [t for t in tiles if t != "launch"]
-    check("every tile has a renderer", all(f"  {t}(" in script for t in named), str([t for t in named if f"  {t}(" not in script]))
+    cards = _re.findall(r'id="c-([a-z]+)"', html)
+    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "apps", "ai", "phone", "quick"]
+    check("Your day has its twelve cards, once each", sorted(cards) == sorted(want), str(cards))
+    for gone in ("focus", "reels", "system", "loom", "tonight", "cook", "trynext", "downloads", "agents", "exposure", "usage"):
+        check(f"no {gone} card", f'id="c-{gone}"' not in html)
+    drawn = set(_re.findall(r"^  (\w+)\(\) \{", script, _re.M))
+    check("every card is drawn", all(c in drawn for c in want if c != "apps"), str([c for c in want if c not in drawn]))
     sys.path.insert(0, str(REPO / "services" / "mario-hub"))
     import hub as hub_mod
-    url_keys = set(_re.findall(r"(\w+): \(\) => \"https:", script))
-    check("every launcher is a known command or link", all(k in hub_mod.LAUNCH or k in url_keys for k in launchers),
-          str([k for k in launchers if k not in hub_mod.LAUNCH and k not in url_keys]))
+    launches = _re.findall(r'data-launch="([a-z]+)"', html)
+    check("every app button is a known command", launches and all(k in hub_mod.LAUNCH for k in launches),
+          str([k for k in launches if k not in hub_mod.LAUNCH]))
+    opens = _re.findall(r'data-open="([^"]+)"', html)
+    check("header links open only allowed sites", all(u.startswith(hub_mod.OPEN_URL_PREFIXES) for u in opens), str(opens))
+    check("cards draw through fill(), which drops empty slots", script.count(".replaceChildren(") <= 3)
     check("page has the panel and its script", "panel-form" in html and "/static/home.js" in html)
     check("no innerHTML in the page script", "innerHTML" not in script)
     try:

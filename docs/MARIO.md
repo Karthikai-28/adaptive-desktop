@@ -13,7 +13,7 @@ reads what is already on the machine. Actions are added on top, one confirmed st
 | Part | Source | Job |
 | --- | --- | --- |
 | Mario Hub | `services/mario-hub/hub.py` (aiohttp, 127.0.0.1:8791) | Runs the collectors, pushes changed cards over `/ws`, answers `/api/ask`, holds Claude Code plans until you decide |
-| Collectors | `services/mario-hub/collectors.py` | Builds (git, 14-day commit activity), Thinking Space boards (sections, Inbox items, last backup), Saved Reels (tracker progress, what to watch / try / cook next, newest saves, version history), Agent Office and terminal agent sessions (tmux), AI usage (`quotaSnapshot.py`, only `usage_providers`: Claude and Gemini), system (CPU, RAM, GTX via `nvidia-smi`, disk, network, battery, busiest processes, Ollama), LOOM (`/api/health`), weather (Open-Meteo), recent files, downloads, listening ports (`ss`), phone (Adaptive Link control socket) |
+| Collectors | `services/mario-hub/collectors.py` | Mail (IMAP, read-only), calendar (private iCal), tasks (Quick Note inboxes), builds (git), agents (terminal tmux sessions, Agent Office), Thinking Space boards, recent files, notes, weather (Open-Meteo), AI usage (`quotaSnapshot.py`, Claude and Gemini), phone (Adaptive Link socket), health (updates, disk, battery, failed services), LOOM and system for Mario's own status; Saved Reels, downloads, processes and ports stay available to Mario's answers |
 | Decisions | `services/mario-hub/brain.py` (pure) | Instant answers from state, local vs Claude Code, the hand-off's limits, the Next step list |
 | Settings | `services/mario-hub/config.py`, `~/.config/adaptive-desktop/mario.json` | Repos, Thinking Space checkout, LOOM/Ollama/Office URLs, backup time |
 | Home and panel | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`) | One page: `/` is Home, `/panel` the panel. DOM only, no framework, no `innerHTML` |
@@ -22,41 +22,44 @@ reads what is already on the machine. Actions are added on top, one confirmed st
 
 The shell's top bar, rail and island stay the shell's; Home fills only the work area.
 
-## Live tiles
+## Your day (Home)
 
-Home is 28 tiles packed on a 14 × 7 grid of near-square cells (the check proves every cell is used
-once and that no tile appears twice): 18 live tiles and 10 one-cell launchers. Each tile shows
-something no other tile does. A tile with more than one face turns by itself on its own beat: small
-tiles flip, wide ones peek-slide. It pauses while the pointer is on it, keeps its face when new
-data arrives, and stops animating under reduced motion. Every tile has a header in its own tint:
-an icon and its name, then its count and the dots that say how many faces it has. The top bar
-keeps the clock; Home does not repeat it.
+Home is laid out for work, in the order a day is used: what came in, what is scheduled, what to
+do, then the work itself, then capture. A side column holds the always-there tools. Cards get the
+room their content needs; nothing is there to fill a gap, and nothing appears twice. Everything
+updates live over the hub's WebSocket. The top bar keeps the clock.
 
-| Tile | Cells | Faces |
+| Card | Shows | Opens / does |
 | --- | --- | --- |
-| Next step | 4 × 2 | Up to four suggestions, each with its action |
-| Builds | 4 × 2 | Repos with branch, last commit, changed and unpushed counts · 14-day commit heatmap |
-| Weather | 2 × 2 | Now, today's range and the next six hours |
-| Tonight | 2 × 2 | One film per face that is on a subscription, with two more from the list |
-| Thinking Space | 4 × 2 | Four boards with their sections and Inbox counts · Inbox items · hub summary and last GitHub backup; opens the hub |
-| Saved Reels | 4 × 2 | Progress per tracker · newest saves · version history; opens the Google Sheet |
-| Try next | 2 × 2 | Newest named AI tools, Claude ideas and websites still to try; opens the reel |
-| AI usage | 2 × 2 | Claude and Gemini, fullest window first, and when each window resets |
-| This laptop | 4 × 2 | CPU, RAM, GTX with a live CPU line · busiest processes · battery, disk, network, uptime |
-| Recent files | 4 × 2 | Newest files you opened (GTK's recently-used list), with the app; opens them |
-| Agents | 2 × 2 | Claude / agy / codex sessions on `adaptive-agent`'s tmux server, by folder · Agent Office; opens the office |
-| Downloads | 2 × 2 | Newest downloads with size; opens the file or the folder |
-| Phone | 2 × 1 | Adaptive Link state; opens the phone's screen |
-| Focus | 4 × 1 | 25 / 50 / 90-minute block with a live bar; a desktop notification when it ends (`/api/focus`) |
-| Jot | 4 × 1 | Quick notes kept in `~/.local/share/adaptive-desktop/mario/notes.md` (`/api/note`) |
-| Cook next | 2 × 1 | Recipes still to cook; opens the reel |
-| LOOM | 2 × 1 | LOOM's backend and the model Ollama holds in memory |
-| Open to network | 2 × 1 | Services listening beyond this laptop (`ss`), with the process |
+| Mail | Unread count and the newest unread (sender, subject, time), read-only over IMAP | Gmail |
+| Today | Date and today's events on a timeline, the current one highlighted (private iCal address) | Google Calendar |
+| Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; tick to finish; add a task; up to two "Mario suggests" (unpushed work, stopped services) with their action or + to make it a task | `/api/task`, `/api/task/done` |
+| Projects | The three most recent repos: last commit, branch, changes / to push / up to date; agents running in the terminal (`adaptive-agent` tmux) and Agent Office | Open in Code, Agent Office |
+| Thinking Space | The four boards with their sections, or what is waiting in their Inbox | The board, the hub |
+| Recent files | Newest files you opened, with type, size and when | The file |
+| Quick note | Capture a thought; the latest notes (`~/.local/share/adaptive-desktop/mario/notes.md`) | `/api/note` |
+| Weather | Now, feels-like, rain chance (Open-Meteo) | |
+| Apps | Terminal, Files, Code, Browser, Settings, Calculator | `LAUNCH` |
+| AI assistants | Claude and Gemini: usage of the fullest window and when each resets | claude.ai, Gemini |
+| Phone | Adaptive Link state | The phone's screen |
+| Quick actions | Downloads, Screenshot, Lock; one status line: pending (security) updates, disk over 90 %, low battery, a failed user service, or "All systems up to date" | `LAUNCH` |
 
-Launchers (1 × 1): Terminal, Files, Code, Settings, Claude, Gemini, Screenshot, Cast to TV,
-Calculator, Lock. A place that already has a tile has no launcher: the tile opens it. They run only
-the commands in `hub.py`'s `LAUNCH` table or open their own links; a program that is not installed
-shows dimmed.
+The ask bar shows where Mario will answer from (LOOM ready / Ollama only / local brain off), and
+"Your day" sums it up: events, open tasks, unread mail. Brief me now includes the calendar, mail and
+tasks.
+
+### Connecting mail and calendar
+
+```sh
+scripts/install-mario.sh --mail       # Gmail address + a Google app password -> GNOME keyring
+scripts/install-mario.sh --calendar   # the calendar's "Secret address in iCal format" -> keyring
+```
+
+Both secrets stay in the keyring (`secret-tool`, attributes `service mario-mail` and
+`service mario-calendar`); the hub reads them when it collects and never writes them to a file,
+a log or its state. Mail is read-only: headers of unread messages, fetched with `BODY.PEEK` so
+nothing is marked read. Recurring events need `icalendar` and `recurring_ical_events`, which
+the installer puts in `.local/mario-pydeps`; without them only one-off events show.
 
 ## Install
 

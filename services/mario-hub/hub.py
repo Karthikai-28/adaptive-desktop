@@ -10,7 +10,8 @@
   POST /api/handoff/ID   {"decision": "run" | "cancel"}: runs a plan only after you say so
   POST /api/action       {"id", "arg"}: a short whitelist (open a repo's terminal, a folder, ...)
   POST /api/presence     {"state", "detail"}: for the voice listener (listening, ...)
-  POST /api/focus        {"minutes"}: start (25/50/90...) or stop (0) a focus block
+  POST /api/task         {"text", "project"?}: a task into a Quick Note inbox (General by default)
+  POST /api/task/done    {"path", "line"}: tick a task in a Quick Note inbox
   POST /api/note         {"text"}: add a line to Jot (~/.local/share/adaptive-desktop/mario/notes.md)
 
 Collectors (collectors.py) run on their own intervals in threads; a card is pushed only when it
@@ -37,6 +38,7 @@ import config as config_mod  # noqa: E402
 STATIC = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "static"
 PRESENCE = ("ready", "listening", "thinking", "doing", "needs_you")
 OPEN_URL_PREFIXES = ("https://claude.ai/", "https://gemini.google.com/", "https://docs.google.com/", "https://github.com/",
+                     "https://mail.google.com/", "https://calendar.google.com/",
                      "https://www.instagram.com/", "http://127.0.0.1:", "http://localhost:")
 REPO = config_mod.ADAPTIVE_REPO
 # Commands Home may start: 1x1 launchers, and tiles that open a place (phone, downloads folder).
@@ -45,6 +47,7 @@ LAUNCH = {
     "terminal": ["gnome-terminal"],
     "files": ["xdg-open", str(Path.home())],
     "code": ["code"],
+    "browser": ["sh", "-c", 'gtk-launch "$(xdg-settings get default-web-browser)"'],
     "settings": ["gnome-control-center"],
     "phone": [sys.executable, str(REPO / "apps" / "adaptive-phone" / "phone.py")],
     "downloads": ["xdg-open", str(Path.home() / "Downloads")],
@@ -65,7 +68,6 @@ class Hub:
         self.handoffs = {}
         self.loom_session = None
         self.tasks = []
-        self.focus = {"until": 0, "minutes": 0}
         self.notes_file = config_mod.DATA_DIR / "notes.md"
 
     # ------------------------------------------------------------ state
@@ -77,7 +79,6 @@ class Hub:
 
     def snapshot(self):
         cards = dict(self.cards)
-        cards["focus"] = {"data": self.focus, "at": 0}
         cards["notes"] = {"data": {"items": collectors.read_notes(self.notes_file)}, "at": 0}
         state = {"cards": cards, "config": self.public_config()}
         state["next"] = brain.next_steps(state, limit=4)
@@ -99,7 +100,10 @@ class Hub:
         await self.broadcast({"type": "presence", **self.presence})
 
     async def collect_once(self, name):
-        fn, _ = self.schedule[name]
+        entry = self.schedule.get(name) or collectors.SCHEDULE.get(name)
+        if not entry:
+            return
+        fn, _ = entry
         try:
             data = await asyncio.to_thread(fn, self.cfg)
         except Exception as exc:  # a collector must not take the hub down
@@ -216,22 +220,44 @@ class Hub:
         await self.set_presence("ready")
         await self.collect_once("builds")
 
-    # ------------------------------------------------------- focus, notes
-    async def set_focus(self, minutes):
-        minutes = max(0, min(int(minutes or 0), 180))
-        self.focus = {"until": time.time() + minutes * 60 if minutes else 0, "minutes": minutes}
-        await self.broadcast({"type": "card", "name": "focus", "data": self.focus, "at": time.time()})
-        if minutes:
-            until = self.focus["until"]
+    # ------------------------------------------------------- tasks, notes
+    async def add_task(self, text, project=""):
+        """A task into a Quick Note inbox, in the format Super+Alt+N and the palette use."""
+        text = " ".join(str(text or "").split())[:300]
+        if not text:
+            return {"ok": False, "error": "empty task"}
+        import re as _re
+        safe = _re.sub(r"[^\w.-]", "_", project or "General")
+        inbox = collectors.NOTES_DIR / safe / "Inbox.md"
+        inbox.parent.mkdir(parents=True, exist_ok=True)
+        header = "" if inbox.exists() else f"# {safe} inbox\n\n"
+        with open(inbox, "a", encoding="utf-8") as f:
+            f.write(header + f"- {time.strftime('%Y-%m-%d %H:%M')}  {text}\n")
+        await self.collect_once("tasks")
+        return {"ok": True}
 
-            async def ring():
-                await asyncio.sleep(minutes * 60)
-                if self.focus.get("until") == until:
-                    self.focus = {"until": 0, "minutes": 0}
-                    await self.broadcast({"type": "card", "name": "focus", "data": self.focus, "at": time.time()})
-                    if shutil.which("notify-send"):
-                        subprocess.Popen(["notify-send", "-a", "Mario", "Focus done", f"{minutes} minutes. Take a break."])
-            asyncio.create_task(ring())
+    async def finish_task(self, path, line):
+        """Tick a task, only in a Quick Note inbox and only if that line still holds it."""
+        sys.path.insert(0, str(config_mod.ADAPTIVE_REPO / "services" / "project-context"))
+        import extras
+        try:
+            target = Path(path).resolve()
+            line = int(line)
+        except (TypeError, ValueError, OSError):
+            return {"ok": False, "error": "bad task"}
+        root = collectors.NOTES_DIR.resolve()
+        if target.name != "Inbox.md" or root not in target.parents:
+            return {"ok": False, "error": "not a Quick Note inbox"}
+        try:
+            text = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        updated = extras.set_task_done(text, line)
+        if updated == text:
+            return {"ok": False, "error": "that task changed; refresh"}
+        target.write_text(updated, encoding="utf-8")
+        await self.collect_once("tasks")
+        return {"ok": True}
 
     async def add_note(self, text):
         text = " ".join(str(text or "").split())[:300]
@@ -247,12 +273,14 @@ class Hub:
     # ----------------------------------------------------------- actions
     def action(self, aid, arg):
         repos = {str(p) for p in self.cfg["repos"]} | {str(self.cfg["thinking_space"])}
-        if aid in ("terminal", "folder", "claude_session") and str(arg) not in repos:
+        if aid in ("terminal", "folder", "claude_session", "code") and str(arg) not in repos:
             return {"ok": False, "error": "not one of Mario's folders"}
         if aid == "terminal":
             cmd = ["gnome-terminal", f"--working-directory={arg}"]
         elif aid == "claude_session":
             cmd = [shutil.which("adaptive-agent") or "adaptive-agent", "claude", str(arg)]
+        elif aid == "code":
+            cmd = ["code", str(arg)]
         elif aid == "folder":
             cmd = ["xdg-open", str(arg)]
         elif aid == "url":
@@ -353,14 +381,19 @@ def make_app(hub, port):
         await hub.set_presence(data["state"], data.get("detail", ""))
         return web.json_response({"ok": True})
 
-    async def focus(request):
-        await hub.set_focus((await read(request)).get("minutes"))
-        return web.json_response({"ok": True, **hub.focus})
+    async def task(request):
+        data = await read(request)
+        return web.json_response(await hub.add_task(data.get("text"), data.get("project", "")))
+
+    async def task_done(request):
+        data = await read(request)
+        return web.json_response(await hub.finish_task(data.get("path"), data.get("line")))
 
     async def note(request):
         return web.json_response(await hub.add_note((await read(request)).get("text")))
 
-    app.router.add_post("/api/focus", focus)
+    app.router.add_post("/api/task", task)
+    app.router.add_post("/api/task/done", task_done)
     app.router.add_post("/api/note", note)
     app.router.add_get("/", page)
     app.router.add_get("/panel", page)

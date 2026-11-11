@@ -36,6 +36,8 @@ DEFAULTS = {
     "usage_providers": ["claude", "gemini"],
     # the weather tile (Open-Meteo, no key); "cards_off": ["weather"] keeps the hub offline
     "weather": {"name": "Bengaluru", "lat": 12.97, "lon": 77.59},
+    # Mail card: IMAP, read-only; the password is in the keyring (install-mario.sh --mail)
+    "mail": {"user": "", "imap_host": "imap.gmail.com"},
     # cards that are off unless turned on here
     "cards_off": ["career"],
 }

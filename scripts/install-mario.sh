@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Install Mario: the live Home on the desktop, the Mario panel (Super+Space) and Mario Hub.
 #
-#   scripts/install-mario.sh            install whatever is missing and start the hub
-#   scripts/install-mario.sh --status   say what is missing; change nothing
+#   scripts/install-mario.sh             install whatever is missing and start the hub
+#   scripts/install-mario.sh --status    say what is missing; change nothing
+#   scripts/install-mario.sh --mail      connect the Mail card (Gmail over IMAP, read-only)
+#   scripts/install-mario.sh --calendar  connect the Today card (your calendar's private iCal address)
 #
 # It installs: python3-aiohttp and WebKitGTK for Python (apt, asks for sudo), the
 # adaptive-mario-hub user service (127.0.0.1:8791), the Mario Home autostart entry (Adaptive session
@@ -23,7 +25,9 @@ MODE=install
 for arg in "$@"; do
     case "$arg" in
         --status) MODE=status ;;
-        -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --mail) MODE=mail ;;
+        --calendar) MODE=calendar ;;
+        -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -55,6 +59,14 @@ check() {
     ts="$(python3 -c "import json,os,sys;print(os.path.expanduser(json.load(open(sys.argv[1])).get('thinking_space','~/thinking-space')))" "$CONFIG" 2>/dev/null || echo "$HOME/thinking-space")"
     [ -d "$ts/boards" ] && ok "Thinking Space checkout: $ts" \
         || opt "Thinking Space checkout for the boards and reel cards: gh repo clone Karthikai-28/thinking-space $ts"
+    command -v secret-tool >/dev/null && ok "secret-tool (keyring)" || need "libsecret-tools (apt)"
+    [ -d "$REPO/.local/mario-pydeps/recurring_ical_events" ] && ok "calendar packages" || need "calendar packages (pip, .local/mario-pydeps)"
+    local mail_user
+    mail_user="$(python3 -c "import json,sys;print((json.load(open(sys.argv[1])).get('mail') or {}).get('user',''))" "$CONFIG" 2>/dev/null || true)"
+    if [ -n "$mail_user" ] && secret-tool lookup service mario-mail account "$mail_user" >/dev/null 2>&1; then ok "Mail: $mail_user"
+    else opt "Mail card: scripts/install-mario.sh --mail"; fi
+    secret-tool lookup service mario-calendar account ical >/dev/null 2>&1 && ok "Calendar connected" \
+        || opt "Today card: scripts/install-mario.sh --calendar"
     curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:8765/api/health 2>/dev/null && ok "LOOM backend answering" \
         || opt "LOOM backend (local answers with memory): cd LOOM/local-ai/app/backend && python3 -m uvicorn main:app --port 8765"
     curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:11434/api/tags 2>/dev/null && ok "Ollama running" || opt "Ollama (local models)"
@@ -66,10 +78,56 @@ if [ "$MODE" = status ]; then
     exit $((MISSING > 0))
 fi
 
+if [ "$MODE" = mail ]; then
+    command -v secret-tool >/dev/null || sudo apt-get install -y libsecret-tools
+    cat <<'TXT'
+Mail card: unread mail from your Gmail inbox, read over IMAP with a Google app password.
+It only reads headers (from, subject, date) and never marks anything read.
+
+  1. Gmail settings > Forwarding and POP/IMAP: IMAP is on.
+  2. https://myaccount.google.com/apppasswords (needs 2-Step Verification): create one named "Mario".
+  3. Paste it below. It goes into your GNOME keyring only; nothing writes it to a file.
+TXT
+    read -r -p "Gmail address: " ADDR
+    [ -n "$ADDR" ] || { echo "No address; nothing changed."; exit 1; }
+    secret-tool store --label="Mario mail (IMAP app password)" service mario-mail account "$ADDR"
+    python3 - "$CONFIG" "$ADDR" <<'PY'
+import json, sys, os
+path, addr = sys.argv[1], sys.argv[2]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+try:
+    cfg = json.load(open(path))
+except (OSError, ValueError):
+    cfg = {}
+cfg["mail"] = {**cfg.get("mail", {}), "user": addr, "imap_host": cfg.get("mail", {}).get("imap_host", "imap.gmail.com")}
+json.dump(cfg, open(path, "w"), indent=2)
+PY
+    systemctl --user restart "$UNIT" 2>/dev/null || true
+    echo "Mail connected. The card fills in within two minutes."
+    exit 0
+fi
+
+if [ "$MODE" = calendar ]; then
+    command -v secret-tool >/dev/null || sudo apt-get install -y libsecret-tools
+    cat <<'TXT'
+Today card: today's events, read-only, from your calendar's private iCal address.
+
+  1. Google Calendar (web) > Settings > your calendar > Integrate calendar.
+  2. Copy "Secret address in iCal format".
+  3. Paste it below. It goes into your GNOME keyring only. Anyone with that address can read
+     the calendar, so it is never written to a file, a log or the hub's state.
+TXT
+    secret-tool store --label="Mario calendar (secret iCal address)" service mario-calendar account ical
+    systemctl --user restart "$UNIT" 2>/dev/null || true
+    echo "Calendar connected. The card fills in within a few minutes."
+    exit 0
+fi
+
 echo "Mario"
 PKGS=()
 python3 -c 'import aiohttp' 2>/dev/null || PKGS+=(python3-aiohttp)
 [ "$(webkit_pkg)" = ok ] || PKGS+=("$(webkit_pkg)")
+command -v secret-tool >/dev/null || PKGS+=(libsecret-tools)
 if [ "${#PKGS[@]}" -gt 0 ]; then
     echo "  installing ${PKGS[*]} (sudo)"
     sudo apt-get install -y "${PKGS[@]}"
@@ -90,6 +148,12 @@ print(f"  wrote {config} with {len(repos)} checkout(s)")
 PY
 fi
 
+if [ ! -d "$REPO/.local/mario-pydeps/recurring_ical_events" ]; then
+    echo "  installing calendar packages into .local/mario-pydeps"
+    python3 -m pip install --quiet --upgrade --target "$REPO/.local/mario-pydeps" icalendar recurring-ical-events \
+        || echo "  (calendar packages failed; the Today card still shows one-off events)"
+fi
+
 chmod +x "$REPO/services/mario-hub/hub.py" "$REPO/apps/mario-home/host.py"
 adaptive_record_repo
 adaptive_render "$REPO/services/$UNIT" "$UNIT_DIR/$UNIT"
@@ -107,3 +171,4 @@ check || true
 echo
 echo "  Home appears at the next Adaptive login, or now: $REPO/apps/mario-home/host.py &"
 echo "  Super+Space opens Mario once scripts/install-keybindings.sh has run."
+echo "  Connect Mail and Today: scripts/install-mario.sh --mail, then --calendar."

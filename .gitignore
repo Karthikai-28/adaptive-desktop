@@ -50,3 +50,4 @@ dist/
 .local/link-pydeps/
 .local/office-pydeps/
 apps/adaptive-link-android/cloud.properties
+.local/mario-pydeps/
