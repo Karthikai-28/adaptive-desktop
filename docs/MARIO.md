@@ -27,22 +27,34 @@ The shell's top bar, rail and island stay the shell's; Home fills only the work 
 Home is laid out for work, in the order a day is used: what came in, what is scheduled, what to
 do, then the work itself, then capture. A side column holds the always-there tools. Cards get the
 room their content needs; nothing is there to fill a gap, and nothing appears twice. Everything
-updates live over the hub's WebSocket. The top bar keeps the clock.
+updates live over the hub's WebSocket, and the tiles marked *live* also turn between faces on their
+own clock, like live tiles: each at its own pace and offset so they never all move at once, paused
+while the pointer is over the tile or the screen is hidden; dots in the header show which face is up.
+New data redraws the current face in place without turning it. The top bar keeps the clock.
+
+Below Mail, Today and Tasks is a four-column block: Projects, Recent files and Quick note take one
+column each (half the width they had, full row height), Thinking Space takes two, and News runs down
+the last column through both rows.
 
 | Card | Shows | Opens / does |
 | --- | --- | --- |
 | Mail | Unread count and up to five newest unread (sender, subject, time), read-only over IMAP | Gmail |
 | Today | Date and today's events on a timeline, the current one highlighted (private iCal address) | Google Calendar |
 | Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; tick to finish; add a task; "Mario suggests" in the rows left over (unpushed work, stopped services) with their action or + to make it a task | `/api/task`, `/api/task/done` |
-| Projects (half height) | The two most recent repos on one line each: last commit, branch, changes / to push / up to date; agents running in the header | Open in Code |
-| Recent files (half height) | The two newest files you opened, with type, size and when | The file |
-| Quick note (half height) | Capture a thought; the latest note (`~/.local/share/adaptive-desktop/mario/notes.md`) | `/api/note` |
+| Projects (live) | One repo per face, newest first (last commit, branch, changes / to push / to pull / up to date), then an Agents face: terminal agent sessions and Agent Office | Code, Terminal |
+| Recent files (live) | The newest files take turns on top (type, size, when), the next two listed below | The file |
+| Quick note | Capture a thought; the three latest notes (`~/.local/share/adaptive-desktop/mario/notes.md`). Does not turn, so typing is never interrupted | `/api/note` |
+| This week (live) | Commits per day for the last seven days across the watched repos; then this week against last, busiest day, today | |
+| News (live) | One headline at a time, rolling to the next every 30 s (a bar along the bottom fills to the next; paused under the pointer), source and age, four "Up next"; RSS from `news` in `mario.json` (Google News Tech and India, Hacker News by default), refreshed every 15 min. `"cards_off": ["news"]` stops the fetching | The article (only headlines on Home open) |
 | Thinking Space | The four boards with their sections, or what is waiting in their Inbox | The board, the hub |
-| Weather | Now, feels-like, rain chance (Open-Meteo) | |
+| Weather (live) | Now, feels-like, rain chance; the next six hours; today's high, low and rain (Open-Meteo) | |
 | Apps | Terminal, Files, Code, Browser, Settings, Calculator, Screenshot, System Monitor | `LAUNCH` |
 | AI assistants | Claude and Gemini: usage of the fullest window and when each resets | claude.ai, Gemini |
 | Phone | Adaptive Link state | The phone's screen |
-| Status | One line: pending (security) updates, disk over 90 %, low battery, a failed user service, or "All systems up to date" | |
+
+There is no "all systems up to date" line. System trouble (pending or security updates, disk over
+90 %, low battery, a failed user service) shows only when it happens, as a Mario suggestion in Tasks
+with an Update (Software Updater) or Check (System Monitor) button.
 
 ### The shell around it stays as it is
 

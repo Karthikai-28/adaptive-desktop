@@ -105,6 +105,15 @@ def test_collectors(cfg, work):
     check("status line with no upstream", collectors.parse_status("## master\n") == ("master", 0, 0, 0))
     b = collectors.builds(cfg)["repos"]
     check("missing checkouts are skipped", len(b) == 1)
+    rss = ('<rss><channel><item><title>Big launch today - The Hindu</title><link>https://news.google.com/a</link>'
+           '<pubDate>Thu, 12 Nov 2026 03:00:00 GMT</pubDate><source url="x">The Hindu</source></item>'
+           '<item><title>Show HN: a thing</title><link>https://example.com/x</link><pubDate>Thu, 12 Nov 2026 04:00:00 GMT</pubDate></item>'
+           '<item><title>Bad</title><link>javascript:alert(1)</link></item></channel></rss>')
+    items = collectors.parse_rss(rss, "Feed")
+    check("news: outlet split from the title", items and items[0]["title"] == "Big launch today" and items[0]["source"] == "The Hindu", str(items))
+    check("news: only https links", [i["link"] for i in items] == ["https://news.google.com/a", "https://example.com/x"])
+    check("news: a broken feed is an empty list", collectors.parse_rss("<rss", "x") == [])
+    check("news: off in cards_off", collectors.news({"cards_off": ["news"], "news": []}).get("off") is True)
     r = b[0]
     check("repo: last commit, unpushed and changed", r["subject"] == "second, not pushed" and r["ahead"] == 1
           and r["dirty"] == 1 and r["branch"] == "main", str(r))
@@ -209,6 +218,9 @@ def test_brain(cfg, work):
     now = time.mktime(time.strptime("2026-11-11 21:00", "%Y-%m-%d %H:%M"))
     check("Next step: backup within three hours",
           any("22:40" in s["text"] for s in brain.next_steps({"cards": {}, "config": {"backup_at": "22:40"}}, now)))
+    sick = brain.next_steps({"cards": {"health": {"data": {"ok": False, "issues": ["3 security updates waiting"]}}}, "config": {}})
+    check("system trouble shows as a Next step with an Update button",
+          sick and sick[0]["action"] == {"id": "launch", "arg": "updates", "label": "Update"}, str(sick))
     check("instant: movie pick", "Predestination" in (brain.quick_answer("Pick a movie for tonight", state) or ""))
     check("instant: anything else goes to a model", brain.quick_answer("explain transformers", state) is None)
 
@@ -280,6 +292,9 @@ async def test_hub(cfg):
                 check("the voice listener can set presence", (await r.json()).get("ok") is True)
             async with s.post(base + "/api/action", json={"id": "launch", "arg": "rm"}) as r:
                 check("launchers run only their own commands", (await r.json())["ok"] is False)
+            hub.cards["news"] = {"data": {"items": [{"title": "t", "link": "https://news.google.com/a"}]}, "at": 0}
+            async with s.post(base + "/api/action", json={"id": "open_news", "arg": "https://evil.example/"}) as r:
+                check("only headlines shown on Home open", (await r.json())["ok"] is False)
             async with s.post(base + "/api/action", json={"id": "open_file", "arg": "/etc/shadow"}) as r:
                 check("only files shown on Home open", (await r.json())["ok"] is False)
             async with s.post(base + "/api/task", json={"text": "  write   the hub docs "}) as r:
@@ -312,10 +327,11 @@ def test_page():
     html = (REPO / "apps" / "mario-home" / "static" / "index.html").read_text()
     import re as _re
     script = js.read_text()
+    css = (REPO / "apps" / "mario-home" / "static" / "home.css").read_text()
     cards = _re.findall(r'id="c-([a-z]+)"', html)
-    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "apps", "ai", "phone", "quick"]
-    check("Your day has its twelve cards, once each", sorted(cards) == sorted(want), str(cards))
-    for gone in ("focus", "reels", "system", "loom", "tonight", "cook", "trynext", "downloads", "agents", "exposure", "usage"):
+    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "apps", "ai", "phone", "news", "week"]
+    check("Your day has its thirteen cards, once each", sorted(cards) == sorted(want), str(cards))
+    for gone in ("focus", "reels", "system", "loom", "tonight", "cook", "trynext", "downloads", "agents", "exposure", "usage", "quick"):
         check(f"no {gone} card", f'id="c-{gone}"' not in html)
     drawn = set(_re.findall(r"^  (\w+)\(\) \{", script, _re.M))
     check("every card is drawn", all(c in drawn for c in want if c != "apps"), str([c for c in want if c not in drawn]))
@@ -327,8 +343,13 @@ def test_page():
     opens = _re.findall(r'data-open="([^"]+)"', html)
     for gone in ("downloads", "lock"):
         check(f"no {gone} button", f'data-launch="{gone}"' not in html)
-    check("Projects, Recent files and Quick note are half-height cards",
-          all(_re.search(rf'class="card slim" id="c-{c}"', html) for c in ("projects", "recent", "note")))
+    check("Projects, Recent files and Quick note are one column wide (half the old width), full height",
+          all(_re.search(rf'class="card narrow" id="c-{c}"', html) for c in ("projects", "recent", "note"))
+          and "repeat(4, minmax(0, 1fr))" in css)
+    check("no 'all systems up to date' line", "all systems up to date" not in script.lower() and 'id="status"' not in html)
+    check("News rolls every 30 seconds", 'setFaces("news", items.map(face), { every: 30000' in script)
+    check("live tiles turn on their own and pause under the pointer",
+          "setInterval(" in script and ':hover' in script and all(f'setFaces("{c}"' in script for c in ("projects", "recent", "week", "weather")))
     host = (REPO / "apps" / "mario-home" / "host.py").read_text()
     check("Home stays a plain desktop layer (no focus grab, never maximized or fullscreen, off the taskbar)",
           all(x in host for x in ("WindowTypeHint.DESKTOP", "set_focus_on_map(False)", "unmaximize()", "unfullscreen()",

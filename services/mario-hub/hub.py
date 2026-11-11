@@ -54,6 +54,7 @@ LAUNCH = {
     "cast": [str(REPO / "scripts" / "adaptive-cast-launch.sh"), "--toggle"],
     "calculator": ["gnome-calculator"],
     "monitor": ["gnome-system-monitor"],
+    "updates": ["update-manager"],
 }
 
 
@@ -292,6 +293,12 @@ class Hub:
             if arg not in LAUNCH:
                 return {"ok": False, "error": "not one of Mario's launchers"}
             cmd = LAUNCH[arg]
+        elif aid == "open_news":
+            items = (self.cards.get("news", {}).get("data") or {}).get("items", [])
+            link = next((i["link"] for i in items if i["link"] == arg), None)
+            if not link or not link.startswith("https://"):
+                return {"ok": False, "error": "only headlines shown on Home open from here"}
+            cmd = ["xdg-open", link]
         elif aid == "open_file":
             listed = {f["path"] for name in ("recent", "downloads")
                       for f in (self.cards.get(name, {}).get("data") or {}).get("files", [])}

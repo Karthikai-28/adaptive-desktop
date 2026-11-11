@@ -35,7 +35,7 @@
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
   <symbol id="i-cap" viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/></symbol>
-  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 5h13v14H6a2 2 0 0 1-2-2zM17 9h3v8a2 2 0 0 1-2 2M8 9h5M8 13h5M8 16h3"/></symbol><symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 19h10a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.5A3.3 3.3 0 0 0 7 19z"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6L19 19M5 19l1.4-1.4M17.6 6.4L19 5"/></symbol>
@@ -73,13 +73,13 @@
         <section class="card" id="c-today"><header class="ch"><svg class="ci"><use href="#i-cal"/></svg><h3>Today</h3><span class="count"></span><button class="open" type="button" data-open="https://calendar.google.com/" aria-label="Open Google Calendar"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card" id="c-tasks"><header class="ch"><svg class="ci"><use href="#i-check"/></svg><h3>Tasks</h3><span class="count"></span></header><div class="body"></div></section>
       </div>
-      <div class="row lower">
-        <div class="stack">
-          <section class="card slim" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="meta" id="agents"></span></header><div class="body"></div></section>
-          <section class="card slim" id="c-recent"><header class="ch"><svg class="ci"><use href="#i-file"/></svg><h3>Recent files</h3></header><div class="body"></div></section>
-          <section class="card slim" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
-        </div>
-        <section class="card" id="c-thinking"><header class="ch"><svg class="ci"><use href="#i-layers"/></svg><h3>Thinking Space</h3><span class="count"></span><button class="open" type="button" data-open-hub aria-label="Open the Thinking Space hub"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+      <div class="grid4">
+        <section class="card narrow" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="dots"></span></header><div class="body"></div></section>
+        <section class="card wide" id="c-thinking"><header class="ch"><svg class="ci"><use href="#i-layers"/></svg><h3>Thinking Space</h3><span class="count"></span><button class="open" type="button" data-open-hub aria-label="Open the Thinking Space hub"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+        <section class="card tall" id="c-news"><header class="ch"><svg class="ci"><use href="#i-news"/></svg><h3>News</h3><span class="meta" id="news-src"></span></header><div class="body"></div><i class="roll" aria-hidden="true"></i></section>
+        <section class="card narrow" id="c-recent"><header class="ch"><svg class="ci"><use href="#i-file"/></svg><h3>Recent files</h3><span class="dots"></span></header><div class="body"></div></section>
+        <section class="card narrow" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
+        <section class="card narrow" id="c-week"><header class="ch"><svg class="ci"><use href="#i-chart"/></svg><h3>This week</h3><span class="dots"></span></header><div class="body"></div></section>
       </div>
     </div>
 
@@ -99,7 +99,6 @@
       </section>
       <section class="card" id="c-ai"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>AI assistants</h3></header><div class="body"></div></section>
       <button class="card compact row-card" id="c-phone" type="button"><svg class="ci"><use href="#i-phone"/></svg><span class="body"></span><svg class="chev"><use href="#i-chev"/></svg></button>
-      <section class="card compact row-card" id="c-quick"><span id="status" class="status"></span></section>
     </aside>
   </div>
 </main>

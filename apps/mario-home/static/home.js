@@ -63,6 +63,50 @@ const KIND = { ipynb: "Notebook", py: "Python", md: "Markdown", js: "JavaScript"
   jpg: "Image", jpeg: "Image", mp4: "Video", cpp: "C++", hpp: "C++", c: "C", h: "C", txt: "Text", html: "HTML", css: "CSS" };
 const kindOf = (name) => { const ext = (name.split(".").pop() || "").toLowerCase(); return KIND[ext] || ext.toUpperCase() || "File"; };
 
+// --------------------------------------------------------------- live tiles
+// A card with faces turns to its next face on its own clock, like a live tile: it pauses while the
+// pointer is over it or the screen is hidden, and new data redraws the face in place without turning.
+const LIVE = {};
+function setFaces(card, faces, { every = 9000, offset = 0, keep } = {}) {
+  const node = body(card);
+  let t = LIVE[card];
+  if (!t) t = LIVE[card] = { i: 0, left: every + offset, every };
+  t.every = every;
+  if (keep != null) { const j = faces.findIndex((f) => f.key === keep); if (j >= 0) t.i = j; }
+  t.faces = faces;
+  if (t.i >= faces.length) t.i = 0;
+  const dots = $(`#c-${card} .dots`);
+  if (dots) fill(dots, faces.length > 1 ? faces.map((_, j) => el("i", { class: j === t.i ? "on" : "" })) : []);
+  fill(node, faces.length ? el("div", { class: "face" }, faces[t.i]()) : []);
+}
+function turn(card) {
+  const t = LIVE[card], node = body(card);
+  if (!t || t.faces.length < 2) return;
+  t.i = (t.i + 1) % t.faces.length;
+  const old = node.querySelector(".face"), next = el("div", { class: "face in" }, t.faces[t.i]());
+  const dots = $(`#c-${card} .dots`);
+  if (dots) dots.querySelectorAll("i").forEach((d, j) => d.classList.toggle("on", j === t.i));
+  if (TURNED[card]) TURNED[card](t, true);
+  if (!old || matchMedia("(prefers-reduced-motion: reduce)").matches) return fill(node, next);
+  old.classList.add("out");
+  setTimeout(() => fill(node, next), 330);
+}
+const TURNED = {  // card -> called after each turn
+  news(t, restart = true) {
+    $("#news-src").textContent = t.faces.length > 1 ? `${t.i + 1} / ${t.faces.length}` : "";
+    const bar = $("#c-news .roll");
+    if (!restart && bar.classList.contains("go")) return;
+    bar.classList.remove("go"); void bar.offsetWidth; bar.style.setProperty("--roll", `${t.every / 1000}s`); bar.classList.add("go");
+  },
+};
+setInterval(() => {
+  if (document.hidden) return;
+  for (const [card, t] of Object.entries(LIVE)) {
+    if ($(`#c-${card}`).matches(":hover") || !t.faces || t.faces.length < 2) continue;
+    if ((t.left -= 500) <= 0) { t.left = t.every; turn(card); }
+  }
+}, 500);
+
 async function post(url, payload) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload || {}) });
   return res.json();
@@ -141,25 +185,33 @@ const render = {
   },
 
   projects() {
-    // half-height card: the two most recent repos on one line each; agents in the header
-    const repos = (data("builds").repos || []).slice(0, 2);
+    // one repo per face, newest first, then what the agents are doing
+    const repos = (data("builds").repos || []).slice(0, 3);
     const sessions = data("agent_sessions").sessions || [];
     const office = data("agent_office");
     const busy = (office.agents || []).filter((a) => /work|busy|run/i.test(a.status)).length;
-    const meta = $("#agents");
-    meta.className = `meta ${sessions.length || busy ? "on" : ""}`;
-    fill(meta, icon("i-bot"), sessions.length
-      ? `${sessions.length} agent${sessions.length > 1 ? "s" : ""}: ${sessions.slice(0, 2).map((x) => `${x.agent} · ${x.folder}`).join(", ")}`
-      : office.running ? `Agent Office ${busy ? `${busy} working` : "idle"}` : "No agents running");
-    fill(body("projects"), repos.length ? el("ul", { class: "rows" }, repos.map((r) => el("li", {},
-      el("span", { class: `dot ${r.dirty || r.ahead ? "warn" : ""}` }),
-      el("div", { class: "grow", style: "display:flex;align-items:baseline;gap:8px;min-width:0" },
-        el("span", { class: "ttl", style: "flex:none" }, r.name), el("span", { class: "sub" }, r.subject || "")),
-      el("span", { class: "chipi" }, icon("i-branch"), r.branch || "–"),
-      r.dirty ? el("span", { class: "chipi warn" }, `${r.dirty} changes`) : r.ahead ? el("span", { class: "chipi warn" }, `${r.ahead} to push`)
-        : el("span", { class: "chipi ok" }, "Up to date"),
-      el("button", { class: "mini", type: "button", "aria-label": `Open ${r.name} in Code`, onclick: () => act({ id: "code", arg: r.path }) }, icon("i-code"), "Code"))))
-      : empty("No git checkouts found. Set ", code("repos"), " in ~/.config/adaptive-desktop/mario.json."));
+    if (!repos.length) {
+      return setFaces("projects", [() => empty("No git checkouts found. Set ", code("repos"), " in ~/.config/adaptive-desktop/mario.json.")]);
+    }
+    const repoFace = (r) => Object.assign(() => [
+      el("div", { class: "between" }, el("span", { class: "big", style: "font-size:20px" }, r.name),
+        el("span", { class: "chipi" }, icon("i-branch"), r.branch || "–")),
+      el("div", { class: "sub", style: "-webkit-line-clamp:2;display:-webkit-box;-webkit-box-orient:vertical;white-space:normal" }, r.subject || "No commits yet"),
+      el("div", { class: "kv" }, el("span", {}, whenLong(r.when)),
+        r.dirty ? el("b", { style: "color:var(--warn)" }, `${r.dirty} changes`) : r.ahead ? el("b", { style: "color:var(--warn)" }, `${r.ahead} to push`)
+          : r.behind ? el("b", { style: "color:var(--cyan)" }, `${r.behind} to pull`) : el("b", { style: "color:var(--ok)" }, "Up to date")),
+      el("div", { style: "margin-top:auto;display:flex;gap:6px" },
+        el("button", { class: "mini", type: "button", onclick: () => act({ id: "code", arg: r.path }) }, icon("i-code"), "Code"),
+        el("button", { class: "mini", type: "button", onclick: () => act({ id: "terminal", arg: r.path }) }, icon("i-term"), "Terminal"))], { key: r.name });
+    const agents = Object.assign(() => [
+      el("div", { class: "between" }, el("span", { class: "big", style: "font-size:20px" }, "Agents"),
+        el("span", { class: `meta ${sessions.length || busy ? "on" : ""}`, style: "margin:0" }, icon("i-bot"), sessions.length ? `${sessions.length} running` : "quiet")),
+      sessions.length ? el("ul", { class: "rows" }, sessions.slice(0, 3).map((x) => el("li", {},
+        el("span", { class: "dot" }), el("span", { class: "ttl grow" }, x.agent), el("span", { class: "sub" }, x.folder))))
+        : el("div", { class: "sub" }, "No agent sessions open."),
+      el("div", { class: "kv", style: "margin-top:auto" }, el("span", {}, "Agent Office"),
+        el("b", {}, office.running ? (busy ? `${busy} working` : "idle") : "stopped"))], { key: "agents" });
+    setFaces("projects", [...repos.map(repoFace), agents], { every: 8000, offset: 0 });
   },
 
   thinking() {
@@ -181,21 +233,26 @@ const render = {
   },
 
   recent() {
-    // half-height card: the two newest files on one line each
-    const files = data("recent").files || [];
-    fill(body("recent"), files.length ? el("ul", { class: "rows" }, files.slice(0, 2).map((f) => {
-      const kind = kindOf(f.name);
-      const ic = /Python|JavaScript|TypeScript|C\+\+|^C$|Shell|JSON|YAML|HTML|CSS/.test(kind) ? "i-code" : "i-file";
-      return el("li", { style: "cursor:pointer", onclick: () => act({ id: "open_file", arg: f.path }) },
-        el("span", { class: "bi", style: `width:26px;height:26px;border-radius:8px;background:${hue(kind)}26;color:${hue(kind)}` }, icon(ic)),
-        el("div", { class: "grow", style: "display:flex;align-items:baseline;gap:8px;min-width:0" },
-          el("span", { class: "ttl", style: "font-weight:500;flex:none;max-width:60%" }, f.name), el("span", { class: "sub" }, [kind, size(f.size)].filter(Boolean).join(" · "))),
-        el("span", { class: "time" }, whenLong(f.when)));
-    })) : empty("Files you open in any app show up here."));
+    // the newest files take turns at the top; the two after it sit below
+    const files = (data("recent").files || []).slice(0, 4);
+    if (!files.length) return setFaces("recent", [() => empty("Files you open in any app show up here.")]);
+    const glyph = (f) => { const kind = kindOf(f.name); return [/Python|JavaScript|TypeScript|C\+\+|^C$|Shell|JSON|YAML|HTML|CSS/.test(kind) ? "i-code" : "i-file", hue(kind), kind]; };
+    const face = (f, i) => Object.assign(() => {
+      const [ic, col, kind] = glyph(f);
+      const rest = [1, 2].map((k) => files[(i + k) % files.length]).filter((x) => x !== f);
+      return [
+        el("button", { class: "headline", type: "button", style: "flex-direction:row;align-items:center;gap:12px", onclick: () => act({ id: "open_file", arg: f.path }) },
+          el("span", { class: "bi", style: `background:${col}26;color:${col}` }, icon(ic)),
+          el("div", { style: "min-width:0" }, el("div", { class: "ttl", style: "font-size:14px" }, f.name),
+            el("div", { class: "sub" }, [kind, size(f.size), whenLong(f.when)].filter(Boolean).join(" · ")))),
+        el("ul", { class: "rows", style: "margin-top:auto" }, rest.map((x) => el("li", { style: "cursor:pointer", onclick: () => act({ id: "open_file", arg: x.path }) },
+          el("span", { class: "ttl grow", style: "font-weight:400;color:var(--soft)" }, x.name), el("span", { class: "time" }, when(x.when)))))];
+    }, { key: f.path });
+    setFaces("recent", files.map(face), { every: 7000, offset: 2500, keep: (LIVE.recent && LIVE.recent.faces[LIVE.recent.i] || {}).key });
   },
 
   note() {
-    // half-height card: the capture box and the latest note
+    // the capture box and the three latest notes (no turning: typing here must not be interrupted)
     const old = $("#note-in");
     const keep = old ? { value: old.value, focused: document.activeElement === old } : null;
     const items = data("notes").items || [];
@@ -203,25 +260,34 @@ const render = {
     const form = el("form", { class: "note-box", style: "padding:6px 8px 6px 12px", onsubmit: async (e) => {
       e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/note", { text });
     } }, input, el("button", { class: "mini", type: "submit" }, "Save"));
-    const last = items[0] ? items[0].split(" · ") : null;
-    fill(body("note"), form, last ? el("div", { class: "between", style: "min-width:0" },
-      el("span", { class: "sub", style: "color:var(--soft)" }, last.slice(1).join(" · ")), el("span", { class: "time" }, last[0]))
-      : el("div", { class: "sub" }, "Kept on this laptop"));
+    fill(body("note"), form, items.length ? el("ul", { class: "rows" }, items.slice(0, 3).map((n) => {
+      const [at, ...text] = n.split(" · ");
+      return el("li", {}, el("span", { class: "sub grow", style: "color:var(--soft)" }, text.join(" · ")), el("span", { class: "time" }, at));
+    })) : el("div", { class: "sub" }, "Kept on this laptop"));
     if (keep) { input.value = keep.value; if (keep.focused) input.focus(); }
   },
 
   weather() {
     const w = data("weather");
     if (w.off || w.error || w.temp == null) {
-      return fill(body("weather"), el("div", { class: "weather" }, icon("i-cloud", "wi"),
-        el("div", { class: "grow" }, el("div", { class: "ttl" }, w.place || "Weather"), el("div", { class: "sub" }, w.off ? "Off in mario.json" : "No forecast right now"))));
+      return setFaces("weather", [() => el("div", { class: "weather" }, icon("i-cloud", "wi"),
+        el("div", { class: "grow" }, el("div", { class: "ttl" }, w.place || "Weather"), el("div", { class: "sub" }, w.off ? "Off in mario.json" : "No forecast right now")))]);
     }
-    const sky = (w.sky || "").toLowerCase();
-    const ic = /rain|drizzle|shower|thunder/.test(sky) ? "i-rain" : /clear/.test(sky) ? "i-sun" : "i-cloud";
-    fill(body("weather"), el("div", { class: "weather" }, icon(ic, "wi"),
+    const skyIcon = (sky) => /rain|drizzle|shower|thunder/i.test(sky || "") ? "i-rain" : /clear/i.test(sky || "") ? "i-sun" : "i-cloud";
+    const now = () => el("div", { class: "weather" }, icon(skyIcon(w.sky), "wi"),
       el("div", {}, el("b", {}, `${w.temp}°`), el("div", { class: "sub" }, w.place)),
       el("div", { style: "margin-left:auto;text-align:right" }, el("div", { style: "font-size:13px;font-weight:600" }, w.sky),
-        el("div", { class: "sub" }, `Feels ${w.feels}° · rain ${w.rain ?? 0}%`))));
+        el("div", { class: "sub" }, `Feels ${w.feels}° · rain ${w.rain ?? 0}%`)));
+    const hours = () => el("div", { class: "between", style: "gap:4px" }, (w.hours || []).slice(0, 6).map((h) =>
+      el("div", { style: "text-align:center;flex:1" }, el("div", { class: "sub" }, `${h.h}:00`),
+        el("div", { style: "font-size:17px;font-weight:600;margin:3px 0" }, `${h.t}°`),
+        el("div", { class: "sub", style: h.rain >= 50 ? "color:var(--cyan)" : "" }, `${h.rain ?? 0}%`))));
+    const day = () => el("div", { class: "weather" }, icon(skyIcon(w.sky), "wi"),
+      el("div", {}, el("div", { class: "sub" }, "Today"), el("b", { style: "font-size:24px" }, `${Math.round(w.high ?? w.temp)}° / ${Math.round(w.low ?? w.temp)}°`)),
+      el("div", { style: "margin-left:auto;text-align:right" }, el("div", { style: "font-size:13px;font-weight:600" }, `Rain ${w.rain ?? 0}%`),
+        el("div", { class: "sub" }, w.rain >= 50 ? "Carry an umbrella" : "Dry enough")));
+    $("#c-weather").classList.add("flip");
+    setFaces("weather", [now, ...(w.hours && w.hours.length ? [hours] : []), day], { every: 10000, offset: 4000 });
   },
 
   ai() {
@@ -251,16 +317,55 @@ const render = {
         p.linked ? `${p.name || "Phone"} · ${p.present ? "Connected" : "Away"}` : "Not linked"));
   },
 
-  quick() {
-    const h = data("health");
+  apps() {
     const available = state.config.launch || {};
     document.querySelectorAll("[data-launch]").forEach((b) => b.classList.toggle("off", available[b.dataset.launch] === false));
-    const node = $("#status");
-    node.className = `status ${h.ok === false ? "warn" : "ok"}`;
-    fill(node, icon(h.ok === false ? "i-warn" : "i-ok"),
-      el("span", {}, h.ok === false ? (h.issues || []).join(" · ") : h.ok ? "All systems up to date" : "Checking the system…"));
   },
 
+  week() {
+    // commits per day across the repos Mario watches: the last seven days, then this week against last
+    const days = data("builds").activity || [];
+    if (!days.length) return setFaces("week", [() => empty("Counting commits…")]);
+    const last7 = days.slice(-7), prev7 = days.slice(-14, -7);
+    const top = Math.max(1, ...last7);
+    const names = last7.map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d.toLocaleDateString(undefined, { weekday: "narrow" }); });
+    const total = last7.reduce((a, b) => a + b, 0), before = prev7.reduce((a, b) => a + b, 0);
+    const bars = () => [
+      el("div", { class: "big" }, total, el("small", {}, `commit${total === 1 ? "" : "s"} in 7 days`)),
+      el("div", { class: "week" }, last7.map((n, i) => el("span", { class: i === 6 ? "today" : "", title: `${n} commits` },
+        el("i", { style: `height:${Math.round((n / top) * 100)}%` }), names[i])))];
+    const best = last7.indexOf(Math.max(...last7));
+    const delta = total - before;
+    const compare = () => [
+      el("div", { class: "big" }, delta >= 0 ? `+${delta}` : delta, el("small", {}, "on last week")),
+      el("div", { class: "kv" }, el("span", {}, "This week"), el("b", {}, total)),
+      el("div", { class: "kv" }, el("span", {}, "Last week"), el("b", {}, before)),
+      el("div", { class: "kv" }, el("span", {}, "Busiest day"), el("b", {}, total ? new Date(Date.now() - (6 - best) * 86400000).toLocaleDateString(undefined, { weekday: "long" }) : "–")),
+      el("div", { class: "kv" }, el("span", {}, "Today"), el("b", {}, last7[6]))];
+    setFaces("week", [bars, compare], { every: 11000, offset: 6000 });
+  },
+
+  news() {
+    // one headline at a time; the tile rolls to the next every 30 seconds (paused under the pointer)
+    const n = data("news");
+    const items = n.items || [];
+    const src = $("#news-src");
+    if (!items.length) {
+      src.textContent = "";
+      $("#c-news .roll").classList.remove("go");
+      return setFaces("news", [() => empty(n.off ? "News is off in mario.json." : n.errors && n.errors.length ? "Feeds are not reachable right now." : "Fetching headlines…")]);
+    }
+    const open = (it) => act({ id: "open_news", arg: it.link });
+    const face = (it, i) => Object.assign(() => [
+      el("button", { class: "headline", type: "button", onclick: () => open(it) },
+        el("span", { class: "src" }, `${it.source}${it.when ? ` · ${when(it.when)}` : ""}`), el("b", {}, it.title)),
+      el("div", { class: "upnext" }, el("h4", {}, "Up next"),
+        [1, 2, 3, 4].map((k) => items[(i + k) % items.length]).filter((x) => x !== it)
+          .map((x) => el("button", { type: "button", onclick: () => open(x) }, x.title)))], { key: it.link });
+    const t = LIVE.news;
+    setFaces("news", items.map(face), { every: 30000, keep: t && t.faces[t.i] ? t.faces[t.i].key : undefined });
+    TURNED.news(LIVE.news, !t);
+  },
   brain() {
     const l = data("loom"), o = (data("system").ollama || {});
     const pill = $("#brain");
@@ -281,8 +386,8 @@ const render = {
 // card -> renderers that read it
 const FEEDS = {
   mail: ["mail", "daysum"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
-  builds: ["projects"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
-  recent: ["recent"], notes: ["note"], weather: ["weather"], usage: ["ai"], phone: ["phone"], health: ["quick"],
+  builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
+  recent: ["recent"], notes: ["note"], weather: ["weather"], usage: ["ai"], phone: ["phone"], news: ["news"],
   loom: ["brain"], system: ["brain"],
 };
 function draw(name) { try { render[name](); } catch (e) { console.error(name, e); } }

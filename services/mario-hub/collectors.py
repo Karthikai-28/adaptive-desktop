@@ -804,6 +804,57 @@ def health(cfg):
     return {"ok": not issues, "issues": issues, "battery": bat}
 
 
+# ------------------------------------------------------------------- news
+
+def parse_rss(text, feed_name, limit=12):
+    """RSS 2.0 items -> [{title, source, link, when, feed}]. Google News puts the outlet after
+    " - " in the title and in <source>; other feeds use the feed's own name."""
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    out = []
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        if not title or not link.startswith("https://"):
+            continue
+        source = (item.findtext("source") or "").strip()
+        if source and title.endswith(" - " + source):
+            title = title[: -len(" - " + source)]
+        try:
+            when = int(parsedate_to_datetime(item.findtext("pubDate") or "").timestamp())
+        except (TypeError, ValueError):
+            when = 0
+        out.append({"title": title[:220], "source": source or feed_name, "link": link, "when": when, "feed": feed_name})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def news(cfg):
+    """Headlines from the configured feeds, newest first, the same story only once."""
+    if "news" in cfg.get("cards_off", []):
+        return {"off": True, "items": []}
+    items, errors = [], []
+    for feed in cfg.get("news") or []:
+        try:
+            req = urllib.request.Request(feed["url"], headers={"User-Agent": "MarioHub/1 (+adaptive-desktop)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                items += parse_rss(resp.read().decode(errors="replace"), feed.get("name", ""))
+        except Exception as exc:  # noqa: BLE001 - one feed down must not empty the tile
+            errors.append(f"{feed.get('name', 'feed')}: {str(getattr(exc, 'reason', exc))[:60]}")
+    seen, unique = set(), []
+    for it in sorted(items, key=lambda x: x["when"], reverse=True):
+        key = re.sub(r"\W+", " ", it["title"].lower()).strip()[:80]
+        if key not in seen:
+            seen.add(key)
+            unique.append(it)
+    return {"items": unique[:30], "errors": errors}
+
+
 # ------------------------------------------------------------- schedule
 
 # card name -> (collector, seconds between runs)
@@ -826,4 +877,5 @@ SCHEDULE = {
     "calendar": (calendar, 300),
     "tasks": (tasks, 5),
     "health": (health, 300),
+    "news": (news, 900),
 }

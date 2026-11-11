@@ -145,6 +145,14 @@ def next_steps(state, now=None, limit=3):
     ollama = (cards.get("system") or {}).get("ollama") or {}
     if ollama and not ollama.get("running"):
         out.append((4, {"text": "Ollama is off: start it (sudo systemctl start ollama) for local answers"}))
+    health = cards.get("health") or {}
+    for issue in health.get("issues") or []:
+        if "update" in issue:
+            out.append((2 if "security" in issue else 5, {"text": issue[0].upper() + issue[1:],
+                                                            "action": {"id": "launch", "arg": "updates", "label": "Update"}}))
+        else:
+            out.append((3, {"text": issue[0].upper() + issue[1:],
+                            "action": {"id": "launch", "arg": "monitor", "label": "Check"}}))
     ts = cards.get("thinking_space") or {}
     if ts.get("pull_error"):
         out.append((5, {"text": "Thinking Space did not update: " + ts["pull_error"][:60]}))

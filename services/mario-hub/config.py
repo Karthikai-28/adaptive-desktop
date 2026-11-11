@@ -38,6 +38,13 @@ DEFAULTS = {
     "weather": {"name": "Bengaluru", "lat": 12.97, "lon": 77.59},
     # Mail card: IMAP, read-only; the password is in the keyring (install-mario.sh --mail)
     "mail": {"user": "", "imap_host": "imap.gmail.com"},
+    # News tile: RSS feeds, merged newest first; the tile rolls to the next headline every 30 s.
+    # "cards_off": ["news"] keeps the hub from fetching them.
+    "news": [
+        {"name": "Tech", "url": "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en"},
+        {"name": "India", "url": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en"},
+        {"name": "Hacker News", "url": "https://hnrss.org/frontpage"},
+    ],
     # cards that are off unless turned on here
     "cards_off": ["career"],
 }
