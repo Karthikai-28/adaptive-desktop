@@ -131,6 +131,13 @@ def test_collectors(cfg, work):
         "h\nh\n  eth0: 1000 0 0 0 0 0 0 0 500 0 0 0 0 0 0 0\n    lo: 9 0 0 0 0 0 0 0 9 0 0 0 0 0 0 0\n", now=10) is None
           and collectors.net_rates("h\nh\n  eth0: 3000 0 0 0 0 0 0 0 1500 0 0 0 0 0 0 0\n", now=12) == {"down": 1000.0, "up": 500.0})
     check("weather can be turned off (no network)", collectors.weather({**cfg, "cards_off": ["weather"]}) == {"off": True})
+    open_ports = collectors.parse_listening(
+        'tcp LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*\n'
+        'tcp LISTEN 0 5 0.0.0.0:8443 0.0.0.0:* users:(("python3",pid=9,fd=3))\n'
+        'tcp LISTEN 0 5 [::]:22 [::]:*\ntcp LISTEN 0 5 127.0.0.1:8791 0.0.0.0:*\n'
+        'tcp LISTEN 0 5 [::1]:631 [::]:*\n')
+    check("open to network: loopback left out, ports in order, process named",
+          [(r["port"], r["proc"]) for r in open_ports] == [(22, ""), (8443, "python3")], str(open_ports))
     check("LOOM stopped reads as stopped", collectors.loom({"loom_url": "http://127.0.0.1:9"})["running"] is False)
     xbel = ('<xbel><bookmark href="file://%s" visited="2026-11-11T09:00:00Z"><info><metadata><a:applications xmlns:a="x">'
             '<a:application name="gedit"/></a:applications></metadata></info></bookmark>'
@@ -278,16 +285,19 @@ def test_page():
     tiles = _re.findall(r'data-tile="([a-z]+)"', html)
     launchers = _re.findall(r'data-launch="([a-z]+)"', html)
     areas = _re.findall(r'grid-area:(\d+)/(\d+)/(\d+)/(\d+)', html)
-    check("20 live tiles and 16 launchers", len(tiles) == 36 and len(launchers) == 16 and len(areas) == 36,
+    check("18 live tiles and 10 launchers", len(tiles) == 28 and len(launchers) == 10 and len(areas) == 28,
           f"{len(tiles)} tiles, {len(launchers)} launchers")
+    check("no tile appears twice", len(set(t for t in tiles if t != "launch")) == 18 and len(set(launchers)) == 10)
     cells = [(r, c) for r0, c0, r1, c1 in (map(int, a) for a in areas) for r in range(r0, r1) for c in range(c0, c1)]
-    check("tiles fill the 14 x 8 grid exactly once", sorted(cells) == [(r, c) for r in range(1, 9) for c in range(1, 15)])
+    check("tiles fill the 14 x 7 grid exactly once", sorted(cells) == [(r, c) for r in range(1, 8) for c in range(1, 15)])
+    for gone in ("phone", "office", "downloads", "hub", "sheet", "mario"):
+        check(f"no launcher repeats a tile ({gone})", gone not in launchers)
     script = js.read_text()
     named = [t for t in tiles if t != "launch"]
     check("every tile has a renderer", all(f"  {t}(" in script for t in named), str([t for t in named if f"  {t}(" not in script]))
     sys.path.insert(0, str(REPO / "services" / "mario-hub"))
     import hub as hub_mod
-    url_keys = set(_re.findall(r"^  (\w+): \(\) =>", script, _re.M))
+    url_keys = set(_re.findall(r"(\w+): \(\) => \"https:", script))
     check("every launcher is a known command or link", all(k in hub_mod.LAUNCH or k in url_keys for k in launchers),
           str([k for k in launchers if k not in hub_mod.LAUNCH and k not in url_keys]))
     check("page has the panel and its script", "panel-form" in html and "/static/home.js" in html)

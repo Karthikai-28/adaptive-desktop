@@ -495,7 +495,7 @@ def weather(cfg):
 
 # ------------------------------------------------------------ local files
 
-def parse_xbel(text, limit=6):
+def parse_xbel(text, limit=8):
     """GTK's recently-used.xbel -> newest local files that still exist: name, path, app, when."""
     import xml.etree.ElementTree as ET
     from datetime import datetime
@@ -559,6 +559,59 @@ def processes(cfg):
     return {"top": rows[:5], "error": err if out is None else ""}
 
 
+def agent_sessions(cfg):
+    """Claude / agy / codex sessions kept by terminal/agent.py on its private tmux server."""
+    if not shutil.which("tmux"):
+        return {"sessions": []}
+    sock = os.environ.get("ADAPTIVE_AGENT_SOCKET", "adaptive-agents")
+    out, _ = _run(["tmux", "-L", sock, "list-sessions", "-F",
+                   "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_attached}"], timeout=3)
+    rows = []
+    for line in (out or "").splitlines():
+        f = line.split("\t")
+        if len(f) < 4:
+            continue
+        name, path, when, attached = f[:4]
+        rows.append({"name": name, "agent": re.sub(r"-\d+$", "", name), "folder": Path(path).name or path,
+                     "when": int(when or 0), "attached": attached not in ("", "0")})
+    rows.sort(key=lambda r: r["when"], reverse=True)
+    return {"sessions": rows[:6]}
+
+
+_LOOPBACK = ("127.", "[::1]", "::1", "localhost")
+
+
+def parse_listening(text):
+    """`ss -ltnuHp` -> services this machine offers to the network (loopback left out)."""
+    out = []
+    for line in text.splitlines():
+        f = line.split()
+        if len(f) < 5:
+            continue
+        proto, local = f[0], f[4]
+        addr, _, port = local.rpartition(":")
+        if addr.startswith(_LOOPBACK) or "%lo" in addr:
+            continue
+        m = re.search(r'users:\(\("([^"]+)"', line)
+        out.append({"proto": proto, "addr": addr or "*", "port": int(port) if port.isdigit() else port,
+                    "proc": m.group(1) if m else ""})
+    seen, uniq = set(), []
+    for r in sorted(out, key=lambda r: (r["port"] if isinstance(r["port"], int) else 1 << 20, r["proto"])):
+        key = (r["proto"], r["port"])
+        if key not in seen:
+            seen.add(key)
+            uniq.append(r)
+    return uniq
+
+
+def listening(cfg):
+    out, err = _run(["ss", "-ltnuHp"], timeout=4)
+    if out is None:
+        return {"error": err, "open": []}
+    rows = parse_listening(out)
+    return {"open": rows[:8], "count": len(rows)}
+
+
 def read_notes(path, limit=4):
     try:
         lines = [l for l in Path(path).read_text().splitlines() if l.startswith("- ")]
@@ -583,4 +636,6 @@ SCHEDULE = {
     "recent": (recent, 20),
     "downloads": (downloads, 20),
     "processes": (processes, 5),
+    "agent_sessions": (agent_sessions, 10),
+    "listening": (listening, 30),
 }

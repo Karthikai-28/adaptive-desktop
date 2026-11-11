@@ -120,53 +120,18 @@ function turn(t) {
   }, 420);
 }
 
-function summaryStrip() {
-  const b = data("builds"), r = data("reels"), ts = data("thinking_space"), sys = data("system");
-  const trackers = r.trackers || [];
-  const done = trackers.reduce((s, t) => s + t.done, 0), total = trackers.reduce((s, t) => s + t.total, 0);
-  const inbox = (ts.boards || []).reduce((s, x) => s + (x.inbox || []).length, 0);
-  const cell = (v, k) => el("div", {}, el("div", { class: "mid" }, v), muted(k));
-  return el("div", { class: "cols4" }, cell(b.week ?? "–", "commits this week"), cell(`${done}/${total}`, "reels done"),
-    cell(inbox, "Inbox items"), cell(sys.battery ? `${sys.battery.percent}%` : pct(sys.cpu), sys.battery ? "battery" : "CPU"));
-}
-
 // --------------------------------------------------------------- renderers
+// Each tile shows something no other tile does; a tile that opens a place says so by being clickable.
 const render = {
   next() {
     const items = state.next || [];
     setFaces("next", [[
       el("div", { class: "mid" }, items.length ? `${items.length} thing${items.length > 1 ? "s" : ""} worth doing` : "All clear"),
-      el("ul", { class: "list grow", style: "gap:10px;font-size:13px" },
+      el("ul", { class: "list grow", style: "gap:7px;font-size:12px" },
         (items.length ? items : [{ text: "Nothing needs you right now." }]).map((s) => el("li", {},
           el("span", { style: "white-space:normal" }, s.text),
           s.action ? el("button", { class: "btn", type: "button", onclick: () => act(s.action) }, s.action.label || "Open") : null))),
-      summaryStrip(),
-    ]]);
-  },
-
-  clock() {
-    const now = new Date();
-    const at = state.config.backup_at || "";
-    const backup = data("thinking_space").last_backup || {};
-    const faces = [[
-      el("div", { class: "huge" }, now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })),
-      el("div", { class: "t" }, now.toLocaleDateString(undefined, { weekday: "long" })),
-      muted(now.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }), "font-size:13px"),
-      el("div", { class: "between", style: "margin-top:auto" }, muted(`Week ${isoWeek(now)}`), muted(at ? `backup ${at}` : "")),
-    ]];
-    if (/^\d{1,2}:\d{2}$/.test(at)) {
-      const [h, m] = at.split(":").map(Number);
-      const next = new Date(now); next.setHours(h, m, 0, 0);
-      if (next < now) next.setDate(next.getDate() + 1);
-      const mins = Math.round((next - now) / 60000);
-      faces.push([
-        muted("Nightly backup", "font-size:12px"),
-        el("div", { class: "big" }, mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins} min`),
-        muted(`at ${at} · boards, trackers, history`, "font-size:12px"),
-        backup.subject ? el("div", { class: "clamp2", style: "font-size:12px;margin-top:auto" }, `Last: ${backup.subject} (${ago(backup.when)})`) : null,
-      ]);
-    }
-    setFaces("clock", faces);
+    ]], { badge: items.length ? String(items.length) : "" });
   },
 
   builds() {
@@ -182,8 +147,8 @@ const render = {
     const peak = Math.max(1, ...days);
     const busiest = repos.filter((r) => r.when && Date.now() / 1000 - r.when < 7 * 86400).map((r) => r.name);
     setFaces("builds", [
-      [list.children.length ? list : muted("No git checkouts found. Set \"repos\" in mario.json.")],
-      [el("div", { class: "between" }, el("div", {}, el("div", { class: "big" }, d.week || 0), muted("commits in the last 7 days")),
+      [repos.length ? list : muted("No git checkouts found. Set \"repos\" in mario.json.")],
+      [el("div", { class: "between" }, el("div", { class: "row", style: "align-items:baseline" }, el("div", { class: "big" }, d.week || 0), muted("commits, last 7 days")),
         muted(busiest.length ? `active: ${busiest.slice(0, 3).join(", ")}` : "quiet week")),
        el("div", { class: "heat" }, days.map((n) => el("i", { title: `${n} commits`, style: n ? `background:rgba(48,209,88,${0.25 + 0.75 * (n / peak)})` : "" }))),
        muted("last 14 days, all repos")],
@@ -194,63 +159,39 @@ const render = {
     const w = data("weather");
     if (w.off) return setFaces("weather", [[muted("Weather is off in mario.json")]]);
     if (w.error || w.temp == null) return setFaces("weather", [[el("div", { class: "t" }, w.place || "Weather"), muted("No forecast right now")]]);
-    setFaces("weather", [
-      [el("div", { class: "between" }, el("div", { class: "big" }, `${w.temp}°`),
-        el("div", { style: "text-align:right" }, el("div", { class: "t" }, w.sky), muted(`${w.place} · feels ${w.feels}°`))),
-       muted(`Today ${Math.round(w.low)}–${Math.round(w.high)}° · rain ${w.rain ?? 0}%`)],
-      [el("div", { class: "hours" }, (w.hours || []).map((h) => el("div", {}, muted(h.h), el("div", { class: "t" }, `${h.t}°`), muted(`${h.rain || 0}%`)))),
-       muted(`Today ${Math.round(w.low)}–${Math.round(w.high)}° · rain ${w.rain ?? 0}%`)],
-    ]);
+    setFaces("weather", [[
+      el("div", { class: "between" }, el("div", { class: "big" }, `${w.temp}°`),
+        el("div", { style: "text-align:right" }, el("div", { class: "t" }, w.sky), muted(`feels ${w.feels}°`))),
+      muted(`${w.place} · today ${Math.round(w.low)}–${Math.round(w.high)}° · rain ${w.rain ?? 0}%`),
+      el("div", { class: "hours", style: "margin-top:auto" }, (w.hours || []).map((h) => el("div", {}, muted(h.h), el("div", { class: "t" }, `${h.t}°`), muted(`${h.rain || 0}%`)))),
+    ]]);
   },
 
   phone() {
-    const p = data("phone"), b = data("system").battery;
-    const faces = [[
+    const p = data("phone");
+    setFaces("phone", [[
       el("div", { class: "between" }, el("div", { class: "t" }, p.linked ? p.name || "Phone" : "Not linked"),
         el("span", { class: `dot ${p.linked ? (p.present ? "" : "warn") : "off"}` })),
-      muted(p.linked ? (p.present ? "Here, connected" : "Linked, away") : p.error || "Pair it with Adaptive Link"),
-    ]];
-    if (b) faces.push([el("div", { class: "between" }, el("div", { class: "t" }, "Laptop battery"), el("div", { class: "mid" }, `${b.percent}%`)),
-      el("div", { class: "bar" }, el("i", { style: `width:${b.percent}%;background:${b.percent < 20 ? "#FF453A" : "#30D158"}` })), muted(b.status)]);
-    setFaces("phone", faces);
+      muted(p.linked ? (p.present ? "Here · tap to show its screen" : "Linked, away") : p.error || "Pair it with Adaptive Link"),
+    ]], { open: () => act({ id: "launch", arg: "phone" }) });
   },
 
   thinking() {
     const d = data("thinking_space");
     if (d.error) return setFaces("thinking", [[muted(d.error)]]);
     const boards = d.boards || [];
-    const inbox = boards.flatMap((b) => (b.inbox || []).map((text) => ({ board: b.title, text, url: b.url })));
-    const hubUrl = (d.hub || {}).url;
+    const inbox = boards.flatMap((b) => (b.inbox || []).map((text) => ({ board: b.title, text })));
+    const backup = d.last_backup || {};
     setFaces("thinking", [
       [el("div", { class: "cols2 grow fill" }, boards.slice(0, 4).map((b) => el("div", { class: "boardbox" },
-        el("div", { class: "between" }, el("span", { class: "t" }, b.title), muted(b.inbox && b.inbox.length ? `${b.inbox.length} in Inbox` : "Inbox clear")),
+        el("div", { class: "between" }, el("span", { class: "t" }, b.title), muted(b.inbox && b.inbox.length ? `${b.inbox.length} in Inbox` : "")),
         el("ul", { class: "sections" }, (b.sections || []).slice(0, 3).map((x) => el("li", {}, x))))))],
       inbox.length ? [el("div", { class: "t" }, "Waiting in your Inboxes"),
        el("ul", { class: "list grow" }, inbox.slice(0, 5).map((x) => el("li", {}, el("span", {}, x.text), muted(x.board))))] : null,
-      d.updated ? [el("div", { class: "mid clamp3" }, d.updated)] : null,
-    ], { open: () => openUrl(hubUrl), badge: inbox.length ? `${inbox.length} new` : "" });
-    render.map();
-  },
-
-  map() {
-    const boards = data("thinking_space").boards || [];
-    const svg = svgEl("svg", { class: "map", viewBox: "0 0 300 200", role: "img", "aria-label": "Ideas from all boards, grouped by board" });
-    const cx = 150, cy = 92;
-    boards.forEach((b, i) => {
-      const a = (i / Math.max(boards.length, 1)) * Math.PI * 2 - Math.PI / 4;
-      const bx = cx + Math.cos(a) * 92, by = cy + Math.sin(a) * 62;
-      svg.append(svgEl("line", { x1: cx, y1: cy, x2: bx, y2: by, stroke: "rgba(255,255,255,.14)" }));
-      const n = Math.min(9, Math.max(2, Math.round((b.elements || 0) / 5)));
-      for (let k = 0; k < n; k++) {
-        const t = (k / n) * Math.PI * 2 + i;
-        svg.append(svgEl("circle", { cx: bx + Math.cos(t) * 20, cy: by + Math.sin(t) * 14, r: 2.6, fill: COLORS[i % COLORS.length] }));
-      }
-      const dot = svgEl("circle", { cx: bx, cy: by, r: 7, fill: COLORS[i % COLORS.length] });
-      const title = svgEl("title", {}); title.textContent = b.title; dot.append(title);
-      svg.append(dot);
-    });
-    svg.append(svgEl("circle", { cx, cy, r: 9, fill: "#F5F5F7" }));
-    setFaces("map", [[svg]], { open: () => openUrl((data("thinking_space").hub || {}).url) });
+      [el("div", { class: "mid clamp3" }, d.updated || "Thinking Space"),
+       el("div", { class: "between", style: "margin-top:auto" }, muted(`Backed up to GitHub ${ago(backup.when) || "–"}`),
+         muted(state.config.backup_at ? `next ${state.config.backup_at}` : ""))],
+    ], { open: () => openUrl((d.hub || {}).url), badge: inbox.length ? `${inbox.length} new` : "" });
   },
 
   reels() {
@@ -262,23 +203,21 @@ const render = {
       el("div", { class: "bar" }, el("i", { style: `width:${(100 * t.done) / Math.max(t.total, 1)}%;background:${COLORS[(i + 3) % COLORS.length]}` })));
     setFaces("reels", [
       [el("div", { class: "cols2 grow", style: "align-content:space-evenly" }, trackers.slice(0, 8).map(bar))],
-      [el("div", { class: "between" }, el("div", { class: "row", style: "align-items:baseline" }, el("div", { class: "big" }, `${done}`), muted(`of ${total} tracked reels done`)),
-        muted(`${d.total || 0} reels saved`)),
-       el("div", { class: "t", style: "margin-top:4px" }, "Newest saves"),
+      [el("div", { class: "between" }, el("div", { class: "t" }, "Newest saves"), muted(`${d.total || 0} reels saved`)),
        el("ul", { class: "list grow" }, (d.newest || []).map((r) => el("li", {}, el("span", {}, shortTitle(r.what, 80)), muted(`${r.category.split(",")[0]} · ${r.saved.slice(5)}`))))],
       [el("div", { class: "t" }, "Version history"),
        el("ul", { class: "list grow" }, (d.history || []).map((h) => el("li", {}, el("span", {}, `${h.Change}: ${h.Item}`), muted(h.Date))))],
-    ], { open: () => openUrl(d.sheet), badge: `${done}/${total}` });
+    ], { open: () => openUrl(d.sheet), badge: `${done}/${total} done` });
   },
 
   tonight() {
     const watch = data("reels").watch || [];
     setFaces("tonight", watch.length ? watch.slice(0, 5).map((m, k) => [
-      muted(m.where, "font-size:12px"),
-      el("div", { class: "mid clamp3", style: "font-size:22px" }, m.title),
+      muted(m.where, "font-size:11px"),
+      el("div", { class: "mid clamp2", style: "font-size:19px" }, m.title),
       muted([m.type, m.year].filter(Boolean).join(" · ")),
-      el("div", { style: "margin-top:auto;display:flex;flex-direction:column;gap:3px" }, muted("Also streaming"),
-        watch.filter((_, j) => j !== k).slice(0, 3).map((o) => el("div", { style: "font-size:12px;color:var(--soft)" }, `${o.title} · ${o.where}`))),
+      el("div", { style: "margin-top:auto;display:flex;flex-direction:column;gap:2px" }, muted("Also on your list"),
+        watch.filter((_, j) => j !== k).slice(0, 2).map((o) => el("div", { style: "font-size:11px;color:var(--soft)" }, `${o.title} · ${o.where}`))),
     ]) : [[el("div", { class: "t" }, "Nothing queued"), muted("Mark films in the Movies tab")]]);
   },
 
@@ -289,23 +228,23 @@ const render = {
     if (d.cpu != null) { cpuHistory.push(d.cpu); if (cpuHistory.length > 60) cpuHistory.shift(); }
     const spark = svgEl("svg", { class: "spark grow", viewBox: "0 0 300 36", preserveAspectRatio: "none", "aria-hidden": "true" });
     spark.append(svgEl("polyline", { points: cpuHistory.map((v, i) => `${(i / 59) * 300},${34 - (v / 100) * 30}`).join(" ") }));
-    const gpu = d.gpu;
-    const stat = (name, value, sub) => el("div", {}, muted(name), el("div", { class: "big", style: "font-size:30px" }, value), sub ? muted(sub) : null);
+    const gpu = d.gpu, b = d.battery;
+    const stat = (name, value, sub) => el("div", {}, muted(name), el("div", { class: "big", style: "font-size:24px" }, value), sub ? muted(sub) : null);
+    const top = data("processes").top || [];
     setFaces("system", [
       [el("div", { class: "cols3" },
         stat("CPU", pct(d.cpu)),
         stat("RAM", d.mem ? `${d.mem.used_gb}` : "–", d.mem ? `of ${d.mem.total_gb} GB` : ""),
         stat(gpu ? gpu.name : "GPU", gpu ? pct(gpu.util) : "–", gpu ? `${gpu.vram_used_gb}/${gpu.vram_total_gb} GB VRAM` : "")),
-       spark,
-       el("div", { class: "between" }, muted(`Disk ${d.disk ? `${d.disk.used_gb}/${d.disk.total_gb} GB` : "–"}`),
-         muted(`Net ${d.net ? `↓ ${fmtRate(d.net.down)} ↑ ${fmtRate(d.net.up)}` : "–"}`),
-         muted(`Model ${(d.ollama && d.ollama.models && d.ollama.models[0]) || "none"}`))],
+       spark],
+      [el("div", { class: "t" }, "Busiest right now"),
+       el("ul", { class: "list grow" }, top.slice(0, 5).map((p) => el("li", {}, el("span", {}, p.name), muted(`${Math.round(p.cpu)}% CPU · ${p.mem.toFixed(1)}% mem`))))],
       [el("div", { class: "cols3" },
+        stat("Battery", b ? `${b.percent}%` : "–", b ? b.status : "on power"),
         stat("Disk", d.disk ? `${Math.round((100 * d.disk.used_gb) / d.disk.total_gb)}%` : "–", d.disk ? `${d.disk.used_gb} of ${d.disk.total_gb} GB` : ""),
-        stat("Network", d.net ? fmtRate(d.net.down) : "–", d.net ? `up ${fmtRate(d.net.up)}` : ""),
-        stat("Up", d.uptime_h != null ? (d.uptime_h >= 24 ? `${Math.floor(d.uptime_h / 24)}d` : `${Math.round(d.uptime_h)}h`) : "–", "since boot"))],
+        stat("Network", d.net ? fmtRate(d.net.down) : "–", d.net ? `up ${fmtRate(d.net.up)}` : "")),
+       muted(d.uptime_h != null ? `Up ${d.uptime_h >= 24 ? `${Math.floor(d.uptime_h / 24)} days` : `${Math.round(d.uptime_h)} hours`} since boot` : "", "margin-top:auto")],
     ]);
-    render.phone(); render.loom();
   },
 
   usage() {
@@ -321,32 +260,38 @@ const render = {
     const resets = names.flatMap((n) => (providers[n].windows || []).map((w) => el("li", {},
       el("span", {}, `${title(n)} ${w.label}`),
       muted(`${pct(w.used)}${w.resets ? ` · resets ${new Date(w.resets * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}` : ""}`))));
-    setFaces("usage", [
-      [el("div", { style: "display:flex;flex-direction:column;gap:12px" }, names.map(line)),
-       resets.length ? el("ul", { class: "list", style: "margin-top:auto;gap:5px;font-size:12px" }, resets.slice(0, 4)) : muted("Mario answers locally first", "margin-top:auto")],
-    ]);
+    setFaces("usage", [[
+      el("div", { style: "display:flex;flex-direction:column;gap:8px" }, names.map(line)),
+      resets.length ? el("ul", { class: "list", style: "margin-top:auto;gap:3px;font-size:11px" }, resets.slice(0, 3)) : muted("Mario answers locally first", "margin-top:auto"),
+    ]]);
   },
 
-  office() {
-    const d = data("agent_office");
-    if (!d.running) {
-      return setFaces("office", [[el("div", { class: "mid" }, "Stopped"), muted("Your AI company is off"),
-        el("button", { class: "btn", type: "button", style: "margin-top:auto;align-self:flex-start", onclick: () => act({ id: "start_office" }) }, "Start")]]);
-    }
-    const busy = (d.agents || []).filter((a) => /work|busy|run/i.test(a.status)).length;
-    setFaces("office", [
-      [el("div", { class: "big" }, `${busy}`), muted(`of ${(d.agents || []).length} agents working`),
-       el("ul", { class: "list" }, (d.agents || []).slice(0, 3).map((a) => el("li", {}, el("span", {}, a.name), muted(a.status))))],
-      [el("div", { class: "t" }, d.missions && d.missions.length ? "On a mission" : d.paused ? "Paused" : "Free"),
-       el("div", { class: "clamp3" }, d.missions && d.missions.length ? d.missions[0].title : "No mission running")],
-    ], { open: () => openUrl("http://127.0.0.1:8790/") });
+  agents() {
+    const office = data("agent_office");
+    const sessions = data("agent_sessions").sessions || [];
+    const busy = (office.agents || []).filter((a) => /work|busy|run/i.test(a.status)).length;
+    setFaces("agents", [
+      {
+        n: [el("div", { class: "t" }, "In the terminal"),
+          sessions.length ? el("ul", { class: "list grow" }, sessions.slice(0, 4).map((x) => el("li", {},
+            el("span", {}, el("span", { class: `dot ${x.attached ? "" : "off"}`, style: "margin-right:6px" }), `${x.agent} · ${x.folder}`), muted(ago(x.when)))))
+            : muted("No Claude or agy sessions open")],
+      },
+      {
+        n: office.running ? [el("div", { class: "t" }, "Agent Office"), el("div", { class: "row", style: "align-items:baseline" }, el("div", { class: "big" }, `${busy}`), muted(`of ${(office.agents || []).length} working`)),
+          muted(office.missions && office.missions.length ? office.missions[0].title : office.paused ? "Paused" : "No mission running", "margin-top:auto")]
+          : [el("div", { class: "t" }, "Agent Office"), muted("Stopped"),
+            el("button", { class: "btn", type: "button", style: "margin-top:auto;align-self:flex-start", onclick: () => act({ id: "start_office" }) }, "Start")],
+        open: () => openUrl("http://127.0.0.1:8790/"),
+      },
+    ], { badge: sessions.length ? `${sessions.length} open` : "" });
   },
 
   trynext() {
     const items = data("reels").try_next || [];
     setFaces("trynext", items.length ? items.map((x) => ({
-      n: [muted(x.kind, "font-size:12px"), el("div", { class: "t clamp3", style: "font-size:16px" }, shortTitle(x.name, 80)),
-        el("div", { class: "clamp2", style: "font-size:12px;color:var(--soft)" }, x.what)],
+      n: [muted(x.kind, "font-size:11px"), el("div", { class: "t clamp3", style: "font-size:15px" }, shortTitle(x.name, 80)),
+        el("div", { class: "clamp2", style: "font-size:11px;color:var(--soft)" }, x.what)],
       open: () => openUrl(x.link),
     })) : [[el("div", { class: "t" }, "Everything tried"), muted("Nice.")]], { badge: items.length ? "tap to open" : "" });
   },
@@ -359,56 +304,28 @@ const render = {
 
   loom() {
     const d = data("loom"), ollama = data("system").ollama || {};
-    setFaces("loom", [
-      [el("div", { class: "between" }, el("div", { class: "t" }, d.running ? (d.warming_up ? "Warming up" : "Ready") : "Off"),
+    const model = ollama.models && ollama.models.length ? ollama.models[0] : "";
+    setFaces("loom", [[
+      el("div", { class: "between" }, el("div", { class: "t" }, d.running ? (d.warming_up ? "Warming up" : "Ready") : "Off"),
         el("span", { class: `dot ${d.running ? "" : "off"}` })),
-       muted(d.running ? `model ${d.model}${d.models ? ` · ${d.models} local` : ""}` : "Start LOOM's backend for memory")],
-      [el("div", { class: "between" }, el("div", { class: "t" }, ollama.running ? "Ollama on" : "Ollama off"),
-        el("span", { class: `dot ${ollama.running ? "" : "off"}` })),
-       muted(ollama.models && ollama.models.length ? `loaded: ${ollama.models[0]}` : "no model loaded")],
-    ]);
+      muted(d.running ? (model ? `in memory: ${model}` : `router: ${d.model}`) : ollama.running ? "Ollama on; start LOOM's backend" : "LOOM and Ollama are off"),
+    ]]);
   },
-};
 
-// ------------------------------------------------------------- launchers
-const LAUNCH_URLS = {
-  hub: () => (data("thinking_space").hub || {}).url,
-  sheet: () => data("reels").sheet,
-  claude: () => "https://claude.ai/",
-  gemini: () => "https://gemini.google.com/app",
-  office: () => "http://127.0.0.1:8790/",
-};
-function launch(key) {
-  if (LAUNCH_URLS[key]) return openUrl(LAUNCH_URLS[key]());
-  return act({ id: "launch", arg: key });
-}
-function renderLaunchers() {
-  const usage = data("usage").providers || {};
-  const reels = data("reels"), ts = data("thinking_space"), office = data("agent_office"), phone = data("phone");
-  const trackers = reels.trackers || [];
-  const inbox = (ts.boards || []).reduce((s, b) => s + (b.inbox || []).length, 0);
-  const badges = {
-    claude: usage.claude && usage.claude.used != null ? pct(usage.claude.used) : "",
-    gemini: usage.gemini && usage.gemini.used != null ? pct(usage.gemini.used) : "",
-    hub: inbox ? String(inbox) : "",
-    sheet: trackers.reduce((s, t) => s + t.done, 0) ? `${trackers.reduce((s, t) => s + t.done, 0)} done` : "",
-    office: office.running ? String((office.agents || []).filter((a) => /work|busy|run/i.test(a.status)).length || "") : "off",
-    phone: phone.linked ? (phone.present ? "here" : "away") : "",
-    downloads: data("downloads").count ? String(data("downloads").count) : "",
-  };
-  const available = state.config.launch || {};
-  document.querySelectorAll("[data-launch]").forEach((node) => {
-    const key = node.dataset.launch;
-    node.querySelector(".badge").textContent = badges[key] || "";
-    node.classList.toggle("off", !LAUNCH_URLS[key] && available[key] === false);
-  });
-}
+  exposure() {
+    const d = data("listening");
+    const open = d.open || [];
+    if (d.error) return setFaces("exposure", [[muted("Can't list ports here")]]);
+    setFaces("exposure", open.length ? open.slice(0, 4).map((r) => [
+      el("div", { class: "between" }, el("div", { class: "t" }, `${r.proto} ${r.port}`), muted(`${open.length} open`)),
+      muted(`${r.proc || "unknown"} on ${r.addr}`),
+    ]) : [[el("div", { class: "t" }, "Nothing open"), muted("Only this laptop can reach its services")]]);
+  },
 
-Object.assign(render, {
   recent() {
     const files = data("recent").files || [];
     setFaces("recent", [[
-      files.length ? el("ul", { class: "list grow" }, files.slice(0, 5).map((f) => el("li", {},
+      files.length ? el("ul", { class: "list grow", style: "gap:6px" }, files.slice(0, 8).map((f) => el("li", {},
         el("span", {}, el("button", { class: "link", type: "button", onclick: () => act({ id: "open_file", arg: f.path }) }, f.name)),
         muted(`${f.app ? f.app + " · " : ""}${ago(f.when)}`))))
         : muted("Files you open show up here"),
@@ -422,54 +339,58 @@ Object.assign(render, {
     setFaces("downloads", files.length ? files.slice(0, 3).map((f) => ({
       n: [muted(ago(f.when)), el("div", { class: "t clamp3", style: "word-break:break-all" }, f.name), muted(size(f.size))],
       open: () => act({ id: "open_file", arg: f.path }),
-    })) : [[muted(d.error || "Nothing downloaded")]], { badge: d.count ? String(d.count) : "" });
+    })) : [[muted(d.error || "Nothing downloaded")]], { badge: d.count ? String(d.count) : "", open: () => act({ id: "launch", arg: "downloads" }) });
   },
 
   focus() {
     const f = data("focus");
     const left = Math.max(0, (f.until || 0) - Date.now() / 1000);
     if (left > 0) {
-      const total = (f.minutes || 1) * 60, r = 26, c = 2 * Math.PI * r;
-      const ring = svgEl("svg", { class: "ring", viewBox: "0 0 64 64", "aria-hidden": "true" });
-      ring.append(svgEl("circle", { cx: 32, cy: 32, r, stroke: "rgba(255,255,255,.12)" }));
-      ring.append(svgEl("circle", { cx: 32, cy: 32, r, stroke: "#FF453A", "stroke-dasharray": c,
-        "stroke-dashoffset": c * (1 - left / total), transform: "rotate(-90 32 32)", "stroke-linecap": "round" }));
       const mm = Math.floor(left / 60), ss = String(Math.floor(left % 60)).padStart(2, "0");
-      setFaces("focus", [[el("div", { class: "row", style: "flex-wrap:nowrap" }, ring,
-        el("div", {}, el("div", { class: "big", style: "font-size:26px" }, `${mm}:${ss}`), muted(`of ${f.minutes} min`))),
-        el("button", { class: "btn", type: "button", style: "margin-top:auto;align-self:flex-start", onclick: () => post("/api/focus", { minutes: 0 }) }, "Stop")]]);
+      setFaces("focus", [[el("div", { class: "row", style: "flex-wrap:nowrap;gap:12px" },
+        el("div", { class: "big", style: "font-size:26px" }, `${mm}:${ss}`),
+        el("div", { class: "grow" }, el("div", { class: "bar", style: "height:8px" }, el("i", { style: `width:${100 * (1 - left / ((f.minutes || 1) * 60))}%;background:#FF453A` })), muted(`of ${f.minutes} min`)),
+        el("button", { class: "btn", type: "button", onclick: () => post("/api/focus", { minutes: 0 }) }, "Stop"))]]);
     } else {
-      setFaces("focus", [[el("div", { class: "t" }, "Start a focus block"), muted("Mario pings you when it ends"),
-        el("div", { class: "row", style: "margin-top:auto" }, [25, 50, 90].map((m) =>
-          el("button", { class: "btn", type: "button", onclick: () => post("/api/focus", { minutes: m }) }, `${m}m`)))]]);
+      setFaces("focus", [[el("div", { class: "row", style: "flex-wrap:nowrap;gap:8px" },
+        el("div", { class: "grow" }, el("div", { class: "t" }, "Focus block"), muted("Mario pings you at the end")),
+        [25, 50, 90].map((m) => el("button", { class: "btn", type: "button", onclick: () => post("/api/focus", { minutes: m }) }, `${m}m`)))]]);
     }
-  },
-
-  processes() {
-    const top = data("processes").top || [];
-    setFaces("processes", [[el("ul", { class: "list grow" }, top.slice(0, 5).map((p) => el("li", {},
-      el("span", {}, p.name), muted(`${Math.round(p.cpu)}% · ${p.mem.toFixed(1)}% mem`))))]]);
   },
 
   notes() {
     const old = document.querySelector("#jot");
     const keep = old ? { value: old.value, focused: document.activeElement === old } : null;
     const items = data("notes").items || [];
-    const input = el("input", { id: "jot", placeholder: "Jot something…", "aria-label": "Jot a note" });
-    const form = el("form", { class: "field", onsubmit: async (e) => {
+    const input = el("input", { id: "jot", placeholder: items.length ? `Last: ${items[0].split("· ").slice(1).join("· ")}` : "Jot something…", "aria-label": "Jot a note" });
+    const form = el("form", { class: "field", style: "margin-top:0", onsubmit: async (e) => {
       e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/note", { text });
     } }, input, el("button", { class: "btn", type: "submit" }, "Add"));
-    setFaces("notes", [[el("ul", { class: "list grow" }, items.slice(0, 3).map((n) => el("li", {}, el("span", { style: "white-space:normal" }, n)))), form]]);
+    setFaces("notes", [[form, muted(items.length ? `${items.length} recent note${items.length > 1 ? "s" : ""} · ~/.local/share/adaptive-desktop/mario/notes.md` : "Kept on this laptop")]]);
     if (keep) { input.value = keep.value; if (keep.focused) input.focus(); }
   },
-});
+};
+
+// ------------------------------------------------------------- launchers
+const LAUNCH_URLS = { claude: () => "https://claude.ai/", gemini: () => "https://gemini.google.com/app" };
+function launch(key) {
+  if (LAUNCH_URLS[key]) return openUrl(LAUNCH_URLS[key]());
+  return act({ id: "launch", arg: key });
+}
+function renderLaunchers() {
+  const available = state.config.launch || {};
+  document.querySelectorAll("[data-launch]").forEach((node) => {
+    const key = node.dataset.launch;
+    node.classList.toggle("off", !LAUNCH_URLS[key] && available[key] === false);
+  });
+}
 
 // card -> tiles that read it
 const FEEDS = {
-  builds: ["builds", "next"], thinking_space: ["thinking", "clock", "next", "launchers"],
-  reels: ["reels", "tonight", "trynext", "cook", "launchers"], system: ["system"], phone: ["phone", "launchers"],
-  usage: ["usage", "launchers"], agent_office: ["office", "launchers"], loom: ["loom"], weather: ["weather"],
-  recent: ["recent"], downloads: ["downloads", "launchers"], processes: ["processes"], focus: ["focus"], notes: ["notes"],
+  builds: ["builds"], thinking_space: ["thinking"], reels: ["reels", "tonight", "trynext", "cook"],
+  system: ["system", "loom"], processes: ["system"], phone: ["phone"], usage: ["usage"],
+  agent_office: ["agents"], agent_sessions: ["agents"], loom: ["loom"], weather: ["weather"], listening: ["exposure"],
+  recent: ["recent"], downloads: ["downloads"], focus: ["focus"], notes: ["notes"],
 };
 
 function renderTile(name) {
@@ -574,7 +495,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Voice is the listener's job (docs/MARIO.md, phase 3); until it runs, the button types.
     $("#talk").addEventListener("click", () => { const i = $("#ask"); i.placeholder = "Voice comes with the listener; type for now"; i.focus(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#answer").hidden = true; });
-    setInterval(() => { greet(); renderTile("clock"); }, 30000);
+    setInterval(greet, 30000);
     setInterval(() => { if ((data("focus").until || 0) > Date.now() / 1000 - 1) renderTile("focus"); }, 1000);
   }
   connect();

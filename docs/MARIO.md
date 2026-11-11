@@ -13,7 +13,7 @@ reads what is already on the machine. Actions are added on top, one confirmed st
 | Part | Source | Job |
 | --- | --- | --- |
 | Mario Hub | `services/mario-hub/hub.py` (aiohttp, 127.0.0.1:8791) | Runs the collectors, pushes changed cards over `/ws`, answers `/api/ask`, holds Claude Code plans until you decide |
-| Collectors | `services/mario-hub/collectors.py` | Builds (git, 14-day commit activity), Thinking Space boards (sections, Inbox items, last backup), Saved Reels (tracker progress, what to watch / try / cook next, newest saves, version history), Agent Office, AI usage (`quotaSnapshot.py`, only `usage_providers`: Claude and Gemini), system (CPU, RAM, GTX via `nvidia-smi`, disk, network, battery, Ollama), LOOM (`/api/health`), weather (Open-Meteo), phone (Adaptive Link control socket) |
+| Collectors | `services/mario-hub/collectors.py` | Builds (git, 14-day commit activity), Thinking Space boards (sections, Inbox items, last backup), Saved Reels (tracker progress, what to watch / try / cook next, newest saves, version history), Agent Office and terminal agent sessions (tmux), AI usage (`quotaSnapshot.py`, only `usage_providers`: Claude and Gemini), system (CPU, RAM, GTX via `nvidia-smi`, disk, network, battery, busiest processes, Ollama), LOOM (`/api/health`), weather (Open-Meteo), recent files, downloads, listening ports (`ss`), phone (Adaptive Link control socket) |
 | Decisions | `services/mario-hub/brain.py` (pure) | Instant answers from state, local vs Claude Code, the hand-off's limits, the Next step list |
 | Settings | `services/mario-hub/config.py`, `~/.config/adaptive-desktop/mario.json` | Repos, Thinking Space checkout, LOOM/Ollama/Office URLs, backup time |
 | Home and panel | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`) | One page: `/` is Home, `/panel` the panel. DOM only, no framework, no `innerHTML` |
@@ -24,37 +24,38 @@ The shell's top bar, rail and island stay the shell's; Home fills only the work 
 
 ## Live tiles
 
-Home is 36 tiles packed on a 14 × 8 grid of near-square cells (the check proves every cell is
-used once): 20 live tiles and 16 one-cell launchers. A tile with more than one face turns by itself
-on its own beat: small tiles flip, wide ones peek-slide. It pauses while the pointer is on it, keeps
-its face when new data arrives, and stops animating under reduced motion. The dots in a corner say
-how many faces it has.
+Home is 28 tiles packed on a 14 × 7 grid of near-square cells (the check proves every cell is used
+once and that no tile appears twice): 18 live tiles and 10 one-cell launchers. Each tile shows
+something no other tile does. A tile with more than one face turns by itself on its own beat: small
+tiles flip, wide ones peek-slide. It pauses while the pointer is on it, keeps its face when new
+data arrives, and stops animating under reduced motion. The dots in a corner say how many faces it
+has. The top bar keeps the clock; Home does not repeat it.
 
 | Tile | Cells | Faces |
 | --- | --- | --- |
-| Next step | 4 × 2 | Up to three suggestions with their action; commits, reels done, Inbox items, battery |
-| Today | 2 × 2 | Clock, week number · countdown to the nightly backup and its last commit |
+| Next step | 4 × 2 | Up to four suggestions, each with its action |
 | Builds | 4 × 2 | Repos with branch, last commit, changed and unpushed counts · 14-day commit heatmap |
-| Weather, Phone | 2 × 1 each | Now and today's range · next six hours · Adaptive Link state · laptop battery |
-| Thinking Space | 4 × 2 | Four boards with their sections and Inbox counts · Inbox items · hub summary; opens the hub |
-| Thinking map | 2 × 2 | Every board as a cluster; opens the hub |
+| Weather | 2 × 2 | Now, today's range and the next six hours |
+| Tonight | 2 × 2 | One film per face that is on a subscription, with two more from the list |
+| Thinking Space | 4 × 2 | Four boards with their sections and Inbox counts · Inbox items · hub summary and last GitHub backup; opens the hub |
 | Saved Reels | 4 × 2 | Progress per tracker · newest saves · version history; opens the Google Sheet |
-| Tonight | 2 × 2 | One film per face that is on a subscription, with the rest of the queue |
-| This laptop | 4 × 2 | CPU, RAM, GTX with a live CPU line, disk, network, loaded model · disk, network, uptime |
-| AI usage | 2 × 2 | Claude and Gemini, fullest window first, and when each window resets |
-| Agent Office | 2 × 2 | Agents working · current mission; opens the office |
 | Try next | 2 × 2 | Newest named AI tools, Claude ideas and websites still to try; opens the reel |
-| Cook next, LOOM | 2 × 1 each | Recipes still to cook · LOOM backend and model · Ollama and the loaded model |
+| AI usage | 2 × 2 | Claude and Gemini, fullest window first, and when each window resets |
+| This laptop | 4 × 2 | CPU, RAM, GTX with a live CPU line · busiest processes · battery, disk, network, uptime |
 | Recent files | 4 × 2 | Newest files you opened (GTK's recently-used list), with the app; opens them |
-| Downloads | 2 × 2 | Newest downloads with size; opens them |
-| Focus | 2 × 2 | 25 / 50 / 90-minute block with a live ring; a desktop notification when it ends (`/api/focus`) |
-| Busiest now | 2 × 2 | Top processes by CPU over the last half second |
-| Jot | 2 × 2 | Quick notes kept in `~/.local/share/adaptive-desktop/mario/notes.md` (`/api/note`) |
+| Agents | 2 × 2 | Claude / agy / codex sessions on `adaptive-agent`'s tmux server, by folder · Agent Office; opens the office |
+| Downloads | 2 × 2 | Newest downloads with size; opens the file or the folder |
+| Phone | 2 × 1 | Adaptive Link state; opens the phone's screen |
+| Focus | 4 × 1 | 25 / 50 / 90-minute block with a live bar; a desktop notification when it ends (`/api/focus`) |
+| Jot | 4 × 1 | Quick notes kept in `~/.local/share/adaptive-desktop/mario/notes.md` (`/api/note`) |
+| Cook next | 2 × 1 | Recipes still to cook; opens the reel |
+| LOOM | 2 × 1 | LOOM's backend and the model Ollama holds in memory |
+| Open to network | 2 × 1 | Services listening beyond this laptop (`ss`), with the process |
 
-Launchers (1 × 1, live badge): Terminal, Files, Code, Settings, Boards (Inbox count), Trackers
-(reels done), Claude and Gemini (usage %), Office (agents working), Phone (here / away), Mario,
-Downloads (count), Screenshot, Cast to TV, Calculator, Lock. They run only the commands in
-`hub.py`'s `LAUNCH` table or open their own links; a program that is not installed shows dimmed.
+Launchers (1 × 1): Terminal, Files, Code, Settings, Claude, Gemini, Screenshot, Cast to TV,
+Calculator, Lock. A place that already has a tile has no launcher: the tile opens it. They run only
+the commands in `hub.py`'s `LAUNCH` table or open their own links; a program that is not installed
+shows dimmed.
 
 ## Install
 

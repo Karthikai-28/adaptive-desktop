@@ -39,14 +39,14 @@ PRESENCE = ("ready", "listening", "thinking", "doing", "needs_you")
 OPEN_URL_PREFIXES = ("https://claude.ai/", "https://gemini.google.com/", "https://docs.google.com/", "https://github.com/",
                      "https://www.instagram.com/", "http://127.0.0.1:", "http://localhost:")
 REPO = config_mod.ADAPTIVE_REPO
-# 1x1 launcher tiles: id -> command. Only these run; a missing program shows the tile dimmed.
+# Commands Home may start: 1x1 launchers, and tiles that open a place (phone, downloads folder).
+# Only these run; a missing program shows its launcher dimmed.
 LAUNCH = {
     "terminal": ["gnome-terminal"],
     "files": ["xdg-open", str(Path.home())],
     "code": ["code"],
     "settings": ["gnome-control-center"],
     "phone": [sys.executable, str(REPO / "apps" / "adaptive-phone" / "phone.py")],
-    "mario": [sys.executable, str(REPO / "apps" / "mario-home" / "host.py"), "--panel"],
     "downloads": ["xdg-open", str(Path.home() / "Downloads")],
     "screenshot": ["gnome-screenshot", "--interactive"],
     "cast": [str(REPO / "scripts" / "adaptive-cast-launch.sh"), "--toggle"],
@@ -80,7 +80,7 @@ class Hub:
         cards["focus"] = {"data": self.focus, "at": 0}
         cards["notes"] = {"data": {"items": collectors.read_notes(self.notes_file)}, "at": 0}
         state = {"cards": cards, "config": self.public_config()}
-        state["next"] = brain.next_steps(state)
+        state["next"] = brain.next_steps(state, limit=4)
         state["presence"] = self.presence
         return state
 
