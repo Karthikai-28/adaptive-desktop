@@ -197,8 +197,13 @@ def test_collectors(cfg, work):
     check("calendar: recurring events when the iCal packages are present",
           "Planning" in titles or not (REPO / ".local" / "mario-pydeps").is_dir(), str(titles))
     check("mail without setup says how to set it up", "install-mario.sh --mail" in collectors.mail({"mail": {}})["error"])
-    check("calendar without setup says how to set it up", collectors.calendar({}).get("setup") is True
-          or "error" in collectors.calendar({}))
+    real_kr = collectors.keyring
+    collectors.keyring = lambda **k: ""   # as on a laptop with no calendar saved, whatever this one has
+    try:
+        no_cal = collectors.calendar({})
+    finally:
+        collectors.keyring = real_kr
+    check("calendar without setup says how to set it up", no_cal.get("setup") is True or "error" in no_cal, str(no_cal))
     import imaplib as _imap
     gp = collectors.mail_login_problem(_imap.IMAP4.error(b"[ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833"))
     check("mail: a Google account password is explained, not shown as b'...'",
