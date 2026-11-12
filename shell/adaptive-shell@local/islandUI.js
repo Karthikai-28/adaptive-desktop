@@ -7,15 +7,15 @@
 // 3. Now-Playing Media (cover art, elapsed/length, seekable scrubber, transport, player switch)
 // 4. Focus Timers (Big digits, Pomodoro presets, +5m extend, Do Not Disturb while focusing)
 //
-// The same cards, plus an Overview, also live in the Shade as the Activity
-// Center: IslandUI builds it and hands it to Shade.mountActivityCenter().
-// Cards are only drawn while they are on screen, so a provider update while
-// the menu is closed costs nothing beyond the panel pill.
+// Clicking the island opens the date menu (calendar and notifications); the
+// cards live only in the floating overlay. Cards are only drawn while they are
+// on screen, so a provider update while the overlay is closed costs nothing
+// beyond the panel pill.
 //
 // Supports two visual themes: "liquid-glass" (default) and "dark-precision".
 // Adheres strictly to: 0% idle timers/animations, async operations, no keyboard focus grabbing.
 
-/* exported IslandUI, IslandAnchor, IslandOverlay, IslandTheme, describeOverview, describeBadges */
+/* exported IslandUI, IslandAnchor, IslandOverlay, IslandTheme */
 /* global require, module */
 
 let Clutter, Gio, GLib, GObject, Pango, St, Shell;
@@ -70,14 +70,6 @@ const IslandState = {
     EXPANDED: "expanded",
 };
 
-const CENTER_TABS = [
-    ["overview", "Overview"],
-    ["quota", "AI usage"],
-    ["tasks", "Tasks"],
-    ["media", "Music"],
-    ["timer", "Focus"],
-];
-
 // -----------------------------------------------------------------------------
 // Pure summaries (tested headless)
 // -----------------------------------------------------------------------------
@@ -96,78 +88,6 @@ function _formatAge(seconds) {
     if (m < 1)
         return "just started";
     return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
-}
-
-// The single most-used AI limit, or null when nothing has been read.
-function _tightestUsage(quota, now) {
-    let tight = null;
-    for (const p of describeUsage(quota || {}, now)) {
-        if (p.unavailable)
-            continue;
-        for (const r of p.rows) {
-            if (r.used === null || r.used === undefined)
-                continue;
-            if (!tight || r.used > tight.used)
-                tight = { ...r, provider: p.name };
-        }
-    }
-    return tight;
-}
-
-// One line per feature for the Overview tab.
-function describeOverview(state, now = Date.now() / 1000) {
-    const tasks = state.tasks || [];
-    const media = state.media || {};
-    const timer = state.timer || {};
-    const hidden = !!state.isScreenSharing;
-    const tight = hidden ? null : _tightestUsage(state.quota, now);
-
-    let timerText = "Off";
-    if (timer.status === "RUNNING")
-        timerText = `${timer.formatted} left · ${timer.label || "Focus"}`;
-    else if (timer.status === "PAUSED")
-        timerText = `Paused at ${timer.formatted}`;
-    else if (timer.status === "EXPIRED")
-        timerText = "Finished";
-
-    return {
-        quota: hidden ? { text: "Hidden while sharing", level: "normal" } : tight
-            ? { text: `${tight.provider} ${tight.label} · ${tight.text}`, level: tight.level }
-            : { text: "No limits read yet", level: "normal" },
-        tasks: {
-            text: tasks.length === 0 ? "None running"
-                : tasks.length === 1 ? (state.isScreenSharing ? "1 running" : `${tasks[0].title || "1 running"}`)
-                : `${tasks.length} running`,
-            level: "normal",
-        },
-        media: {
-            text: hidden && media.title ? "Media playing" : media.title
-                ? `${media.isPlaying ? "" : "Paused · "}${media.title}${media.artist ? ` · ${media.artist}` : ""}`
-                : "Nothing playing",
-            level: "normal",
-        },
-        timer: { text: timerText, level: timer.status === "EXPIRED" ? "caution" : "normal" },
-    };
-}
-
-// The small live badge on each Activity Center tab; "" hides it.
-function describeBadges(state, now = Date.now() / 1000) {
-    const tasks = state.tasks || [];
-    const media = state.media || {};
-    const timer = state.timer || {};
-    const tight = _tightestUsage(state.quota, now);
-    return {
-        overview: { text: "", level: "normal" },
-        quota: tight && tight.level !== "normal"
-            ? { text: "!", level: tight.level } : { text: "", level: "normal" },
-        tasks: { text: tasks.length ? `${tasks.length}` : "", level: "normal" },
-        media: { text: media.isPlaying ? "▶" : "", level: "normal" },
-        timer: {
-            text: timer.status === "RUNNING" || timer.status === "PAUSED" ? timer.formatted || ""
-                : timer.status === "EXPIRED" ? "0:00" : "",
-            level: timer.status === "EXPIRED" ? "caution" : "normal",
-        },
-    };
 }
 
 function _ellipsize(label) {
@@ -241,7 +161,7 @@ var IslandAnchor = class IslandAnchor {
             reactive: true,
             can_focus: false,
             track_hover: true,
-            accessible_name: "Clock and activity. Opens notifications and the Activity Center",
+            accessible_name: "Clock and activity. Opens the calendar and notifications",
         });
 
         const pillInnerBox = new St.BoxLayout({
@@ -568,13 +488,11 @@ var IslandAnchor = class IslandAnchor {
 };
 
 // -----------------------------------------------------------------------------
-// IslandOverlay: Floating 400px HUD mounted to (Main && Main.layoutManager).uiGroup,
-// or (embedded) the card stack of the Shade's Activity Center
+// IslandOverlay: Floating 400px HUD mounted to (Main && Main.layoutManager).uiGroup
 // -----------------------------------------------------------------------------
 var IslandOverlay = class IslandOverlay {
-    constructor(uiController, embedded = false) {
+    constructor(uiController) {
         this._ui = uiController;
-        this._embedded = embedded;
         this._actor = null;
         this._blurEffect = null;
 
@@ -589,8 +507,6 @@ var IslandOverlay = class IslandOverlay {
         this._cardContentBox = null;
 
         // Modular Cards
-        this._overviewCard = null;
-        this._overviewRows = null;
         this._quotaCard = null;
         this._usageRefreshButton = null;
         this._usageRefreshResetId = 0;
@@ -714,8 +630,6 @@ var IslandOverlay = class IslandOverlay {
             y_expand: true,
         });
 
-        if (this._embedded)
-            this._buildOverviewCard();
         this._buildQuotaCard();
         this._buildTasksCard();
         this._buildMediaCard();
@@ -733,17 +647,6 @@ var IslandOverlay = class IslandOverlay {
         mainLayout.add_child(this._cardContentBox);
         this._actor.add_child(mainLayout);
 
-        if (this._embedded) {
-            this._pinButton.hide();
-            this._closeButton.hide();
-            this._actor.add_style_class_name("adaptive-island-embedded");
-            this._actor.set_width(-1);
-            this._actor.x_expand = true;
-            this._actor.opacity = 255;
-            this._actor.visible = true;
-            this._actor.reactive = true;
-            return;
-        }
 
         // Header button events
         this._pinButton.connect("clicked", () => {
@@ -776,46 +679,6 @@ var IslandOverlay = class IslandOverlay {
                 this._blurEffect = null;
             }
         }
-    }
-
-    // A card: the Overview's rows, or a feature's controls.
-    _showFeature(feature) {
-        if (this._embedded)
-            this._ui.selectCenterFeature(feature);
-        else
-            this._ui.expand(feature);
-    }
-
-    _buildOverviewCard() {
-        this._overviewCard = new St.BoxLayout({
-            style_class: "adaptive-island-card adaptive-island-overview-card",
-            vertical: true,
-            visible: false,
-        });
-        this._overviewRows = {};
-        for (const [feature, icon, name] of [["quota", "✦", "AI usage"], ["tasks", "⟳", "Tasks"],
-            ["media", "♫", "Music"], ["timer", "⏱", "Focus"]]) {
-            const row = new St.Button({
-                style_class: "adaptive-island-overview-row",
-                can_focus: true,
-                x_expand: true,
-                accessible_name: name,
-            });
-            const box = new St.BoxLayout({ vertical: false, x_expand: true });
-            box.add_child(new St.Label({ text: icon, style_class: "adaptive-island-overview-icon",
-                y_align: Clutter.ActorAlign.CENTER }));
-            box.add_child(new St.Label({ text: name, style_class: "adaptive-island-overview-name",
-                y_align: Clutter.ActorAlign.CENTER }));
-            const value = _ellipsize(new St.Label({ text: "", x_expand: true,
-                x_align: Clutter.ActorAlign.END, y_align: Clutter.ActorAlign.CENTER,
-                style_class: "adaptive-island-overview-value" }));
-            box.add_child(value);
-            row.set_child(box);
-            row.connect("clicked", () => this._showFeature(feature));
-            this._overviewCard.add_child(row);
-            this._overviewRows[feature] = { row, value, name };
-        }
-        this._cardContentBox.add_child(this._overviewCard);
     }
 
     _buildQuotaCard() {
@@ -1132,8 +995,6 @@ var IslandOverlay = class IslandOverlay {
             }
             card = card || "quota";
         }
-        if (card === "overview" && !this._embedded)
-            card = "quota";
 
         this._activeCardType = card;
 
@@ -1154,8 +1015,6 @@ var IslandOverlay = class IslandOverlay {
         }
 
         // Hide all cards, show active card
-        if (this._overviewCard)
-            this._overviewCard.visible = card === "overview";
         this._quotaCard.visible = card === "quota";
         this._tasksCard.visible = card === "tasks";
         this._mediaCard.visible = card === "media";
@@ -1175,8 +1034,6 @@ var IslandOverlay = class IslandOverlay {
             this._titleLabel.text = 'ROS 2';
             this._badgeLabel.text = 'RECORDING';
             this._rosRecordingLabel.text = state.isScreenSharing ? 'Recording active' : 'Rosbag is recording. Open ROS 2 to stop and save it.';
-        } else if (card === "overview") {
-            this._renderOverviewData(state);
         } else if (card === "quota") {
             this._renderQuotaData(state);
         } else if (card === "tasks") {
@@ -1185,21 +1042,6 @@ var IslandOverlay = class IslandOverlay {
             this._renderMediaData(state);
         } else if (card === "timer") {
             this._renderTimerData(state);
-        }
-    }
-
-    _renderOverviewData(state) {
-        this._titleIcon.text = "✦";
-        this._titleLabel.text = "Activity";
-        this._badgeLabel.text = "NOW";
-        if (!this._overviewRows)
-            return;
-        const summary = describeOverview(state);
-        for (const [feature, view] of Object.entries(this._overviewRows)) {
-            const line = summary[feature];
-            view.value.text = line.text;
-            view.row.accessible_name = `${view.name}: ${line.text}`;
-            _setLevelClass(view.value, "adaptive-island-overview-value", line.level);
         }
     }
 
@@ -1615,10 +1457,6 @@ var IslandUI = class IslandUI {
         this._forcedFeature = null;
         this._clockNotifyId = 0;
         this._shade = null;
-        this._centerOverlay = null;
-        this._centerSection = null;
-        this._centerFeature = "overview";
-        this._centerTabs = new Map(); // feature -> { button, badge, label }
         this._menuOpenId = 0;
         this._progressTimerId = 0;
         this._screencastNotifyId = 0;
@@ -1676,7 +1514,6 @@ var IslandUI = class IslandUI {
             (Main && Main.layoutManager).uiGroup.add_child(this._overlay.getActor());
         }
 
-        this._buildCenter();
         if (dateMenu && dateMenu.menu) {
             this._menuOpenId = dateMenu.menu.connect("open-state-changed", (menu, open) => {
                 if (open) {
@@ -1688,8 +1525,6 @@ var IslandUI = class IslandUI {
                     }
                     this.contract();
                     this._backend.pauseDwell();
-                    if (this._centerFeature === "media")
-                        this._backend.media.refreshPosition();
                     this._updateUI();
                 } else {
                     this._backend.resumeDwell();
@@ -1706,7 +1541,8 @@ var IslandUI = class IslandUI {
         // 5. The Focus timer's end-of-session digest reads the Shade's list.
         // Install this before init(): a restored deadline may already have
         // elapsed, in which case restore emits its digest immediately.
-        if (this._shade && this._backend.timers.setDigestSource) {
+        this._shade = (this._extension && this._extension._shade) || null;
+        if (this._shade && this._shade.notificationMark && this._backend.timers.setDigestSource) {
             const shade = this._shade;
             this._backend.timers.setDigestSource({
                 mark: () => shade.notificationMark(),
@@ -1795,55 +1631,9 @@ var IslandUI = class IslandUI {
         state = state || this._backend.getState();
         const eventIsQuota = !!(state.surfacedEvent &&
             (state.surfacedEvent.payload || {}).provider === "quota");
-        const centerShowsQuota = this.isCenterOpen() &&
-            (this._centerFeature === "overview" || this._centerFeature === "quota");
         const overlayShowsQuota = this._overlay && this._overlay._isExpanded &&
             this._overlay._activeCardType === "quota";
-        this._backend.quota.setDormant(!(eventIsQuota || centerShowsQuota || overlayShowsQuota));
-    }
-
-    // The Activity Center: tabs over an embedded card stack, mounted into the
-    // Shade through its public API.
-    _buildCenter() {
-        const shade = this._extension && this._extension._shade;
-        if (!St || !shade || !shade.mountActivityCenter) return;
-        this._centerSection = new St.BoxLayout({ vertical: true,
-            style_class: "adaptive-island-center", x_expand: true });
-        const tabs = new St.BoxLayout({ style_class: "adaptive-island-actions adaptive-island-tabs", x_expand: true });
-        for (const [feature, label] of CENTER_TABS) {
-            const button = new St.Button({ can_focus: true, x_expand: true,
-                style_class: "adaptive-island-chip adaptive-island-tab",
-                accessible_name: label, toggle_mode: false });
-            const box = new St.BoxLayout({ x_align: Clutter.ActorAlign.CENTER });
-            box.add_child(new St.Label({ text: label, y_align: Clutter.ActorAlign.CENTER }));
-            const badge = new St.Label({ text: "", style_class: "adaptive-island-tab-badge",
-                y_align: Clutter.ActorAlign.CENTER, visible: false });
-            box.add_child(badge);
-            button.set_child(box);
-            button.connect("clicked", () => this.selectCenterFeature(feature));
-            tabs.add_child(button);
-            this._centerTabs.set(feature, { button, badge, label });
-        }
-        this._centerSection.add_child(tabs);
-        this._centerOverlay = new IslandOverlay(this, true);
-        this._centerOverlay.build();
-        this._centerSection.add_child(this._centerOverlay.getActor());
-        if (!shade.mountActivityCenter(this._centerSection)) {
-            this._centerOverlay.destroy();
-            this._centerOverlay = null;
-            this._centerSection.destroy();
-            this._centerSection = null;
-            this._centerTabs.clear();
-            return;
-        }
-        this._shade = shade;
-    }
-
-    selectCenterFeature(feature) {
-        this._centerFeature = feature;
-        if (feature === "media")
-            this._backend.media.refreshPosition();
-        this._updateUI();
+        this._backend.quota.setDormant(!(eventIsQuota || overlayShowsQuota));
     }
 
     isCenterOpen() {
@@ -1893,22 +1683,11 @@ var IslandUI = class IslandUI {
 
         if (this._backend.timers.setDigestSource)
             this._backend.timers.setDigestSource(null);
+        this._shade = null;
         if (this._ownsBackend) {
             this._backend.destroy();
         }
 
-        if (this._shade && this._centerSection)
-            this._shade.unmountActivityCenter(this._centerSection);
-        this._shade = null;
-        if (this._centerOverlay) {
-            this._centerOverlay.destroy();
-            this._centerOverlay = null;
-        }
-        if (this._centerSection) {
-            this._centerSection.destroy();
-            this._centerSection = null;
-        }
-        this._centerTabs.clear();
 
         // Restore dateMenu clock box
         const dateMenu = (Main && (Main && Main.panel)) ? (Main && Main.panel).statusArea.dateMenu : null;
@@ -1976,19 +1755,6 @@ var IslandUI = class IslandUI {
         this._anchor.renderState(state, this._theme);
         if (renderOverlay || this._overlay._isExpanded)
             this._overlay.renderState(state, this._theme, this._forcedFeature);
-        if (this._centerOverlay && this.isCenterOpen()) {
-            this._centerOverlay.renderState(state, this._theme, this._centerFeature);
-            const badges = describeBadges(state);
-            for (const [feature, tab] of this._centerTabs) {
-                if (feature === this._centerFeature) tab.button.add_style_pseudo_class("checked");
-                else tab.button.remove_style_pseudo_class("checked");
-                const badge = badges[feature] || { text: "", level: "normal" };
-                tab.badge.text = badge.text;
-                tab.badge.visible = !!badge.text;
-                _setLevelClass(tab.badge, "adaptive-island-tab-badge", badge.level);
-                tab.button.accessible_name = badge.text ? `${tab.label}, ${badge.text}` : tab.label;
-            }
-        }
         this._syncProviderActivity(state);
         this._syncProgressTicker();
     }
@@ -1996,8 +1762,7 @@ var IslandUI = class IslandUI {
     // A 1 s redraw of the music scrubber, alive only while a Music card is on
     // screen and the track is moving.
     _syncProgressTicker() {
-        const mediaShown = (this._centerOverlay && this._centerFeature === "media" && this.isCenterOpen()) ||
-            (this._overlay._isExpanded && this._overlay._activeCardType === "media");
+        const mediaShown = this._overlay._isExpanded && this._overlay._activeCardType === "media";
         let moving = false;
         if (mediaShown) {
             const track = this._backend.media.getCurrentTrack();
@@ -2011,8 +1776,6 @@ var IslandUI = class IslandUI {
             return;
         this._progressTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
             this._overlay.renderMediaProgress();
-            if (this._centerOverlay)
-                this._centerOverlay.renderMediaProgress();
             return GLib.SOURCE_CONTINUE;
         });
     }
@@ -2076,6 +1839,5 @@ var IslandUI = class IslandUI {
 };
 
 if (typeof module !== "undefined" && module.exports) {
-    module.exports = { IslandUI, IslandAnchor, IslandOverlay, IslandTheme, IslandState,
-        describeOverview, describeBadges };
+    module.exports = { IslandUI, IslandAnchor, IslandOverlay, IslandTheme, IslandState };
 }

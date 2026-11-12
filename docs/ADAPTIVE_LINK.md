@@ -322,7 +322,7 @@ Adaptive Link's native tools. Every screen in this table is in its drawer,
 and all of them together are under *Laptop tools*, which is pinned to Home to
 begin with. A compact **AI usage** card on Home shows the current
 Claude and Gemini plan windows from the same snapshot as the desktop's
-Activity Center. **Refresh** reloads status and usage; **Reconnect** discards the
+Dynamic Island. **Refresh** reloads status and usage; **Reconnect** discards the
 old transport and discovers the paired computer again without unpairing. Usage
 shows explicit loading, unavailable and saved states, with a retry button. The
 current provider window keeps its real label (for example Gemini's daily window),

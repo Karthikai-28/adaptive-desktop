@@ -15,7 +15,7 @@ const file = path.join(__dirname, '..', 'shell', 'adaptive-shell@local', 'adapti
 const U = {};
 vm.runInNewContext(`${fs.readFileSync(file, 'utf8')}
 ;Object.assign(exportsTo, { parseGitStatus, formatGitStatus, cleanProjectName, isDefaultBranch, watchdogVerdict, WATCHDOG,
-  batteryHealth, verificationSummary, classifyApp, clipboardPush, isSecretClipboard,
+  batteryHealth, classifyApp, clipboardPush, isSecretClipboard,
   clipboardPushImage, clipboardPin, clipboardClear, pngSize, formatBytes,
   CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_PINS, CLIPBOARD_MAX_IMAGES,
   CLIPBOARD_MAX_IMAGE_BYTES, DROPDOWN_ROLE, dropdownTerminalKind, dropdownArgv, dropdownRect,
@@ -73,16 +73,6 @@ check(c.healthPct === 75 && c.unit === 'Ah' && c.cycles === null, 'battery: char
 check(U.batteryHealth({ charge_control_end_threshold: '100', energy_full: '1', energy_full_design: '1' }).limit === null,
     'battery: a 100% limit is no limit');
 check(U.batteryHealth({}) === null, 'battery: no battery gives null');
-
-// verification
-let s = U.verificationSummary({ total: 15, checks: { a: { result: 'pass' }, b: { result: 'na' }, c: { result: 'fail' } } });
-check(s.passed === 2 && s.failed === 1 && !s.complete && /2 of 15/.test(s.text) && /1 failing/.test(s.text),
-    'verification: counts and text');
-check(U.verificationSummary(null).text === 'Physical checks not started', 'verification: no report');
-const all = {};
-for (let i = 0; i < 3; i++)
-    all[`k${i}`] = { result: 'pass' };
-check(U.verificationSummary({ total: 3, checks: all }).complete, 'verification: complete when all pass');
 
 // snapshots
 check(U.classifyApp('org.gnome.Terminal.desktop', 'GNOME;GTK;System;TerminalEmulator;') === 'terminal', 'snapshot: terminal');

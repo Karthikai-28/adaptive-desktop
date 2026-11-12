@@ -94,7 +94,7 @@ step "Screen text geometry and selection" quiet node "$REPO/scripts/verify-scree
 step "Notification order (urgent, then newest)" quiet node "$REPO/scripts/verify-notification-order.js"
 step "ROS 2 New package dialog logic" quiet node "$REPO/scripts/verify-ros-package-model.js"
 step "Dynamic Island providers (usage, tasks, music, focus)" quiet node "$REPO/scripts/verify-dynamic-island.js"
-step "Dynamic Island cards and Activity Center" quiet node "$REPO/scripts/verify-island-frontend.js"
+step "Dynamic Island cards" quiet node "$REPO/scripts/verify-island-frontend.js"
 step "Screen text contrast and enlargement" quiet /usr/bin/python3 -s "$REPO/scripts/verify-screen-text-image.py"
 step "Python parses" python_syntax
 step "Shell scripts have no errors" shell_scripts

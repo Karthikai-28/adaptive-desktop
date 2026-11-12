@@ -260,20 +260,19 @@ PY
   has_source "_restackPlaceholder" "${REPO}/shell/adaptive-shell@local/shade.js"
   pass "The empty-state placeholder is unstacked from the controls and restored on detach"
 
-  # The Activity Center has no natural bound, so it is sized against the
-  # monitor and scrolls. It is mounted through the Shade's public API; the
-  # island reaching into a private field is what broke when the field moved.
-  has_source "St.ScrollView" "${REPO}/shell/adaptive-shell@local/shade.js"
-  has_source "_fitActivityToMonitor" "${REPO}/shell/adaptive-shell@local/shade.js"
-  has_source "mountActivityCenter" "${REPO}/shell/adaptive-shell@local/islandUI.js"
+  # The Activity Center and the physical-checks line were taken out of the date
+  # menu (2026-11-12). The island still reads the Shade (the Focus digest), only
+  # through its public API: reaching into a private field broke once already.
+  if rg -q "ActivityCenter|_checksLabel" "${REPO}/shell/adaptive-shell@local/shade.js" "${REPO}/shell/adaptive-shell@local/islandUI.js"; then
+    fail "the Activity Center or the physical-checks line is back in the date menu"
+  fi
   if rg -q "shade\._[a-zA-Z]" "${REPO}/shell/adaptive-shell@local/islandUI.js"; then
     fail "islandUI.js reaches into a private Shade field"
   fi
-  pass "The Activity Center is mounted through the Shade API and scrolls rather than overflowing"
+  pass "The date menu holds the clock, calendar and notifications only; the island uses the Shade's public API"
 
   # The clarity fix was a type scale, and it regresses the moment one 9px rule
-  # gets pasted back in. Two blocks: the Shade, and the Dynamic Island whose
-  # cards the Shade embeds.
+  # gets pasted back in. Two blocks: the Shade, and the Dynamic Island.
   if awk '/Adaptive Shade v3/,/Adaptive Control Center v1/; /Dynamic Island \(islandUI.js\)/,0' \
       "${REPO}/shell/adaptive-shell@local/stylesheet.css" \
       | rg -q "font-size: ([0-9]|10)(\.[0-9]+)?px"; then

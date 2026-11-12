@@ -639,7 +639,6 @@
 }
 
 /* The shared card: one step lighter than the menu, like a macOS widget. */
-.adaptive-shade-activity,
 .adaptive-shade-system,
 #calendarArea .adaptive-shade .message-list,
 #calendarArea .datemenu-calendar-column {
@@ -1111,11 +1110,6 @@
  * System telemetry
  * --------------------------------------------------------------- */
 
-/* The Activity Center scrolls when it outgrows the screen. Its height is set
- * from the monitor in _fitActivityToMonitor() rather than in CSS - St's
- * stylesheet subset does not honour max-height. */
-
-.adaptive-shade-activity,
 .adaptive-shade-system {
     padding: 14px 16px;
     spacing: 10px;
@@ -2913,21 +2907,6 @@
     font-size: 12px;
 }
 
-/* Shade: physical checks still to record (verification summary). */
-.adaptive-shade-checks {
-    margin: 2px 0 8px 0;
-    padding: 6px 11px;
-    border-radius: 10px;
-    background-color: rgba(255, 255, 255, 0.05);
-    color: rgba(245, 245, 247, 0.72);
-    font-size: 12px;
-}
-
-.adaptive-shade-checks-failing {
-    background-color: rgba(255, 69, 58, 0.12);
-    color: #FF453A;
-}
-
 /* ------------------------------------------------------------------
  * Dynamic Island (islandUI.js): in-panel anchor and floating overlay
  * ------------------------------------------------------------------ */
@@ -3299,22 +3278,6 @@
     border-color: #f43f5e !important;
 }
 
-.adaptive-island-center {
-    spacing: 10px;
-    padding-bottom: 14px;
-}
-
-.adaptive-island-embedded.adaptive-island-overlay {
-    padding: 12px;
-    border-radius: 16px;
-    box-shadow: none;
-}
-
-.adaptive-island-chip:checked {
-    background-color: rgba(10, 132, 255, 0.22);
-    color: #ffffff;
-}
-
 /* AI usage card: how much of each plan's limits is used */
 .adaptive-island-fill-red {
     background-color: #f87171;
@@ -3356,77 +3319,6 @@
 
 .adaptive-island-usage-reset {
     padding-left: 54px;
-}
-
-/* Activity Center tabs: the live badge beside each label */
-.adaptive-island-tabs {
-    spacing: 6px;
-}
-
-.adaptive-island-tab {
-    padding: 5px 6px;
-}
-
-.adaptive-island-tab-badge {
-    margin-left: 5px;
-    padding: 0 5px;
-    border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.16);
-    color: #ffffff;
-    font-size: 11px;
-    font-weight: 700;
-    font-feature-settings: "tnum";
-}
-
-.adaptive-island-tab-badge-caution {
-    background-color: rgba(255, 159, 10, 0.30);
-    color: #ffd60a;
-}
-
-.adaptive-island-tab-badge-critical {
-    background-color: rgba(255, 69, 58, 0.32);
-    color: #ffffff;
-}
-
-/* Overview: one row per feature */
-.adaptive-island-overview-card {
-    spacing: 4px;
-}
-
-.adaptive-island-overview-row {
-    padding: 8px 10px;
-    border-radius: 10px;
-    background-color: rgba(255, 255, 255, 0.04);
-}
-
-.adaptive-island-overview-row:hover {
-    background-color: rgba(255, 255, 255, 0.09);
-}
-
-.adaptive-island-overview-icon {
-    min-width: 22px;
-    font-size: 13px;
-    color: #0a84ff;
-}
-
-.adaptive-island-overview-name {
-    min-width: 72px;
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.75);
-}
-
-.adaptive-island-overview-value {
-    font-size: 12px;
-    color: #ffffff;
-}
-
-.adaptive-island-overview-value-caution {
-    color: #fdba74;
-}
-
-.adaptive-island-overview-value-critical {
-    color: #fca5a5;
 }
 
 /* Tasks: one row per running Agent Office task */
@@ -3516,7 +3408,6 @@
 .adaptive-island-chip:focus,
 .adaptive-island-transport-btn:focus,
 .adaptive-island-card-btn:focus,
-.adaptive-island-overview-row:focus,
 .adaptive-island-task-info:focus,
 .adaptive-island-player-btn:focus,
 .adaptive-island-scrubber:focus {

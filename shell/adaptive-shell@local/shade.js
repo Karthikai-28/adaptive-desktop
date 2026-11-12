@@ -1,9 +1,7 @@
 // Adaptive Shade v3 - an information center
 //
 // The date menu, rebuilt as somewhere to LOOK at things. It carries a clock,
-// date, physical verification status, the Activity Center (AI usage, tasks,
-// music, focus - mounted by islandUI.js through mountActivityCenter()), and
-// notifications grouped per application. The rule is "no duplicated system
+// date and uptime, and notifications grouped per application. The rule is "no duplicated system
 // controls": quick settings stay in the Control Center, hardware telemetry in
 // the System panel next to ROS 2.
 //
@@ -24,18 +22,6 @@ const Main = imports.ui.main;
 
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const Notifications = Me.imports.notifications;
-const AdaptiveUtil = Me.imports.adaptiveUtil;
-const AdaptivePaths = Me.imports.adaptivePaths;
-
-// Written by scripts/record-live-verification.py (and Adaptive Settings).
-const VERIFICATION_PATH = GLib.build_filenamev([
-    AdaptivePaths.adaptiveDir(),
-    'verification',
-    'live-verification-latest.json',
-]);
-
-const NOTIFICATION_MIN_HEIGHT = 220;
-const MIN_ACTIVITY_HEIGHT = 120;
 
 const CONFIG_PATH = GLib.build_filenamev(
     [GLib.get_user_config_dir(), 'adaptive-desktop', 'shade.json']);
@@ -80,11 +66,6 @@ var Shade = class Shade {
         this._origYExpand = true;
 
         this._container = null;
-        this._activityScroll = null;
-        this._activityHost = null;
-        this._activityHeight = -1;
-        this._activityActor = null;
-        this._activityLayoutId = 0;
         this._grouped = null;
         this._placeholder = null;
         this._placeholderParent = null;
@@ -95,7 +76,6 @@ var Shade = class Shade {
         this._clockTimerId = 0;
         this._clockSettings = null;
         this._lastUptimeMinute = -1;
-        this._monitorChangedId = 0;
         this._notificationGroupsExpanded = false;
         this._attached = false;
     }
@@ -137,23 +117,6 @@ var Shade = class Shade {
 
             this._buildHeader();
 
-            this._activityScroll = new St.ScrollView({
-                style_class: 'adaptive-shade-scroll',
-                overlay_scrollbars: true,
-                x_expand: true,
-                visible: false,
-            });
-            this._activityScroll.set_policy(
-                St.PolicyType.NEVER, St.PolicyType.AUTOMATIC);
-            this._container.add_child(this._activityScroll);
-
-            this._activityHost = new St.BoxLayout({
-                vertical: true,
-                style_class: 'adaptive-shade-activity',
-                x_expand: true,
-            });
-            this._activityScroll.add_actor(this._activityHost);
-
             parent.remove_child(messageList);
             messageList.y_expand = true;
             this._container.add_child(messageList);
@@ -166,8 +129,6 @@ var Shade = class Shade {
             this._openStateId = dateMenu.menu.connect(
                 'open-state-changed',
                 (menu, isOpen) => this._onOpenStateChanged(isOpen));
-            this._monitorChangedId = Main.layoutManager.connect(
-                'monitors-changed', () => this._queueActivityLayout());
 
             this._attached = true;
             log('[Adaptive Shade] attached to the GNOME date menu');
@@ -180,8 +141,6 @@ var Shade = class Shade {
     _onOpenStateChanged(isOpen) {
         if (isOpen) {
             this._updateClock();
-            this._updateChecks();
-            this._fitActivityToMonitor();
             this._scheduleClockTick();
         } else {
             if (this._clockTimerId) {
@@ -189,76 +148,6 @@ var Shade = class Shade {
                 this._clockTimerId = 0;
             }
         }
-    }
-
-    _fitActivityToMonitor() {
-        if (!this._activityScroll || !this._activityHost || !this._activityActor)
-            return;
-
-        const monitor = Main.layoutManager.findMonitorForActor(this._dateMenu) || Main.layoutManager.primaryMonitor;
-        if (!monitor)
-            return;
-
-        const [, natural] = this._activityHost.get_preferred_height(-1);
-        if (!(natural > 0))
-            return;
-
-        let fixedHeight = 48; // popup padding and section spacing from the theme
-        for (const child of this._container.get_children()) {
-            if (child === this._activityScroll || child === this._messageList || !child.visible)
-                continue;
-            const [, childNatural] = child.get_preferred_height(-1);
-            fixedHeight += Math.max(0, childNatural);
-        }
-        const monitorIndex = Main.layoutManager.monitors.indexOf(monitor);
-        let availableHeight = monitor.height;
-        if (monitorIndex >= 0 && Main.layoutManager.getWorkAreaForMonitor) {
-            try {
-                availableHeight = Main.layoutManager.getWorkAreaForMonitor(monitorIndex).height;
-            } catch (e) {}
-        }
-        const reserved = fixedHeight + NOTIFICATION_MIN_HEIGHT;
-        const cap = Math.max(MIN_ACTIVITY_HEIGHT, availableHeight - reserved);
-        const height = Math.min(natural, cap);
-
-        if (this._activityHeight !== height) {
-            this._activityHeight = height;
-            this._activityScroll.set_height(height);
-        }
-    }
-
-    _queueActivityLayout() {
-        if (this._activityLayoutId)
-            return;
-        this._activityLayoutId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            this._activityLayoutId = 0;
-            this._fitActivityToMonitor();
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
-    mountActivityCenter(actor) {
-        if (!actor || !this._activityHost || this._activityActor)
-            return false;
-        this._activityActor = actor;
-        this._activityHost.add_child(actor);
-        this._activityScroll.visible = true;
-        actor.connectObject('notify::height', () => this._queueActivityLayout(), this);
-        this._queueActivityLayout();
-        return true;
-    }
-
-    unmountActivityCenter(actor) {
-        if (!actor || actor !== this._activityActor)
-            return;
-        actor.disconnectObject(this);
-        const parent = actor.get_parent();
-        if (parent)
-            parent.remove_child(actor);
-        this._activityActor = null;
-        this._activityHeight = -1;
-        if (this._activityScroll)
-            this._activityScroll.visible = false;
     }
 
     get notificationCount() {
@@ -528,14 +417,6 @@ var Shade = class Shade {
             GLib.Source.remove(this._clockTimerId);
             this._clockTimerId = 0;
         }
-        if (this._activityLayoutId) {
-            GLib.Source.remove(this._activityLayoutId);
-            this._activityLayoutId = 0;
-        }
-        if (this._monitorChangedId) {
-            Main.layoutManager.disconnect(this._monitorChangedId);
-            this._monitorChangedId = 0;
-        }
         if (this._clockSettings) {
             this._clockSettings.disconnectObject(this);
             this._clockSettings = null;
@@ -544,8 +425,6 @@ var Shade = class Shade {
         this._removeNotificationHeader();
         this._restoreStockNotifications();
         this._restackPlaceholder();
-        if (this._activityActor)
-            this.unmountActivityCenter(this._activityActor);
 
         if (this._dateMenu) {
             try {
@@ -591,9 +470,6 @@ var Shade = class Shade {
         }
 
         this._messageList = null;
-        this._activityHost = null;
-        this._activityScroll = null;
-        this._activityHeight = -1;
         this._origParent = null;
         this._origIndex = -1;
         this._origYExpand = true;
@@ -660,13 +536,6 @@ var Shade = class Shade {
         this._uptimeChip.add_child(this._uptimeLabel);
         header.add_child(this._uptimeChip);
 
-        this._checksLabel = new St.Label({
-            style_class: 'adaptive-shade-checks',
-            x_expand: true,
-            visible: false,
-        });
-        this._container.add_child(this._checksLabel);
-
         try {
             this._clockSettings = new Gio.Settings({
                 schema_id: 'org.gnome.desktop.interface',
@@ -717,23 +586,6 @@ var Shade = class Shade {
                     this._scheduleClockTick();
                 return GLib.SOURCE_REMOVE;
             });
-    }
-
-    _updateChecks() {
-        let report = null;
-        try {
-            const [ok, contents] = GLib.file_get_contents(VERIFICATION_PATH);
-            report = ok ? JSON.parse(new TextDecoder().decode(contents)) : null;
-        } catch (e) {
-            report = null;
-        }
-        const summary = AdaptiveUtil.verificationSummary(report);
-        this._checksLabel.text = `${summary.text} · record them in Adaptive Settings`;
-        this._checksLabel.visible = !summary.complete;
-        if (summary.failed)
-            this._checksLabel.add_style_class_name('adaptive-shade-checks-failing');
-        else
-            this._checksLabel.remove_style_class_name('adaptive-shade-checks-failing');
     }
 
     _updateClock() {

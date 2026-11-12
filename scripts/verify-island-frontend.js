@@ -209,37 +209,7 @@ check(usage[0].rows[1].text === "reset, awaiting update", "Ended Claude window n
 check(usage[1].unavailable && usage[1].rows.length === 0, "Missing Gemini limits never display sample values");
 check(usageOverlay._badgeLabel.text === "USED", "Usage card is labelled as used");
 
-// -- Suite 5b: Overview, tab badges, and drawing only what is visible --
-const { describeOverview, describeBadges } = require("../shell/adaptive-shell@local/islandUI.js");
-const ovState = {
-    quota: { claude: { ts: nowS, windows: [{ label: "5h", used: 62, resetsAt: nowS + 3600 },
-        { label: "Weekly", used: 91, resetsAt: nowS + 86400 }] } },
-    tasks: [{ id: 1, title: "Index repo" }, { id: 2, title: "Write docs" }],
-    media: { title: "Teardrop", artist: "Massive Attack", isPlaying: true },
-    timer: { status: "RUNNING", formatted: "18:42", label: "Pomodoro" },
-};
-const ov = describeOverview(ovState, nowS);
-check(ov.quota.text === "Claude Weekly · 91% used" && ov.quota.level === "caution", "Overview names the tightest AI limit");
-check(ov.tasks.text === "2 running", "Overview counts running tasks");
-check(ov.media.text === "Teardrop · Massive Attack", "Overview shows the current track");
-check(ov.timer.text.startsWith("18:42 left"), "Overview shows focus time remaining");
-check(describeOverview({ tasks: [{ title: "Secret" }], isScreenSharing: true }).tasks.text === "1 running",
-    "Overview hides a task title while the screen is shared");
-const privateOverview = describeOverview({
-    quota: ovState.quota,
-    media: { title: "Private song", artist: "Private artist", isPlaying: true },
-    isScreenSharing: true,
-});
-check(privateOverview.quota.text === "Hidden while sharing" &&
-    privateOverview.media.text === "Media playing",
-"Overview hides AI usage and media metadata while the screen is shared");
-const badges = describeBadges(ovState, nowS);
-check(badges.tasks.text === "2" && badges.media.text === "▶" && badges.timer.text === "18:42",
-    "Tabs carry live badges: task count, playing, countdown");
-check(badges.quota.text === "!" && badges.quota.level === "caution", "AI usage tab warns when a limit is tight");
-const quiet = describeBadges({ timer: { status: "IDLE" } }, nowS);
-check(!quiet.tasks.text && !quiet.media.text && !quiet.timer.text && !quiet.quota.text, "Idle features show no badge");
-
+// -- Suite 5b: drawing only what is visible --
 let overlayRenders = 0;
 const realRender = ui._overlay.renderState.bind(ui._overlay);
 ui._overlay.renderState = (...args) => { overlayRenders++; return realRender(...args); };
@@ -252,8 +222,10 @@ ui.contract();
 ui._overlay.renderState = realRender;
 
 const uiSource = fs.readFileSync(require.resolve("../shell/adaptive-shell@local/islandUI.js"), "utf8");
-check(!/shade\._[a-zA-Z]/.test(uiSource) && uiSource.includes("mountActivityCenter"),
-    "Activity Center mounts through the Shade API, not a private field");
+const shadeSource = fs.readFileSync(require.resolve("../shell/adaptive-shell@local/shade.js"), "utf8");
+check(!/shade\._[a-zA-Z]/.test(uiSource) && !/ActivityCenter|CENTER_TABS|describeOverview|_embedded/.test(uiSource) &&
+    !/ActivityCenter|_activity|_checksLabel|verificationSummary/.test(shadeSource),
+    "The date menu has no Activity Center or physical-checks line; the island uses only the Shade's public API");
 check(!/Task #14|Midnight City|Agent: Lena/.test(uiSource), "No demo data is left in the cards");
 check(uiSource.includes('notify::screencast-in-progress') && uiSource.includes('setDormant'),
     "Screen recording privacy and dormant quota polling are wired to the live UI");

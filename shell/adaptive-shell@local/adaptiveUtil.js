@@ -8,7 +8,7 @@
 
 /* exported parseGitStatus, formatGitStatus, cleanProjectName, isDefaultBranch,
    watchdogVerdict, WATCHDOG,
-   batteryHealth, verificationSummary, classifyApp, clipboardPush,
+   batteryHealth, classifyApp, clipboardPush,
    clipboardPushImage, clipboardPin, clipboardClear, clipboardTrim, pngSize,
    formatBytes, isSecretClipboard, CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_CHARS,
    CLIPBOARD_MAX_PINS, CLIPBOARD_MAX_IMAGES, CLIPBOARD_MAX_IMAGE_BYTES,
@@ -167,29 +167,6 @@ function batteryHealth(values) {
         cycles: cycles || null,
         limit: limit && limit < 100 ? limit : null,
     };
-}
-
-// --------------------------------------------------------- verification
-
-// report: verification/live-verification-latest.json, or null. total is the
-// number of checks, which the recorder writes into the report.
-function verificationSummary(report) {
-    const checks = report && report.checks ? report.checks : {};
-    const total = report && Number.isInteger(report.total) ? report.total : 0;
-    let passed = 0;
-    let failed = 0;
-    for (const id of Object.keys(checks)) {
-        const result = checks[id] && checks[id].result;
-        if (result === 'pass' || result === 'na')
-            passed++;
-        else if (result === 'fail')
-            failed++;
-    }
-    const complete = total > 0 && passed >= total;
-    let text = total ? `${passed} of ${total} physical checks done` : 'Physical checks not started';
-    if (failed)
-        text += ` · ${failed} failing`;
-    return { passed, failed, total, complete, text };
 }
 
 // ------------------------------------------------------------ snapshots

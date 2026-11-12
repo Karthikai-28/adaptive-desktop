@@ -18,24 +18,20 @@ dismissed has changed.
 ## The Adaptive Shade
 
 The shade (`shell/adaptive-shell@local/shade.js`) rebuilds the *interior* of the
-date menu popup as an **information center**: a clock, the Activity Center, and
-notifications grouped per application, beside GNOME's own calendar. Hardware
-telemetry is not here any more; it has its own System panel next to ROS 2.
+date menu popup as an **information center**: a clock and notifications grouped
+per application, beside GNOME's own calendar. Hardware telemetry is not here any
+more; it has its own System panel next to ROS 2.
 
-The Activity Center is the Dynamic Island's cards (Overview, AI usage, Tasks,
-Music, Focus), built by `islandUI.js` and mounted with
-`Shade.mountActivityCenter()`. It has no natural bound, so it lives in a scroll
-view whose height is set from the monitor, re-measured only when it changes size
-or the monitors change. The scroll view wraps only that block, not the whole
-column: GNOME's message list does its own scrolling, and a scroll view inside a
-scroll view gives neither a sane size.
+The Activity Center (the Dynamic Island's cards as tabs) and the physical-checks
+reminder were taken out of the shade on 2026-11-12: AI usage, tasks, music and
+focus stay in the island's own floating card, and physical checks are recorded
+and shown in Adaptive Settings.
 
 It contains **no duplicated system controls**. GNOME's aggregate menu in the
 top-right (and the Control Center over it) owns network, bluetooth, audio,
 brightness and power, and a second place to change them was a second thing to
 keep in sync. `verify-live-readiness.sh` fails if one reappears. What the shade
-does act on is what only it shows: clear one app's notifications, cancel an
-Agent Office task, seek a track, start or stop a focus session.
+does act on is what only it shows: clear one app's notifications.
 
 Notifications are ordered urgent first, then newest first, both inside an app's
 group and between groups, so a collapsed group never hides the newest message.
