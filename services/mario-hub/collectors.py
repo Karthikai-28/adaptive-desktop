@@ -684,23 +684,69 @@ def _decode(value):
 
 
 _MAIL_REFUSED = {}   # hash of (host, user, password) -> why Gmail refused it, for this hub run
+MAIL_ITEMS = 5       # newest unread shown per account
+
+
+def mail_accounts(cfg):
+    """The configured mail accounts, the main one first.
+
+    mario.json: "mail": {"accounts": ["me@gmail.com", "other@gmail.com"], "main": "me@gmail.com"};
+    an account may also be {"user": ..., "imap_host": ...}. Without "main" the first account is the
+    main one. The older one-account form, "mail": {"user": ...}, still works."""
+    m = cfg.get("mail") or {}
+    host = m.get("imap_host") or "imap.gmail.com"
+    raw = list(m.get("accounts") or []) + ([m["user"]] if m.get("user") else [])
+    out, seen = [], set()
+    for a in raw:
+        a = {"user": a} if isinstance(a, str) else a if isinstance(a, dict) else {}
+        user = str(a.get("user") or "").strip()
+        if user and user.lower() not in seen:
+            seen.add(user.lower())
+            out.append({"user": user, "imap_host": a.get("imap_host") or host})
+    main = str(m.get("main") or "").strip().lower()
+    out.sort(key=lambda a: a["user"].lower() != main)   # stable: the rest keep their order
+    return out
+
+
+def gmail_inbox(user):
+    """The inbox of this Gmail account in the browser, whichever Google accounts are signed in."""
+    from urllib.parse import quote
+    return f"https://mail.google.com/mail/u/{quote(user, safe='@.+-_')}/#inbox"
 
 
 def mail(cfg):
-    """Unread mail in the inbox, newest first, read-only over IMAP (nothing is marked read).
-    The password (a Google app password) lives in the keyring: install-mario.sh --mail."""
+    """Unread mail of every configured account, read-only over IMAP (nothing is marked read).
+    `accounts` holds each account (the main one first), `unread` and `items` all of them together.
+    The passwords (Google app passwords) live in the keyring: install-mario.sh --mail."""
+    accounts = mail_accounts(cfg)
+    if not accounts:
+        return {"setup": True, "error": "Mail is not set up: scripts/install-mario.sh --mail",
+                "unread": None, "items": [], "accounts": []}
+    results = [mail_account(a["user"], a["imap_host"]) for a in accounts]
+    ok = [r for r in results if r.get("unread") is not None]
+    main = results[0]
+    out = {"accounts": results, "main": main["user"], "user": main["user"],
+           "unread": sum(r["unread"] for r in ok) if ok else None,
+           "items": sorted((i for r in ok for i in r["items"]), key=lambda i: i["when"], reverse=True)}
+    if not ok:   # nothing to show: the main account says why
+        out.update({k: main[k] for k in ("error", "fix", "setup") if k in main})
+    if any(r.get("waiting") for r in results):
+        out["waiting"] = True
+    return out
+
+
+def mail_account(user, host="imap.gmail.com"):
+    """One account's unread inbox mail, newest first. Each message carries a link that opens
+    that very conversation in Gmail, in this account (Gmail's thread id, X-GM-THRID, in hex)."""
     import imaplib
     from email.utils import parseaddr, parsedate_to_datetime
-    m = cfg.get("mail") or {}
-    user, host = m.get("user", ""), m.get("imap_host", "imap.gmail.com")
-    if not user:
-        return {"setup": True, "error": "Mail is not set up: scripts/install-mario.sh --mail"}
     try:
         password = keyring(service="mario-mail", account=user)
     except KeyringNotReady:
-        return {"waiting": True, "error": KEYRING_WAIT, "unread": None, "items": []}
+        return {"waiting": True, "error": KEYRING_WAIT, "unread": None, "items": [], "user": user}
     if not password:
-        return {"setup": True, "error": "No mail password in the keyring: scripts/install-mario.sh --mail"}
+        return {"setup": True, "error": f"No mail password for {user} in the keyring: scripts/install-mario.sh --mail",
+                "unread": None, "items": [], "user": user}
     # Google shows an app password as four groups of four letters; it is the 16 letters that count
     if re.fullmatch(r"(?:[a-zA-Z]{4}\s*){4}", password.strip()):
         password = re.sub(r"\s+", "", password)
@@ -717,13 +763,17 @@ def mail(cfg):
         except imaplib.IMAP4.error as exc:
             _MAIL_REFUSED[key] = mail_login_problem(exc)
             return {**_MAIL_REFUSED[key], "unread": None, "items": [], "user": user}
+        gmail = "X-GM-EXT-1" in (box.capabilities or ())
         box.select("INBOX", readonly=True)
         _, ids = box.search(None, "UNSEEN")
         unread = ids[0].split() if ids and ids[0] else []
         items = []
-        for num in reversed(unread[-4:]):
-            _, data = box.fetch(num, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
-            raw = data[0][1].decode(errors="replace") if data and data[0] else ""
+        for num in reversed(unread[-MAIL_ITEMS:]):
+            _, data = box.fetch(num, "(X-GM-THRID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])" if gmail
+                                else "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+            part = data[0] if data and isinstance(data[0], tuple) else (b"", b"")
+            raw = part[1].decode(errors="replace")
+            thread = re.search(rb"X-GM-THRID (\d+)", part[0] or b"")
             head = {}
             for line in raw.replace("\r\n ", " ").splitlines():
                 key, _, val = line.partition(":")
@@ -733,14 +783,16 @@ def mail(cfg):
                 when = int(parsedate_to_datetime(head.get("date", "")).timestamp())
             except (TypeError, ValueError):
                 when = 0
-            items.append({"from": name or addr, "subject": _decode(head.get("subject", "")) or "(no subject)", "when": when})
+            items.append({"from": name or addr, "subject": _decode(head.get("subject", "")) or "(no subject)",
+                          "when": when, "account": user,
+                          "link": gmail_inbox(user) + f"/{int(thread.group(1)):x}" if thread else None})
         box.logout()
     except imaplib.IMAP4.error as exc:
-        return {"error": f"Gmail answered: {_imap_text(exc)[:90]}", "unread": None, "items": []}
+        return {"error": f"Gmail answered: {_imap_text(exc)[:90]}", "unread": None, "items": [], "user": user}
     except OSError:
         return {"waiting": True, "error": f"Can't reach {host} right now. Mail comes back when the laptop is online.",
-                "unread": None, "items": []}
-    return {"unread": len(unread), "items": items, "user": user}
+                "unread": None, "items": [], "user": user}
+    return {"unread": len(unread), "items": items, "user": user, "inbox": gmail_inbox(user) if gmail else None}
 
 
 def _imap_text(exc):
@@ -896,9 +948,23 @@ def health(cfg):
 
 # ------------------------------------------------------------------- news
 
+MRSS = "{http://search.yahoo.com/mrss/}"
+
+
+def _rss_image(item):
+    """A picture a feed gives with the item itself (Media RSS or an image enclosure), else ""."""
+    for tag in (MRSS + "content", MRSS + "thumbnail", "enclosure"):
+        for node in item.iter(tag):
+            url = node.get("url") or ""
+            kind = node.get("type") or node.get("medium") or "image"
+            if url.startswith("https://") and kind.startswith("image"):
+                return url
+    return ""
+
+
 def parse_rss(text, feed_name, limit=12):
-    """RSS 2.0 items -> [{title, source, link, when, feed}]. Google News puts the outlet after
-    " - " in the title and in <source>; other feeds use the feed's own name."""
+    """RSS 2.0 items -> [{title, source, link, when, feed, image_src}]. Google News puts the outlet
+    after " - " in the title and in <source>; other feeds use the feed's own name."""
     import xml.etree.ElementTree as ET
     from email.utils import parsedate_to_datetime
     try:
@@ -918,7 +984,8 @@ def parse_rss(text, feed_name, limit=12):
             when = int(parsedate_to_datetime(item.findtext("pubDate") or "").timestamp())
         except (TypeError, ValueError):
             when = 0
-        out.append({"title": title[:220], "source": source or feed_name, "link": link, "when": when, "feed": feed_name})
+        out.append({"title": title[:220], "source": source or feed_name, "link": link, "when": when, "feed": feed_name,
+                    "image_src": _rss_image(item)})
         if len(out) >= limit:
             break
     return out
@@ -942,7 +1009,171 @@ def news(cfg):
         if key not in seen:
             seen.add(key)
             unique.append(it)
-    return {"items": unique[:30], "errors": errors}
+    global _NEWS_SHOWN
+    _NEWS_SHOWN = {it["link"]: it.get("image_src", "") for it in unique[:30]}
+    return {"items": [{k: v for k, v in it.items() if k != "image_src"} for it in unique[:30]], "errors": errors}
+
+
+# News pictures and real article links. Google News hands out its own redirect pages, not the
+# article; the page carries a signature that Google's own front end trades for the article's
+# address. The article's og:image (or twitter:image) is the tile's picture. Each headline is looked
+# up once and remembered on disk; pictures are kept here and served by the hub, so a site's hotlink
+# rules or a slow server never leave the tile blank, and nothing loads from the internet on Home.
+NEWS_DIR = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "adaptive-desktop" / "mario" / "news"
+NEWS_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif", "image/avif": ".avif"}
+IMAGE_MAX = 4_000_000
+NEWS_IMAGE_NAME = re.compile(r"[0-9a-f]{16}\.(?:jpg|png|webp|gif|avif)")
+_NEWS_SHOWN = {}       # link -> picture the feed itself gave ("" when none); set by news()
+_NEWS_CACHE = None     # link -> {"url", "image", "tries", "at"}; loaded from NEWS_DIR/cache.json
+
+
+def _fetch(url, limit, headers=None, until=None, timeout=10, data=None):
+    """GET (POST with `data`) at most `limit` bytes; with `until`, stop as soon as that marker has
+    been read. -> (final url, content type, bytes)."""
+    req = urllib.request.Request(url, data=data, headers={"User-Agent": NEWS_UA, "Accept-Language": "en-IN,en;q=0.9", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = b""
+        try:
+            while len(body) < limit:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                body += chunk
+                if until and until in body[-len(chunk) - len(until):].lower():
+                    break
+        except Exception as exc:  # noqa: BLE001 - a cut-off page still has its head
+            if not body:
+                raise exc
+        return resp.geturl(), resp.headers.get_content_type(), body[:limit]
+
+
+def google_news_article(link):
+    """The article behind a news.google.com redirect link, or None when Google does not say."""
+    import urllib.parse
+    article_id = urllib.parse.urlparse(link).path.rstrip("/").rsplit("/", 1)[-1]
+    _, _, page = _fetch(link, 2_000_000, until=b"data-n-a-ts")
+    sig, ts = re.search(rb'data-n-a-sg="([^"]+)"', page), re.search(rb'data-n-a-ts="(\d+)"', page)
+    if not article_id or not sig or not ts:
+        return None
+    inner = ["garturlreq", [["X", "X", ["X", "X"], None, None, 1, 1, "US:en", None, 1, None, None, None, None, None, 0, 1],
+                            "X", "X", 1, [1, 1, 1], 1, 1, None, 0, 0, None, 0],
+             article_id, int(ts.group(1)), sig.group(1).decode()]
+    form = "f.req=" + urllib.parse.quote(json.dumps([[["Fbv4je", json.dumps(inner), None, "generic"]]]))
+    _, _, out = _fetch("https://news.google.com/_/DotsSplashUi/data/batchexecute", 200_000,
+                       {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"}, data=form.encode())
+    try:
+        url = json.loads(json.loads(out.decode(errors="replace").split("\n\n", 1)[1])[0][2])[1]
+    except (IndexError, TypeError, ValueError):
+        return None
+    return url if isinstance(url, str) and url.startswith(("https://", "http://")) else None
+
+
+def page_image(url):
+    """The picture a page names for itself (og:image, else twitter:image), as an absolute https URL."""
+    from html.parser import HTMLParser
+    from urllib.parse import urljoin
+    final, kind, body = _fetch(url, 1_500_000, until=b"</head>")
+    if kind not in ("text/html", "application/xhtml+xml"):
+        return ""
+    found = {}
+
+    class Meta(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if tag == "meta":
+                a = dict(attrs)
+                key = (a.get("property") or a.get("name") or "").lower()
+                if key in ("og:image", "og:image:secure_url", "og:image:url", "twitter:image", "twitter:image:src") \
+                        and a.get("content") and key not in found:
+                    found[key] = a["content"].strip()
+
+    parser = Meta()
+    try:
+        parser.feed(body.decode(errors="replace"))
+    except Exception:  # noqa: BLE001 - broken markup: whatever was read so far counts
+        pass
+    for key in ("og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src"):
+        if found.get(key):
+            img = urljoin(final, found[key])
+            if img.startswith("http://"):
+                img = "https://" + img[len("http://"):]
+            return img if img.startswith("https://") else ""
+    return ""
+
+
+def save_news_image(src, referer=None, folder=None):
+    """Download a picture into the news folder -> its file name, or "" if it is not a picture we keep."""
+    import hashlib
+    folder = Path(folder or NEWS_DIR / "img")
+    _, kind, body = _fetch(src, IMAGE_MAX + 1, {"Referer": referer} if referer else None, timeout=15)
+    ext = IMAGE_TYPES.get(kind)
+    if not ext or len(body) > IMAGE_MAX or len(body) < 2000:   # not a picture, too big, or a tracking pixel
+        return ""
+    name = hashlib.sha1(src.encode()).hexdigest()[:16] + ext
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / (name + ".part")
+    tmp.write_bytes(body)
+    tmp.replace(folder / name)
+    return name
+
+
+def resolve_news(link, image_src=""):
+    """One headline -> {"url": the article itself, "image": a saved picture's file name or ""}."""
+    url = link
+    if link.startswith("https://news.google.com/"):
+        try:
+            url = google_news_article(link) or link
+        except Exception:  # noqa: BLE001 - keep the Google link; it still redirects in a browser
+            url = link
+    image = ""
+    try:
+        src = image_src or (page_image(url) if url != link or not link.startswith("https://news.google.com/") else "")
+        image = save_news_image(src, referer=url) if src else ""
+    except Exception:  # noqa: BLE001 - no picture: the tile shows the outlet's name instead
+        image = ""
+    return {"url": url, "image": image}
+
+
+def _news_cache():
+    global _NEWS_CACHE
+    if _NEWS_CACHE is None:
+        try:
+            _NEWS_CACHE = json.loads((NEWS_DIR / "cache.json").read_text())
+        except (OSError, ValueError):
+            _NEWS_CACHE = {}
+    return _NEWS_CACHE
+
+
+def news_media(cfg, per_run=6, workers=3, keep_days=3):
+    """Real article links and pictures for the headlines News shows, a few new ones each run.
+    A headline that gave no picture is tried again later, at most three times."""
+    if "news" in cfg.get("cards_off", []):
+        return {"off": True, "media": {}}
+    from concurrent.futures import ThreadPoolExecutor
+    cache, shown, now = _news_cache(), dict(_NEWS_SHOWN), time.time()
+    todo = [link for link in shown
+            if link not in cache or (not cache[link].get("image") and cache[link].get("tries", 0) < 3
+                                     and now - cache[link].get("at", 0) > 1800)][:per_run]
+    if todo:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for link, got in zip(todo, pool.map(lambda l: resolve_news(l, shown[l]), todo)):
+                before = cache.get(link) or {}
+                cache[link] = {"url": got["url"] if got["url"] != link else before.get("url", link),
+                               "image": got["image"] or before.get("image", ""),
+                               "tries": before.get("tries", 0) + 1, "at": now}
+        for link in [l for l, c in cache.items() if l not in shown and now - c.get("at", 0) > keep_days * 86400]:
+            del cache[link]
+        try:
+            NEWS_DIR.mkdir(parents=True, exist_ok=True)
+            (NEWS_DIR / "cache.json").write_text(json.dumps(cache))
+            keep = {c.get("image") for c in cache.values()}
+            for f in (NEWS_DIR / "img").glob("*"):
+                if f.name not in keep and now - f.stat().st_mtime > 3600:
+                    f.unlink()
+        except OSError:
+            pass
+    return {"media": {link: {"url": cache[link]["url"], "image": cache[link].get("image", "")}
+                      for link in shown if link in cache}}
 
 
 # ------------------------------------------------------------- schedule
@@ -968,4 +1199,5 @@ SCHEDULE = {
     "tasks": (tasks, 5),
     "health": (health, 300),
     "news": (news, 900),
+    "news_media": (news_media, 45),
 }

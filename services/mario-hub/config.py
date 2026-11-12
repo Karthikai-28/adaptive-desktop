@@ -29,15 +29,28 @@ DEFAULTS = {
     "ollama_url": "http://127.0.0.1:11434",
     # asked directly when LOOM's backend is not running (LOOM's default_chat role)
     "fallback_model": "qwen2.5:7b-instruct",
-    # Claude Code for multi-step dev work; asked only after you confirm
+    # Who answers (engines.py): Claude first, Gemini when Claude is at its limit or does not
+    # answer, LOOM/Ollama on this laptop only when neither cloud answers
+    "brain": ["claude", "gemini", "local"],
+    # Claude Code, headless, on the Claude subscription: answers, and multi-step dev work in a repo
+    # (that only after you confirm)
     "claude_cmd": "claude",
+    "claude_model": "sonnet",
     "claude_timeout_s": 1800,
+    # Gemini through the Antigravity CLI on the AI Pro subscription: a fast model for answers, a
+    # stronger one when it takes a code hand-off because Claude is at its limit
+    "gemini_cmd": "agy",
+    "gemini_model": "gemini-3.8-flash-low",
+    "gemini_work_model": "gemini-3.8-flash-high",
+    # how long one answer may take before the next engine is asked
+    "answer_timeout_s": 150,
     # AI plans shown on the usage tile (quotaSnapshot.py keys): the subscriptions you have
     "usage_providers": ["claude", "gemini"],
     # the weather tile (Open-Meteo, no key); "cards_off": ["weather"] keeps the hub offline
     "weather": {"name": "Bengaluru", "lat": 12.97, "lon": 77.59},
-    # Mail card: IMAP, read-only; the password is in the keyring (install-mario.sh --mail)
-    "mail": {"user": "", "imap_host": "imap.gmail.com"},
+    # Mail card: IMAP, read-only; each account's app password is in the keyring
+    # (install-mario.sh --mail). "main" is the account Home shows first; without it, the first one.
+    "mail": {"accounts": [], "main": "", "imap_host": "imap.gmail.com"},
     # News tile: RSS feeds, merged newest first; the tile rolls to the next headline every 30 s.
     # "cards_off": ["news"] keeps the hub from fetching them.
     "news": [

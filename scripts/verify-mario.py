@@ -3,10 +3,13 @@
 
     scripts/verify-mario.py
 
-Collectors against throwaway git repos and a fake Thinking Space; Mario's decisions (instant
-answers, local vs Claude Code, the hand-off's limits, Next step); the hub over real HTTP and a
-WebSocket with stand-in collectors, including its loopback guards; the page's script syntax. What
-it does not touch: WebKit on GNOME (the desktop hint, the panel toggle), LOOM, Ollama, Claude Code.
+Collectors against throwaway git repos and a fake Thinking Space; mail accounts and Gmail thread
+links against a stand-in IMAP server; news pictures and article links against stand-in pages;
+Mario's decisions (instant answers, answer vs hand-off, the hand-off's limits, Next step); who
+answers (Claude, then Gemini at Claude's limit, then the laptop) with recorded CLI replies; the hub
+over real HTTP and a WebSocket with stand-in collectors, including its loopback guards; the page's
+script syntax. What it does not touch: WebKit on GNOME (the desktop hint, the panel toggle), the real
+claude and agy CLIs, LOOM, Ollama, Gmail and the news sites themselves.
 """
 import asyncio
 import csv
@@ -25,6 +28,7 @@ sys.path.insert(0, str(REPO / "services" / "mario-hub"))
 import brain  # noqa: E402
 import collectors  # noqa: E402
 import config as config_mod  # noqa: E402
+import engines  # noqa: E402
 
 FAILED = []
 
@@ -114,6 +118,41 @@ def test_collectors(cfg, work):
     check("news: only https links", [i["link"] for i in items] == ["https://news.google.com/a", "https://example.com/x"])
     check("news: a broken feed is an empty list", collectors.parse_rss("<rss", "x") == [])
     check("news: off in cards_off", collectors.news({"cards_off": ["news"], "news": []}).get("off") is True)
+    media_rss = ('<rss xmlns:media="http://search.yahoo.com/mrss/"><channel><item><title>Pic</title><link>https://example.com/p</link>'
+                 '<media:content url="https://img.example.com/p.jpg" medium="image"/></item>'
+                 '<item><title>Enc</title><link>https://example.com/e</link><enclosure url="https://img.example.com/e.mp3" type="audio/mpeg"/></item></channel></rss>')
+    mi = collectors.parse_rss(media_rss, "F")
+    check("news: a picture the feed gives is kept, audio is not", [i["image_src"] for i in mi] == ["https://img.example.com/p.jpg", ""], str(mi))
+    real_fetch = collectors._fetch
+    page = (b'<html><head><meta name="twitter:image" content="https://cdn.example.com/t.jpg">'
+            b'<meta content="/img/lead.jpg" property="og:image"></head><body>x</body></html>')
+    collectors._fetch = lambda url, *a, **k: ("https://site.example.com/story/1", "text/html", page)
+    try:
+        check("news: the article's own og:image, made absolute", collectors.page_image("https://site.example.com/story/1")
+              == "https://site.example.com/img/lead.jpg")
+    finally:
+        collectors._fetch = real_fetch
+    news_dir = Path(cfg["thinking_space"]).parent / "news"
+    real_dir, real_cache, real_resolve, real_shown = collectors.NEWS_DIR, collectors._NEWS_CACHE, collectors.resolve_news, collectors._NEWS_SHOWN
+    looked = []
+
+    def fake_resolve(link, image_src=""):
+        looked.append(link)
+        return {"url": "https://www.thehindu.com/story" if "google" in link else link, "image": "0123456789abcdef.jpg"}
+    collectors.NEWS_DIR, collectors._NEWS_CACHE, collectors.resolve_news = news_dir, None, fake_resolve
+    collectors._NEWS_SHOWN = {"https://news.google.com/rss/articles/a": "", "https://example.com/x": ""}
+    try:
+        nm = collectors.news_media({"cards_off": []})["media"]
+        again = collectors.news_media({"cards_off": []})["media"]
+    finally:
+        collectors.NEWS_DIR, collectors._NEWS_CACHE, collectors.resolve_news, collectors._NEWS_SHOWN = real_dir, real_cache, real_resolve, real_shown
+    check("news: a Google News link opens the article itself, with its picture",
+          nm.get("https://news.google.com/rss/articles/a") == {"url": "https://www.thehindu.com/story", "image": "0123456789abcdef.jpg"}, str(nm))
+    check("news: each headline is looked up once and remembered on disk",
+          len(looked) == 2 and again == nm and (news_dir / "cache.json").is_file(), str(looked))
+    check("news: picture names are plain hashes (nothing else is served)",
+          collectors.NEWS_IMAGE_NAME.fullmatch("0123456789abcdef.jpg") and not collectors.NEWS_IMAGE_NAME.fullmatch("../x.jpg")
+          and not collectors.NEWS_IMAGE_NAME.fullmatch("0123456789abcdef.svg"))
     r = b[0]
     check("repo: last commit, unpushed and changed", r["subject"] == "second, not pushed" and r["ahead"] == 1
           and r["dirty"] == 1 and r["branch"] == "main", str(r))
@@ -193,6 +232,52 @@ def test_collectors(cfg, work):
           str((boot_mail, boot_cal)))
     check("the session's display is read from the user manager, not kept from the hub's start",
           collectors.session_env.__doc__ and "show-environment" in Path(collectors.__file__).read_text())
+    accts = collectors.mail_accounts({"mail": {"accounts": ["b@gmail.com", {"user": "c@x.org", "imap_host": "imap.x.org"}, "B@gmail.com"],
+                                               "user": "a@gmail.com", "main": "c@x.org"}})
+    check("mail: every account once, the main one first, the old one-account form kept",
+          [a["user"] for a in accts] == ["c@x.org", "b@gmail.com", "a@gmail.com"] and accts[0]["imap_host"] == "imap.x.org", str(accts))
+    check("mail: without 'main' the first account is the main one",
+          [a["user"] for a in collectors.mail_accounts({"mail": {"accounts": ["x@gmail.com", "y@gmail.com"]}})] == ["x@gmail.com", "y@gmail.com"])
+    real_acct = collectors.mail_account
+    fake = {"main@gmail.com": {"user": "main@gmail.com", "unread": 2, "items": [{"from": "A", "subject": "old", "when": 10}]},
+            "kk@gmail.com": {"user": "kk@gmail.com", "unread": 5, "items": [{"from": "B", "subject": "new", "when": 20}]},
+            "off@gmail.com": {"user": "off@gmail.com", "unread": None, "items": [], "fix": "password", "error": "refused"}}
+    collectors.mail_account = lambda user, host="": fake[user]
+    try:
+        both = collectors.mail({"mail": {"accounts": ["kk@gmail.com", "main@gmail.com", "off@gmail.com"], "main": "main@gmail.com"}})
+        down = collectors.mail({"mail": {"accounts": ["off@gmail.com", "kk@gmail.com"]}})
+        alone = collectors.mail({"mail": {"accounts": ["off@gmail.com"]}})
+    finally:
+        collectors.mail_account = real_acct
+    check("mail: the main account leads, unread adds up, newest first across accounts",
+          both["main"] == "main@gmail.com" and [a["user"] for a in both["accounts"]][0] == "main@gmail.com"
+          and both["unread"] == 7 and [i["subject"] for i in both["items"]] == ["new", "old"], str(both)[:300])
+    check("mail: one refused account does not hide the others", down["unread"] == 5 and "fix" not in down, str(down)[:200])
+    check("mail: with nothing to show, the main account says why", alone["unread"] is None and alone["fix"] == "password")
+    import imaplib as _imap3
+
+    class _Gmail:
+        capabilities = ("IMAP4REV1", "X-GM-EXT-1")
+        def __init__(self, *a, **k): pass
+        def login(self, u, pw): return "OK", [b""]
+        def select(self, *a, **k): return "OK", [b"2"]
+        def search(self, *a): return "OK", [b"1 2"]
+        def fetch(self, num, what):
+            seen.append(what)
+            return "OK", [(b"%s (X-GM-THRID 1849283746123456789 BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {90}" % num,
+                           b"From: Asha <asha@example.com>\r\nSubject: Lunch\r\nDate: Thu, 12 Nov 2026 10:00:00 +0530\r\n\r\n"), b")"]
+        def logout(self): pass
+    seen = []
+    real_ssl, real_kr = _imap3.IMAP4_SSL, collectors.keyring
+    _imap3.IMAP4_SSL, collectors.keyring = _Gmail, (lambda **k: "pw")
+    try:
+        one = collectors.mail_account("me@gmail.com")
+    finally:
+        _imap3.IMAP4_SSL, collectors.keyring = real_ssl, real_kr
+    check("mail: each message opens its own conversation in Gmail, in its own account",
+          one["items"] and one["items"][0]["link"] == f"https://mail.google.com/mail/u/me@gmail.com/#inbox/{1849283746123456789:x}"
+          and one["inbox"] == "https://mail.google.com/mail/u/me@gmail.com/#inbox", str(one)[:300])
+    check("mail: still read-only (headers peeked, nothing marked read)", seen and all("BODY.PEEK" in w for w in seen), str(seen))
     check("mail: a refused app password asks for a new one",
           collectors.mail_login_problem(_imap.IMAP4.error(b"[AUTHENTICATIONFAILED] Invalid credentials (Failure)"))["fix"] == "password")
     inbox_dir = Path(cfg["thinking_space"]).parent / "notes-fixture" / "LOOM"
@@ -260,6 +345,91 @@ def test_brain(cfg, work):
     check("instant: anything else goes to a model", brain.quick_answer("explain transformers", state) is None)
 
 
+def test_engines(cfg):
+    print("Who answers")
+    check("Claude first, then Gemini, the laptop last", engines.order({}) == ["claude", "gemini", "local"])
+    check("the laptop stays the last resort whatever the order says", engines.order({"brain": ["gemini", "bogus"]}) == ["gemini", "local"])
+    argv = engines.claude_argv(cfg, "hi", session="s1")
+    tools = argv[argv.index("--tools") + 1]
+    check("Claude answers with web search and fetch only: nothing runs, nothing changes",
+          tools == "WebSearch,WebFetch" and "--resume" in argv and "--system-prompt" in argv and "acceptEdits" not in argv, str(argv))
+    g = engines.gemini_argv(cfg, "hi")
+    check("Gemini answers read-only (agy plan mode, sandboxed, a Gemini model pinned)",
+          g[0] == "agy" and g[g.index("--mode") + 1] == "plan" and "--sandbox" in g and g[g.index("--model") + 1].startswith("gemini"), str(g))
+    check("a code hand-off to Gemini edits files in the repo only", engines.handoff_argv("gemini", cfg, "p")[:2] == ["agy", "-p"]
+          and "accept-edits" in engines.handoff_argv("gemini", cfg, "p"))
+    check("no API key reaches either CLI (they stay on the subscriptions)",
+          not {"ANTHROPIC_API_KEY", "GEMINI_API_KEY"} & set(engines.clean_env({"ANTHROPIC_API_KEY": "x", "GEMINI_API_KEY": "y", "PATH": "/bin"})))
+    ok = engines.parse_claude(0, json.dumps({"type": "result", "is_error": False, "result": "pong", "session_id": "abc",
+                                             "modelUsage": {"claude-haiku-5-5": {}, "claude-sonnet-5-5": {}}}), "")
+    check("a Claude answer, its session and model", ok == {"answer": "pong", "session": "abc", "model": "claude-sonnet-5-5"}, str(ok))
+    lim = engines.parse_claude(1, json.dumps({"type": "result", "is_error": True, "result": "Claude AI usage limit reached|4102444800"}), "")
+    check("Claude at its limit is recognised, with when it lifts", lim.get("limited") and lim.get("until") == 4102444800, str(lim))
+    other = engines.parse_claude(1, "", "network down")
+    check("other Claude failures are not taken for a limit", not other.get("limited") and "network" in other["error"])
+    gok = engines.parse_gemini(0, 'warning: x\n{"conversation_id": "c1", "status": "SUCCESS", "response": "pong\\n"}', "")
+    check("a Gemini answer after a warning line", gok.get("answer") == "pong" and gok.get("session") == "c1", str(gok))
+    check("Gemini out of quota is recognised", engines.parse_gemini(1, "", "429 RESOURCE_EXHAUSTED Individual quota reached")["limited"])
+    usage = {"providers": {"claude": {"windows": [{"label": "5h", "used": 100, "resets": 4102444800}, {"label": "Weekly", "used": 40}]},
+                           "gemini": {"windows": [{"label": "5h", "used": 100, "resets": 1}]}}}
+    check("the usage tile shows Claude at 100 % until its reset", engines.usage_limit(usage, "claude") == 4102444800)
+    check("a window that has reset no longer counts", engines.usage_limit(usage, "gemini") is None)
+    ctx = engines.context({"cards": {"calendar": {"data": {"events": [{"start": "10:00", "title": "Stand-up"}]}},
+                                     "mail": {"data": {"accounts": [{"user": "main@gmail.com", "unread": 3,
+                                                                     "items": [{"from": "Asha", "subject": "Lunch"}]}]}},
+                                     "tasks": {"data": {"open": [{"text": "ship it"}], "count": 1}}}})
+    check("the model gets the day as context (calendar, mail per account, tasks)",
+          "10:00 Stand-up" in ctx and "main@gmail.com: 3 unread" in ctx and "Asha: Lunch" in ctx and "ship it" in ctx, ctx)
+
+
+async def test_answer(cfg):
+    print("Claude first, Gemini at Claude's limit")
+    import hub as hub_mod
+    hub = hub_mod.Hub(cfg, schedule={})
+    hub.brain_dir = Path(cfg["thinking_space"]).parent / "brain"
+    ran = []
+    replies = {}
+
+    def fake_run(argv, cwd, timeout):
+        ran.append(argv[0])
+        return replies[argv[0]]
+
+    real_run, real_which = hub_mod.engines.run, hub_mod.shutil.which
+    hub_mod.engines.run = fake_run
+    hub_mod.shutil.which = lambda c: f"/usr/bin/{c}"
+    hub.ask_local = lambda text: {"answer": "from the laptop", "via": "LOOM", "model": "", "ms": 1}
+    try:
+        replies["claude"] = (0, json.dumps({"is_error": False, "result": "Hello from Claude", "session_id": "s1"}), "")
+        first = hub.answer("hello")
+        check("Claude answers by default", first["engine"] == "claude" and first["answer"] == "Hello from Claude"
+              and ran == ["claude"] and hub.brain_status()["engine"] == "claude", str(first))
+        check("and keeps one conversation", hub.sessions["claude"] == "s1")
+        replies["claude"] = (1, json.dumps({"is_error": True, "result": "You've hit your usage limit · resets 3pm"}), "")
+        replies["agy"] = (0, json.dumps({"conversation_id": "g1", "status": "SUCCESS", "response": "Hello from Gemini"}), "")
+        ran.clear()
+        second = hub.answer("hello again")
+        check("Claude at its limit: Gemini answers, and says why", second["engine"] == "gemini"
+              and second["answer"] == "Hello from Gemini" and "limit" in second.get("note", "") and ran == ["claude", "agy"], str(second))
+        ran.clear()
+        third = hub.answer("and again")
+        check("while Claude is at its limit Gemini goes first (no wasted call)", third["engine"] == "gemini" and ran == ["agy"], str(ran))
+        status = hub.brain_status()
+        check("the ask bar says Gemini, and why", status["engine"] == "gemini" and "limit" in status["skipped"].get("claude", ""), str(status))
+        check("a code change goes to Gemini (agy) while Claude is out", hub.handoff_engine() == "gemini")
+        replies["agy"] = (1, "", "429 RESOURCE_EXHAUSTED")
+        fourth = hub.answer("one more")
+        check("both clouds out: the laptop answers", fourth["engine"] == "local" and fourth["answer"] == "from the laptop", str(fourth))
+        hub.limited.clear()
+        hub.cards["usage"] = {"data": {"providers": {"claude": {"windows": [{"label": "Weekly", "used": 100, "resets": time.time() + 3600}]}}}}
+        check("the usage tile alone puts Claude aside until its reset", hub.engine_ready("claude", time.time()) is not None
+              and hub.brain_status()["engine"] == "gemini")
+        hub.cards.pop("usage")
+        hub_mod.shutil.which = lambda c: None
+        check("without the CLIs the laptop answers", hub.brain_status()["engine"] == "local")
+    finally:
+        hub_mod.engines.run, hub_mod.shutil.which = real_run, real_which
+
+
 async def test_hub(cfg):
     print("Hub over HTTP and WebSocket")
     import aiohttp
@@ -275,6 +445,7 @@ async def test_hub(cfg):
     hub = hub_mod.Hub(cfg, schedule={"fake": (fake, 0.2)})
     hub.notes_file = Path(cfg["thinking_space"]).parent / "notes.md"
     collectors.NOTES_DIR = Path(cfg["thinking_space"]).parent / "notes"
+    collectors.NEWS_DIR = Path(cfg["thinking_space"]).parent / "news-hub"
     port = 18791
     app = hub_mod.make_app(hub, port)
     runner = web.AppRunner(app)
@@ -305,7 +476,7 @@ async def test_hub(cfg):
                 check("changed cards are pushed", pushed and pushed["name"] == "fake")
                 async with s.post(base + "/api/ask", json={"text": "write tests for the hub in " + Path(cfg["repos"][0]).name}) as r:
                     res = await r.json()
-                check("dev work comes back as a plan, not a run", res.get("route") == "claude" and res["handoff"]["status"] == "waiting")
+                check("dev work comes back as a plan, not a run", res.get("route") == "handoff" and res["handoff"]["status"] == "waiting")
                 check("the plan never exposes the command line", "argv" not in res.get("handoff", {}))
                 pres = None
                 for _ in range(10):
@@ -330,6 +501,25 @@ async def test_hub(cfg):
             hub.cards["news"] = {"data": {"items": [{"title": "t", "link": "https://news.google.com/a"}]}, "at": 0}
             async with s.post(base + "/api/action", json={"id": "open_news", "arg": "https://evil.example/"}) as r:
                 check("only headlines shown on Home open", (await r.json())["ok"] is False)
+            hub.cards["news_media"] = {"data": {"media": {"https://news.google.com/a": {"url": "https://www.thehindu.com/a", "image": ""}}}, "at": 0}
+            opened = []
+            real_popen, real_env = hub_mod.subprocess.Popen, hub_mod.launch_env
+            hub_mod.subprocess.Popen = lambda cmd, **k: opened.append(cmd)
+            hub_mod.launch_env = lambda: {"DISPLAY": ":0"}
+            try:
+                async with s.post(base + "/api/action", json={"id": "open_news", "arg": "https://news.google.com/a"}) as r:
+                    res_open = await r.json()
+            finally:
+                hub_mod.subprocess.Popen, hub_mod.launch_env = real_popen, real_env
+            check("a headline opens the article itself, not Google's redirect page",
+                  res_open.get("ok") and opened == [["xdg-open", "https://www.thehindu.com/a"]], str((res_open, opened)))
+            img_dir = collectors.NEWS_DIR / "img"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            (img_dir / "0123456789abcdef.jpg").write_bytes(b"\xff\xd8" + b"0" * 3000)
+            async with s.get(base + "/news-img/0123456789abcdef.jpg") as r:
+                check("news pictures are served by the hub", r.status == 200 and r.content_type == "image/jpeg")
+            async with s.get(base + "/news-img/..%2F..%2Fcache.json") as r:
+                check("and nothing else from that folder", r.status == 404)
             async with s.post(base + "/api/action", json={"id": "open_file", "arg": "/etc/shadow"}) as r:
                 check("only files shown on Home open", (await r.json())["ok"] is False)
             async with s.post(base + "/api/task", json={"text": "  write   the hub docs "}) as r:
@@ -392,6 +582,12 @@ def test_page():
           and "repeat(4, minmax(0, 1fr))" in css)
     check("no 'all systems up to date' line", "all systems up to date" not in script.lower() and 'id="status"' not in html)
     check("News rolls every 30 seconds", 'setFaces("news", items.map(face), { every: 30000' in script)
+    check("News shows each headline's picture, cover-fitted edge to edge, from the hub",
+          "/news-img/" in script and 'newsPic(it, "hero")' in script and _re.search(r"\.hero img \{[^}]*object-fit: cover", css))
+    check("a mail opens its own conversation; the main account shows first",
+          "openUrl(i.link || inbox)" in script and "accounts[0]" in script)
+    check("the ask bar says who answers (Claude first), not the old local-first brain",
+          "LOOM ready" not in script and "answers locally first" not in script + html and 'id="brain"' in html)
     check("live tiles turn on their own and pause under the pointer",
           "setInterval(" in script and ':hover' in script and all(f'setFaces("{c}"' in script for c in ("projects", "recent", "week", "weather")))
     host = (REPO / "apps" / "mario-home" / "host.py").read_text()
@@ -454,8 +650,10 @@ def main():
         test_collectors(cfg, work)
         test_usage(cfg)
         test_brain(cfg, work)
+        test_engines(cfg)
         try:
             import aiohttp  # noqa: F401
+            asyncio.run(test_answer(cfg))
             asyncio.run(test_hub(cfg))
             asyncio.run(test_after_boot(cfg))
         except ImportError:

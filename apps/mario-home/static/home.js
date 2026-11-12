@@ -115,32 +115,58 @@ const act = (action) => post("/api/action", action);
 const openUrl = (url) => url && act({ id: "url", arg: url });
 
 // ----------------------------------------------------------------- cards
+let mailAccount = null;  // the account Mail shows: the main one until you pick another
+const newsMedia = (it) => (data("news_media").media || {})[it.link] || {};
+// a headline's picture, cover-fitted; without one, the outlet's initial on its own colour
+function newsPic(it, cls) {
+  const m = newsMedia(it), letter = (it.source || "?").trim()[0].toUpperCase();
+  const blank = () => el("span", { class: `${cls} none`, style: `--h:${hue(it.source)}` }, cls === "hero" ? it.source : letter);
+  if (!m.image) return blank();
+  return el("span", { class: cls }, el("img", { src: `/news-img/${m.image}`, alt: "", decoding: "async", draggable: "false",
+    onerror: (e) => e.target.parentElement.replaceWith(blank()) }));
+}
+
 const render = {
   mail() {
     const m = data("mail");
     count("mail", m.unread || "");
-    if (m.unread == null && m.fix) {
+    // every account is a tab; the main one (first) shows unless you picked another
+    const accounts = m.accounts || [];
+    const a = accounts.find((x) => x.user === mailAccount) || accounts[0] || m;
+    const inbox = a.inbox || "https://mail.google.com/";
+    $("#c-mail .open").dataset.open = inbox;
+    const tabs = accounts.length > 1 ? el("div", { class: "accts", role: "tablist" }, accounts.map((x, j) =>
+      el("button", { class: `acct${x === a ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(x === a),
+        title: `${x.user}${j === 0 ? " (main)" : ""}${x.error ? `: ${x.error}` : ""}`,
+        onclick: () => { mailAccount = x.user; draw("mail"); } },
+        el("span", { class: "nm" }, x.user.split("@")[0]), j === 0 ? el("small", {}, "main") : null,
+        x.unread ? el("span", { class: "n" }, x.unread > 999 ? "999+" : String(x.unread))
+          : x.unread == null && !x.waiting ? el("i", { class: "dot warn" }) : null))) : null;
+    if (a.unread == null && a.fix) {
       // the login was refused: say why and how to put it right
-      return fill(body("mail"),
-        empty(m.error, el("br"), m.fix === "app_password"
+      return fill(body("mail"), tabs,
+        empty(a.error, el("br"), a.fix === "app_password"
           ? "Make one named Mario (needs 2-Step Verification), then save it with "
           : "Make a new app password, then save it again with ", code("scripts/install-mario.sh --mail")),
         el("div", { class: "foot" }, el("button", { class: "btn primary", type: "button",
           onclick: () => openUrl("https://myaccount.google.com/apppasswords") }, "Create an app password")));
     }
-    if (m.unread == null) {
-      return fill(body("mail"), empty(m.setup ? "Connect Gmail once on this laptop: " : (m.error || "Checking mail…"),
-        m.setup ? code("scripts/install-mario.sh --mail") : null, m.setup ? el("br") : null,
-        m.setup ? "It reads unread headers only and never marks anything read." : null));
+    if (a.unread == null) {
+      return fill(body("mail"), tabs, empty(a.setup ? "Connect Gmail once on this laptop: " : (a.error || "Checking mail…"),
+        a.setup ? code("scripts/install-mario.sh --mail") : null, a.setup ? el("br") : null,
+        a.setup ? "It reads unread headers only and never marks anything read." : null));
     }
-    const items = m.items || [];
-    fill(body("mail"), 
+    // a message opens that very conversation in Gmail, in its own account
+    const items = a.items || [];
+    fill(body("mail"), tabs,
       items.length ? el("ul", { class: "rows" }, items.slice(0, 5).map((i) => el("li", {},
-        el("span", { class: "avatar", style: `background:${hue(i.from)}33;color:${hue(i.from)}` }, (i.from || "?").trim()[0].toUpperCase()),
-        el("div", { class: "grow" }, el("div", { class: "ttl" }, i.from), el("div", { class: "sub" }, i.subject)),
-        el("span", { class: "time" }, when(i.when)))))
+        el("button", { class: "mrow", type: "button", title: "Open this mail in Gmail", onclick: () => openUrl(i.link || inbox) },
+          el("span", { class: "avatar", style: `background:${hue(i.from)}33;color:${hue(i.from)}` }, (i.from || "?").trim()[0].toUpperCase()),
+          el("div", { class: "grow" }, el("div", { class: "ttl" }, i.from), el("div", { class: "sub" }, i.subject)),
+          el("span", { class: "time" }, when(i.when))))))
         : empty("Inbox zero. Nothing unread."),
-      el("div", { class: "foot" }, el("button", { class: "link", type: "button", onclick: () => openUrl("https://mail.google.com/") }, "Open Mail", icon("i-chev"))));
+      el("div", { class: "foot" }, el("button", { class: "link", type: "button", onclick: () => openUrl(inbox) },
+        accounts.length > 1 ? `Open ${a.user.split("@")[0]}` : "Open Mail", icon("i-chev"))));
   },
 
   today() {
@@ -368,22 +394,27 @@ const render = {
       $("#c-news .roll").classList.remove("go");
       return setFaces("news", [() => empty(n.off ? "News is off in mario.json." : n.errors && n.errors.length ? "Feeds are not reachable right now." : "Fetching headlines…")]);
     }
+    // the hub opens the article itself (Google News links are only redirect pages)
     const open = (it) => act({ id: "open_news", arg: it.link });
     const face = (it, i) => Object.assign(() => [
-      el("button", { class: "headline", type: "button", onclick: () => open(it) },
+      el("button", { class: "headline", type: "button", title: "Open the article", onclick: () => open(it) },
+        newsPic(it, "hero"),
         el("span", { class: "src" }, `${it.source}${it.when ? ` · ${when(it.when)}` : ""}`), el("b", {}, it.title)),
       el("div", { class: "upnext" }, el("h4", {}, "Up next"),
-        [1, 2, 3, 4].map((k) => items[(i + k) % items.length]).filter((x) => x !== it)
-          .map((x) => el("button", { type: "button", onclick: () => open(x) }, x.title)))], { key: it.link });
+        [1, 2].map((k) => items[(i + k) % items.length]).filter((x) => x !== it)
+          .map((x) => el("button", { type: "button", title: "Open the article", onclick: () => open(x) }, newsPic(x, "thumb"), el("span", {}, x.title))))], { key: it.link });
     const t = LIVE.news;
     setFaces("news", items.map(face), { every: 30000, keep: t && t.faces[t.i] ? t.faces[t.i].key : undefined });
     TURNED.news(LIVE.news, !t);
   },
   brain() {
-    const l = data("loom"), o = (data("system").ollama || {});
+    // who answers: Claude, Gemini while Claude is at its limit, the laptop when both are out
+    const b = state.brain || {};
     const pill = $("#brain");
-    pill.className = `pill ${l.running ? "ok" : o.running ? "warn" : "warn"}`;
-    pill.textContent = l.running ? "LOOM ready" : o.running ? "Ollama only" : "Local brain off";
+    pill.className = `pill ${b.engine === "claude" ? "ok" : "warn"}`;
+    pill.textContent = b.engine === "claude" ? "Claude" : b.engine === "gemini"
+      ? (/limit/.test((b.skipped || {}).claude || "") ? "Gemini · Claude at its limit" : "Gemini") : b.engine ? "On this laptop" : "Claude";
+    pill.title = brainLine();
   },
 
   daysum() {
@@ -400,8 +431,8 @@ const render = {
 const FEEDS = {
   mail: ["mail", "daysum"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
   builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
-  recent: ["recent"], notes: ["note"], weather: ["weather"], usage: ["ai"], phone: ["phone"], news: ["news"],
-  loom: ["brain"], system: ["brain"],
+  recent: ["recent"], notes: ["note"], weather: ["weather"], phone: ["phone"], news: ["news"],
+  news_media: ["news"], usage: ["ai"],
 };
 function draw(name) { try { render[name](); } catch (e) { console.error(name, e); } }
 function renderAll() { Object.keys(render).forEach(draw); renderPresence(); greet(); }
@@ -410,7 +441,14 @@ function renderPresence() {
   const p = state.presence || { state: "ready" };
   document.querySelectorAll(".mark").forEach((m) => m.setAttribute("data-state", p.state));
   const sub = $("#panel-sub");
-  if (sub) sub.textContent = p.detail ? `${p.state.replace("_", " ")} · ${p.detail}` : "answers locally first";
+  if (sub) sub.textContent = p.detail ? `${p.state.replace("_", " ")} · ${p.detail}` : brainLine();
+}
+const ENGINE = { claude: "Claude", gemini: "Gemini", local: "This laptop" };
+function brainLine() {
+  const b = state.brain || {};
+  if (!b.engine) return "Claude answers";
+  const why = Object.entries(b.skipped || {}).map(([n, w]) => `${ENGINE[n] || n} is ${w}`);
+  return `${ENGINE[b.engine] || b.engine} answers${why.length ? ` · ${why.join("; ")}` : ""}`;
 }
 
 function greet() {
@@ -422,17 +460,18 @@ function greet() {
 // -------------------------------------------------------------------- ask
 function answerNode(res) {
   if (res.error) return el("div", { class: "mario" }, res.error);
-  if (res.route === "claude") return planNode(res.handoff);
+  if (res.handoff) return planNode(res.handoff);
   const meta = el("div", {});
-  if (res.via) meta.append(el("span", { class: "pill" }, [res.model || res.via, res.via === "Mario" ? "instant" : "local", res.ms ? `${(res.ms / 1000).toFixed(1)} s` : ""].filter(Boolean).join(" · ")));
+  if (res.via) meta.append(el("span", { class: "pill" }, [res.via === "Mario" ? "instant" : res.via, res.model, res.ms ? `${(res.ms / 1000).toFixed(1)} s` : ""].filter(Boolean).join(" · ")));
   return el("div", { class: "mario" }, res.answer || "", res.note ? el("span", { class: "muted" }, res.note) : null, meta);
 }
 
 function planNode(plan) {
   const out = el("pre", { hidden: true });
   return el("div", { class: "plan", "data-handoff": plan.id },
-    el("div", { class: "between" }, el("b", {}, `Claude Code in ${plan.repo}`),
+    el("div", { class: "between" }, el("b", {}, `${plan.agent || "Claude Code"} in ${plan.repo}`),
       el("span", { class: "pill warn" }, plan.outward ? "you push or send yourself" : "edits files here")),
+    plan.why ? el("span", { class: "muted" }, `${plan.why}, so Gemini takes this one.`) : null,
     el("ol", {}, plan.steps.map((s) => el("li", {}, s))),
     out,
     el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
@@ -440,7 +479,7 @@ function planNode(plan) {
         e.target.parentElement.remove(); out.hidden = false; out.textContent = "Starting…\n";
         await post(`/api/handoff/${plan.id}`, { decision: "run" });
       } }, "Run"),
-      el("button", { class: "btn", type: "button", onclick: () => act({ id: "claude_session", arg: plan.cwd }) }, "Open in terminal instead"),
+      el("button", { class: "btn", type: "button", onclick: () => act({ id: plan.engine === "gemini" ? "gemini_session" : "claude_session", arg: plan.cwd }) }, "Open in terminal instead"),
       el("button", { class: "btn", type: "button", onclick: async (e) => {
         await post(`/api/handoff/${plan.id}`, { decision: "cancel" }); e.target.closest(".plan").remove();
       } }, "Not now")));
@@ -481,6 +520,7 @@ function connect(delay = 500) {
       if (!PANEL) (FEEDS[msg.name] || []).forEach(draw);
     } else if (msg.type === "next") { state.next = msg.items; if (!PANEL) draw("tasks"); }
     else if (msg.type === "presence") { state.presence = msg; renderPresence(); }
+    else if (msg.type === "brain") { state.brain = msg; if (!PANEL) draw("brain"); renderPresence(); }
     else if (msg.type === "handoff") handoffEvent(msg);
   };
   ws.onclose = () => { $("#offline").hidden = false; setTimeout(() => connect(Math.min(delay * 2, 10000)), delay); };

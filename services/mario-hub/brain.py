@@ -1,8 +1,10 @@
 """Mario's decisions, kept pure so they can be checked without a model, a network or a desktop.
 
   quick_answer   questions the hub answers from its own state, instantly, with no model
-  classify       everything else: LOOM locally, or Claude Code for multi-step work in a repo
-  plan_handoff   what Claude Code would be asked, where, and with which limits: shown before it runs
+  classify       everything else: an answer ("local" route: Claude, Gemini or the laptop, engines.py),
+                 or a hand-off for multi-step work in a repo
+  plan_handoff   what Claude Code (or Gemini, while Claude is at its limit) would be asked, where, and
+                 with which limits: shown before it runs
   next_steps     up to three one-line suggestions for the Next step card
 """
 import datetime as dt
@@ -42,14 +44,21 @@ def classify(text, repos=()):
     return {"route": route, "repo": str(repo) if repo else None, "outward": bool(re.search(OUTWARD, low))}
 
 
-def plan_handoff(text, repo, claude_cmd="claude"):
+AGENT = {"claude": "Claude Code", "gemini": "Gemini (agy)"}
+
+
+def plan_handoff(text, repo, claude_cmd="claude", engine="claude"):
+    """The plan shown before a code change runs. `engine` is who takes it: Claude Code, or Gemini
+    through agy while Claude is at its limit (the hub then sets the matching command)."""
     prompt = f"{_norm(text)}\n\n{LIMITS}"
-    pid = hashlib.sha1(f"{repo}\0{prompt}".encode()).hexdigest()[:12]
+    pid = hashlib.sha1(f"{repo}\0{engine}\0{prompt}".encode()).hexdigest()[:12]
+    agent = AGENT.get(engine, AGENT["claude"])
     return {"id": pid, "cwd": str(repo), "prompt": prompt, "repo": Path(repo).name,
+            "engine": engine if engine in AGENT else "claude", "agent": agent,
             # headless; file edits inside cwd are allowed, every other tool keeps Claude Code's own
             # permission rules, which in -p mode means anything not already allowed is refused
             "argv": [claude_cmd, "-p", prompt, "--permission-mode", "acceptEdits", "--output-format", "text"],
-            "steps": [f"Open Claude Code in {Path(repo).name}",
+            "steps": [f"Open {agent} in {Path(repo).name}",
                       "Let it edit files in that folder only",
                       "Show you what changed; nothing is pushed or sent"]}
 

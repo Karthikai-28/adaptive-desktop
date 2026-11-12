@@ -97,6 +97,23 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: rgba(255
 .link:hover { color: #C6D4FF; }
 .link svg { width: 15px; height: 15px; }
 
+/* mail: one tab per account (the main one first); a message opens itself in Gmail */
+.accts { display: flex; gap: 6px; min-width: 0; overflow: hidden; flex: none; }
+.acct { border: 0; border-radius: 9px; background: rgba(255,255,255,.06); padding: 4px 10px; min-height: 26px; font-size: 12px; color: var(--soft);
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; transition: background var(--feedback); }
+.acct:hover { background: rgba(255,255,255,.12); }
+.acct.on { background: rgba(10,132,255,.24); color: var(--text); }
+.acct .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acct small { font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.acct.on small { color: #9DB7FF; }
+.acct .n { font-size: 10px; font-weight: 600; color: #fff; background: var(--indigo); border-radius: 999px; padding: 1px 6px; }
+.acct .dot { width: 7px; height: 7px; }
+.mrow { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; border: 0; background: transparent; color: inherit; text-align: left;
+  margin: -5px -8px; padding: 5px 8px; border-radius: 10px; transition: background var(--feedback); }
+.mrow:hover { background: rgba(255,255,255,.06); }
+.mrow:hover .ttl { color: var(--cyan); }
+.mrow:focus-visible, .headline:focus-visible, .upnext button:focus-visible, .acct:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
 /* today */
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden; }
 .timeline li { display: grid; grid-template-columns: 46px 16px minmax(0, 1fr); gap: 8px; align-items: start; }
@@ -205,13 +222,29 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: rgba(255
 
 /* news: one headline at a time, rolling every 30 s; the bar at the bottom fills to the next */
 #c-news { position: relative; }
-.headline { flex: none; border: 0; background: transparent; padding: 0; text-align: left; color: var(--text); display: flex; flex-direction: column; gap: 8px; }
-.headline b { font-size: 21px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+/* the body spans the card's full width (it clips what overflows), so the picture can reach the edges */
+#c-news .body { margin: 0 -18px; padding: 0 18px; }
+.headline { flex: none; border: 0; background: transparent; padding: 0; text-align: left; color: var(--text); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.headline b { font-size: 18px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* the picture fills the tile's width edge to edge (the headline spans the card's 18px side padding), cropped to fit */
+#c-news .headline { margin: 0 -18px; }
+#c-news .headline > .src, #c-news .headline > b { padding: 0 18px; }
+.hero { display: block; margin: 0 0 2px; height: clamp(110px, 30vh, 190px); overflow: hidden; background: rgba(255,255,255,.04); position: relative; }
+.hero img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 30%; transition: transform 600ms cubic-bezier(.2,.8,.2,1); }
+.hero::after { content: ""; position: absolute; inset: auto 0 0 0; height: 40%; background: linear-gradient(transparent, rgba(16,20,32,.55)); pointer-events: none; }
+.headline:hover .hero img { transform: scale(1.04); }
+.hero.none { display: grid; place-items: center; padding: 0 22px; text-align: center; font-size: 22px; font-weight: 700; letter-spacing: -.01em;
+  color: var(--h); background: radial-gradient(120% 90% at 30% 20%, color-mix(in srgb, var(--h) 30%, transparent), rgba(255,255,255,.03)); }
+.hero.none::after { display: none; }
+.thumb { flex: none; width: 40px; height: 40px; border-radius: 9px; overflow: hidden; background: rgba(255,255,255,.06); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.none { display: grid; place-items: center; font-size: 15px; font-weight: 700; color: var(--h); background: color-mix(in srgb, var(--h) 22%, transparent); }
 .headline:hover b { color: var(--cyan); }
 .headline .src { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--cyan); }
-.upnext { margin-top: auto; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.upnext { margin-top: auto; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
 .upnext h4 { margin: 0; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
-.upnext button { border: 0; background: transparent; padding: 0; text-align: left; font-size: 12px; color: var(--soft); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.upnext button { flex: none; border: 0; background: transparent; padding: 0; text-align: left; font-size: 12px; color: var(--soft); line-height: 1.35; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.upnext button > span:last-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .upnext button:hover { color: var(--text); }
 .roll { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; transform-origin: left; transform: scaleX(0); background: linear-gradient(90deg, #64D2FF, #7D7AFF); }
 .roll.go { animation: roll var(--roll, 30s) linear forwards; }

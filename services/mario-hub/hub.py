@@ -6,7 +6,9 @@
   GET  /                 the Home page (apps/mario-home/static), /panel the Mario panel
   GET  /api/state        every card, the Next step list and Mario's presence
   GET  /ws               the same, pushed: {"type": "card" | "next" | "presence" | "handoff", ...}
-  POST /api/ask          {"text"} -> an answer (instant, LOOM, or Ollama) or a Claude Code plan
+  POST /api/ask          {"text"} -> an answer (instant, Claude, Gemini, or the laptop's LOOM/Ollama)
+                         or a plan for a code change (Claude Code, Gemini when Claude is at its limit)
+  GET  /news-img/NAME    a picture the News tile shows, saved by the news_media collector
   POST /api/handoff/ID   {"decision": "run" | "cancel"}: runs a plan only after you say so
   POST /api/action       {"id", "arg"}: a short whitelist (open a repo's terminal, a folder, ...)
   POST /api/presence     {"state", "detail"}: for the voice listener (listening, ...)
@@ -34,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import brain  # noqa: E402
 import collectors  # noqa: E402
 import config as config_mod  # noqa: E402
+import engines  # noqa: E402
 
 STATIC = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "static"
 PRESENCE = ("ready", "listening", "thinking", "doing", "needs_you")
@@ -93,6 +96,10 @@ class Hub:
         self.presence = {"state": "ready", "detail": ""}
         self.handoffs = {}
         self.loom_session = None
+        self.sessions = {"claude": None, "gemini": None}   # one conversation per engine per hub run
+        self.limited = {}                                   # engine -> when its limit lifts
+        self.brain_dir = config_mod.DATA_DIR / "brain"      # where the engines run: no repo, no project files
+        self.last_brain = None
         self.tasks = []
         self.notes_file = config_mod.DATA_DIR / "notes.md"
 
@@ -109,7 +116,84 @@ class Hub:
         state = {"cards": cards, "config": self.public_config()}
         state["next"] = brain.next_steps(state, limit=4)
         state["presence"] = self.presence
+        state["brain"] = self.brain_status()
         return state
+
+    # ------------------------------------------------------------ brain
+    def engine_ready(self, name, now=None):
+        """None when `name` can answer now, else why it cannot (in a few words)."""
+        now = now or time.time()
+        if name == "local":
+            return None
+        cmd = self.cfg.get(f"{name}_cmd") or ("claude" if name == "claude" else "agy")
+        if not shutil.which(cmd):
+            return f"not installed ({cmd})"
+        # a limit it reported itself, else the usage tile's reading (0 = at the limit, reset unknown)
+        until = self.limited.get(name)
+        if not until or until <= now:
+            until = engines.usage_limit((self.cards.get("usage") or {}).get("data"), name, now)
+        if until is None or 0 < until <= now:
+            return None
+        return "at its usage limit" + (time.strftime(" until %H:%M", time.localtime(until)) if until else "")
+
+    def brain_status(self):
+        """Who answers next, and why the ones before it are skipped."""
+        names = engines.order(self.cfg)
+        why = {n: self.engine_ready(n) for n in names}
+        first = next(n for n in names if why[n] is None)
+        return {"engine": first, "label": engines.LABEL[first], "order": names,
+                "skipped": {n: w for n, w in why.items() if w and names.index(n) < names.index(first)}}
+
+    async def push_brain(self):
+        status = self.brain_status()
+        if status != self.last_brain:
+            self.last_brain = status
+            await self.broadcast({"type": "brain", **status})
+
+    def answer(self, text):
+        """Claude, then Gemini, then the laptop: the first that answers. Runs in a thread."""
+        prompt = f"[Live desktop context]\n{engines.context(self.snapshot())}\n\n[Karthi asks]\n{text}"
+        self.brain_dir.mkdir(parents=True, exist_ok=True)
+        notes = []
+        for name in engines.order(self.cfg):
+            why = self.engine_ready(name)
+            if why:
+                notes.append(f"{engines.LABEL[name]} is {why}")
+                continue
+            if name == "local":
+                res = self.ask_local(text)
+                res["engine"] = "local"
+                if notes:
+                    res["note"] = "; ".join(notes + ([res["note"]] if res.get("note") else [])) + "."
+                return res
+            started = time.time()
+            for attempt in (1, 2):
+                build = engines.claude_argv if name == "claude" else engines.gemini_argv
+                code, out, err = engines.run(build(self.cfg, prompt, self.sessions[name]), str(self.brain_dir),
+                                             int(self.cfg.get("answer_timeout_s", 150)))
+                res = (engines.parse_claude if name == "claude" else engines.parse_gemini)(code, out, err)
+                if res.get("answer") or res.get("limited") or not self.sessions[name]:
+                    break
+                self.sessions[name] = None    # a conversation that cannot be resumed: start a new one once
+            if res.get("answer"):
+                self.sessions[name] = res.get("session") or self.sessions[name]
+                model = res.get("model") or self.cfg.get(f"{name}_model") or ""
+                return {"answer": res["answer"], "via": engines.LABEL[name], "engine": name, "model": model,
+                        "ms": int((time.time() - started) * 1000),
+                        **({"note": "; ".join(notes) + f", so {engines.LABEL[name]} answered."} if notes else {})}
+            if res.get("limited"):
+                self.limited[name] = res.get("until") or time.time() + 15 * 60
+                notes.append(f"{engines.LABEL[name]} is at its usage limit")
+            else:
+                notes.append(f"{engines.LABEL[name]} did not answer ({res.get('error', '')[:80]})")
+        return {"answer": "", "via": "", "error": "Nobody answered: " + "; ".join(notes) + "."}
+
+    def handoff_engine(self):
+        """Who takes a confirmed code change: Claude Code, or Gemini (agy) while Claude is out."""
+        for name in engines.order(self.cfg):
+            if name != "local" and self.engine_ready(name) is None:
+                return name
+        return "claude"
 
     async def broadcast(self, message):
         text = json.dumps(message, default=str)
@@ -138,6 +222,8 @@ class Hub:
             self.cards[name] = {"data": data, "at": time.time()}
             await self.broadcast({"type": "card", "name": name, **self.cards[name]})
             await self.broadcast({"type": "next", "items": self.snapshot()["next"]})
+            if name == "usage":
+                await self.push_brain()
 
     async def run_collector(self, name):
         _, every = self.schedule[name]
@@ -200,27 +286,34 @@ class Hub:
         decision = brain.classify(text, self.cfg["repos"])
         if decision["route"] == "claude":
             repo = decision["repo"] or str(config_mod.ADAPTIVE_REPO)
-            plan = brain.plan_handoff(text, repo, self.cfg["claude_cmd"])
+            engine = self.handoff_engine()
+            plan = brain.plan_handoff(text, repo, self.cfg["claude_cmd"], engine=engine)
+            plan["argv"] = engines.handoff_argv(engine, self.cfg, plan["prompt"])
+            if engine != "claude":
+                plan["why"] = f"Claude is {self.engine_ready('claude')}"
             plan["outward"] = decision["outward"]
             plan["status"] = "waiting"
             self.handoffs[plan["id"]] = plan
-            await self.set_presence("needs_you", f"Claude Code in {plan['repo']}?")
-            return {"route": "claude", "handoff": {k: v for k, v in plan.items() if k != "argv"}}
-        await self.set_presence("thinking", "local")
+            await self.set_presence("needs_you", f"{plan['agent']} in {plan['repo']}?")
+            return {"route": "handoff", "handoff": {k: v for k, v in plan.items() if k != "argv"}}
+        await self.set_presence("thinking", self.brain_status()["label"])
         try:
-            result = await asyncio.to_thread(self.ask_local, text)
+            result = await asyncio.to_thread(self.answer, text)
         finally:
             await self.set_presence("ready")
-        return {"route": "local", **result}
+            await self.push_brain()
+        # route: "instant" (from Home's own data), "answer" (engine says who), or "handoff" (a plan)
+        return {"route": "answer", **result}
 
     async def run_handoff(self, plan):
         plan["status"] = "running"
-        await self.set_presence("doing", f"Claude Code · {plan['repo']}")
+        await self.set_presence("doing", f"{plan['agent']} · {plan['repo']}")
         argv = list(plan["argv"])
         if not shutil.which(argv[0]):
             plan["status"] = "failed"
             await self.broadcast({"type": "handoff", "id": plan["id"], "status": "failed",
-                                  "line": f"{argv[0]} is not installed; scripts/install-agent-office.sh installs it."})
+                                  "line": f"{argv[0]} is not installed" + ("; scripts/install-agent-office.sh installs it."
+                                                                            if plan.get("engine", "claude") == "claude" else ".")})
             await self.set_presence("ready")
             return
         try:
@@ -231,11 +324,13 @@ class Hub:
             await self.broadcast({"type": "handoff", "id": plan["id"], "status": "failed", "line": str(exc)})
             await self.set_presence("ready")
             return
+        tail = []
         try:
             async def pump():
                 async for raw in proc.stdout:
-                    await self.broadcast({"type": "handoff", "id": plan["id"], "status": "running",
-                                          "line": raw.decode(errors="replace").rstrip()})
+                    line = raw.decode(errors="replace").rstrip()
+                    tail[:] = (tail + [line])[-20:]
+                    await self.broadcast({"type": "handoff", "id": plan["id"], "status": "running", "line": line})
                 return await proc.wait()
 
             code = await asyncio.wait_for(pump(), timeout=self.cfg["claude_timeout_s"])
@@ -243,6 +338,13 @@ class Hub:
         except asyncio.TimeoutError:
             proc.kill()
             plan["status"] = "failed"
+        engine = plan.get("engine", "claude")
+        if plan["status"] == "failed" and engines.LIMIT.search("\n".join(tail)):
+            self.limited[engine] = engines.limit_until("\n".join(tail)) or time.time() + 15 * 60
+            other = "Gemini" if engine == "claude" else "Claude"
+            await self.broadcast({"type": "handoff", "id": plan["id"], "status": "running",
+                                  "line": f"{engines.LABEL[engine]} reached its usage limit. Ask again and {other} takes it."})
+            await self.push_brain()
         changed, _ = await asyncio.to_thread(collectors._run, ["git", "-C", plan["cwd"], "status", "--short"])
         await self.broadcast({"type": "handoff", "id": plan["id"], "status": plan["status"],
                               "changed": (changed or "").splitlines()[:40]})
@@ -302,12 +404,12 @@ class Hub:
     # ----------------------------------------------------------- actions
     def action(self, aid, arg):
         repos = {str(p) for p in self.cfg["repos"]} | {str(self.cfg["thinking_space"])}
-        if aid in ("terminal", "folder", "claude_session", "code") and str(arg) not in repos:
+        if aid in ("terminal", "folder", "claude_session", "gemini_session", "code") and str(arg) not in repos:
             return {"ok": False, "error": "not one of Mario's folders"}
         if aid == "terminal":
             cmd = ["gnome-terminal", f"--working-directory={arg}"]
-        elif aid == "claude_session":
-            cmd = [shutil.which("adaptive-agent") or "adaptive-agent", "claude", str(arg)]
+        elif aid in ("claude_session", "gemini_session"):
+            cmd = [shutil.which("adaptive-agent") or "adaptive-agent", "agy" if aid == "gemini_session" else "claude", str(arg)]
         elif aid == "code":
             cmd = [*editor(), str(arg)]
         elif aid == "folder":
@@ -327,7 +429,11 @@ class Hub:
             link = next((i["link"] for i in items if i["link"] == arg), None)
             if not link or not link.startswith("https://"):
                 return {"ok": False, "error": "only headlines shown on Home open from here"}
-            cmd = ["xdg-open", link]
+            # the article itself when the news_media collector found it (Google News links are
+            # only redirect pages), else the feed's own link
+            media = ((self.cards.get("news_media", {}).get("data") or {}).get("media") or {}).get(link) or {}
+            url = media.get("url") or ""
+            cmd = ["xdg-open", url if url.startswith(("https://", "http://")) else link]
         elif aid == "open_file":
             listed = {f["path"] for name in ("recent", "downloads")
                       for f in (self.cards.get(name, {}).get("data") or {}).get("files", [])}
@@ -430,6 +536,14 @@ def make_app(hub, port):
     async def note(request):
         return web.json_response(await hub.add_note((await read(request)).get("text")))
 
+    async def news_image(request):
+        name = request.match_info["name"]
+        path = collectors.NEWS_DIR / "img" / name
+        if not collectors.NEWS_IMAGE_NAME.fullmatch(name) or not path.is_file():
+            raise web.HTTPNotFound()
+        # the name is a hash of the picture's address: it never changes, so the page keeps it cached
+        return web.FileResponse(path, headers={"Cache-Control": "max-age=604800, immutable"})
+
     app.router.add_post("/api/task", task)
     app.router.add_post("/api/task/done", task_done)
     app.router.add_post("/api/note", note)
@@ -441,6 +555,7 @@ def make_app(hub, port):
     app.router.add_post("/api/handoff/{id}", handoff)
     app.router.add_post("/api/action", action)
     app.router.add_post("/api/presence", presence)
+    app.router.add_get("/news-img/{name}", news_image)
     app.router.add_static("/static/", STATIC)
     app.on_startup.append(hub.start)
     # on_shutdown runs before aiohttp waits for open connections; Home's WebSocket never closes on
