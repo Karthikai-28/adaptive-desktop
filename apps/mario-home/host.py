@@ -97,9 +97,9 @@ class Home(Gtk.Application):
             win.resize(area.width, area.height)
 
         # The shell's dock hides for fullscreen or maximized windows and the top bar treats them
-        # as covering the screen. Home is neither: it fills the work area (which already leaves
-        # out the top bar, the rail and a fixed dock) and stays a plain desktop layer, so the
-        # dock, the top bar and everything on them keep working exactly as without it.
+        # as covering the screen. Home is neither: it fills the work area (which leaves out the top
+        # bar and the rail; the page keeps the floating dock's band free) and stays a plain desktop
+        # layer, so the dock, the top bar and everything on them keep working exactly as without it.
         def stay_plain(_win, event):
             state = event.new_window_state
             if state & Gdk.WindowState.FULLSCREEN:

@@ -18,7 +18,9 @@ button { font: inherit; color: var(--text); cursor: pointer; }
 svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* -- layout: header, "Your day", then a main column and a side column ---------------------- */
-.home { height: 100%; padding: 20px 28px 22px; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 14px; overflow: hidden; }
+/* --dock: the band at the bottom where the shell's dock floats over the desktop (autohide keeps it
+   up there; it reserves no screen space, so Home leaves it free: 54px dock, 6px gap, room to breathe). */
+.home { --dock: 76px; height: 100%; padding: 20px 28px var(--dock); display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 14px; overflow: hidden; }
 .top { display: flex; align-items: center; gap: 36px; }
 .greet { flex: none; display: flex; flex-direction: column; gap: 2px; }
 .greet h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.015em; }

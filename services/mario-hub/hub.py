@@ -39,18 +39,35 @@ STATIC = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "static"
 PRESENCE = ("ready", "listening", "thinking", "doing", "needs_you")
 OPEN_URL_PREFIXES = ("https://claude.ai/", "https://gemini.google.com/", "https://docs.google.com/", "https://github.com/",
                      "https://mail.google.com/", "https://calendar.google.com/",
+                     "https://myaccount.google.com/apppasswords",
                      "https://www.instagram.com/", "http://127.0.0.1:", "http://localhost:")
 REPO = config_mod.ADAPTIVE_REPO
+
+
+def editor():
+    """The code editor: VS Code's `code` when it is installed, else Antigravity IDE (a VS Code
+    fork, the editor on this laptop) through its command-line launcher, which opens a folder in
+    the running window. A missing editor leaves the Code launcher dimmed."""
+    for cand in (shutil.which("code"), "/opt/antigravity-ide/bin/antigravity-ide",
+                 shutil.which("antigravity-ide"), shutil.which("antigravity")):
+        if cand and Path(cand).exists():
+            return [cand]
+    return ["code"]
+
+
 # Commands Home may start: the Apps card, and the Phone card (the phone's screen).
 # Only these run; a missing program shows its launcher dimmed.
 LAUNCH = {
     "terminal": ["gnome-terminal"],
     "files": ["xdg-open", str(Path.home())],
-    "code": ["code"],
+    "code": editor(),
     "browser": ["sh", "-c", 'gtk-launch "$(xdg-settings get default-web-browser)"'],
     "settings": ["gnome-control-center"],
     "phone": [sys.executable, str(REPO / "apps" / "adaptive-phone" / "phone.py")],
-    "screenshot": ["gnome-screenshot", "--interactive"],
+    # GNOME 42's own screenshot screen has no command; Adaptive Annotate selects an area, then
+    # lets you mark it up, copy or save it (the same as Super+Shift+S)
+    "screenshot": ([shutil.which("gnome-screenshot"), "--interactive"] if shutil.which("gnome-screenshot")
+                   else [sys.executable, str(REPO / "apps" / "adaptive-annotate" / "main.py")]),
     "cast": [str(REPO / "scripts" / "adaptive-cast-launch.sh"), "--toggle"],
     "calculator": ["gnome-calculator"],
     "monitor": ["gnome-system-monitor"],
@@ -280,7 +297,7 @@ class Hub:
         elif aid == "claude_session":
             cmd = [shutil.which("adaptive-agent") or "adaptive-agent", "claude", str(arg)]
         elif aid == "code":
-            cmd = ["code", str(arg)]
+            cmd = [*editor(), str(arg)]
         elif aid == "folder":
             cmd = ["xdg-open", str(arg)]
         elif aid == "url":
@@ -411,7 +428,9 @@ def make_app(hub, port):
     app.router.add_post("/api/presence", presence)
     app.router.add_static("/static/", STATIC)
     app.on_startup.append(hub.start)
-    app.on_cleanup.append(hub.stop)
+    # on_shutdown runs before aiohttp waits for open connections; Home's WebSocket never closes on
+    # its own, so closing it only at cleanup left every stop hanging until systemd's SIGKILL
+    app.on_shutdown.append(hub.stop)
     return app
 
 
@@ -430,7 +449,11 @@ def main():
             print(json.dumps(hub.snapshot(), indent=1, default=str))
         asyncio.run(once())
         return
-    web.run_app(make_app(hub, port), host="127.0.0.1", port=port, print=None)
+    web.run_app(make_app(hub, port), host="127.0.0.1", port=port, print=None, shutdown_timeout=3)
+    # A collector thread may still sit in an IMAP login or a subprocess (up to 20 s); nothing is
+    # left to save, so leave now instead of waiting for it. systemd ends any child (KillMode=mixed).
+    sys.stdout.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

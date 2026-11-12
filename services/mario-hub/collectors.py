@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -645,6 +646,9 @@ def _decode(value):
         return value or ""
 
 
+_MAIL_REFUSED = {}   # hash of (host, user, password) -> why Gmail refused it, for this hub run
+
+
 def mail(cfg):
     """Unread mail in the inbox, newest first, read-only over IMAP (nothing is marked read).
     The password (a Google app password) lives in the keyring: install-mario.sh --mail."""
@@ -657,9 +661,22 @@ def mail(cfg):
     password = keyring(service="mario-mail", account=user)
     if not password:
         return {"setup": True, "error": "No mail password in the keyring: scripts/install-mario.sh --mail"}
+    # Google shows an app password as four groups of four letters; it is the 16 letters that count
+    if re.fullmatch(r"(?:[a-zA-Z]{4}\s*){4}", password.strip()):
+        password = re.sub(r"\s+", "", password)
+    # A password Gmail refused is not sent again (repeated failed logins with an account password
+    # can trip Google's security alerts); saving a new one with install-mario.sh --mail changes the key.
+    import hashlib
+    key = hashlib.sha256(f"{host}\0{user}\0{password}".encode()).hexdigest()
+    if key in _MAIL_REFUSED:
+        return {**_MAIL_REFUSED[key], "unread": None, "items": [], "user": user}
     try:
         box = imaplib.IMAP4_SSL(host, timeout=15)
-        box.login(user, password)
+        try:
+            box.login(user, password)
+        except imaplib.IMAP4.error as exc:
+            _MAIL_REFUSED[key] = mail_login_problem(exc)
+            return {**_MAIL_REFUSED[key], "unread": None, "items": [], "user": user}
         box.select("INBOX", readonly=True)
         _, ids = box.search(None, "UNSEEN")
         unread = ids[0].split() if ids and ids[0] else []
@@ -678,9 +695,30 @@ def mail(cfg):
                 when = 0
             items.append({"from": name or addr, "subject": _decode(head.get("subject", "")) or "(no subject)", "when": when})
         box.logout()
-    except (imaplib.IMAP4.error, OSError) as exc:
-        return {"error": f"Mail: {str(exc)[:80]}", "unread": None, "items": []}
+    except imaplib.IMAP4.error as exc:
+        return {"error": f"Gmail answered: {_imap_text(exc)[:90]}", "unread": None, "items": []}
+    except OSError:
+        return {"error": f"Can't reach {host} right now. Mail comes back when the laptop is online.",
+                "unread": None, "items": []}
     return {"unread": len(unread), "items": items, "user": user}
+
+
+def _imap_text(exc):
+    """imaplib hands the server's reply over as bytes inside the exception: b'[ALERT] ...'."""
+    arg = exc.args[0] if exc.args else exc
+    text = arg.decode(errors="replace") if isinstance(arg, (bytes, bytearray)) else str(arg)
+    return re.sub(r"^\[[A-Z-]+\]\s*", "", text).strip()
+
+
+def mail_login_problem(exc):
+    """A Gmail login refusal -> what to do about it (`fix` tells Home which help to show)."""
+    text = _imap_text(exc)
+    if "application-specific password" in text.lower():
+        return {"fix": "app_password",
+                "error": "Gmail needs an app password here, not your Google password."}
+    if "invalid credentials" in text.lower() or "authenticationfailed" in text.lower():
+        return {"fix": "password", "error": "Gmail turned the saved app password down (wrong, or revoked)."}
+    return {"fix": "password", "error": f"Gmail refused the login: {text[:90]}"}
 
 
 def _ics_events(text, day):
@@ -745,8 +783,16 @@ def calendar(cfg):
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
             text = resp.read().decode(errors="replace")
+    except urllib.error.HTTPError as exc:
+        # Google answers 404 once the secret address is reset, and for the calendar's public address
+        return {"fix": True, "events": [],
+                "error": f"Google would not hand over the calendar ({exc.code}). Use the calendar's current "
+                         "\"Secret address in iCal format\"."}
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Calendar: {str(getattr(exc, 'reason', exc))[:80]}", "events": []}
+        return {"error": f"Can't reach the calendar right now ({str(getattr(exc, 'reason', exc))[:60]}).", "events": []}
+    if "BEGIN:VCALENDAR" not in text[:2000]:
+        return {"fix": True, "events": [],
+                "error": "That address is not a calendar feed. Use \"Secret address in iCal format\" (it ends in .ics)."}
     events, note = _ics_events(text, dt.date.today())
     return {"events": events[:8], "note": note}
 

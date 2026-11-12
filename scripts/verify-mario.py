@@ -160,6 +160,29 @@ def test_collectors(cfg, work):
     check("mail without setup says how to set it up", "install-mario.sh --mail" in collectors.mail({"mail": {}})["error"])
     check("calendar without setup says how to set it up", collectors.calendar({}).get("setup") is True
           or "error" in collectors.calendar({}))
+    import imaplib as _imap
+    gp = collectors.mail_login_problem(_imap.IMAP4.error(b"[ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833"))
+    check("mail: a Google account password is explained, not shown as b'...'",
+          gp["fix"] == "app_password" and "b'" not in gp["error"] and "app password" in gp["error"], str(gp))
+    import imaplib as _imap2
+    calls = []
+
+    class _Box:
+        def __init__(self, *a, **k): pass
+        def login(self, u, pw):
+            calls.append(pw)
+            raise _imap2.IMAP4.error(b"[ALERT] Application-specific password required")
+    real_ssl, real_kr = _imap2.IMAP4_SSL, collectors.keyring
+    _imap2.IMAP4_SSL, collectors.keyring = _Box, (lambda **k: "abcd efgh ijkl mnop")
+    try:
+        cfg_m = {"mail": {"user": "me@example.com", "imap_host": "imap.example.invalid"}}
+        first, second = collectors.mail(cfg_m), collectors.mail(cfg_m)
+    finally:
+        _imap2.IMAP4_SSL, collectors.keyring = real_ssl, real_kr
+    check("mail: an app password shown with spaces is sent as its 16 letters", calls[:1] == ["abcdefghijklmnop"], str(calls))
+    check("mail: a refused password is not sent again", len(calls) == 1 and second["fix"] == "app_password", str(calls))
+    check("mail: a refused app password asks for a new one",
+          collectors.mail_login_problem(_imap.IMAP4.error(b"[AUTHENTICATIONFAILED] Invalid credentials (Failure)"))["fix"] == "password")
     inbox_dir = Path(cfg["thinking_space"]).parent / "notes-fixture" / "LOOM"
     inbox_dir.mkdir(parents=True)
     (inbox_dir / "Inbox.md").write_text("# LOOM inbox\n\n- 2026-11-10 09:00  older\n- [x] 2026-11-11 09:00  done\n- 2026-11-12 09:00  newer\n")
@@ -340,6 +363,15 @@ def test_page():
     launches = _re.findall(r'data-launch="([a-z]+)"', html)
     check("every app button is a known command", launches and all(k in hub_mod.LAUNCH for k in launches),
           str([k for k in launches if k not in hub_mod.LAUNCH]))
+    check("Code and Screenshot use programs this kind of laptop has (Antigravity IDE, Adaptive Annotate)",
+          hub_mod.LAUNCH["screenshot"][-1].endswith(("adaptive-annotate/main.py", "--interactive"))
+          and hub_mod.editor()[0] != "" and hub_mod.LAUNCH["code"] == hub_mod.editor())
+    check("Home leaves the dock's band free at the bottom",
+          _re.search(r"\.home \{ --dock: (\d+)px;[^}]*padding: [^;]*var\(--dock\)", css) is not None
+          and int(_re.search(r"--dock: (\d+)px", css).group(1)) >= 66)
+    check("the mail fix opens Google's app-password page, and the hub allows it",
+          "https://myaccount.google.com/apppasswords" in script
+          and "https://myaccount.google.com/apppasswords".startswith(hub_mod.OPEN_URL_PREFIXES))
     opens = _re.findall(r'data-open="([^"]+)"', html)
     for gone in ("downloads", "lock"):
         check(f"no {gone} button", f'data-launch="{gone}"' not in html)

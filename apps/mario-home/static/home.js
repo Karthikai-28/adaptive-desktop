@@ -119,6 +119,15 @@ const render = {
   mail() {
     const m = data("mail");
     count("mail", m.unread || "");
+    if (m.unread == null && m.fix) {
+      // the login was refused: say why and how to put it right
+      return fill(body("mail"),
+        empty(m.error, el("br"), m.fix === "app_password"
+          ? "Make one named Mario (needs 2-Step Verification), then save it with "
+          : "Make a new app password, then save it again with ", code("scripts/install-mario.sh --mail")),
+        el("div", { class: "foot" }, el("button", { class: "btn primary", type: "button",
+          onclick: () => openUrl("https://myaccount.google.com/apppasswords") }, "Create an app password")));
+    }
     if (m.unread == null) {
       return fill(body("mail"), empty(m.setup ? "Connect Gmail once on this laptop: " : (m.error || "Checking mail…"),
         m.setup ? code("scripts/install-mario.sh --mail") : null, m.setup ? el("br") : null,
@@ -143,7 +152,8 @@ const render = {
     count("today", events.length || "");
     if (!c.events) {
       return fill(body("today"), head, empty(c.setup ? "Show today's events: " : (c.error || "Loading your calendar…"),
-        c.setup ? code("scripts/install-mario.sh --calendar") : null, c.setup ? el("br") : null,
+        c.fix ? el("br") : null, c.fix ? "Save the right one with " : null,
+        c.setup || c.fix ? code("scripts/install-mario.sh --calendar") : null, c.setup ? el("br") : null,
         c.setup ? "It reads your calendar's private iCal address, read-only." : null));
     }
     const nowIndex = events.findIndex((e) => e.start && e.start > hm) - 1;

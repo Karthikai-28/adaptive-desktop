@@ -38,7 +38,7 @@ the last column through both rows.
 
 | Card | Shows | Opens / does |
 | --- | --- | --- |
-| Mail | Unread count and up to five newest unread (sender, subject, time), read-only over IMAP | Gmail |
+| Mail | Unread count and up to five newest unread (sender, subject, time), read-only over IMAP. A refused login says why; for a Google account password (Gmail wants an app password) a button opens the app-password page | Gmail |
 | Today | Date and today's events on a timeline, the current one highlighted (private iCal address) | Google Calendar |
 | Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; tick to finish; add a task; "Mario suggests" in the rows left over (unpushed work, stopped services) with their action or + to make it a task | `/api/task`, `/api/task/done` |
 | Projects (live) | One repo per face, newest first (last commit, branch, changes / to push / to pull / up to date), then an Agents face: terminal agent sessions and Agent Office | Code, Terminal |
@@ -48,7 +48,7 @@ the last column through both rows.
 | News (live) | One headline at a time, rolling to the next every 30 s (a bar along the bottom fills to the next; paused under the pointer), source and age, four "Up next"; RSS from `news` in `mario.json` (Google News Tech and India, Hacker News by default), refreshed every 15 min. `"cards_off": ["news"]` stops the fetching | The article (only headlines on Home open) |
 | Thinking Space | The four boards with their sections, or what is waiting in their Inbox | The board, the hub |
 | Weather (live) | Now, feels-like, rain chance; the next six hours; today's high, low and rain (Open-Meteo) | |
-| Apps | Terminal, Files, Code, Browser, Settings, Calculator, Screenshot, System Monitor | `LAUNCH` |
+| Apps | Terminal, Files, Code (VS Code's `code`, else Antigravity IDE), Browser, Settings, Calculator, Screenshot (`gnome-screenshot`, else Adaptive Annotate), System Monitor | `LAUNCH` |
 | AI assistants | Claude and Gemini: usage of the fullest window and when each resets | claude.ai, Gemini |
 | Phone | Adaptive Link state | The phone's screen |
 
@@ -58,8 +58,9 @@ with an Update (Software Updater) or Check (System Monitor) button.
 
 ### The shell around it stays as it is
 
-Home is only the desktop layer. It fills the work area, which already leaves out the top bar, the
-rail and a fixed dock; it sits below every window, is off the taskbar and the dock, never takes
+Home is only the desktop layer. It fills the work area, which leaves out the top bar and the rail;
+the dock floats over the desktop without reserving space (autohide keeps it up when nothing covers
+it), so Home keeps a band at the bottom free for it (`--dock` in `home.css`). It sits below every window, is off the taskbar and the dock, never takes
 focus when it appears, and is kept from being maximized or fullscreen (the dock hides only for
 those). So the dock, the top bar and everything on it (the island, ROS 2, the system monitor,
 network, Control Center, the keyboard-layout switch on Super+Space) work exactly as without it.
@@ -76,7 +77,8 @@ scripts/install-mario.sh --mail       # Gmail address + a Google app password ->
 scripts/install-mario.sh --calendar   # the calendar's "Secret address in iCal format" -> keyring
 ```
 
-Both secrets stay in the keyring (`secret-tool`, attributes `service mario-mail` and
+Each step tries the login or the feed once before it finishes and says what is wrong if Gmail or
+Google refuses (the password itself is never printed). Both secrets stay in the keyring (`secret-tool`, attributes `service mario-mail` and
 `service mario-calendar`); the hub reads them when it collects and never writes them to a file,
 a log or its state. Mail is read-only: headers of unread messages, fetched with `BODY.PEEK` so
 nothing is marked read. Recurring events need `icalendar` and `recurring_ical_events`, which

@@ -102,8 +102,26 @@ except (OSError, ValueError):
 cfg["mail"] = {**cfg.get("mail", {}), "user": addr, "imap_host": cfg.get("mail", {}).get("imap_host", "imap.gmail.com")}
 json.dump(cfg, open(path, "w"), indent=2)
 PY
+    # Try the login now, so a Google account password (which Gmail refuses over IMAP) is caught
+    # here and not as an error on Home. Nothing about the password is printed.
+    if ! python3 - "$REPO/services/mario-hub" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import collectors, config
+out = collectors.mail(config.load())
+if out.get("unread") is None:
+    print("Not connected: " + out.get("error", "unknown error"))
+    if out.get("fix") == "app_password":
+        print("That was your Google password. Make an app password at")
+        print("  https://myaccount.google.com/apppasswords  and run this again with it.")
+    sys.exit(1)
+print(f"Mail connected: {out['unread']} unread.")
+PY
+    then
+        systemctl --user restart "$UNIT" 2>/dev/null || true
+        exit 1
+    fi
     systemctl --user restart "$UNIT" 2>/dev/null || true
-    echo "Mail connected. The card fills in within two minutes."
     exit 0
 fi
 
@@ -118,8 +136,22 @@ Today card: today's events, read-only, from your calendar's private iCal address
      the calendar, so it is never written to a file, a log or the hub's state.
 TXT
     secret-tool store --label="Mario calendar (secret iCal address)" service mario-calendar account ical
+    # Fetch it once now, so a wrong address shows here; the address itself is never printed.
+    if ! python3 - "$REPO/services/mario-hub" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import collectors, config
+out = collectors.calendar(config.load())
+if out.get("error"):
+    print("Not connected: " + out["error"])
+    sys.exit(1)
+print(f"Calendar connected: {len(out.get('events') or [])} event(s) today.")
+PY
+    then
+        systemctl --user restart "$UNIT" 2>/dev/null || true
+        exit 1
+    fi
     systemctl --user restart "$UNIT" 2>/dev/null || true
-    echo "Calendar connected. The card fills in within a few minutes."
     exit 0
 fi
 
