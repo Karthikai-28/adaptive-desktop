@@ -103,8 +103,13 @@ case "$*" in *--list-apps*) printf '%s\\n' "[server] INFO: List of apps:" " - Wh
     config = root / "config/adaptive-desktop/phone.json"
     config.parent.mkdir(parents=True)
     config.write_text(json.dumps({"serial": "192.168.31.15:37601", "address": "192.168.31.15:37601"}))
+    # The app's messages go to the desktop when it is not run from a terminal, as here: a stand-in
+    # notify-send keeps "No such phone app" and the like off the real desktop during the check.
+    (root / "notify-send").write_text("#!/bin/sh\n")
+    (root / "notify-send").chmod(0o755)
     env = dict(os.environ, ADAPTIVE_PHONE_ADB=str(root / "adb"), ADAPTIVE_PHONE_SCRCPY=str(root / "scrcpy"),
-               XDG_CONFIG_HOME=str(root / "config"), XDG_CACHE_HOME=str(root / "cache"))
+               XDG_CONFIG_HOME=str(root / "config"), XDG_CACHE_HOME=str(root / "cache"),
+               PATH=f"{root}:{os.environ.get('PATH', '')}")
     script = str(REPO / "apps/adaptive-phone/phone.py")
     done = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
