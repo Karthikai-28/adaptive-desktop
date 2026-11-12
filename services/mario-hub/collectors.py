@@ -627,15 +627,52 @@ def read_notes(path, limit=4):
 
 # ------------------------------------------------------------- your day
 
+# What the desktop session hands to user services when you log in. The hub is a user service that
+# can start before anyone logs in (lingering), and the display can change between logins, so this is
+# read when it is needed, never kept from the hub's own start.
+SESSION_KEYS = ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "DCONF_PROFILE",
+                "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE", "XDG_SESSION_DESKTOP", "XDG_DATA_DIRS",
+                "XDG_CONFIG_DIRS", "DESKTOP_SESSION", "GNOME_SETUP_DISPLAY", "SSH_AUTH_SOCK")
+
+
+def session_env():
+    """The logged-in desktop's variables (DISPLAY and the rest) from the user manager, or {} when
+    no desktop session is up yet."""
+    out, _ = _run(["systemctl", "--user", "show-environment"], timeout=3)
+    env = {}
+    for line in (out or "").splitlines():
+        key, _, val = line.partition("=")
+        if key in SESSION_KEYS:
+            env[key] = val
+    return env if env.get("DISPLAY") or env.get("WAYLAND_DISPLAY") else {}
+
+
+class KeyringNotReady(Exception):
+    """The keyring cannot be asked yet: nobody is logged in, or it is still locked."""
+
+
 def keyring(**attrs):
-    """A secret from the GNOME keyring (secret-tool), or "" when it is not stored. Never logged."""
+    """A secret from the GNOME keyring (secret-tool), or "" when it is not stored. Never logged.
+    Raises KeyringNotReady before you log in (the login unlocks it): asking then would start a
+    keyring daemon outside the session or wait on an unlock prompt nobody can see."""
     if not shutil.which("secret-tool"):
         return ""
+    env = session_env()
+    if not env:
+        raise KeyringNotReady("not logged in")
     args = ["secret-tool", "lookup"]
     for k, v in attrs.items():
         args += [k, str(v)]
-    out, _ = _run(args, timeout=5)
-    return (out or "").strip()
+    try:
+        out = subprocess.run(args, capture_output=True, text=True, timeout=5, env={**os.environ, **env})
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise KeyringNotReady(str(exc)) from exc
+    if out.returncode != 0 and out.stderr.strip():
+        raise KeyringNotReady(out.stderr.strip()[:120])   # no secret service, locked, refused
+    return (out.stdout or "").strip()
+
+
+KEYRING_WAIT = "Waiting for the keyring: it opens when you log in."
 
 
 def _decode(value):
@@ -658,7 +695,10 @@ def mail(cfg):
     user, host = m.get("user", ""), m.get("imap_host", "imap.gmail.com")
     if not user:
         return {"setup": True, "error": "Mail is not set up: scripts/install-mario.sh --mail"}
-    password = keyring(service="mario-mail", account=user)
+    try:
+        password = keyring(service="mario-mail", account=user)
+    except KeyringNotReady:
+        return {"waiting": True, "error": KEYRING_WAIT, "unread": None, "items": []}
     if not password:
         return {"setup": True, "error": "No mail password in the keyring: scripts/install-mario.sh --mail"}
     # Google shows an app password as four groups of four letters; it is the 16 letters that count
@@ -698,7 +738,7 @@ def mail(cfg):
     except imaplib.IMAP4.error as exc:
         return {"error": f"Gmail answered: {_imap_text(exc)[:90]}", "unread": None, "items": []}
     except OSError:
-        return {"error": f"Can't reach {host} right now. Mail comes back when the laptop is online.",
+        return {"waiting": True, "error": f"Can't reach {host} right now. Mail comes back when the laptop is online.",
                 "unread": None, "items": []}
     return {"unread": len(unread), "items": items, "user": user}
 
@@ -777,7 +817,10 @@ def calendar(cfg):
     """Today's events from your calendar's private iCal address (kept in the keyring:
     install-mario.sh --calendar). Read-only."""
     import datetime as dt
-    url = keyring(service="mario-calendar", account="ical")
+    try:
+        url = keyring(service="mario-calendar", account="ical")
+    except KeyringNotReady:
+        return {"waiting": True, "error": KEYRING_WAIT, "events": []}
     if not url:
         return {"setup": True, "error": "Calendar is not set up: scripts/install-mario.sh --calendar"}
     try:
@@ -789,7 +832,8 @@ def calendar(cfg):
                 "error": f"Google would not hand over the calendar ({exc.code}). Use the calendar's current "
                          "\"Secret address in iCal format\"."}
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Can't reach the calendar right now ({str(getattr(exc, 'reason', exc))[:60]}).", "events": []}
+        return {"waiting": True, "events": [],
+                "error": f"Can't reach the calendar right now ({str(getattr(exc, 'reason', exc))[:60]})."}
     if "BEGIN:VCALENDAR" not in text[:2000]:
         return {"fix": True, "events": [],
                 "error": "That address is not a calendar feed. Use \"Secret address in iCal format\" (it ends in .ics)."}

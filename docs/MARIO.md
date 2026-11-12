@@ -101,6 +101,20 @@ directly is phase 2.
 For local answers with memory, run LOOM's backend (`local-ai/app/backend`, port 8765). Without it
 the hub asks Ollama directly (`fallback_model`, LOOM's `default_chat`) and says so under the answer.
 
+## After a restart
+
+The hub is a user service that starts at boot (lingering is on), before anyone logs in, so:
+
+- it leaves the keyring alone until a desktop session is up (asking earlier would start a keyring
+  outside the session); Mail and Today say "Waiting for the keyring" and look again every 15 s, so
+  they fill in within seconds of logging in. A network that is not up yet (boot, resume) is retried
+  the same way;
+- everything Home opens goes to the display of the current login, read from the user manager at
+  that moment (`systemctl --user show-environment`), not the one the hub started with;
+- Home starts at every Adaptive login (autostart entry), reconnects to the hub on its own, and
+  reloads if its web view dies;
+- stopping the hub takes well under a second (it used to hang until systemd killed it).
+
 ## How a request goes
 
 1. **Instant**: "brief me", "what changed today", "pick a movie for tonight" are answered from the

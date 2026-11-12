@@ -75,6 +75,15 @@ LAUNCH = {
 }
 
 
+WAIT_RETRY_S = 15
+
+
+def launch_env():
+    """Programs started from Home go to the desktop you are logged in to now: the hub may have
+    started at boot, before any login, and the display can differ from one login to the next."""
+    return {**os.environ, **collectors.session_env()}
+
+
 class Hub:
     def __init__(self, cfg, schedule=None):
         self.cfg = cfg
@@ -134,7 +143,10 @@ class Hub:
         _, every = self.schedule[name]
         while True:
             await self.collect_once(name)
-            await asyncio.sleep(every)
+            # a card waiting for the login (the keyring) looks again soon, so mail and the
+            # calendar are there within seconds of logging in, not minutes
+            waiting = (self.cards.get(name, {}).get("data") or {}).get("waiting")
+            await asyncio.sleep(min(every, WAIT_RETRY_S) if waiting else every)
 
     async def start(self, _app=None):
         for name in self.schedule:
@@ -325,7 +337,10 @@ class Hub:
         else:
             return {"ok": False, "error": f"unknown action {aid}"}
         try:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            env = launch_env()
+            if not (env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")):
+                return {"ok": False, "error": "no desktop session to open it on"}
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, env=env)
         except OSError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}

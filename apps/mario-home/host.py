@@ -63,6 +63,9 @@ def make_view(path):
         return False
 
     view.connect("load-failed", retry)
+    # the page's web process can die (out of memory, a GPU reset after suspend); Home must not stay
+    # blank until the next login, so it loads again
+    view.connect("web-process-terminated", lambda *_: retry())
     view.connect("decide-policy", stay_inside)
     view.load_uri(hub_url(path))
     return view

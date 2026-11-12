@@ -181,6 +181,18 @@ def test_collectors(cfg, work):
         _imap2.IMAP4_SSL, collectors.keyring = real_ssl, real_kr
     check("mail: an app password shown with spaces is sent as its 16 letters", calls[:1] == ["abcdefghijklmnop"], str(calls))
     check("mail: a refused password is not sent again", len(calls) == 1 and second["fix"] == "app_password", str(calls))
+    real_se = collectors.session_env
+    collectors.session_env = lambda: {}
+    try:
+        boot_mail = collectors.mail({"mail": {"user": "me@example.com"}})
+        boot_cal = collectors.calendar({})
+    finally:
+        collectors.session_env = real_se
+    check("before login the keyring is left alone and mail/calendar wait for it",
+          boot_mail.get("waiting") and boot_cal.get("waiting") and not boot_mail.get("setup") and not boot_cal.get("setup"),
+          str((boot_mail, boot_cal)))
+    check("the session's display is read from the user manager, not kept from the hub's start",
+          collectors.session_env.__doc__ and "show-environment" in Path(collectors.__file__).read_text())
     check("mail: a refused app password asks for a new one",
           collectors.mail_login_problem(_imap.IMAP4.error(b"[AUTHENTICATIONFAILED] Invalid credentials (Failure)"))["fix"] == "password")
     inbox_dir = Path(cfg["thinking_space"]).parent / "notes-fixture" / "LOOM"
@@ -402,6 +414,40 @@ def test_page():
         check("host.py compiles", False, str(exc))
 
 
+async def test_after_boot(cfg):
+    print("After a restart")
+    import hub as hub_mod
+    calls = {"n": 0}
+
+    def waiting(_cfg):
+        calls["n"] += 1
+        return {"waiting": True, "n": calls["n"]}
+
+    real_wait, real_se = hub_mod.WAIT_RETRY_S, hub_mod.collectors.session_env
+    hub_mod.WAIT_RETRY_S = 0.05
+    hub = hub_mod.Hub(cfg, schedule={"mail": (waiting, 3600)})
+    task = asyncio.create_task(hub.run_collector("mail"))
+    await asyncio.sleep(0.4)
+    task.cancel()
+    hub_mod.WAIT_RETRY_S = real_wait
+    check("a card waiting for the login looks again within seconds, not at its usual interval", calls["n"] >= 3, str(calls))
+    hub_mod.collectors.session_env = lambda: {}
+    try:
+        env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+        saved = dict(os.environ)
+        os.environ.clear(); os.environ.update(env)
+        out = hub.action("launch", "calculator")
+    finally:
+        os.environ.clear(); os.environ.update(saved)
+        hub_mod.collectors.session_env = real_se
+    check("with nobody logged in a launcher says so instead of failing silently", out["ok"] is False and "session" in out["error"], str(out))
+    hub_mod.collectors.session_env = lambda: {"DISPLAY": ":7", "XAUTHORITY": "/x"}
+    try:
+        check("programs open on the display of the current login", hub_mod.launch_env()["DISPLAY"] == ":7")
+    finally:
+        hub_mod.collectors.session_env = real_se
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         cfg, work = fixture(Path(tmp))
@@ -411,6 +457,7 @@ def main():
         try:
             import aiohttp  # noqa: F401
             asyncio.run(test_hub(cfg))
+            asyncio.run(test_after_boot(cfg))
         except ImportError:
             print("  skip hub checks: python3-aiohttp is not installed")
     test_page()
