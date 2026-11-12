@@ -49,7 +49,7 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: rgba(255
 .main { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px; }
 .left { min-height: 0; display: grid; grid-template-rows: minmax(0, 1.05fr) minmax(0, 1.25fr); gap: 18px; }
 .row { min-height: 0; display: grid; gap: 18px; }
-.r3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.r2 { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
 /* lower block: four equal columns, two rows. Projects, Recent files and Quick note take one column
    each (half the width of the old cards, full height); Thinking Space takes two; News runs down the last. */
 .grid4 { min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 18px; }
@@ -98,9 +98,6 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: rgba(255
 .link svg { width: 15px; height: 15px; }
 
 /* today */
-.dateline { display: flex; align-items: baseline; gap: 10px; }
-.dateline b { font-size: 38px; font-weight: 700; line-height: 1; }
-.dateline span { font-size: 20px; color: var(--soft); }
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden; }
 .timeline li { display: grid; grid-template-columns: 46px 16px minmax(0, 1fr); gap: 8px; align-items: start; }
 .timeline .at { font-size: 12px; color: var(--soft); padding-top: 2px; }
@@ -109,6 +106,17 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: rgba(255
 .timeline li:last-child .rail::before { display: none; }
 .timeline .rail i { position: absolute; left: 2px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--indigo); box-shadow: 0 0 0 3px rgba(125,122,255,.2); }
 .timeline li.past { opacity: .5; }
+/* the Today tile sits under the weather and takes whatever height the side column has spare */
+#c-today { flex: 1 1 0; min-height: 132px; gap: 8px; }
+#c-today .body { gap: 8px; }
+#c-today .meta + .open { margin-left: 2px; }
+#c-today .empty { font-size: 12px; line-height: 1.6; }
+#c-today .empty code { display: inline-block; white-space: nowrap; font-size: 11px; margin: 2px 0; }
+#c-today .timeline li { grid-template-columns: 40px 16px minmax(0, 1fr); gap: 6px; }
+#c-today .timeline .rail { min-height: 32px; }
+#c-today .timeline { gap: 0; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 14px), transparent); }
+#c-today .timeline li > div { padding-bottom: 4px !important; }
+#c-today .ttl { font-size: 13px; }
 .timeline li.now .rail i { background: var(--ok); box-shadow: 0 0 0 3px rgba(48,209,88,.25); }
 
 /* tasks */

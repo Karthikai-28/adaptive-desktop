@@ -147,20 +147,23 @@ const render = {
     const c = data("calendar");
     const now = new Date();
     const hm = now.toTimeString().slice(0, 5);
-    const head = el("div", { class: "dateline" }, el("b", {}, now.getDate()), el("span", {}, now.toLocaleDateString(undefined, { weekday: "short" })));
+    $("#today-date").textContent = now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
     const events = c.events || [];
     count("today", events.length || "");
     if (!c.events) {
-      return fill(body("today"), head, empty(c.setup ? "Show today's events: " : (c.error || "Loading your calendar…"),
+      return fill(body("today"), empty(c.setup ? "Show today's events: " : (c.error || "Loading your calendar…"),
         c.fix ? el("br") : null, c.fix ? "Save the right one with " : null,
         c.setup || c.fix ? code("scripts/install-mario.sh --calendar") : null, c.setup ? el("br") : null,
         c.setup ? "It reads your calendar's private iCal address, read-only." : null));
     }
     const nowIndex = events.findIndex((e) => e.start && e.start > hm) - 1;
-    fill(body("today"), head, events.length ? el("ul", { class: "timeline" }, events.slice(0, 5).map((e, i) => {
-      const end = e.start && e.minutes ? (() => { const [h, m] = e.start.split(":").map(Number); const t = h * 60 + m + e.minutes; return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; })() : "";
-      const past = e.start && (end ? end <= hm : e.start < hm && i < nowIndex);
-      const live = e.start && e.start <= hm && end && end > hm;
+    const rows = events.map((e, i) => {
+      const end = e.start && e.minutes ? (() => { const [h, m] = e.start.split(":").map(Number); const t = Math.min(h * 60 + m + e.minutes, 24 * 60); return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; })() : "";
+      return { e, past: e.start && (end ? end <= hm : e.start < hm && i < nowIndex), live: e.start && e.start <= hm && end && end > hm };
+    });
+    // the tile is small: start at the first event still to come (all-day ones stay), not at this morning's
+    const ahead = rows.filter((r) => !r.past);
+    fill(body("today"), events.length ? el("ul", { class: "timeline" }, (ahead.length ? ahead : rows).slice(0, 5).map(({ e, past, live }) => {
       return el("li", { class: live ? "now" : past ? "past" : "" },
         el("span", { class: "at" }, e.all_day ? "All day" : e.start),
         el("span", { class: "rail" }, el("i")),

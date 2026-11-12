@@ -32,14 +32,14 @@ own clock, like live tiles: each at its own pace and offset so they never all mo
 while the pointer is over the tile or the screen is hidden; dots in the header show which face is up.
 New data redraws the current face in place without turning it. The top bar keeps the clock.
 
-Below Mail, Today and Tasks is a four-column block: Projects, Recent files and Quick note take one
+Below Mail and Tasks (Today is a small tile in the side column, under the weather) is a four-column block: Projects, Recent files and Quick note take one
 column each (half the width they had, full row height), Thinking Space takes two, and News runs down
 the last column through both rows.
 
 | Card | Shows | Opens / does |
 | --- | --- | --- |
 | Mail | Unread count and up to five newest unread (sender, subject, time), read-only over IMAP. A refused login says why; for a Google account password (Gmail wants an app password) a button opens the app-password page | Gmail |
-| Today | Date and today's events on a timeline, the current one highlighted (private iCal address) | Google Calendar |
+| Today | Small tile under the weather: date, and today's events still to come on a timeline, the current one highlighted (private iCal address) | Google Calendar |
 | Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; tick to finish; add a task; "Mario suggests" in the rows left over (unpushed work, stopped services) with their action or + to make it a task | `/api/task`, `/api/task/done` |
 | Projects (live) | One repo per face, newest first (last commit, branch, changes / to push / to pull / up to date), then an Agents face: terminal agent sessions and Agent Office | Code, Terminal |
 | Recent files (live) | The newest files take turns on top (type, size, when), the next two listed below | The file |
