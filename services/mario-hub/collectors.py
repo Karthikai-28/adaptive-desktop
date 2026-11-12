@@ -564,7 +564,7 @@ def processes(cfg):
 
 
 def agent_sessions(cfg):
-    """Claude / agy / codex sessions kept by terminal/agent.py on its private tmux server."""
+    """Claude / agy sessions kept by terminal/agent.py on its private tmux server."""
     if not shutil.which("tmux"):
         return {"sessions": []}
     sock = os.environ.get("ADAPTIVE_AGENT_SOCKET", "adaptive-agents")

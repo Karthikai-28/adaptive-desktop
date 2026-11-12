@@ -184,7 +184,7 @@ def test_collectors(cfg, work):
 def test_usage(cfg):
     print("AI usage")
     import types
-    snap = {"codex": {"windows": [{"label": "5h", "used": 90}]},
+    snap = {"other": {"windows": [{"label": "5h", "used": 90}]},
             "claude": {"windows": [{"label": "5h", "used": 42, "resetsAt": 1}, {"label": "Weekly", "used": 70, "resetsAt": 2},
                                    {"label": "old", "used": 99, "expired": True}]},
             "gemini": {"windows": []}}
