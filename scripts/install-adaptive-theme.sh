@@ -126,21 +126,28 @@ if [ "${DCONF_PROFILE:-}" = "adaptive" ]; then
     gsettings set org.gnome.desktop.interface document-font-name "$DOC_FONT"
     gsettings set org.gnome.desktop.interface monospace-font-name "$MONO_FONT"
 
-    # picture-uri and picture-uri-dark both, or the background reverts the
-    # moment color-scheme flips. primary-color is what shows during the gap
-    # before the file loads, so it gets the same canvas value.
-    BG_URI="file://${BG_DST}/adaptive-desktop.png"
-    gsettings set org.gnome.desktop.background picture-uri "$BG_URI"
-    gsettings set org.gnome.desktop.background picture-uri-dark "$BG_URI"
-    gsettings set org.gnome.desktop.background picture-options 'zoom'
-    gsettings set org.gnome.desktop.background primary-color "$(
-        python3 -c "import sys; sys.path.insert(0, '${REPO}/scripts'); import adaptive_tokens; print(adaptive_tokens.load().hex('surface.window'))"
-    )"
+    # The hourly rotation (adaptive-wallpaper.timer) owns the wallpaper once it is
+    # installed: rebuilding the theme must not put the generated image back over
+    # the picture it chose.
+    if systemctl --user is-enabled adaptive-wallpaper.timer >/dev/null 2>&1; then
+        echo "  wallpaper    left to the hourly rotation"
+    else
+        # picture-uri and picture-uri-dark both, or the background reverts the
+        # moment color-scheme flips. primary-color is what shows during the gap
+        # before the file loads, so it gets the same canvas value.
+        BG_URI="file://${BG_DST}/adaptive-desktop.png"
+        gsettings set org.gnome.desktop.background picture-uri "$BG_URI"
+        gsettings set org.gnome.desktop.background picture-uri-dark "$BG_URI"
+        gsettings set org.gnome.desktop.background picture-options 'zoom'
+        gsettings set org.gnome.desktop.background primary-color "$(
+            python3 -c "import sys; sys.path.insert(0, '${REPO}/scripts'); import adaptive_tokens; print(adaptive_tokens.load().hex('surface.window'))"
+        )"
 
-    # The lock shield already has its own image; point the screensaver key at
-    # it so the blanked-screen colour matches instead of falling back to grey.
-    gsettings set org.gnome.desktop.screensaver picture-uri "file://${BG_DST}/adaptive-lock.png"
-    gsettings set org.gnome.desktop.screensaver picture-options 'zoom'
+        # The lock shield already has its own image; point the screensaver key at
+        # it so the blanked-screen colour matches instead of falling back to grey.
+        gsettings set org.gnome.desktop.screensaver picture-uri "file://${BG_DST}/adaptive-lock.png"
+        gsettings set org.gnome.desktop.screensaver picture-options 'zoom'
+    fi
 
     echo "Adaptive session appearance set:"
     echo "  gtk-theme    $(gsettings get org.gnome.desktop.interface gtk-theme)"
