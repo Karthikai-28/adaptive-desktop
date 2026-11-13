@@ -126,6 +126,14 @@ class Tokens:
         own = alpha if alpha is not None else own
         return value if own is None else f"alpha({value}, {own / 100:.2f})"
 
+    def terminal(self):
+        """The terminal scheme: background, foreground, cursor and the sixteen ANSI colours, as hex."""
+        raw = self.raw["terminal"]
+        resolve = lambda alias: self.hex(_ALIAS.match(alias).group(1))  # noqa: E731
+        return {"background": resolve(raw["background"]), "foreground": resolve(raw["foreground"]),
+                "cursor": resolve(raw["cursor"]),
+                "ansi": [resolve(a) for a in raw["ansi"]] + [resolve(a) for a in raw["bright"]]}
+
     def value(self, name, where=""):
         """Any token a stylesheet can name, as CSS text."""
         raw = self.raw

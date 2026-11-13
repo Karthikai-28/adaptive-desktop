@@ -7,6 +7,10 @@ names, and Antigravity. The embedded Antigravity and Files terminals use the
 same Zsh setup, Nerd Font and colors; external actions open the KTERM window.
 ROS 2 terminals retain the panel's selected environment on top of Zsh startup.
 Existing shell sessions keep their state; these settings apply to new terminals.
+KTERM ships with Catppuccin Mocha; the same step replaces it with the desktop's own scheme (the
+`terminal` section of `tokens/adaptive.tokens.json`) in the Terminator profile, both Starship
+prompts, the shell's menu colours and the editor's terminal. The files KTERM wrote are kept once
+under `logs/terminal-setup-before/`.
 `python3 scripts/install-terminal.py` previews configuration changes;
 `python3 scripts/verify-terminal.py` checks command routing and ROS setup.
 

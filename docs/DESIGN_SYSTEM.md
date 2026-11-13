@@ -36,6 +36,8 @@ To retune the whole desktop, change the ramp's hue, chroma or lightness list and
   chart series or categories apart.
 - **One gradient.** `aurora` (blue → indigo → cyan) means Mario is thinking or answering. No other
   gradient exists; do not add one for atmosphere.
+- **The terminal has its own sixteen.** Programs need six distinct hues, so yellow and purple exist
+  in the terminal scheme and nowhere else in the interface.
 - **Two materials.** Glass (a graphite tint over the blurred wallpaper) for the two large
   backdrops, Files and Home. Solid surfaces for everything that is read from.
 
@@ -79,6 +81,11 @@ One hue (OKLCH hue 286, chroma 0.004) at twelve lightness steps.
 | `orange.pale` | `#FFCF85` |
 | `red` | `#FF453A` |
 | `red.pale` | `#FFA59E` |
+| `yellow` | `#FFD60A` |
+| `yellow.pale` | `#FFE98A` |
+| `purple` | `#BF5AF2` |
+| `purple.pale` | `#DDA8FF` |
+| `cyan.pale` | `#B5E9FF` |
 
 ### Alpha scale
 
@@ -129,6 +136,21 @@ A colour is only ever used at full strength or at one of: 4%, 8%, 12%, 16%, 24%,
 | `glass` | `{n1}/60` | `rgba(21, 21, 23, 0.60)` |
 | `glass.pane` | `{white}/4` | `rgba(255, 255, 255, 0.04)` |
 | `glass.edge` | `{white}/8` | `rgba(255, 255, 255, 0.08)` |
+
+### Terminal
+
+Ground `#151517`, text `#CACACD`, cursor `#0A84FF`. Applied by `scripts/install-terminal.py`.
+
+| ANSI | Normal | Bright |
+|---|---|---|
+| black | `#3B3B3D` | `#868688` |
+| red | `#FF453A` | `#FFA59E` |
+| green | `#30D158` | `#9FF0B5` |
+| yellow | `#FFD60A` | `#FFE98A` |
+| blue | `#0A84FF` | `#409CFF` |
+| magenta | `#BF5AF2` | `#DDA8FF` |
+| cyan | `#64D2FF` | `#B5E9FF` |
+| white | `#CACACD` | `#F5F5F8` |
 
 ### Gradient
 
@@ -196,6 +218,7 @@ GTK widgets styled by the session theme can also use its named colours (`@ad_bg`
 | Agent Office | `services/agent-office/static/style.src.css` |
 | Adaptive Home on the TV | `apps/adaptive-tv/app/home.src.css` |
 | Palette, Settings, Cast, Projects, Gestures | `apps/adaptive-*/style.src.css` |
+| Terminal (Terminator profile, Starship prompts, shell menus, the editor's terminal) | the `terminal` section of the tokens, applied by `scripts/install-terminal.py --apply` |
 
 ### What is still written by hand
 

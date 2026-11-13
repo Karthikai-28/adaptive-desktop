@@ -1083,6 +1083,9 @@ features: ideas go to a Later list and are built only if their absence has stopp
   compiled from tokens. Mario Home recoloured from navy and five accents to graphite and one blue
   (live). Shell stylesheet passed the nested shell; synced, live after the next shell restart.
 - ✅ `docs/DESIGN_SYSTEM.md` rewritten; its palette tables are generated.
+- ✅ Terminal: the Terminator profile, both Starship prompts, the shell's fzf and suggestion
+  colours and the editor's terminal use the `terminal` scheme from the tokens instead of Catppuccin
+  (`scripts/install-terminal.py --apply`; live for new terminals).
 - ⬜ `tokens/handwritten-colours.json` to empty: 404 values in 32 files (the phone app's Kotlin,
   inline colours in the Files inspector, Cast pages, Projects, Annotate, the shell's JS).
 - ⬜ Agent Office is fed by tokens but is still a light panel with an indigo accent; restyle it onto

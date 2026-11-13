@@ -30,7 +30,12 @@
     "orange": "#FF9F0A",
     "orange.pale": "#FFCF85",
     "red": "#FF453A",
-    "red.pale": "#FFA59E"
+    "red.pale": "#FFA59E",
+    "yellow": "#FFD60A",
+    "yellow.pale": "#FFE98A",
+    "purple": "#BF5AF2",
+    "purple.pale": "#DDA8FF",
+    "cyan.pale": "#B5E9FF"
   },
 
   "alpha": [4, 8, 12, 16, 24, 32, 45, 60, 80, 95],
@@ -86,6 +91,19 @@
     "glass.edge": "{white}/8"
   },
 
+  "terminal": {
+    "_about": [
+      "The terminal's sixteen ANSI colours and its ground. Programs need six distinct hues, so yellow",
+      "and purple exist here and nowhere else in the interface. scripts/install-terminal.py applies",
+      "this to the Terminator profile, the prompt, the shell's menus and the editor's terminal."
+    ],
+    "background": "{surface.ground}",
+    "foreground": "{text.secondary}",
+    "cursor": "{accent}",
+    "ansi": ["{n5}", "{red}", "{green}", "{yellow}", "{blue}", "{purple}", "{cyan}", "{n10}"],
+    "bright": ["{n8}", "{red.pale}", "{green.pale}", "{yellow.pale}", "{blue.light}", "{purple.pale}", "{cyan.pale}", "{n11}"]
+  },
+
   "gradient": {
     "_about": "The only gradient: Mario thinking or answering. Never decoration.",
     "aurora": ["{blue}", "{indigo}", "{cyan}"]
@@ -133,9 +151,9 @@
     "services/agent-office/static/map.js": "pixel-art office map",
     "services/agent-office/static/sprites.js": "pixel-art characters",
     "services/agent-office/static/world.js": "pixel-art office furniture",
-    "scripts/install-terminal.py": "terminal ANSI colour scheme",
-    "terminal/install-kterm-ubuntu.sh": "terminal ANSI colour scheme",
-    "terminal/install-kterm-raspberry-pi.sh": "terminal ANSI colour scheme",
+    "scripts/install-terminal.py": "the Catppuccin values KTERM ships with, listed so they can be replaced by tokens",
+    "terminal/install-kterm-ubuntu.sh": "KTERM's own installer, kept as released; install-terminal.py recolours what it writes",
+    "terminal/install-kterm-raspberry-pi.sh": "KTERM's own installer, kept as released",
     "extension/adaptive_files/tags.py": "file tag colours: labels the user picks, stored with the file",
     "extension/adaptive-dark.xml": "syntax-highlighting scheme for file previews",
     "apps/adaptive-annotate/shapes.py": "pen colours the user draws with",

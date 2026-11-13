@@ -47,6 +47,8 @@ def main():
     args = terminal_args(sys.argv[1:], Path(sys.argv[0]).name)
     env = os.environ.copy()
     env["KARTHI_SHELL_MODE"] = "modern"
+    # bat draws with the terminal's own sixteen colours instead of a theme of its own.
+    env.setdefault("BAT_THEME", "ansi")
     for key in ("KARTHI_MODERN_LOADED", "KARTHI_HUD_SHOWN"):
         env.pop(key, None)
     os.execve(binary, [binary, "--no-dbus", "--config", str(profile),

@@ -55,6 +55,12 @@ def guide_block(tokens):
     for name, alias in raw["color"].items():
         if not name.startswith("_"):
             lines.append(f"| `{name}` | `{alias}` | `{tokens.css(name)}` |")
+    scheme = tokens.terminal()
+    names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]
+    lines += ["", "### Terminal", "",
+              f'Ground `{scheme["background"]}`, text `{scheme["foreground"]}`, cursor `{scheme["cursor"]}`. '
+              "Applied by `scripts/install-terminal.py`.", "", "| ANSI | Normal | Bright |", "|---|---|---|"]
+    lines += [f'| {name} | `{scheme["ansi"][i]}` | `{scheme["ansi"][i + 8]}` |' for i, name in enumerate(names)]
     lines += ["", "### Gradient", "", f'`aurora`: `{tokens.value("gradient.aurora")}`. Mario thinking or answering, nothing else.',
               "", "### Size and motion", "", "| Token | Value |", "|---|---|"]
     lines += [f"| `radius.{k}` | {v}px |" for k, v in raw["radius"].items()]

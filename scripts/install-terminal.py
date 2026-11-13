@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
-"""Configure the installed KTERM as Terminal. Preview by default; --apply installs."""
+"""Configure the installed KTERM as Terminal. Preview by default; --apply installs.
+
+KTERM ships with the Catppuccin Mocha scheme. This step replaces it, in the files KTERM wrote
+(the Terminator profile, both Starship prompts, the shell's menu and suggestion colours) and in
+the editor's terminal, with the scheme under "terminal" in tokens/adaptive.tokens.json, so the
+terminal sits on the same graphite ground and uses the same hues as the rest of the desktop.
+The originals are kept once under logs/terminal-setup-before/.
+"""
 
 import argparse
 import ast
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import adaptive_tokens  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -16,6 +28,36 @@ HOME = Path.home()
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
 DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
 BIN = HOME / ".local/bin"
+
+
+# Catppuccin Mocha, by its own names, and the token each becomes.
+CATPPUCCIN = {
+    "#11111b": "surface.ground", "#181825": "surface.ground", "#1e1e2e": "surface.window",
+    "#313244": "surface.card", "#45475a": "surface.raised", "#585b70": "line.solid",
+    "#6c7086": "text.disabled", "#7f849c": "text.quaternary", "#9399b2": "text.tertiary",
+    "#a6adc8": "text.tertiary", "#bac2de": "text.secondary", "#cdd6f4": "text.secondary",
+    "#f5e0dc": "accent", "#f2cdcd": "red.pale", "#f5c2e7": "purple.pale", "#cba6f7": "purple",
+    "#f38ba8": "red", "#eba0ac": "red.pale", "#fab387": "orange", "#f9e2af": "yellow",
+    "#a6e3a1": "green", "#94e2d5": "cyan", "#89dceb": "cyan", "#74c7ec": "blue.light",
+    "#89b4fa": "blue", "#b4befe": "blue.pale",
+}
+
+
+def recolour(text, tokens):
+    """Every Catppuccin value in a KTERM file becomes the token's value."""
+    text = re.sub("|".join(CATPPUCCIN), lambda m: tokens.hex(CATPPUCCIN[m.group(0).lower()]), text, flags=re.I)
+    return text.replace("catppuccin_mocha", "adaptive")
+
+
+def terminator_profile(text, tokens):
+    """The Terminator profile on the token scheme: ground, text, cursor and the ANSI sixteen."""
+    scheme = tokens.terminal()
+    values = {"background_color": scheme["background"], "foreground_color": scheme["foreground"],
+              "cursor_color": scheme["cursor"], "palette": ":".join(scheme["ansi"])}
+    text = recolour(text, tokens)
+    for key, value in values.items():
+        text = re.sub(rf"^(\s*{key} = ).*$", lambda m, v=value: f'{m.group(1)}"{v}"', text, flags=re.M)
+    return text
 
 
 def main():
@@ -49,7 +91,14 @@ def main():
     for name in ("kterm-terminal", "x-terminal-emulator", "gnome-terminal", "terminal"):
         write(BIN / name, launcher, 0o755)
     write(CONFIG / "karthi-shell/state/default-mode", "modern\n")
-    write(CONFIG / "terminator/config", profile.read_bytes())
+    tokens = adaptive_tokens.load()
+    modern = terminator_profile(profile.read_text(), tokens)
+    write(profile, modern)
+    write(CONFIG / "terminator/config", modern)
+    for name in ("starship-rich.toml", "starship-compact.toml", "modern.zsh"):
+        kterm_file = CONFIG / "karthi-shell" / name
+        if kterm_file.is_file():
+            write(kterm_file, recolour(kterm_file.read_text(), tokens))
 
     desktop = f'''[Desktop Entry]
 Version=1.0
@@ -142,12 +191,11 @@ Exec="{BIN / 'adaptive-agent'}" {agent} --new
                          "terminal.integrated.cursorStyle": "line",
                          "terminal.integrated.cursorBlinking": True})
         colors = settings.setdefault("workbench.colorCustomizations", {})
-        colors.update({"terminal.background": "#11111b", "terminal.foreground": "#cdd6f4",
-                       "terminalCursor.foreground": "#f5e0dc"})
+        scheme = tokens.terminal()
+        colors.update({"terminal.background": scheme["background"], "terminal.foreground": scheme["foreground"],
+                       "terminalCursor.foreground": scheme["cursor"]})
         names = ["Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"]
-        palette = ["#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
-                   "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8"]
-        for i, color in enumerate(palette):
+        for i, color in enumerate(scheme["ansi"]):
             colors["terminal.ansi" + ("Bright" if i >= 8 else "") + names[i % 8]] = color
         write(settings_file, json.dumps(settings, indent=4) + "\n")
 
