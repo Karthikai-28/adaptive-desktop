@@ -1070,6 +1070,51 @@ Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `d
   word, local). Phase 4: notes into board Inboxes, island and phone. Phase 5: council, nightly
   review, routines.
 
+## Milestone 21 — Finish and freeze
+
+Plan: https://claude.ai/artifact/JEaW4VGY713c6Pf6i2q1WA (2026-11-14). Five phases, then no new
+features: ideas go to a Later list and are built only if their absence has stopped real work twice.
+
+### Phase 1 — one colour system
+
+- ✅ `tokens/adaptive.tokens.json` as ramp → alpha scale → roles; `scripts/build-tokens.py` writes
+  every `*.src.css` output and `theme/Adaptive`; `--check` in `verify-all.sh --quick`.
+- ✅ Shell, Files, Mario Home, Agent Office, TV page, palette, Settings, Cast, Projects, Gestures
+  compiled from tokens. Mario Home recoloured from navy and five accents to graphite and one blue
+  (live). Shell stylesheet passed the nested shell; synced, live after the next shell restart.
+- ✅ `docs/DESIGN_SYSTEM.md` rewritten; its palette tables are generated.
+- ⬜ `tokens/handwritten-colours.json` to empty: 404 values in 32 files (the phone app's Kotlin,
+  inline colours in the Files inspector, Cast pages, Projects, Annotate, the shell's JS).
+- ⬜ Agent Office is fed by tokens but is still a light panel with an indigo accent; restyle it onto
+  the dark surfaces.
+
+### Phase 2 — Files
+
+- ⬜ Reproduce the drag and hover artifacts in the nested shell (suspect: `windowGlass.js` live
+  background blur with partial redraws). Replace with a wallpaper blurred once per change.
+- ⬜ Inspector: Activity chart cut off at the bottom; the floating status pill overlaps it.
+- ⬜ A drag test in the Files sandbox check.
+
+### Phase 3 — Home as a space
+
+- ⬜ Home stops being the desktop layer: one key (Super+H) and a dock button summon and dismiss
+  it; double Ctrl shows the bare wallpaper.
+- ⬜ Tabs: Today, Mail (Gmail), Calendar, Thinking Space, Mario; listed in `mario.json`.
+- ⬜ Today rebuilt (agenda, mail from people, projects, suggestions, capture); fits 1080 and 1200.
+  Apps, AI assistants, Phone, Recent files and self-turning tiles removed; News off Today.
+
+### Phase 4 — motion
+
+- ⬜ Motion tokens applied to Home, shell panels and the island; reduced motion honoured.
+
+### Phase 5 — purpose pass and freeze
+
+- ⬜ One line of purpose per feature in `AGENTS.md`, or the feature is removed (list agreed first).
+  Known candidates: the scripts that patch `stylesheet.css` in place (`fix-bottom-dock-v2.sh`,
+  `adaptive-dock-customize.sh`, `rollback-bottom-dock.sh`), which now target a generated file.
+- ⬜ `map-check` is stale (412 files since the last stamp): bring the map up to date and stamp it.
+- ⬜ Close this backlog.
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the

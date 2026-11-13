@@ -463,7 +463,12 @@ async def loopback_only(request, handler):
     origin = request.headers.get("Origin")
     if request.method != "GET" and origin and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
         return web.json_response({"error": "cross-site request"}, status=403)
-    return await handler(request)
+    response = await handler(request)
+    # The page and its script and stylesheet come from the checkout and change when it does.
+    # Without this the web view keeps yesterday's stylesheet on a guess at its freshness.
+    if request.path in ("/", "/panel") or request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 def make_app(hub, port):
