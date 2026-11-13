@@ -14,7 +14,10 @@
   font: 400 13px/1.4 Inter, "Cantarell", system-ui, sans-serif; color: var(--text);
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
+/* One screen, never a scrolling page: what does not fit is laid out again, not scrolled to. */
+html, body { margin: 0; height: 100%; overflow: hidden; }
+/* A rule that sets display (.panel, .card) must not bring a hidden element back. */
+[hidden] { display: none !important; }
 body { background: var(--ground); }
 .sr { position: absolute; left: -9999px; }
 .muted { color: var(--muted); font-size: 12px; }
