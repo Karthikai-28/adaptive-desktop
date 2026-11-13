@@ -36,7 +36,8 @@ if /usr/bin/python3 -c 'import PIL' 2>/dev/null; then
     WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland /usr/bin/python3 - >"$SANDBOX/glass-window.log" 2>&1 <<'PY' &
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gio
+from gi.repository import Gtk, Gio, GLib
+GLib.set_prgname("org.gnome.Nautilus")   # on Wayland the window's class is the program name
 app = Gtk.Application(application_id="org.gnome.Nautilus", flags=Gio.ApplicationFlags.NON_UNIQUE)
 def activate(app):
     window = Gtk.ApplicationWindow(application=app, title="Glass stand-in")

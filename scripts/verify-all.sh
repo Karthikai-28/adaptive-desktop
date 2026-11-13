@@ -126,7 +126,7 @@ step "Files icons match their generator (scripts/build-file-icons.py)" quiet pyt
 if [ "$QUICK" = 0 ]; then
     step "Command palette window (virtual display)" quiet python3 "$REPO/scripts/verify-palette.py"
     step "Annotate window (virtual display)" quiet python3 "$REPO/scripts/verify-annotate.py"
-    step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh" --extra "$REPO/scripts/verify-screen-text-nested.sh" --extra "$REPO/scripts/verify-ros-nested.sh"
+    step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh" --extra "$REPO/scripts/verify-screen-text-nested.sh" --extra "$REPO/scripts/verify-ros-nested.sh" --extra "$REPO/scripts/verify-window-glass-nested.sh"
     step "ROS 2 panel helper against real nodes (private domain; skips without ROS 2)" quiet python3 "$REPO/scripts/verify-ros-panel.py"
     step "ROS 2 New package: every template created, built and run (skips without ROS 2)" quiet python3 "$REPO/scripts/verify-ros-package-create.py"
     step "Files with the inspector (the Nautilus fork, sandboxed)" quiet python3 "$REPO/scripts/verify-files-inspector.py"

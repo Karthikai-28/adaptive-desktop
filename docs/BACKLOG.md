@@ -1093,10 +1093,15 @@ features: ideas go to a Later list and are built only if their absence has stopp
 
 ### Phase 2 — Files
 
-- ⬜ Reproduce the drag and hover artifacts in the nested shell (suspect: `windowGlass.js` live
-  background blur with partial redraws). Replace with a wallpaper blurred once per change.
-- ⬜ Inspector: Activity chart cut off at the bottom; the floating status pill overlaps it.
-- ⬜ A drag test in the Files sandbox check.
+- 🔬 Glass without live blur (`windowGlass.js`): the wallpaper is blurred once into
+  `~/.cache/adaptive-desktop/glass.png` (`tools/glass_wallpaper.py`) and each Files window sits on
+  that picture. The live `Shell.BlurEffect` behind the window is gone: it re-read the screen on
+  every partial repaint, which is where hover and rubber-band drags smeared, and the sandbox could
+  not show it because a nested shell repaints whole frames. Passed in the nested shell
+  (`scripts/verify-window-glass-nested.sh`, part of the full check); live after a shell restart.
+  The drag itself still has to be tried live: the cause was reasoned, not reproduced.
+- ✅ Inspector: four Largest Items rows, so the Activity chart is no longer cut off at 1080 high.
+  The floating status pill does not overlap the inspector (it was misread from a screenshot).
 
 ### Phase 3 — Home as a space
 

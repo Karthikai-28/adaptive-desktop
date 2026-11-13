@@ -524,7 +524,9 @@ class FolderMixin:
         box.pack_start(group, False, False, 0)
         return box
 
-    def _largest_items(self, payload, title="Largest Items", limit=5):
+    # Four rows: with a repository block above, five pushed the Activity chart past the bottom
+    # of a 1080-high screen, where it looked cut off rather than scrollable.
+    def _largest_items(self, payload, title="Largest Items", limit=4):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.pack_start(self._section_label(title), False, False, 0)
 
