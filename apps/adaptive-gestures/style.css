@@ -1,10 +1,12 @@
+/* GENERATED from style.src.css by scripts/build-tokens.py. Edit style.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
 /* Touchpad Gestures - the palette table from the shell stylesheet. */
 
 @define-color ad_bg        #1C1C1E;
-@define-color ad_surface   #2C2C2E;
-@define-color ad_text      #F5F5F7;
-@define-color ad_muted     #98989D;
-@define-color ad_tertiary  #8E8E93;
+@define-color ad_surface   #2D2D2F;
+@define-color ad_text      #F5F5F8;
+@define-color ad_muted     #A4A4A7;
+@define-color ad_tertiary  #868688;
 @define-color ad_accent    #0A84FF;
 @define-color ad_warning   #FF9F0A;
 
@@ -35,7 +37,7 @@ window.adaptive-gestures {
 .banner {
     padding: 12px 14px;
     border-radius: 12px;
-    background-color: alpha(@ad_warning, 0.14);
+    background-color: rgba(255, 159, 10, 0.12);
     color: @ad_text;
     font-size: 13px;
 }
@@ -105,13 +107,13 @@ dropdown.choice > button:hover {
 
 popover.menu contents,
 dropdown popover contents {
-    background-color: #1E1E20;
+    background-color: #1C1C1E;
     border-radius: 10px;
 }
 
 entry {
     border-radius: 8px;
-    background-color: #141416;
+    background-color: #151517;
     color: @ad_text;
 }
 

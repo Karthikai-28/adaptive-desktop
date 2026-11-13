@@ -1,8 +1,11 @@
-/* Adaptive Desktop Shell v1.6 — GNOME Shell 42 */
+/* GENERATED from stylesheet.src.css by scripts/build-tokens.py. Edit stylesheet.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
+/* Adaptive Desktop Shell - GNOME Shell 42. Source of stylesheet.css: colours are named tokens
+   (see the palette note further down); run scripts/build-tokens.py after editing. */
 
 #panel {
-    background-color: rgba(28, 28, 30, 0.98);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: #1C1C1E;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: none;
 }
 
@@ -13,15 +16,15 @@
     margin: 1px 3px;
     padding: 0 11px;
     border-radius: 7px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    background-color: rgba(44, 44, 46, 0.64);
-    color: #F5F5F7;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(45, 45, 47, 0.60);
+    color: #F5F5F8;
 }
 
 .adaptive-stock-clock:hover,
 .adaptive-stock-clock:focus {
-    border-color: rgba(255, 255, 255, 0.19);
-    background-color: rgba(58, 58, 60, 0.82);
+    border-color: rgba(255, 255, 255, 0.16);
+    background-color: rgba(59, 59, 61, 0.80);
 }
 
 /* ---------- interactive bottom dock ---------- */
@@ -41,22 +44,22 @@
     border-radius: 14px;
     border: 1px solid transparent;
     background-color: transparent;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-dock-button:hover {
     border-color: rgba(255, 255, 255, 0.16);
-    background-color: rgba(58, 58, 60, 0.86);
+    background-color: rgba(59, 59, 61, 0.80);
 }
 
 .adaptive-dock-button:focus {
-    border-color: rgba(10, 132, 255, 0.34);
-    background-color: rgba(58, 58, 60, 0.90);
+    border-color: rgba(10, 132, 255, 0.32);
+    background-color: rgba(59, 59, 61, 0.95);
 }
 
 .adaptive-dock-button.active {
-    border-color: rgba(255, 255, 255, 0.22);
-    background-color: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.24);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-app-dock-content {
@@ -77,7 +80,7 @@
     width: 4px;
     height: 4px;
     border-radius: 2px;
-    background-color: rgba(235, 235, 245, 0.76);
+    background-color: rgba(245, 245, 248, 0.80);
 }
 
 .adaptive-running-dot.active {
@@ -86,7 +89,7 @@
 
 .adaptive-running-count {
     margin-left: 1px;
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 8px;
     font-weight: 700;
 }
@@ -96,7 +99,7 @@
     width: 1px;
     height: 38px;
     margin: 9px 2px 7px 3px;
-    background-color: rgba(72, 72, 74, 0.58);
+    background-color: rgba(73, 73, 76, 0.60);
 }
 
 .adaptive-utility-dock-button {
@@ -106,25 +109,25 @@
 .adaptive-tooltip {
     padding: 6px 10px;
     border-radius: 8px;
-    border: 1px solid rgba(72, 72, 74, 0.58);
-    background-color: rgba(44, 44, 46, 0.98);
-    color: #F5F5F7;
+    border: 1px solid rgba(73, 73, 76, 0.60);
+    background-color: #2D2D2F;
+    color: #F5F5F8;
     font-size: 11px;
     font-weight: 600;
-    box-shadow: 0 7px 20px rgba(0, 0, 0, 0.38);
+    box-shadow: 0 7px 20px rgba(0, 0, 0, 0.32);
 }
 
 .adaptive-dock-popup .popup-menu-content {
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background-color: rgba(28, 28, 30, 0.98);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: #1C1C1E;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
 }
 
 .adaptive-dock-popup .popup-menu-item {
     min-height: 30px;
     border-radius: 8px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-dock-popup .popup-menu-item:focus,
@@ -134,7 +137,7 @@
 
 .adaptive-system-status-value {
     max-width: 150px;
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 10px;
 }
 
@@ -159,7 +162,7 @@
 
 /* Calm Adaptive overview background. */
 #overviewGroup {
-    background-color: #1E1E20;
+    background-color: #1C1C1E;
 }
 
 .overview-controls {
@@ -172,26 +175,26 @@
     min-height: 38px;
     padding: 3px 13px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background-color: rgba(36, 36, 38, 0.88);
-    color: #F5F5F7;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background-color: rgba(36, 36, 38, 0.95);
+    color: #F5F5F8;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
 }
 
 .search-entry:hover,
 .search-entry:focus {
-    border-color: rgba(255, 255, 255, 0.28);
-    background-color: rgba(44, 44, 46, 0.94);
+    border-color: rgba(255, 255, 255, 0.24);
+    background-color: rgba(45, 45, 47, 0.95);
 }
 
 /* Workspace preview frames */
 .workspace-thumbnail {
     border-radius: 14px;
-    background-color: rgba(44, 44, 46, 0.76);
+    background-color: rgba(45, 45, 47, 0.80);
 }
 
 .workspace-thumbnail-indicator {
-    border: 2px solid rgba(10, 132, 255, 0.92);
+    border: 2px solid rgba(10, 132, 255, 0.95);
     border-radius: 14px;
 }
 
@@ -207,14 +210,14 @@
 
 .app-well-app:hover .overview-icon,
 .grid-search-result:hover .overview-icon {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 /* Keep the top clock pill visually connected to the popup */
 .adaptive-stock-clock {
-    border-color: rgba(255, 255, 255, 0.15);
-    background-color: rgba(36, 36, 38, 0.90);
-    color: #F5F5F7;
+    border-color: rgba(255, 255, 255, 0.16);
+    background-color: rgba(36, 36, 38, 0.95);
+    color: #F5F5F8;
     font-weight: 650;
 }
 
@@ -337,8 +340,8 @@
 }
 
 .adaptive-dock-button:hover {
-    background-color: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-app-icon,
@@ -365,7 +368,7 @@
     width: 1px;
     height: 30px;
     margin: 7px 3px 4px 3px;
-    background-color: rgba(255, 255, 255, 0.14);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 /* Adaptive dock visual customization v2.3 END */
 
@@ -388,10 +391,10 @@
     padding: 4px 13px 3px 13px;
     spacing: 4px;
     border-radius: 17px;
-    background-color: rgba(18, 18, 20, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background-color: rgba(21, 21, 23, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     box-shadow:
-        0 10px 30px rgba(0, 0, 0, 0.22),
+        0 10px 30px rgba(0, 0, 0, 0.24),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -460,7 +463,7 @@
 .adaptive-lock-activity {
     margin-top: 16px;
     max-width: 640px;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.60);
     font-size: 12px;
     font-weight: 500;
     text-align: center;
@@ -472,7 +475,7 @@
     border-radius: 9px;
     border: 1px solid rgba(255, 255, 255, 0.16);
     background-color: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.68);
+    color: rgba(255, 255, 255, 0.60);
     font-size: 11px;
     font-weight: 600;
 }
@@ -487,7 +490,7 @@
 }
 
 .login-dialog-prompt-label {
-    color: rgba(255, 255, 255, 0.72);
+    color: rgba(255, 255, 255, 0.80);
     font-size: 13px;
     font-weight: 500;
     text-align: center;
@@ -498,22 +501,22 @@
     min-height: 36px;
     padding: 4px 14px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background-color: rgba(255, 255, 255, 0.04);
     color: #FFFFFF;
     caret-color: #FFFFFF;
     selection-background-color: rgba(255, 255, 255, 0.24);
 }
 
 .login-dialog-prompt-entry:focus {
-    border-color: rgba(255, 255, 255, 0.55);
-    background-color: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.60);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .login-dialog-message,
 .login-dialog-message-warning,
 .caps-lock-warning-label {
-    color: rgba(255, 255, 255, 0.72);
+    color: rgba(255, 255, 255, 0.80);
     font-size: 11px;
     text-align: center;
 }
@@ -525,19 +528,19 @@
     min-height: 30px;
     padding: 4px 16px;
     border-radius: 11px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background-color: rgba(255, 255, 255, 0.04);
     color: #FFFFFF;
 }
 
 .unlock-dialog .modal-dialog-button:hover,
 .unlock-dialog .modal-dialog-button:focus {
-    border-color: rgba(255, 255, 255, 0.42);
-    background-color: rgba(255, 255, 255, 0.11);
+    border-color: rgba(255, 255, 255, 0.45);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
 .switch-user-button {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 /* ---------- notifications on the shield ---------- */
@@ -552,20 +555,20 @@
 .unlock-dialog-notification-source {
     padding: 9px 11px;
     border-radius: 11px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
     color: #FFFFFF;
 }
 
 .unlock-dialog-notification-label {
-    color: rgba(255, 255, 255, 0.66);
+    color: rgba(255, 255, 255, 0.60);
     font-size: 11px;
 }
 
 .unlock-dialog-notification-count-text {
     padding: 0 7px;
     border-radius: 8px;
-    background-color: rgba(255, 255, 255, 0.14);
+    background-color: rgba(255, 255, 255, 0.12);
     color: #FFFFFF;
     font-size: 10px;
     font-weight: 700;
@@ -579,13 +582,13 @@
 }
 
 .adaptive-aod-time {
-    color: rgba(255, 255, 255, 0.62);
+    color: rgba(255, 255, 255, 0.60);
     font-size: 92px;
     font-weight: 200;
 }
 
 .adaptive-aod-date {
-    color: rgba(255, 255, 255, 0.38);
+    color: rgba(255, 255, 255, 0.32);
     font-size: 17px;
     font-weight: 400;
 }
@@ -624,25 +627,25 @@
  * --------------------------------------------------------------- */
 
 .popup-menu-content.adaptive-shade-menu {
-    background-color: #1E1E20;
+    background-color: #1C1C1E;
     padding: 0;
     border-radius: 22px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.60);
     font-family: Inter;
 }
 
 #calendarArea {
     padding: 14px;
     spacing: 14px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 /* The shared card: one step lighter than the menu, like a macOS widget. */
 .adaptive-shade-system,
 #calendarArea .adaptive-shade .message-list,
 #calendarArea .datemenu-calendar-column {
-    background-color: rgba(44, 44, 46, 0.80);
+    background-color: rgba(45, 45, 47, 0.80);
     border-radius: 18px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -676,7 +679,7 @@
 .adaptive-shade {
     width: 440px;
     spacing: 12px;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-family: Inter;
 }
 
@@ -690,7 +693,7 @@
 }
 
 .adaptive-shade-time {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-feature-settings: "tnum";
     font-size: 46px;
     font-weight: 200;
@@ -698,7 +701,7 @@
 
 .adaptive-shade-seconds {
     padding-bottom: 8px;
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 18px;
     font-weight: 300;
@@ -706,7 +709,7 @@
 
 .adaptive-shade-date {
     margin-top: 2px;
-    color: #8E8E93;
+    color: #868688;
 }
 
 .adaptive-shade-uptime {
@@ -714,7 +717,7 @@
     padding: 5px 11px 5px 9px;
     spacing: 7px;
     border-radius: 999px;
-    border: 1px solid rgba(48, 209, 88, 0.30);
+    border: 1px solid rgba(48, 209, 88, 0.32);
     background-color: rgba(48, 209, 88, 0.08);
     color: #30D158;
 }
@@ -756,7 +759,7 @@
 }
 
 .adaptive-notif-heading-label {
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-notif-heading-count {
@@ -773,7 +776,7 @@
 
 /* "Do Not Disturb" */
 #calendarArea .message-list-controls > StLabel {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
     font-weight: 500;
 }
@@ -803,8 +806,8 @@
 #calendarArea .message-list-clear-button {
     padding: 4px 11px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background-color: rgba(255, 255, 255, 0.04);
     color: #0A84FF;
     font-size: 11px;
     font-weight: 600;
@@ -819,7 +822,7 @@
 }
 
 #calendarArea .message-list-clear-button:insensitive {
-    color: #636366;
+    color: #636365;
     border-color: rgba(255, 255, 255, 0.08);
     background-color: transparent;
 }
@@ -831,16 +834,16 @@
 }
 
 #calendarArea .message-list .message-list-placeholder > StIcon {
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.04);
     icon-size: 22px;
     padding: 17px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    color: #98989D;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #A4A4A7;
 }
 
 #calendarArea .message-list .message-list-placeholder > StLabel {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 13px;
     font-weight: 500;
 }
@@ -852,23 +855,23 @@
 
 .adaptive-notif-group {
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background-color: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-notif-group:hover {
-    border-color: rgba(255, 255, 255, 0.20);
+    border-color: rgba(255, 255, 255, 0.16);
 }
 
 .adaptive-notif-group-header {
     padding: 10px 12px 6px 10px;
     border-radius: 16px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-notif-group-header:hover,
 .adaptive-notif-group-header:focus {
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-notif-group-icon {
@@ -880,7 +883,7 @@
 }
 
 .adaptive-notif-group-title {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
     font-weight: 600;
 }
@@ -891,7 +894,7 @@
     padding: 1px 7px;
     border-radius: 999px;
     background-color: rgba(255, 255, 255, 0.16);
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-feature-settings: "tnum";
     font-size: 11px;
     font-weight: 800;
@@ -924,7 +927,7 @@
     margin: 0 4px;
     padding: 3px;
     border-radius: 999px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-notif-group-clear:hover,
@@ -933,14 +936,14 @@
 .adaptive-notif-heading-action:focus,
 .adaptive-notif-group-settings:hover,
 .adaptive-notif-group-settings:focus {
-    background-color: rgba(255, 255, 255, 0.10);
-    color: #F5F5F7;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #F5F5F8;
 }
 
 .adaptive-notif-group-clear:focus,
 .adaptive-notif-heading-action:focus,
 .adaptive-notif-group-settings:focus {
-    box-shadow: inset 0 0 0 2px rgba(10, 132, 255, 0.70);
+    box-shadow: inset 0 0 0 2px rgba(10, 132, 255, 0.60);
 }
 
 .adaptive-notif-group-chevron {
@@ -957,15 +960,15 @@
     margin: 0 10px 10px 10px;
     padding: 6px;
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     color: #0A84FF;
 }
 
 .adaptive-notif-more:hover,
 .adaptive-notif-more:focus {
-    border-color: rgba(10, 132, 255, 0.34);
+    border-color: rgba(10, 132, 255, 0.32);
     background-color: rgba(255, 255, 255, 0.08);
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 /* A single notification inside a group. */
@@ -975,23 +978,23 @@
     border: 1px solid transparent;
     background-color: transparent;
     box-shadow: none;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 #calendarArea .message:hover {
-    border-color: rgba(255, 255, 255, 0.14);
-    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 #calendarArea .message:focus,
 #calendarArea .message:focus:active {
-    border-color: rgba(10, 132, 255, 0.42);
-    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(10, 132, 255, 0.45);
+    background-color: rgba(255, 255, 255, 0.04);
     box-shadow: none;
 }
 
 #calendarArea .message:active {
-    background-color: rgba(255, 255, 255, 0.09);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 #calendarArea .message .message-icon-bin,
@@ -1012,18 +1015,18 @@
 
 #calendarArea .message .message-title {
     padding-top: 0;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 13px;
     font-weight: 600;
 }
 
 #calendarArea .message .message-body {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 12px;
 }
 
 #calendarArea .message .message-secondary-bin > .event-time {
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;
 }
@@ -1032,22 +1035,22 @@
     padding: 4px;
     border-radius: 999px;
     background-color: rgba(255, 255, 255, 0.08);
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 #calendarArea .message .message-close-button:hover {
-    background-color: rgba(255, 69, 58, 0.22);
+    background-color: rgba(255, 69, 58, 0.24);
     color: #FF453A;
 }
 
 /* Media player card */
 #calendarArea .message-media-control {
     border-radius: 999px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 #calendarArea .message-media-control:hover {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
     color: #FFFFFF;
 }
 
@@ -1059,17 +1062,17 @@
 #notification-container .notification-banner:hover,
 #notification-container .notification-banner:focus,
 #notification-container .notification-banner:active {
-    background-color: #1E1E20;
+    background-color: #1C1C1E;
     margin: 10px;
     border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
-    color: #F5F5F7;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.60);
+    color: #F5F5F8;
     font-family: Inter;
 }
 
 #notification-container .notification-banner:hover {
-    border-color: rgba(10, 132, 255, 0.38);
+    border-color: rgba(10, 132, 255, 0.32);
 }
 
 #notification-container .notification-banner .message-icon-bin > StIcon {
@@ -1077,16 +1080,16 @@
 }
 
 #notification-container .notification-banner .message-title {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-weight: 600;
 }
 
 #notification-container .notification-banner .message-body {
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 #notification-container .notification-banner .message-secondary-bin > .event-time {
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
 }
 
@@ -1095,14 +1098,14 @@
     padding: 7px;
     border-radius: 10px;
     border-width: 0;
-    background-color: rgba(255, 255, 255, 0.10);
-    color: #F5F5F7;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #F5F5F8;
     font-weight: 600;
 }
 
 #notification-container .notification-banner .notification-button:hover,
 #notification-container .notification-banner .notification-button:focus {
-    background-color: rgba(255, 255, 255, 0.20);
+    background-color: rgba(255, 255, 255, 0.16);
     color: #FFFFFF;
 }
 
@@ -1122,8 +1125,8 @@
 .adaptive-shade-expander {
     padding: 3px 11px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background-color: rgba(255, 255, 255, 0.04);
     color: #0A84FF;
     font-size: 11px;
     font-weight: 600;
@@ -1131,19 +1134,19 @@
 
 .adaptive-shade-expander:hover,
 .adaptive-shade-expander:focus {
-    border-color: rgba(10, 132, 255, 0.42);
+    border-color: rgba(10, 132, 255, 0.45);
     background-color: rgba(255, 255, 255, 0.12);
     color: #FFFFFF;
 }
 
 .adaptive-shade-section-title {
     margin-top: 4px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-shade-load,
 .adaptive-shade-subline {
-    color: #8E8E93;
+    color: #868688;
     font-feature-settings: "tnum";
     font-size: 11px;
 }
@@ -1159,11 +1162,11 @@
 }
 
 .adaptive-metric-name {
-    color: #8E8E93;
+    color: #868688;
 }
 
 .adaptive-metric-value {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-feature-settings: "tnum";
     font-size: 22px;
     font-weight: 300;
@@ -1171,7 +1174,7 @@
 
 .adaptive-metric-meta {
     width: 92px;
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;
     text-align: right;
@@ -1190,13 +1193,13 @@
 
 .adaptive-meter-name {
     width: 70px;
-    color: #8E8E93;
+    color: #868688;
 }
 
 .adaptive-meter {
     height: 6px;
     border-radius: 3px;
-    background-color: rgba(255, 255, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-meter-fill {
@@ -1207,7 +1210,7 @@
 
 .adaptive-meter-value {
     width: 132px;
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;
     text-align: right;
@@ -1221,7 +1224,7 @@
 
 .adaptive-core {
     border-radius: 2px;
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-core-fill {
@@ -1235,13 +1238,13 @@
 }
 
 .adaptive-net-name {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
     font-weight: 600;
 }
 
 .adaptive-net-rate {
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;
 }
@@ -1260,7 +1263,7 @@
 }
 
 .adaptive-chip-name {
-    color: #8E8E93;
+    color: #868688;
     font-size: 11px;
     font-weight: 600;
 }
@@ -1279,13 +1282,13 @@
 }
 
 .adaptive-proc-name {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
 }
 
 .adaptive-proc-cpu {
     width: 52px;
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;
     font-weight: 600;
@@ -1294,7 +1297,7 @@
 
 .adaptive-proc-mem {
     width: 72px;
-    color: #8E8E93;
+    color: #868688;
     font-feature-settings: "tnum";
     font-size: 11px;
     text-align: right;
@@ -1303,8 +1306,8 @@
 .adaptive-shade-footer-item {
     margin-top: 4px;
     padding-top: 9px;
-    border-top: 1px solid rgba(255, 255, 255, 0.10);
-    color: #98989D;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;
     font-weight: 600;
@@ -1319,7 +1322,7 @@
     width: 300px;
     padding: 12px;
     spacing: 10px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 #calendarArea .datemenu-displays-box {
@@ -1328,17 +1331,17 @@
 
 /* Today: a plain card; the weekday carries the accent. */
 #calendarArea .datemenu-today-button {
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.04);
     margin: 0;
     padding: 12px 14px;
     border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 #calendarArea .datemenu-today-button:hover,
 #calendarArea .datemenu-today-button:focus {
-    border-color: rgba(10, 132, 255, 0.44);
+    border-color: rgba(10, 132, 255, 0.45);
 }
 
 #calendarArea .datemenu-today-button .day-label {
@@ -1349,7 +1352,7 @@
 }
 
 #calendarArea .datemenu-today-button .date-label {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 18px;
     font-weight: 600;
 }
@@ -1359,11 +1362,11 @@
     padding: 0;
     border-width: 0;
     background-color: transparent;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 #calendarArea .calendar .calendar-month-label {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-feature-settings: "tnum";
     font-size: 12px;
     font-weight: 700;
@@ -1373,7 +1376,7 @@
     width: 28px;
     height: 28px;
     border-radius: 999px;
-    color: #98989D;
+    color: #A4A4A7;
     background-color: transparent;
 }
 
@@ -1390,14 +1393,14 @@
     margin: 2px;
     padding: 0 !important;
     border-radius: 999px;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-feature-settings: "tnum";
     font-size: 12px;
     text-align: center;
 }
 
 #calendarArea .calendar .calendar-day-base:hover {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
     color: #FFFFFF;
 }
 
@@ -1405,8 +1408,8 @@
 #calendarArea .calendar .calendar-day-base:selected,
 #calendarArea .calendar .calendar-day-base:active,
 #calendarArea .calendar .calendar-day-base:selected:focus {
-    background-color: rgba(255, 255, 255, 0.10);
-    box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.55);
+    background-color: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.60);
     color: #FFFFFF;
 }
 
@@ -1415,22 +1418,22 @@
     padding-top: 2px !important;
     background-color: transparent;
     box-shadow: none;
-    color: #636366;
+    color: #636365;
     font-size: 11px;
     font-weight: 700;
 }
 
 #calendarArea .calendar .calendar-nonwork-day {
-    color: #8E8E93;
+    color: #868688;
 }
 
 #calendarArea .calendar .calendar-other-month-day,
 #calendarArea .calendar .calendar-other-month-day.calendar-nonwork-day {
-    color: rgba(235, 235, 245, 0.38);
+    color: rgba(245, 245, 248, 0.32);
 }
 
 #calendarArea .calendar .calendar-day-with-events {
-    color: #F5F5F7;
+    color: #F5F5F8;
     background-image: url("assets/shade/event-dot.svg");
     background-size: contain;
 }
@@ -1446,8 +1449,8 @@
 }
 
 #calendarArea .calendar .calendar-week-number {
-    color: #636366;
-    background-color: rgba(255, 255, 255, 0.05);
+    color: #636365;
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 /* Events, world clocks, weather */
@@ -1457,10 +1460,10 @@
     margin: 0;
     padding: 11px 13px;
     border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     background-color: rgba(255, 255, 255, 0.04);
     box-shadow: none;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 #calendarArea .events-button:hover,
@@ -1469,14 +1472,14 @@
 #calendarArea .world-clocks-button:focus,
 #calendarArea .weather-button:hover,
 #calendarArea .weather-button:focus {
-    border-color: rgba(255, 255, 255, 0.26);
+    border-color: rgba(255, 255, 255, 0.24);
     background-color: rgba(255, 255, 255, 0.08);
 }
 
 #calendarArea .events-title,
 #calendarArea .world-clocks-header,
 #calendarArea .weather-header {
-    color: #98989D;
+    color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;
     font-weight: 700;
@@ -1487,7 +1490,7 @@
 }
 
 #calendarArea .event-placeholder {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 13px;
 }
 
@@ -1514,18 +1517,18 @@
  */
 
 .popup-menu-content.adaptive-cc-menu {
-    background-color: #1E1E20;
+    background-color: #1C1C1E;
     min-width: 396px;
     padding: 0;
     border-radius: 22px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.60);
     font-family: Inter;
 }
 
 .adaptive-cc {
     padding: 14px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-cc-main {
@@ -1544,7 +1547,7 @@
     padding: 6px 12px 6px 9px;
     spacing: 6px;
     border-radius: 999px;
-    border: 1px solid rgba(48, 209, 88, 0.30);
+    border: 1px solid rgba(48, 209, 88, 0.32);
     background-color: rgba(48, 209, 88, 0.08);
     color: #30D158;
     font-feature-settings: "tnum";
@@ -1560,9 +1563,9 @@
     width: 36px;
     height: 36px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background-color: rgba(255, 255, 255, 0.05);
-    color: #F5F5F7;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.04);
+    color: #F5F5F8;
 }
 
 .adaptive-cc-round-button StIcon {
@@ -1571,15 +1574,15 @@
 
 .adaptive-cc-round-button:hover,
 .adaptive-cc-round-button:focus {
-    border-color: rgba(10, 132, 255, 0.42);
+    border-color: rgba(10, 132, 255, 0.45);
     background-color: rgba(255, 255, 255, 0.12);
     color: #FFFFFF;
 }
 
 .adaptive-cc-power-button:hover,
 .adaptive-cc-power-button:focus {
-    border-color: rgba(255, 69, 58, 0.50);
-    background-color: rgba(255, 69, 58, 0.14);
+    border-color: rgba(255, 69, 58, 0.45);
+    background-color: rgba(255, 69, 58, 0.12);
     color: #FF453A;
 }
 
@@ -1590,19 +1593,19 @@
 .adaptive-cc-tile {
     min-height: 60px;
     border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background-color: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-cc-tile-main {
     padding: 10px 10px 10px 10px;
     border-radius: 18px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-cc-tile-main:hover,
 .adaptive-cc-tile-main:focus {
-    background-color: rgba(255, 255, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-cc-tile-box {
@@ -1614,36 +1617,36 @@
     icon-size: 18px;
     padding: 9px;
     border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.10);
-    color: #F5F5F7;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #F5F5F8;
 }
 
 .adaptive-cc-tile-title {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 13px;
     font-weight: 600;
 }
 
 .adaptive-cc-tile-subtitle {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
 }
 
 .adaptive-cc-tile-chevron {
     icon-size: 14px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-cc-tile-arrow {
     width: 34px;
     border-radius: 0 18px 18px 0;
-    border-left: 1px solid rgba(255, 255, 255, 0.10);
-    color: #98989D;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    color: #A4A4A7;
 }
 
 .adaptive-cc-tile-arrow:hover,
 .adaptive-cc-tile-arrow:focus {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
     color: #FFFFFF;
 }
 
@@ -1655,12 +1658,12 @@
 
 .adaptive-cc-tile:insensitive .adaptive-cc-tile-icon {
     background-color: rgba(255, 255, 255, 0.04);
-    color: #636366;
+    color: #636365;
 }
 
 .adaptive-cc-tile:insensitive .adaptive-cc-tile-title,
 .adaptive-cc-tile:insensitive .adaptive-cc-tile-subtitle {
-    color: #636366;
+    color: #636365;
 }
 
 /* ---------------------------------------------------------------
@@ -1668,7 +1671,7 @@
  * --------------------------------------------------------------- */
 
 .adaptive-cc-sliders {
-    background-color: rgba(44, 44, 46, 0.80);
+    background-color: rgba(45, 45, 47, 0.80);
     padding: 8px 12px;
     spacing: 4px;
     border-radius: 18px;
@@ -1689,12 +1692,12 @@
 
 .adaptive-cc-slider-icon-button:hover,
 .adaptive-cc-slider-icon-button:focus {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-cc-slider-icon {
     icon-size: 16px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-cc .adaptive-cc-slider {
@@ -1707,7 +1710,7 @@
     -barlevel-border-width: 0;
     -slider-handle-radius: 9px;
     -slider-handle-border-width: 1px;
-    -slider-handle-border-color: rgba(0, 0, 0, 0.25);
+    -slider-handle-border-color: rgba(0, 0, 0, 0.24);
 }
 
 .adaptive-cc .adaptive-cc-slider:focus {
@@ -1718,7 +1721,7 @@
     width: 30px;
     height: 30px;
     border-radius: 999px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-cc-slider-arrow StIcon {
@@ -1727,7 +1730,7 @@
 
 .adaptive-cc-slider-arrow:hover,
 .adaptive-cc-slider-arrow:focus {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
     color: #FFFFFF;
 }
 
@@ -1741,12 +1744,12 @@
     spacing: 2px;
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    background-color: rgba(0, 0, 0, 0.22);
+    background-color: rgba(0, 0, 0, 0.24);
 }
 
 .adaptive-cc-dropdown-status {
     padding: 14px 10px;
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 13px;
     text-align: center;
 }
@@ -1769,7 +1772,7 @@
 .adaptive-cc-tile-arrow:expanded,
 .adaptive-cc-tile-main:expanded,
 .adaptive-cc-slider-arrow:expanded {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-cc-round-button:expanded {
@@ -1779,15 +1782,15 @@
 }
 
 .adaptive-cc-power-button:expanded {
-    border-color: rgba(255, 69, 58, 0.50);
-    background-color: rgba(255, 69, 58, 0.14);
+    border-color: rgba(255, 69, 58, 0.45);
+    background-color: rgba(255, 69, 58, 0.12);
     color: #FF453A;
 }
 
 /* "Known Networks", "My Devices": Apple's grouped-list section label. */
 .adaptive-cc-list-heading {
     margin: 8px 10px 2px 10px;
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 12px;
     font-weight: 600;
 }
@@ -1803,12 +1806,12 @@
     padding: 12px;
     spacing: 10px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-cc-form-prompt {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
 }
 
@@ -1819,11 +1822,11 @@
 .adaptive-cc-entry {
     padding: 7px 10px;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background-color: rgba(0, 0, 0, 0.30);
-    color: #F5F5F7;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: rgba(0, 0, 0, 0.32);
+    color: #F5F5F8;
     caret-color: #0A84FF;
-    selection-background-color: rgba(10, 132, 255, 0.55);
+    selection-background-color: rgba(10, 132, 255, 0.60);
     selected-color: #FFFFFF;
     font-size: 13px;
 }
@@ -1833,14 +1836,14 @@
 }
 
 .adaptive-cc-entry StLabel.hint-text {
-    color: #636366;
+    color: #636365;
 }
 
 .adaptive-cc-form-eye {
     width: 32px;
     height: 32px;
     border-radius: 8px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-cc-form-eye StIcon {
@@ -1849,13 +1852,13 @@
 
 .adaptive-cc-form-eye:hover,
 .adaptive-cc-form-eye:focus {
-    background-color: rgba(255, 255, 255, 0.10);
-    color: #F5F5F7;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #F5F5F8;
 }
 
 .adaptive-cc-form-code {
     padding: 4px 0;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 26px;
     font-weight: 600;
     font-feature-settings: "tnum";
@@ -1870,14 +1873,14 @@
     padding: 6px 14px;
     border-radius: 8px;
     background-color: rgba(255, 255, 255, 0.12);
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 13px;
     font-weight: 500;
 }
 
 .adaptive-cc-form-button:hover,
 .adaptive-cc-form-button:focus {
-    background-color: rgba(255, 255, 255, 0.20);
+    background-color: rgba(255, 255, 255, 0.16);
 }
 
 .adaptive-cc-form-primary {
@@ -1891,8 +1894,8 @@
 }
 
 .adaptive-cc-form-primary:insensitive {
-    background-color: rgba(10, 132, 255, 0.35);
-    color: rgba(255, 255, 255, 0.55);
+    background-color: rgba(10, 132, 255, 0.32);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 .adaptive-cc-list {
@@ -1903,18 +1906,18 @@
     padding: 9px 10px;
     border-radius: 14px;
     border: 1px solid transparent;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-cc-row:hover,
 .adaptive-cc-row:focus {
-    border-color: rgba(255, 255, 255, 0.14);
-    background-color: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-cc-row:checked {
-    border-color: rgba(10, 132, 255, 0.30);
-    background-color: rgba(255, 255, 255, 0.10);
+    border-color: rgba(10, 132, 255, 0.32);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-cc-row-box {
@@ -1924,7 +1927,7 @@
 .adaptive-cc-row-icon {
     -st-icon-style: symbolic;
     icon-size: 18px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-cc-row-title {
@@ -1933,7 +1936,7 @@
 }
 
 .adaptive-cc-row-subtitle {
-    color: #8E8E93;
+    color: #868688;
     font-size: 11px;
 }
 
@@ -1943,7 +1946,7 @@
 
 .adaptive-cc-row-trailing {
     icon-size: 14px;
-    color: #8E8E93;
+    color: #868688;
 }
 
 .adaptive-cc-row-check {
@@ -1958,14 +1961,14 @@
 
 .adaptive-cc-row-danger:hover,
 .adaptive-cc-row-danger:focus {
-    border-color: rgba(255, 69, 58, 0.35);
+    border-color: rgba(255, 69, 58, 0.32);
     background-color: rgba(255, 69, 58, 0.12);
 }
 
 .adaptive-cc-pill-button {
     padding: 4px 11px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 69, 58, 0.35);
+    border: 1px solid rgba(255, 69, 58, 0.32);
     color: #FF453A;
     font-size: 11px;
     font-weight: 600;
@@ -1986,8 +1989,8 @@
     padding: 10px 12px 10px 10px;
     spacing: 8px;
     border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background-color: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-cc-media-art-bin {
@@ -1998,7 +2001,7 @@
 }
 
 .adaptive-cc-media-art {
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-cc-media-body {
@@ -2008,22 +2011,22 @@
 
 .adaptive-cc-media-body:hover,
 .adaptive-cc-media-body:focus {
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-cc-media-title {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 13px;
     font-weight: 600;
 }
 
 .adaptive-cc-media-artist {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 12px;
 }
 
 .adaptive-cc-media-app {
-    color: #636366;
+    color: #636365;
     font-size: 11px;
 }
 
@@ -2031,7 +2034,7 @@
     width: 32px;
     height: 32px;
     border-radius: 999px;
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-cc-media-button StIcon {
@@ -2040,11 +2043,11 @@
 
 .adaptive-cc-media-button:hover,
 .adaptive-cc-media-button:focus {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-cc-media-button:insensitive {
-    color: #636366;
+    color: #636365;
 }
 
 .adaptive-cc-media-play {
@@ -2058,7 +2061,7 @@
     padding: 8px 12px;
     spacing: 4px;
     border-radius: 14px;
-    border: 1px solid rgba(255, 159, 10, 0.30);
+    border: 1px solid rgba(255, 159, 10, 0.32);
     background-color: rgba(255, 159, 10, 0.08);
 }
 
@@ -2081,7 +2084,7 @@
 }
 
 .adaptive-cc-privacy-label {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
 }
 
@@ -2113,7 +2116,7 @@
 
 .adaptive-cc-row-dim .adaptive-cc-row-title,
 .adaptive-cc-row-dim .adaptive-cc-row-icon {
-    color: #636366;
+    color: #636365;
 }
 
 .adaptive-cc-edit-row {
@@ -2125,7 +2128,7 @@
     height: 22px;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.24);
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-cc-edit-check StIcon {
@@ -2139,14 +2142,14 @@
 }
 
 .adaptive-cc-edit-hidden {
-    color: #636366;
+    color: #636365;
 }
 
 .adaptive-cc-edit-move {
     width: 28px;
     height: 28px;
     border-radius: 8px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-cc-edit-move StIcon {
@@ -2155,12 +2158,12 @@
 
 .adaptive-cc-edit-move:hover,
 .adaptive-cc-edit-move:focus {
-    background-color: rgba(255, 255, 255, 0.10);
-    color: #F5F5F7;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #F5F5F8;
 }
 
 .adaptive-cc-edit-move:insensitive {
-    color: #48484A;
+    color: #49494C;
 }
 
 .adaptive-cc-app-volume {
@@ -2169,7 +2172,7 @@
 }
 
 .adaptive-cc-app-volume-name {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
 }
 
@@ -2182,7 +2185,7 @@
 }
 
 .adaptive-cc-share-caption {
-    color: #98989D;
+    color: #A4A4A7;
     text-align: center;
 }
 
@@ -2212,13 +2215,13 @@
 }
 
 .adaptive-usb-title {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 15px;
     font-weight: 600;
 }
 
 .adaptive-usb-summary {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 12px;
     font-feature-settings: "tnum";
 }
@@ -2235,12 +2238,12 @@
 }
 
 .adaptive-usb-key {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 12px;
 }
 
 .adaptive-usb-value {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
     font-feature-settings: "tnum";
 }
@@ -2264,14 +2267,14 @@
     width: 48px;
     height: 50px;
     border-radius: 12px;
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-dock-remove-hint {
     padding: 4px 10px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 69, 58, 0.50);
-    background-color: rgba(30, 30, 32, 0.95);
+    border: 1px solid rgba(255, 69, 58, 0.45);
+    background-color: rgba(28, 28, 30, 0.95);
     color: #FF453A;
     font-size: 12px;
     font-weight: 600;
@@ -2301,7 +2304,7 @@
     height: 5px;
     margin: 0 3px 1px 3px;
     border-radius: 3px;
-    background-color: rgba(0, 0, 0, 0.55);
+    background-color: rgba(0, 0, 0, 0.60);
 }
 
 .adaptive-dock-progress-fill {
@@ -2329,7 +2332,7 @@
     spacing: 8px;
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.12);
-    background-color: rgba(30, 30, 32, 0.97);
+    background-color: rgba(28, 28, 30, 0.95);
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
 }
 
@@ -2341,8 +2344,8 @@
 
 .adaptive-dock-preview:hover,
 .adaptive-dock-preview:focus {
-    border-color: rgba(10, 132, 255, 0.55);
-    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(10, 132, 255, 0.60);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-dock-preview-box {
@@ -2355,7 +2358,7 @@
 
 .adaptive-dock-preview-title {
     max-width: 170px;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
 }
 
@@ -2363,7 +2366,7 @@
     width: 20px;
     height: 20px;
     border-radius: 999px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-dock-preview-close StIcon {
@@ -2378,7 +2381,7 @@
 
 .adaptive-dock-preview-frame {
     border-radius: 8px;
-    background-color: rgba(0, 0, 0, 0.30);
+    background-color: rgba(0, 0, 0, 0.32);
 }
 
 /* Downloads stack */
@@ -2396,7 +2399,7 @@
 }
 
 .adaptive-dock-stack-title {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 14px;
     font-weight: 600;
 }
@@ -2410,7 +2413,7 @@
 
 .adaptive-dock-stack-link:hover,
 .adaptive-dock-stack-link:focus {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-dock-stack-item {
@@ -2421,48 +2424,43 @@
 
 .adaptive-dock-stack-item:hover,
 .adaptive-dock-stack-item:focus {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .adaptive-dock-stack-name {
     margin-top: 6px;
     max-width: 84px;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 11px;
 }
 
 .adaptive-dock-stack-status {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 12px;
 }
 
 /* Section headings in dock menus ("Icon Size", "Show"). */
 .adaptive-dock-popup .popup-separator-menu-item .popup-menu-item-label,
 .adaptive-dock-popup .popup-separator-menu-item StLabel {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
     font-weight: 600;
 }
 
-/* ===== Adaptive palette — Apple dark appearance =====
+/* ===== Adaptive palette =====
  *
- * The one colour system for the whole desktop: this shell, the GTK themes
- * (generated from tokens/adaptive.tokens.json), and the Adaptive apps. St has
- * no CSS variables, so the values are written out; this is the table they
- * come from. Add a colour here before using it anywhere above.
+ * The one colour system for the whole desktop lives in tokens/adaptive.tokens.json.
+ * This file never spells out a colour: it names a role (surface.card, text.primary,
+ * accent) or a hue with a strength from the alpha scale (white/8, black/45), each
+ * written with a dollar sign in front, and scripts/build-tokens.py writes
+ * stylesheet.css with the values. St has no CSS variables, which is why the names are
+ * resolved at build time. docs/DESIGN_SYSTEM.md has the full table.
  *
- *   Materials   menu #1E1E20 · card rgba(44,44,46,.80) · tile rgba(255,255,255,.045)
- *               fill rgba(255,255,255,.06-.12) · hairline rgba(255,255,255,.08-.10)
- *   Labels      primary #F5F5F7 · secondary #98989D · tertiary #8E8E93 · quaternary #636366
- *   Accent      system blue #0A84FF - selected, on, focused, today, links. The only one.
- *               Its hover shade #409CFF is for the primary button only.
- *   Status      green #30D158 · orange #FF9F0A · red #FF453A - never decoration.
- *   Data only   indigo #5E5CE6 · cyan #64D2FF - to tell chart series apart.
- *
- * GTK apps share it: the session gtk-theme is Adaptive (theme/Adaptive,
- * generated from tokens/adaptive.tokens.json over a Yaru-blue-dark base),
- * Files adds only its own widgets (extension/preview.css), and the session
- * font is Inter, as here.
+ *   Depth       ground, window, pane, card, raised: each one ramp step lighter
+ *   Labels      primary, secondary, tertiary, quaternary, disabled
+ *   Accent      system blue: selected, on, focused, today, links. The only one.
+ *   Status      green, orange, red: never decoration.
+ *   Data only   indigo, cyan: to tell chart series apart, and Mario's mark.
  */
 
 /* ===== Tasks panel =====
@@ -2484,19 +2482,19 @@
 .adaptive-tasks-sort {
     padding: 2px 9px;
     border-radius: 999px;
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
     font-weight: 600;
 }
 
 .adaptive-tasks-sort:hover {
     background-color: rgba(255, 255, 255, 0.08);
-    color: #F5F5F7;
+    color: #F5F5F8;
 }
 
 .adaptive-tasks-sort:checked {
-    background-color: rgba(255, 255, 255, 0.14);
-    color: #F5F5F7;
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #F5F5F8;
 }
 
 .adaptive-tasks-icon {
@@ -2511,7 +2509,7 @@
 .adaptive-tasks-cpu {
     min-width: 44px;
     margin-right: 8px;
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 12px;
     font-feature-settings: "tnum";
     text-align: right;
@@ -2528,7 +2526,7 @@
 
 .adaptive-tasks-end:hover,
 .adaptive-tasks-end:focus {
-    background-color: rgba(255, 69, 58, 0.22);
+    background-color: rgba(255, 69, 58, 0.24);
     color: #FF453A;
 }
 
@@ -2554,7 +2552,7 @@
 .adaptive-network-value {
     padding: 3px 6px;
     border-radius: 6px;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
     font-feature-settings: "tnum";
 }
@@ -2583,7 +2581,7 @@
 
 .adaptive-network-note {
     padding: 6px 8px 2px 8px;
-    color: #8E8E93;
+    color: #868688;
     font-size: 11px;
 }
 
@@ -2608,7 +2606,7 @@
 }
 
 .adaptive-ros-hint {
-    color: #8E8E93;
+    color: #868688;
     font-size: 11px;
 }
 
@@ -2633,13 +2631,13 @@
     padding: 2px 10px;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.12);
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 11px;
 }
 
 .adaptive-ros-chip:hover,
 .adaptive-ros-chip:focus {
-    border-color: rgba(10, 132, 255, 0.42);
+    border-color: rgba(10, 132, 255, 0.45);
     background-color: rgba(255, 255, 255, 0.08);
 }
 
@@ -2649,7 +2647,7 @@
 
 .adaptive-ros-section-toggle:hover,
 .adaptive-ros-section-toggle:focus {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-ros-section-box {
@@ -2663,7 +2661,7 @@
 .adaptive-ros-chevron {
     icon-size: 12px;
     margin: 6px 0 0 6px;
-    color: #98989D;
+    color: #A4A4A7;
 }
 
 .adaptive-ros-expand {
@@ -2680,25 +2678,25 @@
 .adaptive-ros-footer {
     margin-top: 6px;
     padding-top: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.10);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* a topic picked for PlotJuggler */
 .adaptive-ros-picked {
-    background-color: rgba(10, 132, 255, 0.22);
+    background-color: rgba(10, 132, 255, 0.24);
     color: #0A84FF;
 }
 
 .adaptive-ros-detail {
     margin: 0 4px 6px 44px;
     padding: 4px 0 6px 10px;
-    border-left: 2px solid rgba(255, 255, 255, 0.10);
+    border-left: 2px solid rgba(255, 255, 255, 0.08);
     spacing: 2px;
 }
 
 .adaptive-ros-group {
     margin-top: 6px;
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
     font-weight: 600;
 }
@@ -2715,7 +2713,7 @@
 .adaptive-ros-name {
     padding: 1px 4px;
     border-radius: 5px;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 12px;
 }
 
@@ -2732,11 +2730,11 @@
 
 .adaptive-ros-type:hover,
 .adaptive-ros-type-open {
-    background-color: rgba(10, 132, 255, 0.14);
+    background-color: rgba(10, 132, 255, 0.12);
 }
 
 .adaptive-ros-meta {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
 }
 
@@ -2748,19 +2746,19 @@
     margin: 2px 0 4px 4px;
     padding: 6px 8px;
     border-radius: 6px;
-    background-color: rgba(0, 0, 0, 0.28);
-    color: #D1D1D6;
+    background-color: rgba(0, 0, 0, 0.24);
+    color: #CACACD;
     font-family: monospace;
     font-size: 11px;
 }
 
 .adaptive-ros-param-key {
-    color: #98989D;
+    color: #A4A4A7;
     font-size: 11px;
 }
 
 .adaptive-ros-param {
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-size: 11px;
     font-feature-settings: "tnum";
 }
@@ -2786,7 +2784,7 @@
 /* A write waiting for its confirming click. */
 .adaptive-ros-armed,
 .adaptive-ros-armed:hover {
-    background-color: rgba(255, 159, 10, 0.18);
+    background-color: rgba(255, 159, 10, 0.16);
     color: #FF9F0A;
 }
 
@@ -2796,8 +2794,8 @@
 }
 
 .adaptive-ros-chip-active {
-    border-color: rgba(10, 132, 255, 0.70);
-    background-color: rgba(10, 132, 255, 0.18);
+    border-color: rgba(10, 132, 255, 0.60);
+    background-color: rgba(10, 132, 255, 0.16);
 }
 
 .adaptive-ros-setups {
@@ -2845,7 +2843,7 @@
 .adaptive-ros-thumbnail {
     margin: 2px 0 2px 4px;
     border-radius: 6px;
-    background-color: rgba(0, 0, 0, 0.28);
+    background-color: rgba(0, 0, 0, 0.24);
     background-size: contain;
     background-position: center;
     background-repeat: no-repeat;
@@ -2876,9 +2874,9 @@
     margin: 6px 12px;
     padding: 6px 10px;
     border-radius: 8px;
-    color: #F5F5F7;
+    color: #F5F5F8;
     font-weight: 600;
-    background-color: rgba(10, 132, 255, 0.18);
+    background-color: rgba(10, 132, 255, 0.16);
 }
 
 /* ------------------------------------------------------------------
@@ -2894,7 +2892,7 @@
 }
 
 .adaptive-project-git {
-    color: rgba(245, 245, 247, 0.62);
+    color: rgba(245, 245, 248, 0.60);
     font-feature-settings: "tnum";
 }
 
@@ -2903,7 +2901,7 @@
 }
 
 .adaptive-project-path {
-    color: rgba(245, 245, 247, 0.62);
+    color: rgba(245, 245, 248, 0.60);
     font-size: 12px;
 }
 
@@ -2917,12 +2915,12 @@
 
 .adaptive-island-pill {
     border-radius: 9999px;
-    background-color: rgba(28, 28, 30, 0.92);
+    background-color: rgba(28, 28, 30, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
     padding: 0 10px;
     height: 24px;
-    color: #ffffff;
+    color: #FFFFFF;
     transition-duration: 160ms;
 }
 
@@ -2949,7 +2947,7 @@
 .adaptive-island-clock-text {
     font-size: 12px;
     font-weight: 500;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-spark {
@@ -2957,15 +2955,15 @@
 }
 
 .adaptive-island-spark-cyan {
-    color: #0a84ff;
+    color: #0A84FF;
 }
 
 .adaptive-island-spark-amber {
-    color: #fbbf24;
+    color: #FF9F0A;
 }
 
 .adaptive-island-spark-crimson {
-    color: #f43f5e;
+    color: #FF453A;
 }
 
 .adaptive-island-compact-box {
@@ -2977,44 +2975,44 @@
 
 .adaptive-island-compact-icon {
     font-size: 12px;
-    color: #0a84ff;
+    color: #0A84FF;
 }
 
 .adaptive-island-compact-label {
     font-size: 12px;
     font-weight: 500;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-compact-secondary {
     max-width: 64px;
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.65);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 .adaptive-island-satellite {
     width: 32px;
     height: 24px;
     border-radius: 9999px;
-    background-color: rgba(28, 28, 30, 0.92);
+    background-color: rgba(28, 28, 30, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    color: #ffffff;
+    color: #FFFFFF;
     text-align: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
 }
 
 .adaptive-island-satellite-icon {
     font-size: 12px;
-    color: #0a84ff;
+    color: #0A84FF;
 }
 
 /* Floating Overlay HUD */
 .adaptive-island-overlay {
     border-radius: 24px;
-    background-color: rgba(28, 28, 30, 0.96);
+    background-color: rgba(28, 28, 30, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.24);
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
-    color: #ffffff;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.60);
+    color: #FFFFFF;
     padding: 14px 16px;
 }
 
@@ -3030,13 +3028,13 @@
 
 .adaptive-island-card-icon {
     font-size: 13px;
-    color: #0a84ff;
+    color: #0A84FF;
 }
 
 .adaptive-island-card-title {
     font-size: 11px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.80);
     letter-spacing: 0.5px;
 }
 
@@ -3046,21 +3044,21 @@
     border-radius: 4px;
     font-size: 11px;
     font-weight: 600;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-card-btn {
     padding: 2px 6px;
     border-radius: 4px;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 .adaptive-island-card-btn:hover {
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-card-btn.pinned {
-    color: #0a84ff;
+    color: #0A84FF;
 }
 
 .adaptive-island-card {
@@ -3077,7 +3075,7 @@
 
 .adaptive-island-subcard {
     background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 10px;
     padding: 8px 10px;
 }
@@ -3085,30 +3083,30 @@
 .adaptive-island-subcard-title {
     font-size: 11px;
     font-weight: 600;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-val-bold {
     font-size: 13px;
     font-weight: 700;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-subtext {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 .adaptive-island-mono-subtext {
     font-size: 11px;
     font-family: monospace;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.80);
 }
 
 .adaptive-island-status-active {
     font-size: 11px;
     font-weight: 600;
-    color: #34d399;
+    color: #30D158;
 }
 
 .adaptive-island-progress-track {
@@ -3123,15 +3121,15 @@
 }
 
 .adaptive-island-fill-cyan {
-    background-color: #0a84ff;
+    background-color: #0A84FF;
 }
 
 .adaptive-island-fill-amber {
-    background-color: #fb923c;
+    background-color: #FF9F0A;
 }
 
 .adaptive-island-fill-green {
-    background-color: #34d399;
+    background-color: #30D158;
 }
 
 .adaptive-island-footer-row {
@@ -3140,31 +3138,31 @@
 }
 
 .adaptive-island-btn {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.08);
     padding: 4px 10px;
     border-radius: 6px;
     font-size: 11px;
     font-weight: 500;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-btn:hover {
-    background-color: rgba(255, 255, 255, 0.18);
+    background-color: rgba(255, 255, 255, 0.16);
 }
 
 .adaptive-island-btn-alert {
-    background-color: rgba(244, 63, 94, 0.20);
-    color: #fca5a5;
-    border: 1px solid rgba(244, 63, 94, 0.35);
+    background-color: rgba(255, 69, 58, 0.16);
+    color: #FFA59E;
+    border: 1px solid rgba(255, 69, 58, 0.32);
 }
 
 .adaptive-island-btn-alert:hover {
-    background-color: rgba(244, 63, 94, 0.35);
-    color: #ffffff;
+    background-color: rgba(255, 69, 58, 0.32);
+    color: #FFFFFF;
 }
 
 .adaptive-island-terminal {
-    background-color: #06080e;
+    background-color: #0E0E10;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     padding: 6px 8px;
@@ -3174,11 +3172,11 @@
 .adaptive-island-terminal-line {
     font-size: 11px;
     font-family: monospace;
-    color: #94a3b8;
+    color: #A4A4A7;
 }
 
 .adaptive-island-terminal-line.active {
-    color: #0a84ff;
+    color: #0A84FF;
 }
 
 .adaptive-island-media-art {
@@ -3191,7 +3189,7 @@
 
 .adaptive-island-media-art-icon {
     font-size: 20px;
-    color: #34d399;
+    color: #30D158;
 }
 
 .adaptive-island-transport-row {
@@ -3201,15 +3199,15 @@
 .adaptive-island-transport-btn {
     font-size: 15px;
     padding: 4px 10px;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.80);
 }
 
 .adaptive-island-transport-btn:hover {
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-btn-play {
-    background-color: rgba(255, 255, 255, 0.14);
+    background-color: rgba(255, 255, 255, 0.12);
     border-radius: 9999px;
     padding: 6px 12px;
 }
@@ -3218,7 +3216,7 @@
     font-size: 28px;
     font-weight: 700;
     font-family: monospace;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-chip {
@@ -3226,12 +3224,12 @@
     border-radius: 6px;
     padding: 4px 8px;
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(255, 255, 255, 0.80);
 }
 
 .adaptive-island-chip:hover {
     background-color: rgba(255, 255, 255, 0.16);
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 /* --- THEME VARIATIONS --- */
@@ -3239,7 +3237,7 @@
 /* Theme 1: Liquid Glass (Default) */
 .adaptive-island-theme-liquid-glass.adaptive-island-overlay {
     border-radius: 24px;
-    background-color: rgba(28, 28, 30, 0.96);
+    background-color: rgba(28, 28, 30, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -3250,37 +3248,37 @@
 /* Theme 2: Dark Precision */
 .adaptive-island-theme-dark-precision.adaptive-island-overlay {
     border-radius: 14px;
-    background-color: #090a0f;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.90);
+    background-color: #0E0E10;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.95);
     font-family: monospace;
 }
 
 .adaptive-island-theme-dark-precision .adaptive-island-pill {
     border-radius: 8px;
-    background-color: #090a0f;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background-color: #0E0E10;
+    border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .adaptive-island-theme-dark-precision .adaptive-island-satellite {
     border-radius: 6px;
-    background-color: #090a0f;
+    background-color: #0E0E10;
 }
 
 /* Alert States */
 .adaptive-island-pill.caution,
 .adaptive-island-overlay.caution {
-    border-color: #fbbf24 !important;
+    border-color: #FF9F0A !important;
 }
 
 .adaptive-island-pill.critical,
 .adaptive-island-overlay.critical {
-    border-color: #f43f5e !important;
+    border-color: #FF453A !important;
 }
 
 /* AI usage card: how much of each plan's limits is used */
 .adaptive-island-fill-red {
-    background-color: #f87171;
+    background-color: #FFA59E;
 }
 
 .adaptive-island-usage {
@@ -3300,21 +3298,21 @@
     min-width: 46px;
     font-size: 11px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.80);
 }
 
 .adaptive-island-usage-value {
     font-size: 11px;
     font-weight: 700;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 .adaptive-island-usage-caution {
-    color: #fdba74;
+    color: #FFCF85;
 }
 
 .adaptive-island-usage-critical {
-    color: #fca5a5;
+    color: #FFA59E;
 }
 
 .adaptive-island-usage-reset {
@@ -3342,13 +3340,13 @@
 }
 
 .adaptive-island-task-info:hover {
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .adaptive-island-task-title {
     font-size: 12px;
     font-weight: 600;
-    color: #ffffff;
+    color: #FFFFFF;
 }
 
 /* Music */
@@ -3370,7 +3368,7 @@
     padding: 1px 6px;
     border-radius: 6px;
     font-size: 11px;
-    color: #0a84ff;
+    color: #0A84FF;
 }
 
 .adaptive-island-player-btn:hover {
@@ -3378,7 +3376,7 @@
 }
 
 .adaptive-island-player-btn:insensitive {
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 .adaptive-island-scrub-row {
@@ -3400,7 +3398,7 @@
 
 .adaptive-island-transport-btn:insensitive,
 .adaptive-island-btn:insensitive {
-    color: rgba(255, 255, 255, 0.30);
+    color: rgba(255, 255, 255, 0.32);
 }
 
 /* Keyboard focus: every island control shows where focus is */
@@ -3418,56 +3416,56 @@
 .adaptive-ros-dropdown { spacing: 6px; padding: 5px 8px; }
 .adaptive-ros-options { max-height: 176px; }
 .adaptive-ros-option { text-align: left; padding: 8px 10px; border-radius: 6px; }
-.adaptive-ros-option:hover, .adaptive-ros-option:focus { background-color: rgba(10, 132, 255, 0.18); }
+.adaptive-ros-option:hover, .adaptive-ros-option:focus { background-color: rgba(10, 132, 255, 0.16); }
 .adaptive-ros-setups { spacing: 6px; }
 
 .adaptive-ros-setup { spacing: 3px; }
-.adaptive-ros-select { text-align: left; color: #F5F5F7; padding: 5px 6px; }
+.adaptive-ros-select { text-align: left; color: #F5F5F8; padding: 5px 6px; }
 .adaptive-ros-dropdown { padding: 2px 0; }
 
 /* ROS 2 New package dialog (rosPackageWizard.js) */
-.adaptive-ros-wizard { background-color: #1C1C1E; border: 1px solid rgba(255, 255, 255, 0.10); }
+.adaptive-ros-wizard { background-color: #1C1C1E; border: 1px solid rgba(255, 255, 255, 0.08); }
 .adaptive-ros-wizard .modal-dialog-content-box { padding: 22px 24px 12px 24px; spacing: 12px; }
 .adaptive-ros-wizard-header { spacing: 16px; }
-.adaptive-ros-wizard-title { font-size: 18px; font-weight: 700; color: #F5F5F7; }
-.adaptive-ros-wizard-subtitle { font-size: 12px; color: #98989D; }
+.adaptive-ros-wizard-title { font-size: 18px; font-weight: 700; color: #F5F5F8; }
+.adaptive-ros-wizard-subtitle { font-size: 12px; color: #A4A4A7; }
 .adaptive-ros-wizard-steps { spacing: 4px; }
-.adaptive-ros-wizard-step { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #8E8E93; }
+.adaptive-ros-wizard-step { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #868688; }
 .adaptive-ros-wizard-step:checked { background-color: #0A84FF; color: #FFFFFF; }
-.adaptive-ros-wizard-step-done { color: #F5F5F7; }
+.adaptive-ros-wizard-step-done { color: #F5F5F8; }
 .adaptive-ros-wizard-body { spacing: 10px; }
-.adaptive-ros-wizard-heading { font-size: 13px; font-weight: 700; color: #F5F5F7; padding-top: 4px; }
-.adaptive-ros-wizard-hint { font-size: 12px; color: #98989D; }
+.adaptive-ros-wizard-heading { font-size: 13px; font-weight: 700; color: #F5F5F8; padding-top: 4px; }
+.adaptive-ros-wizard-hint { font-size: 12px; color: #A4A4A7; }
 .adaptive-ros-wizard-warning { font-size: 12px; color: #FF9F0A; }
 .adaptive-ros-wizard-error { font-size: 12px; color: #FF453A; }
 .adaptive-ros-wizard-grid { spacing: 10px; }
 .adaptive-ros-wizard-grid-row { spacing: 10px; }
 .adaptive-ros-wizard-card {
     min-height: 118px; padding: 14px; border-radius: 12px; text-align: left;
-    background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
 }
-.adaptive-ros-wizard-card:hover, .adaptive-ros-wizard-card:focus { background-color: rgba(255, 255, 255, 0.09); }
+.adaptive-ros-wizard-card:hover, .adaptive-ros-wizard-card:focus { background-color: rgba(255, 255, 255, 0.08); }
 .adaptive-ros-wizard-card:checked { background-color: rgba(10, 132, 255, 0.16); border: 2px solid #0A84FF; }
 .adaptive-ros-wizard-card StBoxLayout { spacing: 6px; }
 .adaptive-ros-wizard-card-icon { icon-size: 26px; color: #0A84FF; }
-.adaptive-ros-wizard-card-title { font-size: 14px; font-weight: 700; color: #F5F5F7; }
-.adaptive-ros-wizard-card-subtitle { font-size: 11px; color: #98989D; }
+.adaptive-ros-wizard-card-title { font-size: 14px; font-weight: 700; color: #F5F5F8; }
+.adaptive-ros-wizard-card-subtitle { font-size: 11px; color: #A4A4A7; }
 .adaptive-ros-wizard-badge {
-    font-size: 10px; font-weight: 700; color: #C7C7CC; padding: 1px 7px; border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.10);
+    font-size: 10px; font-weight: 700; color: #CACACD; padding: 1px 7px; border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.08);
 }
-.adaptive-ros-wizard-badge-warn { color: #FF9F0A; background-color: rgba(255, 159, 10, 0.14); }
+.adaptive-ros-wizard-badge-warn { color: #FF9F0A; background-color: rgba(255, 159, 10, 0.12); }
 .adaptive-ros-wizard-form { spacing: 12px; padding-right: 8px; }
 .adaptive-ros-wizard-field { spacing: 14px; }
 .adaptive-ros-wizard-field > StBoxLayout { spacing: 5px; }
-.adaptive-ros-wizard-label { width: 120px; font-size: 12px; font-weight: 600; color: #C7C7CC; padding-top: 7px; }
+.adaptive-ros-wizard-label { width: 120px; font-size: 12px; font-weight: 600; color: #CACACD; padding-top: 7px; }
 .adaptive-ros-wizard-pair { spacing: 8px; }
 .adaptive-ros-wizard-chip {
-    padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #C7C7CC;
-    background-color: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #CACACD;
+    background-color: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
 }
-.adaptive-ros-wizard-chip:hover, .adaptive-ros-wizard-chip:focus { background-color: rgba(255, 255, 255, 0.12); color: #F5F5F7; }
-.adaptive-ros-wizard-chip:checked { background-color: rgba(10, 132, 255, 0.22); border-color: #0A84FF; color: #FFFFFF; }
+.adaptive-ros-wizard-chip:hover, .adaptive-ros-wizard-chip:focus { background-color: rgba(255, 255, 255, 0.12); color: #F5F5F8; }
+.adaptive-ros-wizard-chip:checked { background-color: rgba(10, 132, 255, 0.24); border-color: #0A84FF; color: #FFFFFF; }
 .adaptive-ros-wizard-chip-small { padding: 3px 9px; font-size: 11px; }
 .adaptive-ros-wizard-columns { spacing: 14px; }
 .adaptive-ros-wizard-column { spacing: 8px; }
@@ -3479,22 +3477,22 @@
 .adaptive-ros-wizard-chip-row { spacing: 6px; }
 .adaptive-ros-wizard-scroll { border-radius: 8px; }
 .adaptive-ros-wizard-dep { spacing: 10px; padding: 6px 8px; border-radius: 8px; }
-.adaptive-ros-wizard-dep:hover { background-color: rgba(255, 255, 255, 0.05); }
+.adaptive-ros-wizard-dep:hover { background-color: rgba(255, 255, 255, 0.04); }
 .adaptive-ros-wizard-dep-top { spacing: 6px; }
-.adaptive-ros-wizard-dep-name { font-size: 13px; font-weight: 600; color: #F5F5F7; font-family: monospace; }
-.adaptive-ros-wizard-dep-about { font-size: 11px; color: #98989D; }
+.adaptive-ros-wizard-dep-name { font-size: 13px; font-weight: 600; color: #F5F5F8; font-family: monospace; }
+.adaptive-ros-wizard-dep-about { font-size: 11px; color: #A4A4A7; }
 .adaptive-ros-wizard-dep-button {
     padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #0A84FF;
-    background-color: rgba(10, 132, 255, 0.14);
+    background-color: rgba(10, 132, 255, 0.12);
 }
-.adaptive-ros-wizard-dep-button:hover, .adaptive-ros-wizard-dep-button:focus { background-color: rgba(10, 132, 255, 0.28); }
+.adaptive-ros-wizard-dep-button:hover, .adaptive-ros-wizard-dep-button:focus { background-color: rgba(10, 132, 255, 0.24); }
 .adaptive-ros-wizard-fact { spacing: 14px; }
-.adaptive-ros-wizard-value { font-size: 13px; color: #F5F5F7; }
-.adaptive-ros-wizard-file { font-family: monospace; font-size: 12px; color: #C7C7CC; }
-.adaptive-ros-wizard-file-root { color: #F5F5F7; font-weight: 700; }
+.adaptive-ros-wizard-value { font-size: 13px; color: #F5F5F8; }
+.adaptive-ros-wizard-file { font-family: monospace; font-size: 12px; color: #CACACD; }
+.adaptive-ros-wizard-file-root { color: #F5F5F8; font-weight: 700; }
 .adaptive-ros-wizard-command {
-    font-family: monospace; font-size: 11px; color: #C7C7CC; padding: 8px; border-radius: 8px;
-    background-color: rgba(0, 0, 0, 0.30);
+    font-family: monospace; font-size: 11px; color: #CACACD; padding: 8px; border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.32);
 }
 .adaptive-ros-wizard-done { font-size: 20px; font-weight: 700; color: #30D158; }
-.adaptive-ros-wizard .modal-dialog-linked-button:insensitive { color: rgba(255, 255, 255, 0.30); }
+.adaptive-ros-wizard .modal-dialog-linked-button:insensitive { color: rgba(255, 255, 255, 0.32); }

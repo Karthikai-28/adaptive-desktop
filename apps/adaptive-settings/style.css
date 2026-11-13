@@ -1,11 +1,13 @@
+/* GENERATED from style.src.css by scripts/build-tokens.py. Edit style.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
 /* Adaptive Settings - the palette table from the shell stylesheet, laid out
    like Touchpad Gestures so the two read as one Settings. */
 
 @define-color ad_bg        #1C1C1E;
-@define-color ad_bg_deep   #141416;
-@define-color ad_surface   #2C2C2E;
-@define-color ad_text      #F5F5F7;
-@define-color ad_muted     #98989D;
+@define-color ad_bg_deep   #151517;
+@define-color ad_surface   #2D2D2F;
+@define-color ad_text      #F5F5F8;
+@define-color ad_muted     #A4A4A7;
 @define-color ad_accent    #0A84FF;
 @define-color ad_success   #30D158;
 @define-color ad_warning   #FF9F0A;
@@ -42,7 +44,7 @@ stacksidebar.sidebar row:hover {
 }
 
 stacksidebar.sidebar row:selected {
-    background-color: alpha(@ad_accent, 0.18);
+    background-color: rgba(10, 132, 255, 0.16);
     color: @ad_text;
 }
 
@@ -137,7 +139,7 @@ dropdown.choice > button:hover {
 popover.menu contents,
 popover contents,
 dropdown popover contents {
-    background-color: #1E1E20;
+    background-color: #1C1C1E;
     border-radius: 10px;
 }
 
@@ -189,14 +191,14 @@ button.accent {
 }
 
 button.accent:disabled {
-    background-color: alpha(@ad_accent, 0.3);
+    background-color: rgba(10, 132, 255, 0.32);
     color: alpha(white, 0.5);
 }
 
 button.destructive {
     border-radius: 8px;
     background-image: none;
-    background-color: alpha(@ad_danger, 0.16);
+    background-color: rgba(255, 69, 58, 0.16);
     box-shadow: none;
     color: @ad_danger;
 }
@@ -206,7 +208,7 @@ button.destructive {
     margin-bottom: 22px;
     padding: 9px 16px;
     border-radius: 10px;
-    background-color: #2C2C2E;
+    background-color: #2D2D2F;
     border: 1px solid alpha(white, 0.1);
     font-size: 13px;
 }

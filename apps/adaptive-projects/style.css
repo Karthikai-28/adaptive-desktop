@@ -1,12 +1,14 @@
+/* GENERATED from style.src.css by scripts/build-tokens.py. Edit style.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
 /* Project mode - same tokens as the shell and the palette. */
 
 @define-color ad_bg        #1C1C1E;
-@define-color ad_bg_deep   #141416;
-@define-color ad_surface   #2C2C2E;
-@define-color ad_surface_2 #3A3A3C;
-@define-color ad_divider   #48484A;
-@define-color ad_text      #F5F5F7;
-@define-color ad_muted     #98989D;
+@define-color ad_bg_deep   #151517;
+@define-color ad_surface   #2D2D2F;
+@define-color ad_surface_2 #3B3B3D;
+@define-color ad_divider   #49494C;
+@define-color ad_text      #F5F5F8;
+@define-color ad_muted     #A4A4A7;
 @define-color ad_accent    #0A84FF;
 @define-color ad_cyan      #64D2FF;
 @define-color ad_violet    #5E5CE6;
@@ -18,7 +20,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 
 .header {
     padding: 26px 28px 14px 28px;
-    border-bottom: 1px solid alpha(@ad_divider, 0.35);
+    border-bottom: 1px solid rgba(73, 73, 76, 0.32);
     background-color: @ad_bg_deep;
 }
 
@@ -41,7 +43,7 @@ window.adaptive-projects { background-color: @ad_bg; }
     min-width: 132px;
     padding: 10px 14px;
     border-radius: 12px;
-    border: 1px solid alpha(@ad_divider, 0.42);
+    border: 1px solid rgba(73, 73, 76, 0.45);
     background-color: @ad_surface;
 }
 
@@ -66,7 +68,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 .filter {
     min-height: 34px;
     border-radius: 11px;
-    border: 1px solid alpha(@ad_divider, 0.5);
+    border: 1px solid rgba(73, 73, 76, 0.45);
     background-color: @ad_bg;
     color: @ad_text;
 }
@@ -79,26 +81,26 @@ window.adaptive-projects { background-color: @ad_bg; }
     min-width: 330px;
     padding: 13px 15px;
     border-radius: 14px;
-    border: 1px solid alpha(@ad_divider, 0.42);
-    border-left: 3px solid alpha(@ad_muted, 0.5);
+    border: 1px solid rgba(73, 73, 76, 0.45);
+    border-left: 3px solid rgba(164, 164, 167, 0.45);
     background-color: @ad_surface;
     background-image: none;
     box-shadow: none;
 }
 
 .card:hover {
-    border-color: alpha(@ad_accent, 0.42);
+    border-color: rgba(10, 132, 255, 0.45);
     background-color: @ad_surface_2;
 }
 
 .card.band-fresh { border-left-color: @ad_cyan; }
 .card.band-warm  { border-left-color: @ad_accent; }
 .card.band-cool  { border-left-color: @ad_violet; }
-.card.band-idle  { border-left-color: alpha(@ad_muted, 0.42); }
+.card.band-idle  { border-left-color: rgba(164, 164, 167, 0.45); }
 
 .card.active {
-    border-color: alpha(@ad_accent, 0.55);
-    background-color: alpha(@ad_accent, 0.13);
+    border-color: rgba(10, 132, 255, 0.60);
+    background-color: rgba(10, 132, 255, 0.12);
 }
 
 .card-name {
@@ -115,7 +117,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 
 .card-subject {
     margin-top: 3px;
-    color: alpha(@ad_text, 0.78);
+    color: rgba(245, 245, 248, 0.80);
     font-size: 11px;
 }
 
@@ -132,27 +134,27 @@ window.adaptive-projects { background-color: @ad_bg; }
 }
 
 .chip {
-    border: 1px solid alpha(@ad_divider, 0.55);
+    border: 1px solid rgba(73, 73, 76, 0.60);
     background-color: @ad_bg_deep;
     color: @ad_muted;
 }
 
 .chip-dirty {
-    border: 1px solid alpha(@ad_warning, 0.42);
-    background-color: alpha(@ad_warning, 0.14);
+    border: 1px solid rgba(255, 159, 10, 0.45);
+    background-color: rgba(255, 159, 10, 0.12);
     color: @ad_warning;
 }
 
 .chip-active {
-    border: 1px solid alpha(@ad_accent, 0.5);
-    background-color: alpha(@ad_accent, 0.16);
+    border: 1px solid rgba(10, 132, 255, 0.45);
+    background-color: rgba(10, 132, 255, 0.16);
     color: @ad_accent;
     font-weight: 700;
 }
 
 .footer {
     padding: 8px 28px;
-    border-top: 1px solid alpha(@ad_divider, 0.35);
+    border-top: 1px solid rgba(73, 73, 76, 0.32);
     background-color: @ad_bg_deep;
     color: @ad_muted;
     font-size: 10px;
@@ -163,7 +165,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 .back, .action {
     padding: 4px 12px;
     border-radius: 9px;
-    border: 1px solid alpha(@ad_divider, 0.5);
+    border: 1px solid rgba(73, 73, 76, 0.45);
     background-color: @ad_surface;
     background-image: none;
     color: @ad_text;
@@ -172,7 +174,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 }
 
 .back:hover, .action:hover {
-    border-color: alpha(@ad_accent, 0.45);
+    border-color: rgba(10, 132, 255, 0.45);
     background-color: @ad_surface_2;
 }
 
@@ -181,7 +183,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 .panel {
     padding: 14px 16px;
     border-radius: 14px;
-    border: 1px solid alpha(@ad_divider, 0.4);
+    border: 1px solid rgba(73, 73, 76, 0.45);
     background-color: @ad_surface;
 }
 
@@ -204,14 +206,14 @@ window.adaptive-projects { background-color: @ad_bg; }
 .author-count { color: @ad_muted; font-size: 10px; }
 
 .commit-when { color: @ad_muted; font-size: 10px; }
-.commit-subject { color: alpha(@ad_text, 0.86); font-size: 11px; }
+.commit-subject { color: rgba(245, 245, 248, 0.80); font-size: 11px; }
 .commit-author { color: @ad_muted; font-size: 10px; }
 
 /* Section headings break the detail view into activity, composition and
    people, so panels read as groups rather than one long stack. */
 .section-title {
     margin: 10px 2px 0 2px;
-    color: alpha(@ad_text, 0.9);
+    color: rgba(245, 245, 248, 0.95);
     font-family: "Space Grotesk", "Ubuntu", sans-serif;
     font-size: 11px;
     font-weight: 700;
@@ -225,7 +227,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 /* ---------- learn: the repository's own documentation ---------- */
 
 .doc-index {
-    border-right: 1px solid alpha(@ad_divider, 0.4);
+    border-right: 1px solid rgba(73, 73, 76, 0.45);
     background-color: @ad_bg_deep;
 }
 
@@ -243,8 +245,8 @@ window.adaptive-projects { background-color: @ad_bg; }
 .doc-entry:hover { background-color: @ad_surface; }
 
 .doc-entry.selected {
-    border-color: alpha(@ad_accent, 0.4);
-    background-color: alpha(@ad_accent, 0.14);
+    border-color: rgba(10, 132, 255, 0.45);
+    background-color: rgba(10, 132, 255, 0.12);
 }
 
 .doc-name { color: @ad_text; font-size: 12px; font-weight: 600; }
@@ -253,7 +255,7 @@ window.adaptive-projects { background-color: @ad_bg; }
 /* Reading measure: long lines are the enemy of documentation. */
 .doc-body {
     padding: 26px 34px 40px 34px;
-    color: alpha(@ad_text, 0.9);
+    color: rgba(245, 245, 248, 0.95);
     font-size: 13px;
 }
 
@@ -269,33 +271,33 @@ window.adaptive-projects { background-color: @ad_bg; }
 }
 
 .doc-h1 { color: #FFFFFF; }
-.doc-h2 { color: alpha(@ad_text, 0.95); }
+.doc-h2 { color: rgba(245, 245, 248, 0.95); }
 .doc-h3 { color: @ad_accent; }
 
 .doc-rule {
     margin: 6px 0;
-    background-color: alpha(@ad_divider, 0.5);
+    background-color: rgba(73, 73, 76, 0.45);
 }
 
 .doc-table {
     padding: 10px 12px;
     border-radius: 10px;
     background-color: @ad_bg_deep;
-    color: alpha(@ad_text, 0.88);
+    color: rgba(245, 245, 248, 0.95);
     font-family: monospace;
 }
 
 /* Code blocks get their own surface, a language tag and a copy button. */
 .code-block {
     border-radius: 12px;
-    border: 1px solid alpha(@ad_divider, 0.55);
+    border: 1px solid rgba(73, 73, 76, 0.60);
     background-color: @ad_bg_deep;
 }
 
 .code-bar {
     padding: 5px 8px 5px 12px;
-    border-bottom: 1px solid alpha(@ad_divider, 0.42);
-    background-color: alpha(@ad_surface_2, 0.6);
+    border-bottom: 1px solid rgba(73, 73, 76, 0.45);
+    background-color: rgba(59, 59, 61, 0.60);
 }
 
 .code-lang {
@@ -309,7 +311,7 @@ window.adaptive-projects { background-color: @ad_bg; }
     min-height: 20px;
     padding: 1px 10px;
     border-radius: 7px;
-    border: 1px solid alpha(@ad_divider, 0.6);
+    border: 1px solid rgba(73, 73, 76, 0.60);
     background-color: @ad_surface;
     background-image: none;
     color: @ad_text;
@@ -318,13 +320,13 @@ window.adaptive-projects { background-color: @ad_bg; }
 }
 
 .code-copy:hover {
-    border-color: alpha(@ad_accent, 0.5);
+    border-color: rgba(10, 132, 255, 0.45);
     background-color: @ad_surface_2;
 }
 
 .doc-code {
     padding: 12px 14px;
-    color: alpha(@ad_text, 0.92);
+    color: rgba(245, 245, 248, 0.95);
     font-family: monospace;
 }
 
@@ -332,13 +334,13 @@ window.adaptive-projects { background-color: @ad_bg; }
 
 .notes-pane {
     padding: 14px 14px 10px 14px;
-    border-left: 1px solid alpha(@ad_divider, 0.42);
+    border-left: 1px solid rgba(73, 73, 76, 0.45);
     background-color: @ad_bg_deep;
 }
 
 .notes-view {
     border-radius: 10px;
-    border: 1px solid alpha(@ad_divider, 0.42);
+    border: 1px solid rgba(73, 73, 76, 0.45);
     background-color: @ad_bg;
     color: @ad_text;
 }
@@ -346,4 +348,4 @@ window.adaptive-projects { background-color: @ad_bg; }
 .notes-view text { background-color: transparent; color: @ad_text; }
 
 .notes-status { color: @ad_muted; font-size: 9px; }
-.notes-path { color: alpha(@ad_muted, 0.7); font-size: 9px; }
+.notes-path { color: rgba(164, 164, 167, 0.60); font-size: 9px; }

@@ -1,0 +1,349 @@
+/* Project mode - same tokens as the shell and the palette. */
+
+@define-color ad_bg        $surface.window;
+@define-color ad_bg_deep   $surface.ground;
+@define-color ad_surface   $surface.card;
+@define-color ad_surface_2 $surface.raised;
+@define-color ad_divider   $line.solid;
+@define-color ad_text      $n11;
+@define-color ad_muted     $n9;
+@define-color ad_accent    $accent;
+@define-color ad_cyan      $cyan;
+@define-color ad_violet    $indigo;
+@define-color ad_warning   $warn;
+
+window.adaptive-projects { background-color: @ad_bg; }
+
+.root { background-color: @ad_bg; }
+
+.header {
+    padding: 26px 28px 14px 28px;
+    border-bottom: 1px solid $line.solid/32;
+    background-color: @ad_bg_deep;
+}
+
+.greeting {
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 26px;
+    font-weight: 600;
+}
+
+.greeting-sub {
+    color: @ad_muted;
+    font-size: 13px;
+}
+
+/* Numbers first: how much there is, how much is live, how much is dirty. */
+.stats { margin: 16px 0 14px 0; }
+
+.stat {
+    min-width: 132px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid $line.solid/45;
+    background-color: @ad_surface;
+}
+
+.stat-value {
+    color: @ad_text;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.stat-label {
+    color: @ad_muted;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+}
+
+.stat-accent  { border-left: 3px solid @ad_accent; }
+.stat-cyan    { border-left: 3px solid @ad_cyan; }
+.stat-violet  { border-left: 3px solid @ad_violet; }
+.stat-warning { border-left: 3px solid @ad_warning; }
+
+.filter {
+    min-height: 34px;
+    border-radius: 11px;
+    border: 1px solid $line.solid/45;
+    background-color: @ad_bg;
+    color: @ad_text;
+}
+
+.grid { padding: 16px 28px 20px 28px; }
+
+/* One card per repository. The left edge encodes recency, so a glance across
+   the grid shows where the work actually is. */
+.card {
+    min-width: 330px;
+    padding: 13px 15px;
+    border-radius: 14px;
+    border: 1px solid $line.solid/45;
+    border-left: 3px solid $text.tertiary/45;
+    background-color: @ad_surface;
+    background-image: none;
+    box-shadow: none;
+}
+
+.card:hover {
+    border-color: $accent/45;
+    background-color: @ad_surface_2;
+}
+
+.card.band-fresh { border-left-color: @ad_cyan; }
+.card.band-warm  { border-left-color: @ad_accent; }
+.card.band-cool  { border-left-color: @ad_violet; }
+.card.band-idle  { border-left-color: $text.tertiary/45; }
+
+.card.active {
+    border-color: $accent/60;
+    background-color: $accent/12;
+}
+
+.card-name {
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.card-path {
+    color: @ad_muted;
+    font-size: 11px;
+}
+
+.card-subject {
+    margin-top: 3px;
+    color: $text.primary/80;
+    font-size: 11px;
+}
+
+.card-when {
+    color: @ad_muted;
+    font-size: 10px;
+}
+
+.chip, .chip-dirty, .chip-active {
+    padding: 1px 8px;
+    border-radius: 7px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.chip {
+    border: 1px solid $line.solid/60;
+    background-color: @ad_bg_deep;
+    color: @ad_muted;
+}
+
+.chip-dirty {
+    border: 1px solid $warn/45;
+    background-color: $warn/12;
+    color: @ad_warning;
+}
+
+.chip-active {
+    border: 1px solid $accent/45;
+    background-color: $accent/16;
+    color: @ad_accent;
+    font-weight: 700;
+}
+
+.footer {
+    padding: 8px 28px;
+    border-top: 1px solid $line.solid/32;
+    background-color: @ad_bg_deep;
+    color: @ad_muted;
+    font-size: 10px;
+}
+
+/* ---------- project detail ---------- */
+
+.back, .action {
+    padding: 4px 12px;
+    border-radius: 9px;
+    border: 1px solid $line.solid/45;
+    background-color: @ad_surface;
+    background-image: none;
+    color: @ad_text;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.back:hover, .action:hover {
+    border-color: $accent/45;
+    background-color: @ad_surface_2;
+}
+
+.detail-body { padding: 16px 28px 24px 28px; }
+
+.panel {
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid $line.solid/45;
+    background-color: @ad_surface;
+}
+
+.panel-title {
+    color: @ad_muted;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+.legend { color: @ad_muted; font-size: 10px; font-weight: 600; }
+.legend-0 { color: $accent; }
+.legend-1 { color: $cyan; }
+.legend-2 { color: $indigo; }
+.legend-3 { color: $warn; }
+.legend-4 { color: $ok; }
+.legend-5 { color: $danger; }
+
+.author { color: @ad_text; font-size: 11px; font-weight: 600; }
+.author-count { color: @ad_muted; font-size: 10px; }
+
+.commit-when { color: @ad_muted; font-size: 10px; }
+.commit-subject { color: $text.primary/80; font-size: 11px; }
+.commit-author { color: @ad_muted; font-size: 10px; }
+
+/* Section headings break the detail view into activity, composition and
+   people, so panels read as groups rather than one long stack. */
+.section-title {
+    margin: 10px 2px 0 2px;
+    color: $text.primary/95;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+}
+
+.detail-body { padding: 18px 28px 28px 28px; }
+
+.panel { padding: 16px 18px 18px 18px; }
+
+/* ---------- learn: the repository's own documentation ---------- */
+
+.doc-index {
+    border-right: 1px solid $line.solid/45;
+    background-color: @ad_bg_deep;
+}
+
+.doc-index-list { padding: 12px 10px; }
+
+.doc-entry {
+    padding: 7px 10px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+.doc-entry:hover { background-color: @ad_surface; }
+
+.doc-entry.selected {
+    border-color: $accent/45;
+    background-color: $accent/12;
+}
+
+.doc-name { color: @ad_text; font-size: 12px; font-weight: 600; }
+.doc-path { color: @ad_muted; font-size: 9px; }
+
+/* Reading measure: long lines are the enemy of documentation. */
+.doc-body {
+    padding: 26px 34px 40px 34px;
+    color: $text.primary/95;
+    font-size: 13px;
+}
+
+/* ---------- rendered document ---------- */
+
+.doc-page { padding: 24px 30px 40px 30px; }
+
+.doc-h1, .doc-h2, .doc-h3 {
+    margin-top: 10px;
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-weight: 700;
+}
+
+.doc-h1 { color: $white; }
+.doc-h2 { color: $text.primary/95; }
+.doc-h3 { color: @ad_accent; }
+
+.doc-rule {
+    margin: 6px 0;
+    background-color: $line.solid/45;
+}
+
+.doc-table {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background-color: @ad_bg_deep;
+    color: $text.primary/95;
+    font-family: monospace;
+}
+
+/* Code blocks get their own surface, a language tag and a copy button. */
+.code-block {
+    border-radius: 12px;
+    border: 1px solid $line.solid/60;
+    background-color: @ad_bg_deep;
+}
+
+.code-bar {
+    padding: 5px 8px 5px 12px;
+    border-bottom: 1px solid $line.solid/45;
+    background-color: $surface.raised/60;
+}
+
+.code-lang {
+    color: @ad_muted;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+.code-copy {
+    min-height: 20px;
+    padding: 1px 10px;
+    border-radius: 7px;
+    border: 1px solid $line.solid/60;
+    background-color: @ad_surface;
+    background-image: none;
+    color: @ad_text;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.code-copy:hover {
+    border-color: $accent/45;
+    background-color: @ad_surface_2;
+}
+
+.doc-code {
+    padding: 12px 14px;
+    color: $text.primary/95;
+    font-family: monospace;
+}
+
+/* ---------- notes ---------- */
+
+.notes-pane {
+    padding: 14px 14px 10px 14px;
+    border-left: 1px solid $line.solid/45;
+    background-color: @ad_bg_deep;
+}
+
+.notes-view {
+    border-radius: 10px;
+    border: 1px solid $line.solid/45;
+    background-color: @ad_bg;
+    color: @ad_text;
+}
+
+.notes-view text { background-color: transparent; color: @ad_text; }
+
+.notes-status { color: @ad_muted; font-size: 9px; }
+.notes-path { color: $text.tertiary/60; font-size: 9px; }

@@ -1,3 +1,5 @@
+/* GENERATED from style.src.css by scripts/build-tokens.py. Edit style.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
 /*
  * Adaptive Command - search palette
  *
@@ -10,12 +12,12 @@
  */
 
 @define-color ad_bg          #1C1C1E;
-@define-color ad_bg_deep     #141416;
-@define-color ad_surface     #2C2C2E;
-@define-color ad_surface_2   #3A3A3C;
-@define-color ad_divider     #48484A;
-@define-color ad_text        #F5F5F7;
-@define-color ad_muted       #98989D;
+@define-color ad_bg_deep     #151517;
+@define-color ad_surface     #2D2D2F;
+@define-color ad_surface_2   #3B3B3D;
+@define-color ad_divider     #49494C;
+@define-color ad_text        #F5F5F8;
+@define-color ad_muted       #A4A4A7;
 @define-color ad_accent      #0A84FF;
 @define-color ad_cyan        #64D2FF;
 @define-color ad_violet      #5E5CE6;
@@ -26,7 +28,7 @@ window.adaptive-command {
 
 .palette {
     background-color: @ad_bg;
-    border: 1px solid alpha(@ad_divider, 0.55);
+    border: 1px solid rgba(73, 73, 76, 0.60);
     border-radius: 18px;
     box-shadow: 0 24px 60px alpha(black, 0.55);
 }
@@ -39,7 +41,6 @@ window.adaptive-command {
 
 .query-icon {
     color: @ad_muted;
-    -gtk-icon-size: 20px;
 }
 
 entry.query {
@@ -72,11 +73,11 @@ entry.query > text:focus {
 
 entry.query placeholder,
 entry.query text placeholder {
-    color: alpha(@ad_muted, 0.62);
+    color: rgba(164, 164, 167, 0.60);
 }
 
 .rule {
-    background-color: alpha(@ad_divider, 0.42);
+    background-color: rgba(73, 73, 76, 0.45);
     min-height: 1px;
 }
 
@@ -84,7 +85,7 @@ entry.query text placeholder {
 
 .section {
     padding: 14px 20px 6px 20px;
-    color: alpha(@ad_muted, 0.85);
+    color: rgba(164, 164, 167, 0.80);
     font-family: "Space Grotesk", "Ubuntu", sans-serif;
     font-size: 10px;
     font-weight: 700;
@@ -113,13 +114,13 @@ button.row {
 }
 
 button.row:hover {
-    background-color: alpha(@ad_surface_2, 0.85);
+    background-color: rgba(59, 59, 61, 0.80);
 }
 
 /* The left edge carries the category accent, echoing the project cards. */
 button.row.selected {
-    background-color: alpha(@ad_accent, 0.14);
-    border-color: alpha(@ad_accent, 0.34);
+    background-color: rgba(10, 132, 255, 0.12);
+    border-color: rgba(10, 132, 255, 0.32);
 }
 
 button.row.accent-accent.selected { border-left: 3px solid @ad_accent; }
@@ -145,9 +146,9 @@ button.row.accent-muted.selected  { border-left: 3px solid @ad_muted; }
 
 .badge {
     padding: 2px 8px;
-    border: 1px solid alpha(@ad_divider, 0.55);
+    border: 1px solid rgba(73, 73, 76, 0.60);
     border-radius: 7px;
-    background-color: alpha(@ad_surface, 0.9);
+    background-color: rgba(45, 45, 47, 0.95);
     color: @ad_muted;
     font-size: 10px;
     font-weight: 600;
@@ -156,9 +157,9 @@ button.row.accent-muted.selected  { border-left: 3px solid @ad_muted; }
 .chip {
     min-width: 18px;
     padding: 2px 7px;
-    border: 1px solid alpha(@ad_divider, 0.6);
+    border: 1px solid rgba(73, 73, 76, 0.60);
     border-radius: 7px;
-    background-color: alpha(@ad_surface_2, 0.92);
+    background-color: rgba(59, 59, 61, 0.95);
     color: @ad_muted;
     font-size: 10px;
     font-weight: 700;
@@ -166,7 +167,7 @@ button.row.accent-muted.selected  { border-left: 3px solid @ad_muted; }
 
 .empty {
     padding: 34px 20px;
-    color: alpha(@ad_muted, 0.75);
+    color: rgba(164, 164, 167, 0.80);
     font-size: 13px;
 }
 
@@ -174,12 +175,12 @@ button.row.accent-muted.selected  { border-left: 3px solid @ad_muted; }
 
 .footer {
     padding: 9px 20px;
-    border-top: 1px solid alpha(@ad_divider, 0.35);
-    background-color: alpha(@ad_bg_deep, 0.75);
+    border-top: 1px solid rgba(73, 73, 76, 0.32);
+    background-color: rgba(21, 21, 23, 0.80);
 }
 
 .hint {
-    color: alpha(@ad_muted, 0.8);
+    color: rgba(164, 164, 167, 0.80);
     font-size: 10px;
     letter-spacing: 0.3px;
 }
@@ -191,5 +192,5 @@ scrollbar {
 scrollbar slider {
     min-width: 6px;
     border-radius: 6px;
-    background-color: alpha(@ad_muted, 0.35);
+    background-color: rgba(164, 164, 167, 0.32);
 }

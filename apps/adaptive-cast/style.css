@@ -1,12 +1,14 @@
+/* GENERATED from style.src.css by scripts/build-tokens.py. Edit style.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
 /* Cast - same tokens as the shell and the palette. */
 
 @define-color ad_bg        #1C1C1E;
-@define-color ad_bg_deep   #141416;
-@define-color ad_surface   #2C2C2E;
-@define-color ad_surface_2 #3A3A3C;
-@define-color ad_divider   #48484A;
-@define-color ad_text      #F5F5F7;
-@define-color ad_muted     #98989D;
+@define-color ad_bg_deep   #151517;
+@define-color ad_surface   #2D2D2F;
+@define-color ad_surface_2 #3B3B3D;
+@define-color ad_divider   #49494C;
+@define-color ad_text      #F5F5F8;
+@define-color ad_muted     #A4A4A7;
 @define-color ad_accent    #0A84FF;
 @define-color ad_warning   #FF9F0A;
 @define-color ad_danger    #FF453A;
@@ -17,7 +19,7 @@ window.adaptive-cast, .root { background-color: @ad_bg; color: @ad_text; }
 .header {
     padding: 22px 26px 16px 26px;
     background-color: @ad_bg_deep;
-    border-bottom: 1px solid alpha(@ad_divider, 0.35);
+    border-bottom: 1px solid rgba(73, 73, 76, 0.32);
 }
 
 .title { font-size: 24px; font-weight: 700; }
@@ -26,7 +28,7 @@ window.adaptive-cast, .root { background-color: @ad_bg; color: @ad_text; }
 .chip {
     padding: 5px 12px;
     border-radius: 999px;
-    background-color: alpha(@ad_accent, 0.16);
+    background-color: rgba(10, 132, 255, 0.16);
     color: @ad_accent;
     font-weight: 600;
 }
@@ -35,7 +37,7 @@ window.adaptive-cast, .root { background-color: @ad_bg; color: @ad_text; }
     margin: 14px 18px 0 18px;
     padding: 10px 12px;
     border-radius: 10px;
-    background-color: alpha(@ad_warning, 0.14);
+    background-color: rgba(255, 159, 10, 0.12);
     color: @ad_warning;
     font-family: monospace;
 }
@@ -59,7 +61,7 @@ window.adaptive-cast, .root { background-color: @ad_bg; color: @ad_text; }
     border: 1px solid transparent;
 }
 
-.display.last { border-color: alpha(@ad_accent, 0.55); }
+.display.last { border-color: rgba(10, 132, 255, 0.60); }
 .display .name { font-size: 16px; font-weight: 600; }
 .tv-icon { color: @ad_accent; }
 .empty { padding: 48px 24px; }
@@ -81,13 +83,13 @@ button.cast:disabled { background-color: @ad_surface_2; color: @ad_muted; }
 .preview {
     border-radius: 16px;
     background-color: black;
-    border: 1px solid alpha(@ad_divider, 0.5);
+    border: 1px solid rgba(73, 73, 76, 0.45);
 }
 
 .preview-note {
     padding: 8px 16px;
     border-radius: 999px;
-    background-color: alpha(@ad_bg_deep, 0.85);
+    background-color: rgba(21, 21, 23, 0.80);
     color: @ad_text;
     font-weight: 600;
 }
@@ -111,7 +113,7 @@ button.cast:disabled { background-color: @ad_surface_2; color: @ad_muted; }
     font-weight: 600;
 }
 
-.step.current { background-color: alpha(@ad_accent, 0.22); color: @ad_text; }
+.step.current { background-color: rgba(10, 132, 255, 0.24); color: @ad_text; }
 .step.done { background-color: alpha(@ad_live, 0.18); color: @ad_live; }
 
 .status { color: @ad_muted; }
@@ -129,19 +131,19 @@ button.action {
     background-image: none;
     background-color: @ad_surface;
     color: @ad_text;
-    border: 1px solid alpha(@ad_divider, 0.6);
+    border: 1px solid rgba(73, 73, 76, 0.60);
     border-radius: 10px;
     padding: 7px 16px;
 }
 
 button.action:checked {
-    background-color: alpha(@ad_accent, 0.25);
+    background-color: rgba(10, 132, 255, 0.24);
     border-color: @ad_accent;
 }
 
 button.stop {
     background-image: none;
-    background-color: alpha(@ad_danger, 0.18);
+    background-color: rgba(255, 69, 58, 0.16);
     color: @ad_danger;
     border-radius: 10px;
     border: none;
@@ -153,7 +155,7 @@ button.stop {
 
 .sidebar {
     background-color: @ad_bg_deep;
-    border-left: 1px solid alpha(@ad_divider, 0.35);
+    border-left: 1px solid rgba(73, 73, 76, 0.32);
 }
 
 .tabs { padding: 12px 10px 6px 10px; }
@@ -193,7 +195,7 @@ button.preset label.muted { color: @ad_muted; }
 
 button.preset:checked {
     border-color: @ad_accent;
-    background-color: alpha(@ad_accent, 0.14);
+    background-color: rgba(10, 132, 255, 0.12);
 }
 
 button.key {
@@ -205,18 +207,18 @@ button.key {
     min-height: 40px;
 }
 
-button.key:active { background-color: alpha(@ad_accent, 0.35); }
+button.key:active { background-color: rgba(10, 132, 255, 0.32); }
 
 entry {
     background-color: @ad_surface;
     color: @ad_text;
     border-radius: 10px;
-    border: 1px solid alpha(@ad_divider, 0.5);
+    border: 1px solid rgba(73, 73, 76, 0.45);
 }
 
 switch:checked { background-color: @ad_accent; }
 
 /* Narrow (the phone): tabs under the main area, which sizes to its content. */
-window.narrow .sidebar { border-left: none; border-top: 1px solid alpha(@ad_divider, 0.35); }
+window.narrow .sidebar { border-left: none; border-top: 1px solid rgba(73, 73, 76, 0.32); }
 window.narrow .page { padding: 14px 14px; }
 window.narrow .header { padding: 16px 16px 12px 16px; }

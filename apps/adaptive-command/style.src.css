@@ -1,0 +1,194 @@
+/*
+ * Adaptive Command - search palette
+ *
+ * The Command screen from the design system: an obsidian panel floating over
+ * the desktop, one oversized field, sectioned results, thin structural lines
+ * and an 8px rhythm. Colours mirror tokens/adaptive.tokens.json.
+ *
+ * Space Grotesk is the design typeface. It is not installed by default, so the
+ * stack falls through to Ubuntu, which shares its geometric build.
+ */
+
+@define-color ad_bg          $surface.window;
+@define-color ad_bg_deep     $surface.ground;
+@define-color ad_surface     $surface.card;
+@define-color ad_surface_2   $surface.raised;
+@define-color ad_divider     $line.solid;
+@define-color ad_text        $n11;
+@define-color ad_muted       $n9;
+@define-color ad_accent      $accent;
+@define-color ad_cyan        $cyan;
+@define-color ad_violet      $indigo;
+
+window.adaptive-command {
+    background-color: transparent;
+}
+
+.palette {
+    background-color: @ad_bg;
+    border: 1px solid $line.solid/60;
+    border-radius: 18px;
+    box-shadow: 0 24px 60px alpha(black, 0.55);
+}
+
+/* ---------------------------------------------------------------- query */
+
+.query-row {
+    padding: 18px 20px;
+}
+
+.query-icon {
+    color: @ad_muted;
+}
+
+entry.query {
+    background: none;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    caret-color: @ad_accent;
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 24px;
+    font-weight: 500;
+}
+
+/* The session theme draws a focus ring on every focusable widget. In a palette
+   whose entire surface is one field, that ring reads as a stray box, so it is
+   cancelled here - the caret already shows where focus is. */
+entry.query,
+entry.query:focus,
+entry.query:focus-visible,
+entry.query > text,
+entry.query > text:focus {
+    outline: none;
+    border: none;
+    box-shadow: none;
+    background: none;
+    background-color: transparent;
+}
+
+entry.query placeholder,
+entry.query text placeholder {
+    color: $text.tertiary/60;
+}
+
+.rule {
+    background-color: $line.solid/45;
+    min-height: 1px;
+}
+
+/* -------------------------------------------------------------- sections */
+
+.section {
+    padding: 14px 20px 6px 20px;
+    color: $text.tertiary/80;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+.results {
+    padding-bottom: 8px;
+}
+
+.results-scroll {
+    background-color: transparent;
+}
+
+/* ------------------------------------------------------------------ rows */
+
+button.row {
+    margin: 1px 10px;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: none;
+    background-color: transparent;
+    box-shadow: none;
+    color: @ad_text;
+}
+
+button.row:hover {
+    background-color: $surface.raised/80;
+}
+
+/* The left edge carries the category accent, echoing the project cards. */
+button.row.selected {
+    background-color: $accent/12;
+    border-color: $accent/32;
+}
+
+button.row.accent-accent.selected { border-left: 3px solid @ad_accent; }
+button.row.accent-cyan.selected   { border-left: 3px solid @ad_cyan; }
+button.row.accent-violet.selected { border-left: 3px solid @ad_violet; }
+button.row.accent-muted.selected  { border-left: 3px solid @ad_muted; }
+
+.row-icon {
+    color: @ad_text;
+}
+
+.row-title {
+    color: @ad_text;
+    font-family: "Space Grotesk", "Ubuntu", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.row-subtitle {
+    color: @ad_muted;
+    font-size: 11px;
+}
+
+.badge {
+    padding: 2px 8px;
+    border: 1px solid $line.solid/60;
+    border-radius: 7px;
+    background-color: $surface.card/95;
+    color: @ad_muted;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.chip {
+    min-width: 18px;
+    padding: 2px 7px;
+    border: 1px solid $line.solid/60;
+    border-radius: 7px;
+    background-color: $surface.raised/95;
+    color: @ad_muted;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.empty {
+    padding: 34px 20px;
+    color: $text.tertiary/80;
+    font-size: 13px;
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.footer {
+    padding: 9px 20px;
+    border-top: 1px solid $line.solid/32;
+    background-color: $surface.ground/80;
+}
+
+.hint {
+    color: $text.tertiary/80;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+}
+
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    min-width: 6px;
+    border-radius: 6px;
+    background-color: $text.tertiary/32;
+}

@@ -1,0 +1,3496 @@
+/* Adaptive Desktop Shell - GNOME Shell 42. Source of stylesheet.css: colours are named tokens
+   (see the palette note further down); run scripts/build-tokens.py after editing. */
+
+#panel {
+    background-color: $surface.window;
+    border-bottom: 1px solid $white/8;
+    box-shadow: none;
+}
+
+/* ---------- real GNOME clock/calendar ---------- */
+
+.adaptive-stock-clock {
+    min-height: 22px;
+    margin: 1px 3px;
+    padding: 0 11px;
+    border-radius: 7px;
+    border: 1px solid $white/8;
+    background-color: $surface.card/60;
+    color: $text.primary;
+}
+
+.adaptive-stock-clock:hover,
+.adaptive-stock-clock:focus {
+    border-color: $white/16;
+    background-color: $surface.raised/80;
+}
+
+/* ---------- interactive bottom dock ---------- */
+
+/* Favorites + running applications share one icon. Running-window dots live
+   below each icon, so opening another window never creates a duplicate app
+   icon. The whole dock is positioned by _layoutRail() in extension.js. */
+
+.adaptive-window-list {
+    spacing: 5px;
+}
+
+.adaptive-dock-button {
+    width: 52px;
+    height: 56px;
+    padding: 3px 4px 2px 4px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background-color: transparent;
+    color: $text.tertiary;
+}
+
+.adaptive-dock-button:hover {
+    border-color: $white/16;
+    background-color: $surface.raised/80;
+}
+
+.adaptive-dock-button:focus {
+    border-color: $accent/32;
+    background-color: $surface.raised/95;
+}
+
+.adaptive-dock-button.active {
+    border-color: $white/24;
+    background-color: $white/8;
+}
+
+.adaptive-app-dock-content {
+    spacing: 2px;
+}
+
+.adaptive-app-icon,
+.adaptive-dock-icon {
+    icon-size: 40px;
+}
+
+.adaptive-running-indicators {
+    height: 6px;
+    spacing: 3px;
+}
+
+.adaptive-running-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: $n11/80;
+}
+
+.adaptive-running-dot.active {
+    background-color: $accent;
+}
+
+.adaptive-running-count {
+    margin-left: 1px;
+    color: $text.tertiary;
+    font-size: 8px;
+    font-weight: 700;
+}
+
+/* Vertical separator between application icons and the Applications launcher. */
+.adaptive-rail-rule {
+    width: 1px;
+    height: 38px;
+    margin: 9px 2px 7px 3px;
+    background-color: $line.solid/60;
+}
+
+.adaptive-utility-dock-button {
+    margin-left: 1px;
+}
+
+.adaptive-tooltip {
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid $line.solid/60;
+    background-color: $surface.card;
+    color: $text.primary;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: 0 7px 20px $black/32;
+}
+
+.adaptive-dock-popup .popup-menu-content {
+    border-radius: 12px;
+    border: 1px solid $white/12;
+    background-color: $surface.window;
+    box-shadow: 0 10px 28px $black/32;
+}
+
+.adaptive-dock-popup .popup-menu-item {
+    min-height: 30px;
+    border-radius: 8px;
+    color: $text.primary;
+}
+
+.adaptive-dock-popup .popup-menu-item:focus,
+.adaptive-dock-popup .popup-menu-item:hover {
+    background-color: $white/12;
+}
+
+.adaptive-system-status-value {
+    max-width: 150px;
+    color: $text.tertiary;
+    font-size: 10px;
+}
+
+/* ---------- Overview redesign ---------- */
+
+/* Remove the stock Ubuntu/GNOME overview dash. The Adaptive bottom dock owns navigation. */
+#dash {
+    opacity: 0;
+    height: 0;
+    min-height: 0;
+}
+
+#dash .dash-background {
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+#dash .dash-item-container {
+    opacity: 0;
+}
+
+/* Calm Adaptive overview background. */
+#overviewGroup {
+    background-color: $surface.window;
+}
+
+.overview-controls {
+    spacing: 22px;
+}
+
+/* Search surface */
+.search-entry {
+    width: 360px;
+    min-height: 38px;
+    padding: 3px 13px;
+    border-radius: 12px;
+    border: 1px solid $white/16;
+    background-color: $surface.pane/95;
+    color: $text.primary;
+    box-shadow: 0 8px 28px $black/16;
+}
+
+.search-entry:hover,
+.search-entry:focus {
+    border-color: $white/24;
+    background-color: $surface.card/95;
+}
+
+/* Workspace preview frames */
+.workspace-thumbnail {
+    border-radius: 14px;
+    background-color: $surface.card/80;
+}
+
+.workspace-thumbnail-indicator {
+    border: 2px solid $accent/95;
+    border-radius: 14px;
+}
+
+.workspace-thumbnails {
+    spacing: 12px;
+}
+
+/* App grid / overview labels */
+.app-well-app .overview-icon,
+.grid-search-result .overview-icon {
+    border-radius: 12px;
+}
+
+.app-well-app:hover .overview-icon,
+.grid-search-result:hover .overview-icon {
+    background-color: $white/8;
+}
+
+/* Keep the top clock pill visually connected to the popup */
+.adaptive-stock-clock {
+    border-color: $white/16;
+    background-color: $surface.pane/95;
+    color: $text.primary;
+    font-weight: 650;
+}
+
+
+/* Adaptive bottom dock stability v2.1 */
+.adaptive-dock-reservation {
+    background-color: transparent;
+}
+
+
+.adaptive-window-list {
+    spacing: 4px;
+}
+
+.adaptive-dock-button {
+    width: 48px;
+    height: 50px;
+    padding: 2px 3px 1px 3px;
+    border-radius: 13px;
+}
+
+.adaptive-app-icon,
+.adaptive-dock-icon {
+    icon-size: 36px;
+}
+
+.adaptive-app-dock-content {
+    spacing: 1px;
+}
+
+.adaptive-running-indicators {
+    height: 5px;
+    spacing: 3px;
+}
+
+.adaptive-rail-rule {
+    width: 1px;
+    height: 34px;
+    margin: 8px 2px 6px 2px;
+}
+
+.adaptive-dock-popup .popup-menu-content {
+    min-width: 190px;
+}
+
+
+/* Adaptive bottom dock geometry v2.2
+ *
+ * The dock is positioned explicitly in JavaScript. No CSS margin may
+ * alter its physical screen position.
+ */
+.adaptive-dock-reservation {
+    margin: 0;
+    padding: 0;
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+
+.adaptive-window-list {
+    spacing: 3px;
+}
+
+.adaptive-dock-button {
+    width: 46px;
+    height: 48px;
+    padding: 1px 2px;
+    border-radius: 12px;
+}
+
+.adaptive-app-icon,
+.adaptive-dock-icon {
+    icon-size: 34px;
+}
+
+.adaptive-app-dock-content {
+    spacing: 1px;
+}
+
+.adaptive-running-indicators {
+    height: 4px;
+    spacing: 3px;
+}
+
+.adaptive-running-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+}
+
+.adaptive-rail-rule {
+    width: 1px;
+    height: 30px;
+    margin: 8px 2px 5px 2px;
+}
+
+
+/* Adaptive dock visual customization v2.3 START */
+.adaptive-dock-reservation {
+    margin: 0;
+    padding: 0;
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+
+.adaptive-window-list {
+    spacing: 3px;
+}
+
+.adaptive-dock-button {
+    width: 48px;
+    height: 48px;
+    padding: 1px 2px;
+    border-radius: 12px;
+    background-color: transparent;
+    border: 1px solid transparent;
+}
+
+.adaptive-dock-button:hover {
+    background-color: $white/8;
+    border: 1px solid $white/8;
+}
+
+.adaptive-app-icon,
+.adaptive-dock-icon {
+    icon-size: 36px;
+}
+
+.adaptive-app-dock-content {
+    spacing: 1px;
+}
+
+.adaptive-running-indicators {
+    height: 5px;
+    spacing: 3px;
+}
+
+.adaptive-running-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+}
+
+.adaptive-rail-rule {
+    width: 1px;
+    height: 30px;
+    margin: 7px 3px 4px 3px;
+    background-color: $white/12;
+}
+/* Adaptive dock visual customization v2.3 END */
+
+
+
+/* Adaptive monitor-aware dock v2.6 START */
+.adaptive-dock-hot-edge {
+    background-color: transparent;
+    border: 0;
+}
+
+.adaptive-dock-reservation {
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+.adaptive-rail {
+    margin: 0;
+    padding: 4px 13px 3px 13px;
+    spacing: 4px;
+    border-radius: 17px;
+    background-color: $surface.ground/16;
+    border: 1px solid $white/16;
+    box-shadow:
+        0 10px 30px $black/24,
+        inset 0 1px 0 $white/8;
+}
+
+.adaptive-window-list {
+    spacing: 3px;
+}
+
+.adaptive-show-apps-button {
+    margin-left: 3px;
+    margin-right: 3px;
+}
+/* Adaptive monitor-aware dock v2.6 END */
+
+/* ===== Adaptive lock screen =====
+ *
+ * Applies in unlock-dialog session mode, which the extension opts into via
+ * session-modes in metadata.json - GNOME otherwise disables user extensions
+ * while locked and the lock screen falls back to stock Yaru.
+ *
+ * OLED treatment: once the screen blanks the panel is true black so unlit
+ * pixels stay unlit, and only the clock, date and activity line carry white.
+ * The password screen itself shows the wallpaper unblurred. Presentation only:
+ * authentication and the unlock path remain GNOME's own.
+ */
+
+#lockDialogGroup {
+    background-color: $black;
+    background-image: none;
+}
+
+/* The password screen shows the desktop wallpaper, left sharp (the extension
+   removes the blur). Black remains only behind it and once the screen blanks. */
+.screen-shield-background,
+.unlock-dialog,
+#lockDialogGroup .screen-shield-background {
+    background-color: transparent;
+    background-image: none;
+}
+
+/* ---------- clock ---------- */
+
+.unlock-dialog-clock {
+    spacing: 8px;
+    padding: 0;
+    color: $white;
+}
+
+/* Seconds are appended by the extension, so the glyphs change every second.
+   Tabular-ish spacing keeps the line from shifting as digits change width. */
+.unlock-dialog-clock-time {
+    color: $white;
+    font-size: 76px;
+    font-weight: 200;
+    font-feature-settings: "tnum";
+}
+
+.unlock-dialog-clock-date {
+    margin-top: 10px;
+    color: $white;
+    font-size: 18px;
+    font-weight: 400;
+}
+
+/* Running-process line. Dim white rather than an accent colour: on an OLED
+   panel a coloured glow is exactly what this treatment is avoiding. */
+.adaptive-lock-activity {
+    margin-top: 16px;
+    max-width: 640px;
+    color: $white/60;
+    font-size: 12px;
+    font-weight: 500;
+    text-align: center;
+}
+
+.unlock-dialog-clock-hint {
+    margin-top: 20px;
+    padding: 4px 12px;
+    border-radius: 9px;
+    border: 1px solid $white/16;
+    background-color: $white/4;
+    color: $white/60;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* ---------- unlock prompt ---------- */
+
+/* The prompt column is centred on the shield by the extension; these keep the
+   entry itself centred within that column. */
+.login-dialog-prompt-layout {
+    spacing: 12px;
+    text-align: center;
+}
+
+.login-dialog-prompt-label {
+    color: $white/80;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+}
+
+.login-dialog-prompt-entry {
+    width: 300px;
+    min-height: 36px;
+    padding: 4px 14px;
+    border-radius: 12px;
+    border: 1px solid $white/24;
+    background-color: $white/4;
+    color: $white;
+    caret-color: $white;
+    selection-background-color: $white/24;
+}
+
+.login-dialog-prompt-entry:focus {
+    border-color: $white/60;
+    background-color: $white/8;
+}
+
+.login-dialog-message,
+.login-dialog-message-warning,
+.caps-lock-warning-label {
+    color: $white/80;
+    font-size: 11px;
+    text-align: center;
+}
+
+/* ---------- buttons ---------- */
+
+.unlock-dialog .modal-dialog-button,
+.login-dialog-button-box .modal-dialog-button {
+    min-height: 30px;
+    padding: 4px 16px;
+    border-radius: 11px;
+    border: 1px solid $white/16;
+    background-color: $white/4;
+    color: $white;
+}
+
+.unlock-dialog .modal-dialog-button:hover,
+.unlock-dialog .modal-dialog-button:focus {
+    border-color: $white/45;
+    background-color: $white/12;
+}
+
+.switch-user-button {
+    color: $white/60;
+}
+
+/* ---------- notifications on the shield ---------- */
+
+.unlock-dialog-notifications-container {
+    width: 330px;
+    spacing: 6px;
+    background-color: transparent;
+}
+
+.unlock-dialog-notifications-container .message,
+.unlock-dialog-notification-source {
+    padding: 9px 11px;
+    border-radius: 11px;
+    border: 1px solid $white/8;
+    background-color: $white/4;
+    color: $white;
+}
+
+.unlock-dialog-notification-label {
+    color: $white/60;
+    font-size: 11px;
+}
+
+.unlock-dialog-notification-count-text {
+    padding: 0 7px;
+    border-radius: 8px;
+    background-color: $white/12;
+    color: $white;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+/* Always-on layer: shown once GNOME fades its unlock dialog away, so the
+   screen is never just black. Dim by design - this can sit lit for hours. */
+.adaptive-aod {
+    spacing: 10px;
+    background-color: transparent;
+}
+
+.adaptive-aod-time {
+    color: $white/60;
+    font-size: 92px;
+    font-weight: 200;
+}
+
+.adaptive-aod-date {
+    color: $white/32;
+    font-size: 17px;
+    font-weight: 400;
+}
+
+
+/* ===== Adaptive Shade v3 — information center =====
+ *
+ * The date menu as somewhere to LOOK at things: clock, the Activity Center
+ * (AI usage, tasks, music, focus), notifications grouped per application, and
+ * GNOME's own calendar. The rule is no DUPLICATED system controls: quick
+ * settings live in the Control Center and hardware telemetry in the System
+ * panel; what is here acts on things only the Shade shows.
+ *
+ * LOOK. Apple's dark appearance, as the whole desktop now uses it (see
+ * "Adaptive palette" at the end of this file): a graphite menu material, cards
+ * one step lighter, white labels in three strengths, and a single accent -
+ * system blue - for whatever is selected, on, or today. Green, orange and red
+ * are status colours only. No gradients, no glows.
+ *
+ * SCOPE. Everything hangs off `.adaptive-shade-menu` (added to the popup by
+ * shade.js - GNOME 42 gives the date menu no class of its own, which is why
+ * the v2 `.calendar-menu` rules silently never applied and Yaru's grey showed)
+ * or `#calendarArea`, GNOME's id for the popup's contents. The id is also what
+ * lifts these rules over Yaru's, several of which carry !important.
+ *
+ * TYPE. Inter throughout (the nearest free face to SF Pro), with tabular
+ * figures wherever numbers tick. Section labels are sentence case, not
+ * tracked capitals. Nothing here, or in the Dynamic Island block, is smaller
+ * than 11px - verify-live-readiness.sh fails if it is.
+ *
+ * One block. Do not add override rules further down the file.
+ */
+
+/* ---------------------------------------------------------------
+ * Popup
+ * --------------------------------------------------------------- */
+
+.popup-menu-content.adaptive-shade-menu {
+    background-color: $surface.window;
+    padding: 0;
+    border-radius: 22px;
+    border: 1px solid $white/8;
+    box-shadow: 0 22px 56px $black/60;
+    font-family: Inter;
+}
+
+#calendarArea {
+    padding: 14px;
+    spacing: 14px;
+    color: $text.primary;
+}
+
+/* The shared card: one step lighter than the menu, like a macOS widget. */
+.adaptive-shade-system,
+#calendarArea .adaptive-shade .message-list,
+#calendarArea .datemenu-calendar-column {
+    background-color: $surface.card/80;
+    border-radius: 18px;
+    border: 1px solid $white/8;
+    box-shadow: inset 0 1px 0 $white/4;
+}
+
+/* Section and row labels: Apple's footnote style - small, semibold, and the
+ * secondary label colour set on each rule below. */
+.adaptive-shade-date,
+.adaptive-shade-uptime,
+.adaptive-shade-section-title,
+.adaptive-metric-name,
+.adaptive-meter-name,
+.adaptive-notif-heading-label,
+.adaptive-notif-more {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Something is live: the uptime chip, the system card. */
+.adaptive-shade-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: $ok;
+}
+
+/* ---------------------------------------------------------------
+ * Shade column and header
+ * --------------------------------------------------------------- */
+
+.adaptive-shade {
+    width: 440px;
+    spacing: 12px;
+    color: $text.primary;
+    font-family: Inter;
+}
+
+.adaptive-shade-header {
+    padding: 2px 6px 0 8px;
+    spacing: 12px;
+}
+
+.adaptive-shade-clock {
+    spacing: 3px;
+}
+
+.adaptive-shade-time {
+    color: $text.primary;
+    font-feature-settings: "tnum";
+    font-size: 46px;
+    font-weight: 200;
+}
+
+.adaptive-shade-seconds {
+    padding-bottom: 8px;
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 18px;
+    font-weight: 300;
+}
+
+.adaptive-shade-date {
+    margin-top: 2px;
+    color: $text.quaternary;
+}
+
+.adaptive-shade-uptime {
+    margin-top: 10px;
+    padding: 5px 11px 5px 9px;
+    spacing: 7px;
+    border-radius: 999px;
+    border: 1px solid $ok/32;
+    background-color: $ok/8;
+    color: $ok;
+}
+
+/* ---------------------------------------------------------------
+ * Notifications — header row, empty state, grouped cards
+ * --------------------------------------------------------------- */
+
+/* Yaru draws a right-hand border on the list - the stray vertical line - and
+ * pads it for a scrollbar the overlay scrollbars never need. */
+#calendarArea .adaptive-shade .message-list,
+#calendarArea .adaptive-shade .message-list:ltr {
+    margin: 0;
+    padding: 12px 10px 10px 12px;
+    border-width: 1px;
+}
+
+#calendarArea .message-list-sections,
+#calendarArea .message-list-sections:ltr {
+    margin: 0;
+    padding: 0;
+    spacing: 10px;
+}
+
+#calendarArea .message-list-section,
+#calendarArea .message-list-section-list {
+    spacing: 8px;
+}
+
+/* GNOME's controls row, moved to the top by shade.js. */
+#calendarArea .message-list-controls.adaptive-notif-header {
+    padding: 0 0 10px 4px;
+    spacing: 10px;
+    border-width: 0;
+}
+
+.adaptive-notif-heading {
+    spacing: 8px;
+}
+
+.adaptive-notif-heading-label {
+    color: $text.tertiary;
+}
+
+.adaptive-notif-heading-count {
+    background-color: $accent;
+    min-width: 12px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    color: $white;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    font-weight: 800;
+    text-align: center;
+}
+
+/* "Do Not Disturb" */
+#calendarArea .message-list-controls > StLabel {
+    color: $text.tertiary;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+#calendarArea .message-list-controls .dnd-button {
+    padding: 0;
+    border-width: 0;
+    border-radius: 999px;
+    background-color: transparent;
+}
+
+#calendarArea .message-list-controls .dnd-button:focus {
+    box-shadow: 0 0 0 2px $accent/45;
+}
+
+#calendarArea .toggle-switch {
+    width: 44px;
+    height: 24px;
+    background-size: contain;
+    background-image: url("assets/shade/toggle-off.svg");
+}
+
+#calendarArea .toggle-switch:checked {
+    background-image: url("assets/shade/toggle-on.svg");
+}
+
+#calendarArea .message-list-clear-button {
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid $white/24;
+    background-color: $white/4;
+    color: $accent;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+#calendarArea .message-list-clear-button:hover,
+#calendarArea .message-list-clear-button:focus {
+    border-color: $danger/45;
+    background-color: $danger/12;
+    color: $danger;
+}
+
+#calendarArea .message-list-clear-button:insensitive {
+    color: $text.disabled;
+    border-color: $white/8;
+    background-color: transparent;
+}
+
+/* Empty state: a glowing ring rather than a grey bell. */
+#calendarArea .message-list .message-list-placeholder {
+    padding: 16px 0 14px 0;
+    spacing: 12px;
+}
+
+#calendarArea .message-list .message-list-placeholder > StIcon {
+    background-color: $white/4;
+    icon-size: 22px;
+    padding: 17px;
+    border-radius: 999px;
+    border: 1px solid $white/8;
+    color: $text.tertiary;
+}
+
+#calendarArea .message-list .message-list-placeholder > StLabel {
+    color: $text.tertiary;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* One card per application. */
+.adaptive-notif-section {
+    spacing: 10px;
+}
+
+.adaptive-notif-group {
+    border-radius: 16px;
+    border: 1px solid $white/8;
+    background-color: $white/4;
+}
+
+.adaptive-notif-group:hover {
+    border-color: $white/16;
+}
+
+.adaptive-notif-group-header {
+    padding: 10px 12px 6px 10px;
+    border-radius: 16px;
+    color: $text.primary;
+}
+
+.adaptive-notif-group-header:hover,
+.adaptive-notif-group-header:focus {
+    background-color: $white/4;
+}
+
+.adaptive-notif-group-icon {
+    margin-right: 10px;
+    padding: 5px;
+    border-radius: 9px;
+    border: 1px solid $white/16;
+    background-color: $white/8;
+}
+
+.adaptive-notif-group-title {
+    color: $text.primary;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.adaptive-notif-group-count {
+    min-width: 12px;
+    margin: 0 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background-color: $white/16;
+    color: $text.primary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    font-weight: 800;
+    text-align: center;
+}
+
+.adaptive-notif-group.urgent {
+    border-color: $danger/45;
+}
+
+.adaptive-notif-group-urgent {
+    width: 7px;
+    height: 7px;
+    margin: 0 6px;
+    border-radius: 4px;
+    background-color: $danger;
+}
+
+.adaptive-notif-group-clear,
+.adaptive-notif-heading-action {
+    margin: 0 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    color: $accent;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.adaptive-notif-group-settings {
+    margin: 0 4px;
+    padding: 3px;
+    border-radius: 999px;
+    color: $text.tertiary;
+}
+
+.adaptive-notif-group-clear:hover,
+.adaptive-notif-group-clear:focus,
+.adaptive-notif-heading-action:hover,
+.adaptive-notif-heading-action:focus,
+.adaptive-notif-group-settings:hover,
+.adaptive-notif-group-settings:focus {
+    background-color: $white/8;
+    color: $text.primary;
+}
+
+.adaptive-notif-group-clear:focus,
+.adaptive-notif-heading-action:focus,
+.adaptive-notif-group-settings:focus {
+    box-shadow: inset 0 0 0 2px $accent/60;
+}
+
+.adaptive-notif-group-chevron {
+    icon-size: 14px;
+    color: $accent;
+}
+
+.adaptive-notif-group-list {
+    padding: 0 6px 6px 6px;
+    spacing: 4px;
+}
+
+.adaptive-notif-more {
+    margin: 0 10px 10px 10px;
+    padding: 6px;
+    border-radius: 10px;
+    border: 1px solid $white/12;
+    color: $accent;
+}
+
+.adaptive-notif-more:hover,
+.adaptive-notif-more:focus {
+    border-color: $accent/32;
+    background-color: $white/8;
+    color: $text.primary;
+}
+
+/* A single notification inside a group. */
+#calendarArea .message {
+    margin: 0;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background-color: transparent;
+    box-shadow: none;
+    color: $text.primary;
+}
+
+#calendarArea .message:hover {
+    border-color: $white/12;
+    background-color: $white/4;
+}
+
+#calendarArea .message:focus,
+#calendarArea .message:focus:active {
+    border-color: $accent/45;
+    background-color: $white/4;
+    box-shadow: none;
+}
+
+#calendarArea .message:active {
+    background-color: $white/8;
+}
+
+#calendarArea .message .message-icon-bin,
+#calendarArea .message .message-icon-bin:ltr {
+    padding: 12px 4px 12px 10px;
+}
+
+#calendarArea .message .message-icon-bin > StIcon {
+    icon-size: 28px;
+    -st-icon-style: requested;
+}
+
+#calendarArea .message .message-content {
+    margin-bottom: 0;
+    padding: 10px 10px 10px 6px;
+    spacing: 3px;
+}
+
+#calendarArea .message .message-title {
+    padding-top: 0;
+    color: $text.primary;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#calendarArea .message .message-body {
+    color: $text.tertiary;
+    font-size: 12px;
+}
+
+#calendarArea .message .message-secondary-bin > .event-time {
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+}
+
+#calendarArea .message .message-close-button {
+    padding: 4px;
+    border-radius: 999px;
+    background-color: $white/8;
+    color: $text.tertiary;
+}
+
+#calendarArea .message .message-close-button:hover {
+    background-color: $danger/24;
+    color: $danger;
+}
+
+/* Media player card */
+#calendarArea .message-media-control {
+    border-radius: 999px;
+    color: $text.primary;
+}
+
+#calendarArea .message-media-control:hover {
+    background-color: $white/8;
+    color: $white;
+}
+
+/* ---------------------------------------------------------------
+ * Banners - the pop-ups at the top of the screen, in the same skin
+ * --------------------------------------------------------------- */
+
+#notification-container .notification-banner,
+#notification-container .notification-banner:hover,
+#notification-container .notification-banner:focus,
+#notification-container .notification-banner:active {
+    background-color: $surface.window;
+    margin: 10px;
+    border-radius: 18px;
+    border: 1px solid $white/24;
+    box-shadow: 0 14px 36px $black/60;
+    color: $text.primary;
+    font-family: Inter;
+}
+
+#notification-container .notification-banner:hover {
+    border-color: $accent/32;
+}
+
+#notification-container .notification-banner .message-icon-bin > StIcon {
+    -st-icon-style: requested;
+}
+
+#notification-container .notification-banner .message-title {
+    color: $text.primary;
+    font-weight: 600;
+}
+
+#notification-container .notification-banner .message-body {
+    color: $text.tertiary;
+}
+
+#notification-container .notification-banner .message-secondary-bin > .event-time {
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+}
+
+#notification-container .notification-banner .notification-button {
+    margin: 0 6px 8px 6px;
+    padding: 7px;
+    border-radius: 10px;
+    border-width: 0;
+    background-color: $white/8;
+    color: $text.primary;
+    font-weight: 600;
+}
+
+#notification-container .notification-banner .notification-button:hover,
+#notification-container .notification-banner .notification-button:focus {
+    background-color: $white/16;
+    color: $white;
+}
+
+/* ---------------------------------------------------------------
+ * System telemetry
+ * --------------------------------------------------------------- */
+
+.adaptive-shade-system {
+    padding: 14px 16px;
+    spacing: 10px;
+}
+
+.adaptive-shade-section-head {
+    spacing: 8px;
+}
+
+.adaptive-shade-expander {
+    padding: 3px 11px;
+    border-radius: 999px;
+    border: 1px solid $white/24;
+    background-color: $white/4;
+    color: $accent;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-shade-expander:hover,
+.adaptive-shade-expander:focus {
+    border-color: $accent/45;
+    background-color: $white/12;
+    color: $white;
+}
+
+.adaptive-shade-section-title {
+    margin-top: 4px;
+    color: $text.tertiary;
+}
+
+.adaptive-shade-load,
+.adaptive-shade-subline {
+    color: $text.quaternary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+}
+
+/* A metric row: name and figure, history strip, then the hardware detail. */
+.adaptive-metric {
+    spacing: 12px;
+    padding: 3px 0;
+}
+
+.adaptive-metric-left {
+    width: 70px;
+}
+
+.adaptive-metric-name {
+    color: $text.quaternary;
+}
+
+.adaptive-metric-value {
+    color: $text.primary;
+    font-feature-settings: "tnum";
+    font-size: 22px;
+    font-weight: 300;
+}
+
+.adaptive-metric-meta {
+    width: 92px;
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    text-align: right;
+}
+
+.adaptive-shade-sparkline {
+    height: 34px;
+    min-width: 110px;
+}
+
+/* Meters: memory, swap, filesystems. */
+.adaptive-meter-row {
+    spacing: 10px;
+    padding: 2px 0;
+}
+
+.adaptive-meter-name {
+    width: 70px;
+    color: $text.quaternary;
+}
+
+.adaptive-meter {
+    height: 6px;
+    border-radius: 3px;
+    background-color: $white/8;
+}
+
+.adaptive-meter-fill {
+    height: 6px;
+    border-radius: 3px;
+    background-color: $accent;
+}
+
+.adaptive-meter-value {
+    width: 132px;
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    text-align: right;
+}
+
+/* Per-core load. Sixteen bars read as a shape; sixteen numbers do not. */
+.adaptive-shade-cores {
+    height: 28px;
+    spacing: 3px;
+}
+
+.adaptive-core {
+    border-radius: 2px;
+    background-color: $white/4;
+}
+
+.adaptive-core-fill {
+    border-radius: 2px;
+    background-color: $accent;
+}
+
+/* Network, one row per interface that has actually carried traffic. */
+.adaptive-net-row {
+    padding: 1px 0;
+}
+
+.adaptive-net-name {
+    color: $text.tertiary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-net-rate {
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+}
+
+/* Temperature chips, coloured by band rather than by sensor. */
+.adaptive-shade-chips {
+    padding: 2px 0;
+}
+
+.adaptive-chip {
+    padding: 7px 8px;
+    spacing: 2px;
+    border-radius: 10px;
+    border: 1px solid $white/8;
+    background-color: $white/4;
+}
+
+.adaptive-chip-name {
+    color: $text.quaternary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-chip-value {
+    color: $ok;
+    font-feature-settings: "tnum";
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* Top processes. */
+.adaptive-proc-row {
+    padding: 2px 0;
+    spacing: 8px;
+}
+
+.adaptive-proc-name {
+    color: $text.primary;
+    font-size: 12px;
+}
+
+.adaptive-proc-cpu {
+    width: 52px;
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.adaptive-proc-mem {
+    width: 72px;
+    color: $text.quaternary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    text-align: right;
+}
+
+.adaptive-shade-footer-item {
+    margin-top: 4px;
+    padding-top: 9px;
+    border-top: 1px solid $white/8;
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* ---------------------------------------------------------------
+ * Calendar column - GNOME's actors, restyled
+ * --------------------------------------------------------------- */
+
+#calendarArea .datemenu-calendar-column,
+#calendarArea .datemenu-calendar-column:ltr {
+    width: 300px;
+    padding: 12px;
+    spacing: 10px;
+    color: $text.primary;
+}
+
+#calendarArea .datemenu-displays-box {
+    spacing: 8px;
+}
+
+/* Today: a plain card; the weekday carries the accent. */
+#calendarArea .datemenu-today-button {
+    background-color: $white/4;
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid $white/8;
+    color: $text.primary;
+}
+
+#calendarArea .datemenu-today-button:hover,
+#calendarArea .datemenu-today-button:focus {
+    border-color: $accent/45;
+}
+
+#calendarArea .datemenu-today-button .day-label {
+    color: $accent;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    font-weight: 700;
+}
+
+#calendarArea .datemenu-today-button .date-label {
+    color: $text.primary;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+#calendarArea .calendar {
+    margin: 0;
+    padding: 0;
+    border-width: 0;
+    background-color: transparent;
+    color: $text.primary;
+}
+
+#calendarArea .calendar .calendar-month-label {
+    color: $text.primary;
+    font-feature-settings: "tnum";
+    font-size: 12px;
+    font-weight: 700;
+}
+
+#calendarArea .calendar .calendar-month-header .pager-button {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    color: $text.tertiary;
+    background-color: transparent;
+}
+
+#calendarArea .calendar .calendar-month-header .pager-button:hover,
+#calendarArea .calendar .calendar-month-header .pager-button:focus {
+    color: $white;
+    background-color: $white/12;
+}
+
+/* Yaru sizes days with !important, so these have to as well. */
+#calendarArea .calendar .calendar-day-base {
+    width: 34px !important;
+    height: 34px !important;
+    margin: 2px;
+    padding: 0 !important;
+    border-radius: 999px;
+    color: $text.primary;
+    font-feature-settings: "tnum";
+    font-size: 12px;
+    text-align: center;
+}
+
+#calendarArea .calendar .calendar-day-base:hover {
+    background-color: $white/8;
+    color: $white;
+}
+
+#calendarArea .calendar .calendar-day-base:focus,
+#calendarArea .calendar .calendar-day-base:selected,
+#calendarArea .calendar .calendar-day-base:active,
+#calendarArea .calendar .calendar-day-base:selected:focus {
+    background-color: $white/8;
+    box-shadow: inset 0 0 0 1px $accent/60;
+    color: $white;
+}
+
+#calendarArea .calendar .calendar-day-base.calendar-day-heading {
+    height: 18px !important;
+    padding-top: 2px !important;
+    background-color: transparent;
+    box-shadow: none;
+    color: $text.disabled;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+#calendarArea .calendar .calendar-nonwork-day {
+    color: $text.quaternary;
+}
+
+#calendarArea .calendar .calendar-other-month-day,
+#calendarArea .calendar .calendar-other-month-day.calendar-nonwork-day {
+    color: $n11/32;
+}
+
+#calendarArea .calendar .calendar-day-with-events {
+    color: $text.primary;
+    background-image: url("assets/shade/event-dot.svg");
+    background-size: contain;
+}
+
+#calendarArea .calendar .calendar-today,
+#calendarArea .calendar .calendar-today:hover,
+#calendarArea .calendar .calendar-today:focus,
+#calendarArea .calendar .calendar-today:selected,
+#calendarArea .calendar .calendar-today:active {
+    background-color: $accent;
+    color: $white !important;
+    font-weight: 800;
+}
+
+#calendarArea .calendar .calendar-week-number {
+    color: $text.disabled;
+    background-color: $white/4;
+}
+
+/* Events, world clocks, weather */
+#calendarArea .events-button,
+#calendarArea .world-clocks-button,
+#calendarArea .weather-button {
+    margin: 0;
+    padding: 11px 13px;
+    border-radius: 14px;
+    border: 1px solid $white/8;
+    background-color: $white/4;
+    box-shadow: none;
+    color: $text.primary;
+}
+
+#calendarArea .events-button:hover,
+#calendarArea .events-button:focus,
+#calendarArea .world-clocks-button:hover,
+#calendarArea .world-clocks-button:focus,
+#calendarArea .weather-button:hover,
+#calendarArea .weather-button:focus {
+    border-color: $white/24;
+    background-color: $white/8;
+}
+
+#calendarArea .events-title,
+#calendarArea .world-clocks-header,
+#calendarArea .weather-header {
+    color: $text.tertiary;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    font-weight: 700;
+}
+
+#calendarArea .events-list {
+    spacing: 6px;
+}
+
+#calendarArea .event-placeholder {
+    color: $text.tertiary;
+    font-size: 13px;
+}
+
+#calendarArea .events-button .event-time,
+#calendarArea .world-clocks-button .world-clocks-time {
+    color: $accent;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+}
+
+/* ===== Adaptive Control Center v1 — quick settings =====
+ *
+ * GNOME's system menu (top-right) as Android/iOS quick settings: a header of
+ * round actions, a two-column grid of tiles, a sliders card, and dropdowns
+ * that open in place under their control - Wi-Fi and Bluetooth under their
+ * tiles, power mode under its row, sound output under the volume slider, and
+ * the session actions under the header. One is open at a time.
+ *
+ * Same skin as the Shade block above, and macOS Control Center's rule for
+ * state: a tile never changes colour; its icon circle turns system blue, with
+ * a white glyph, when it is on. Everything hangs off `.adaptive-cc-menu` (added to the
+ * popup by controlCenter.js) or `.adaptive-cc`, so the lock screen's stock menu
+ * keeps Yaru's look.
+ */
+
+.popup-menu-content.adaptive-cc-menu {
+    background-color: $surface.window;
+    min-width: 396px;
+    padding: 0;
+    border-radius: 22px;
+    border: 1px solid $white/16;
+    box-shadow: 0 22px 56px $black/60;
+    font-family: Inter;
+}
+
+.adaptive-cc {
+    padding: 14px;
+    color: $text.primary;
+}
+
+.adaptive-cc-main {
+    spacing: 14px;
+}
+
+/* ---------------------------------------------------------------
+ * Header
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-header {
+    spacing: 8px;
+}
+
+.adaptive-cc-battery {
+    padding: 6px 12px 6px 9px;
+    spacing: 6px;
+    border-radius: 999px;
+    border: 1px solid $ok/32;
+    background-color: $ok/8;
+    color: $ok;
+    font-feature-settings: "tnum";
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.adaptive-cc-battery StIcon {
+    icon-size: 14px;
+}
+
+.adaptive-cc-round-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid $white/12;
+    background-color: $white/4;
+    color: $text.primary;
+}
+
+.adaptive-cc-round-button StIcon {
+    icon-size: 16px;
+}
+
+.adaptive-cc-round-button:hover,
+.adaptive-cc-round-button:focus {
+    border-color: $accent/45;
+    background-color: $white/12;
+    color: $white;
+}
+
+.adaptive-cc-power-button:hover,
+.adaptive-cc-power-button:focus {
+    border-color: $danger/45;
+    background-color: $danger/12;
+    color: $danger;
+}
+
+/* ---------------------------------------------------------------
+ * Tiles
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-tile {
+    min-height: 60px;
+    border-radius: 18px;
+    border: 1px solid $white/8;
+    background-color: $white/4;
+}
+
+.adaptive-cc-tile-main {
+    padding: 10px 10px 10px 10px;
+    border-radius: 18px;
+    color: $text.primary;
+}
+
+.adaptive-cc-tile-main:hover,
+.adaptive-cc-tile-main:focus {
+    background-color: $white/8;
+}
+
+.adaptive-cc-tile-box {
+    spacing: 10px;
+}
+
+.adaptive-cc-tile-icon {
+    -st-icon-style: symbolic;
+    icon-size: 18px;
+    padding: 9px;
+    border-radius: 999px;
+    background-color: $white/8;
+    color: $text.primary;
+}
+
+.adaptive-cc-tile-title {
+    color: $text.primary;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.adaptive-cc-tile-subtitle {
+    color: $text.tertiary;
+    font-size: 11px;
+}
+
+.adaptive-cc-tile-chevron {
+    icon-size: 14px;
+    color: $text.tertiary;
+}
+
+.adaptive-cc-tile-arrow {
+    width: 34px;
+    border-radius: 0 18px 18px 0;
+    border-left: 1px solid $white/8;
+    color: $text.tertiary;
+}
+
+.adaptive-cc-tile-arrow:hover,
+.adaptive-cc-tile-arrow:focus {
+    background-color: $white/8;
+    color: $white;
+}
+
+/* ON: the icon circle goes system blue; the tile itself stays grey. */
+.adaptive-cc-tile:checked .adaptive-cc-tile-icon {
+    background-color: $accent;
+    color: $white;
+}
+
+.adaptive-cc-tile:insensitive .adaptive-cc-tile-icon {
+    background-color: $white/4;
+    color: $text.disabled;
+}
+
+.adaptive-cc-tile:insensitive .adaptive-cc-tile-title,
+.adaptive-cc-tile:insensitive .adaptive-cc-tile-subtitle {
+    color: $text.disabled;
+}
+
+/* ---------------------------------------------------------------
+ * Sliders
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-sliders {
+    background-color: $surface.card/80;
+    padding: 8px 12px;
+    spacing: 4px;
+    border-radius: 18px;
+    border: 1px solid $white/12;
+    box-shadow: inset 0 1px 0 $white/4;
+}
+
+.adaptive-cc-slider-row {
+    spacing: 8px;
+    min-height: 40px;
+}
+
+.adaptive-cc-slider-icon-button {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+}
+
+.adaptive-cc-slider-icon-button:hover,
+.adaptive-cc-slider-icon-button:focus {
+    background-color: $white/8;
+}
+
+.adaptive-cc-slider-icon {
+    icon-size: 16px;
+    color: $text.primary;
+}
+
+.adaptive-cc .adaptive-cc-slider {
+    height: 28px;
+    color: $white;
+    -barlevel-height: 6px;
+    -barlevel-background-color: $white/12;
+    -barlevel-active-background-color: $accent;
+    -barlevel-overdrive-color: $danger;
+    -barlevel-border-width: 0;
+    -slider-handle-radius: 9px;
+    -slider-handle-border-width: 1px;
+    -slider-handle-border-color: $black/24;
+}
+
+.adaptive-cc .adaptive-cc-slider:focus {
+    -slider-handle-border-color: $accent;
+}
+
+.adaptive-cc-slider-arrow {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    color: $text.tertiary;
+}
+
+.adaptive-cc-slider-arrow StIcon {
+    icon-size: 14px;
+}
+
+.adaptive-cc-slider-arrow:hover,
+.adaptive-cc-slider-arrow:focus {
+    background-color: $white/8;
+    color: $white;
+}
+
+/* ---------------------------------------------------------------
+ * Dropdowns
+ * --------------------------------------------------------------- */
+
+/* A recessed well under the control that opened it. */
+.adaptive-cc-dropdown {
+    padding: 6px;
+    spacing: 2px;
+    border-radius: 16px;
+    border: 1px solid $white/8;
+    background-color: $black/24;
+}
+
+.adaptive-cc-dropdown-status {
+    padding: 14px 10px;
+    color: $text.tertiary;
+    font-size: 13px;
+    text-align: center;
+}
+
+.adaptive-cc-dropdown-link {
+    margin: 2px 4px 2px 4px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    color: $accent;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.adaptive-cc-dropdown-link:hover,
+.adaptive-cc-dropdown-link:focus {
+    background-color: $white/8;
+}
+
+/* Whatever opened the dropdown reads as pressed while it is open. */
+.adaptive-cc-tile-arrow:expanded,
+.adaptive-cc-tile-main:expanded,
+.adaptive-cc-slider-arrow:expanded {
+    background-color: $white/8;
+}
+
+.adaptive-cc-round-button:expanded {
+    border-color: $white/24;
+    background-color: $white/16;
+    color: $white;
+}
+
+.adaptive-cc-power-button:expanded {
+    border-color: $danger/45;
+    background-color: $danger/12;
+    color: $danger;
+}
+
+/* "Known Networks", "My Devices": Apple's grouped-list section label. */
+.adaptive-cc-list-heading {
+    margin: 8px 10px 2px 10px;
+    color: $text.tertiary;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Two classes, so it wins over the plain subtitle colour defined below. */
+.adaptive-cc-row-subtitle.adaptive-cc-row-alert {
+    color: $danger;
+}
+
+/* Inline forms: a Wi-Fi password, a Bluetooth PIN, passkey or code. */
+.adaptive-cc-form {
+    margin: 2px 4px 6px 4px;
+    padding: 12px;
+    spacing: 10px;
+    border-radius: 12px;
+    border: 1px solid $white/8;
+    background-color: $white/4;
+}
+
+.adaptive-cc-form-prompt {
+    color: $text.primary;
+    font-size: 12px;
+}
+
+.adaptive-cc-form-field {
+    spacing: 6px;
+}
+
+.adaptive-cc-entry {
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid $white/12;
+    background-color: $black/32;
+    color: $text.primary;
+    caret-color: $accent;
+    selection-background-color: $accent/60;
+    selected-color: $white;
+    font-size: 13px;
+}
+
+.adaptive-cc-entry:focus {
+    border-color: $accent;
+}
+
+.adaptive-cc-entry StLabel.hint-text {
+    color: $text.disabled;
+}
+
+.adaptive-cc-form-eye {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    color: $text.tertiary;
+}
+
+.adaptive-cc-form-eye StIcon {
+    icon-size: 16px;
+}
+
+.adaptive-cc-form-eye:hover,
+.adaptive-cc-form-eye:focus {
+    background-color: $white/8;
+    color: $text.primary;
+}
+
+.adaptive-cc-form-code {
+    padding: 4px 0;
+    color: $text.primary;
+    font-size: 26px;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-cc-form-buttons {
+    spacing: 8px;
+}
+
+.adaptive-cc-form-button {
+    min-width: 64px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background-color: $white/12;
+    color: $text.primary;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.adaptive-cc-form-button:hover,
+.adaptive-cc-form-button:focus {
+    background-color: $white/16;
+}
+
+.adaptive-cc-form-primary {
+    background-color: $accent;
+    color: $white;
+}
+
+.adaptive-cc-form-primary:hover,
+.adaptive-cc-form-primary:focus {
+    background-color: $accent.hover;
+}
+
+.adaptive-cc-form-primary:insensitive {
+    background-color: $accent/32;
+    color: $white/60;
+}
+
+.adaptive-cc-list {
+    spacing: 4px;
+}
+
+.adaptive-cc-row {
+    padding: 9px 10px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    color: $text.primary;
+}
+
+.adaptive-cc-row:hover,
+.adaptive-cc-row:focus {
+    border-color: $white/12;
+    background-color: $white/8;
+}
+
+.adaptive-cc-row:checked {
+    border-color: $accent/32;
+    background-color: $white/8;
+}
+
+.adaptive-cc-row-box {
+    spacing: 12px;
+}
+
+.adaptive-cc-row-icon {
+    -st-icon-style: symbolic;
+    icon-size: 18px;
+    color: $text.primary;
+}
+
+.adaptive-cc-row-title {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.adaptive-cc-row-subtitle {
+    color: $text.quaternary;
+    font-size: 11px;
+}
+
+.adaptive-cc-row:checked .adaptive-cc-row-subtitle {
+    color: $accent;
+}
+
+.adaptive-cc-row-trailing {
+    icon-size: 14px;
+    color: $text.quaternary;
+}
+
+.adaptive-cc-row-check {
+    icon-size: 16px;
+    color: $accent;
+}
+
+.adaptive-cc-row-danger .adaptive-cc-row-icon,
+.adaptive-cc-row-danger .adaptive-cc-row-title {
+    color: $danger;
+}
+
+.adaptive-cc-row-danger:hover,
+.adaptive-cc-row-danger:focus {
+    border-color: $danger/32;
+    background-color: $danger/12;
+}
+
+.adaptive-cc-pill-button {
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid $danger/32;
+    color: $danger;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-cc-pill-button:hover,
+.adaptive-cc-pill-button:focus {
+    background-color: $danger/16;
+    color: $white;
+}
+
+
+/* ---------------------------------------------------------------
+ * Control Center extras: now playing, privacy, record, edit, apps
+ * --------------------------------------------------------------- */
+
+.adaptive-cc-media {
+    padding: 10px 12px 10px 10px;
+    spacing: 8px;
+    border-radius: 18px;
+    border: 1px solid $white/8;
+    background-color: $white/4;
+}
+
+.adaptive-cc-media-art-bin {
+    width: 52px;
+    height: 52px;
+    border-radius: 10px;
+    background-color: $white/8;
+}
+
+.adaptive-cc-media-art {
+    color: $text.tertiary;
+}
+
+.adaptive-cc-media-body {
+    padding: 2px 4px;
+    border-radius: 10px;
+}
+
+.adaptive-cc-media-body:hover,
+.adaptive-cc-media-body:focus {
+    background-color: $white/4;
+}
+
+.adaptive-cc-media-title {
+    color: $text.primary;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.adaptive-cc-media-artist {
+    color: $text.tertiary;
+    font-size: 12px;
+}
+
+.adaptive-cc-media-app {
+    color: $text.disabled;
+    font-size: 11px;
+}
+
+.adaptive-cc-media-button {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    color: $text.primary;
+}
+
+.adaptive-cc-media-button StIcon {
+    icon-size: 16px;
+}
+
+.adaptive-cc-media-button:hover,
+.adaptive-cc-media-button:focus {
+    background-color: $white/8;
+}
+
+.adaptive-cc-media-button:insensitive {
+    color: $text.disabled;
+}
+
+.adaptive-cc-media-play {
+    width: 36px;
+    height: 36px;
+    background-color: $white/12;
+}
+
+/* Orange is the microphone, green the camera - the iOS convention. */
+.adaptive-cc-privacy {
+    padding: 8px 12px;
+    spacing: 4px;
+    border-radius: 14px;
+    border: 1px solid $warn/32;
+    background-color: $warn/8;
+}
+
+.adaptive-cc-privacy-row {
+    spacing: 8px;
+}
+
+.adaptive-cc-privacy-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+}
+
+.adaptive-cc-privacy-mic {
+    background-color: $warn;
+}
+
+.adaptive-cc-privacy-cam {
+    background-color: $ok;
+}
+
+.adaptive-cc-privacy-label {
+    color: $text.primary;
+    font-size: 12px;
+}
+
+.adaptive-privacy-panel-dot {
+    width: 6px;
+    height: 6px;
+    margin: 0 4px 0 2px;
+    border-radius: 3px;
+    background-color: $warn;
+}
+
+/* Recording: the record button fills red until it is pressed again. */
+.adaptive-cc-record-button:checked {
+    border-color: $danger/60;
+    background-color: $danger;
+    color: $white;
+}
+
+.adaptive-cc-pill-quiet {
+    border-color: $white/16;
+    color: $accent;
+}
+
+.adaptive-cc-pill-quiet:hover,
+.adaptive-cc-pill-quiet:focus {
+    background-color: $accent/16;
+    color: $white;
+}
+
+.adaptive-cc-row-dim .adaptive-cc-row-title,
+.adaptive-cc-row-dim .adaptive-cc-row-icon {
+    color: $text.disabled;
+}
+
+.adaptive-cc-edit-row {
+    spacing: 10px;
+}
+
+.adaptive-cc-edit-check {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid $white/24;
+    color: $text.tertiary;
+}
+
+.adaptive-cc-edit-check StIcon {
+    icon-size: 12px;
+}
+
+.adaptive-cc-edit-check:checked {
+    border-color: $accent;
+    background-color: $accent;
+    color: $white;
+}
+
+.adaptive-cc-edit-hidden {
+    color: $text.disabled;
+}
+
+.adaptive-cc-edit-move {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: $text.tertiary;
+}
+
+.adaptive-cc-edit-move StIcon {
+    icon-size: 14px;
+}
+
+.adaptive-cc-edit-move:hover,
+.adaptive-cc-edit-move:focus {
+    background-color: $white/8;
+    color: $text.primary;
+}
+
+.adaptive-cc-edit-move:insensitive {
+    color: $n6;
+}
+
+.adaptive-cc-app-volume {
+    padding: 4px 10px 4px 6px;
+    spacing: 8px;
+}
+
+.adaptive-cc-app-volume-name {
+    color: $text.primary;
+    font-size: 12px;
+}
+
+.adaptive-cc-slider-icon-button:checked {
+    background-color: $danger/16;
+}
+
+.adaptive-cc-share {
+    spacing: 12px;
+}
+
+.adaptive-cc-share-caption {
+    color: $text.tertiary;
+    text-align: center;
+}
+
+.adaptive-cc-share-password {
+    font-size: 16px;
+}
+
+/* The code itself is always black on white: phones read that best. */
+.adaptive-qr {
+    border-radius: 10px;
+}
+
+/* ===== Adaptive USB panel =====
+ *
+ * The top-bar USB indicator's popup. It borrows the Control Center's menu,
+ * rows, headings and form card (see above) and adds only its own header,
+ * the detail grid and the serial-port count badge.
+ */
+
+.adaptive-usb {
+    width: 420px;
+    spacing: 8px;
+}
+
+.adaptive-usb-header {
+    padding: 0 4px 2px 6px;
+}
+
+.adaptive-usb-title {
+    color: $text.primary;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.adaptive-usb-summary {
+    color: $text.tertiary;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-usb-badge {
+    margin-left: 3px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background-color: $accent;
+    color: $white;
+    font-size: 10px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-usb-key {
+    color: $text.tertiary;
+    font-size: 12px;
+}
+
+.adaptive-usb-value {
+    color: $text.primary;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-usb-actions {
+    spacing: 6px;
+}
+
+.adaptive-usb-warning {
+    color: $warn;
+    font-size: 12px;
+}
+
+/* ===== Dock drag and drop =====
+ *
+ * The gap a dragged icon will land in, and the hint shown when a pinned icon
+ * is dragged far enough above the dock to be unpinned.
+ */
+
+.adaptive-dock-placeholder {
+    width: 48px;
+    height: 50px;
+    border-radius: 12px;
+    background-color: $white/4;
+}
+
+.adaptive-dock-remove-hint {
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid $danger/45;
+    background-color: $surface.window/95;
+    color: $danger;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* ===== Dock extras =====
+ *
+ * Unread badges and progress bars over app icons, the attention marker, live
+ * window previews, the Downloads stack, and dock popup headings. Colours from
+ * the palette at the end of this file: red is Apple's badge colour, blue the
+ * one accent.
+ */
+
+.adaptive-dock-badge {
+    min-width: 10px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background-color: $danger;
+    color: $white;
+    font-size: 10px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    text-align: center;
+}
+
+.adaptive-dock-progress {
+    height: 5px;
+    margin: 0 3px 1px 3px;
+    border-radius: 3px;
+    background-color: $black/60;
+}
+
+.adaptive-dock-progress-fill {
+    height: 5px;
+    border-radius: 3px;
+    background-color: $accent;
+}
+
+/* An app asking for attention: its window dots turn orange until it is used. */
+.adaptive-dock-button.attention .adaptive-running-dot {
+    background-color: $warn;
+}
+
+.adaptive-dock-button.attention .adaptive-running-indicators {
+    min-height: 4px;
+}
+
+.adaptive-dock-recent .adaptive-app-icon {
+    opacity: 0.85;
+}
+
+/* Window previews */
+.adaptive-dock-previews {
+    padding: 8px;
+    spacing: 8px;
+    border-radius: 16px;
+    border: 1px solid $white/12;
+    background-color: $surface.window/95;
+    box-shadow: 0 14px 36px $black/45;
+}
+
+.adaptive-dock-preview {
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid transparent;
+}
+
+.adaptive-dock-preview:hover,
+.adaptive-dock-preview:focus {
+    border-color: $accent/60;
+    background-color: $white/4;
+}
+
+.adaptive-dock-preview-box {
+    spacing: 6px;
+}
+
+.adaptive-dock-preview-header {
+    spacing: 6px;
+}
+
+.adaptive-dock-preview-title {
+    max-width: 170px;
+    color: $text.primary;
+    font-size: 12px;
+}
+
+.adaptive-dock-preview-close {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    color: $text.tertiary;
+}
+
+.adaptive-dock-preview-close StIcon {
+    icon-size: 12px;
+}
+
+.adaptive-dock-preview-close:hover,
+.adaptive-dock-preview-close:focus {
+    background-color: $danger;
+    color: $white;
+}
+
+.adaptive-dock-preview-frame {
+    border-radius: 8px;
+    background-color: $black/32;
+}
+
+/* Downloads stack */
+.adaptive-dock-stack-menu {
+    padding: 0;
+}
+
+.adaptive-dock-stack {
+    padding: 10px 12px 12px 12px;
+    spacing: 10px;
+}
+
+.adaptive-dock-stack-header {
+    spacing: 12px;
+}
+
+.adaptive-dock-stack-title {
+    color: $text.primary;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.adaptive-dock-stack-link {
+    padding: 3px 8px;
+    border-radius: 8px;
+    color: $accent;
+    font-size: 12px;
+}
+
+.adaptive-dock-stack-link:hover,
+.adaptive-dock-stack-link:focus {
+    background-color: $white/8;
+}
+
+.adaptive-dock-stack-item {
+    width: 92px;
+    padding: 8px 4px;
+    border-radius: 10px;
+}
+
+.adaptive-dock-stack-item:hover,
+.adaptive-dock-stack-item:focus {
+    background-color: $white/8;
+}
+
+.adaptive-dock-stack-name {
+    margin-top: 6px;
+    max-width: 84px;
+    color: $text.primary;
+    font-size: 11px;
+}
+
+.adaptive-dock-stack-status {
+    color: $text.tertiary;
+    font-size: 12px;
+}
+
+/* Section headings in dock menus ("Icon Size", "Show"). */
+.adaptive-dock-popup .popup-separator-menu-item .popup-menu-item-label,
+.adaptive-dock-popup .popup-separator-menu-item StLabel {
+    color: $text.tertiary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* ===== Adaptive palette =====
+ *
+ * The one colour system for the whole desktop lives in tokens/adaptive.tokens.json.
+ * This file never spells out a colour: it names a role (surface.card, text.primary,
+ * accent) or a hue with a strength from the alpha scale (white/8, black/45), each
+ * written with a dollar sign in front, and scripts/build-tokens.py writes
+ * stylesheet.css with the values. St has no CSS variables, which is why the names are
+ * resolved at build time. docs/DESIGN_SYSTEM.md has the full table.
+ *
+ *   Depth       ground, window, pane, card, raised: each one ramp step lighter
+ *   Labels      primary, secondary, tertiary, quaternary, disabled
+ *   Accent      system blue: selected, on, focused, today, links. The only one.
+ *   Status      green, orange, red: never decoration.
+ *   Data only   indigo, cyan: to tell chart series apart, and Mario's mark.
+ */
+
+/* ===== Tasks panel =====
+ *
+ * Shares the Control Center's popup, rows and headings with the USB panel;
+ * adds the CPU column, the sort chips and the End pill.
+ */
+
+.adaptive-tasks {
+    width: 440px;
+    spacing: 8px;
+}
+
+.adaptive-tasks-heading {
+    padding-right: 6px;
+    spacing: 4px;
+}
+
+.adaptive-tasks-sort {
+    padding: 2px 9px;
+    border-radius: 999px;
+    color: $text.tertiary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-tasks-sort:hover {
+    background-color: $white/8;
+    color: $text.primary;
+}
+
+.adaptive-tasks-sort:checked {
+    background-color: $white/12;
+    color: $text.primary;
+}
+
+.adaptive-tasks-icon {
+    icon-size: 20px;
+}
+
+.adaptive-tasks-meta {
+    font-feature-settings: "tnum";
+}
+
+/* CPU is status, so it takes status colours only when it is high. */
+.adaptive-tasks-cpu {
+    min-width: 44px;
+    margin-right: 8px;
+    color: $text.tertiary;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+    text-align: right;
+}
+
+.adaptive-tasks-warm {
+    color: $warn;
+}
+
+.adaptive-tasks-hot {
+    color: $danger;
+    font-weight: 600;
+}
+
+.adaptive-tasks-end:hover,
+.adaptive-tasks-end:focus {
+    background-color: $danger/24;
+    color: $danger;
+}
+
+.adaptive-tasks-footer {
+    padding: 2px 4px 0 4px;
+}
+
+/* ===== Network panel =====
+ *
+ * Same popup, rows and headings as the USB and Tasks panels; adds the facts
+ * grid, whose values copy themselves when clicked.
+ */
+
+.adaptive-network {
+    width: 460px;
+    spacing: 8px;
+}
+
+.adaptive-network-facts {
+    padding: 8px 12px;
+}
+
+.adaptive-network-value {
+    padding: 3px 6px;
+    border-radius: 6px;
+    color: $text.primary;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-network-value:hover {
+    background-color: $white/8;
+}
+
+.adaptive-network-good { color: $ok; }
+.adaptive-network-warn { color: $warn; }
+.adaptive-network-bad { color: $danger; }
+
+.adaptive-network-show {
+    margin: 2px 0;
+}
+
+.adaptive-network-ssh {
+    padding: 2px 12px 8px 44px;
+    spacing: 6px;
+}
+
+.adaptive-network-ssh-error {
+    color: $danger;
+    font-size: 11px;
+}
+
+.adaptive-network-note {
+    padding: 6px 8px 2px 8px;
+    color: $text.quaternary;
+    font-size: 11px;
+}
+
+/* ===== ROS 2 panel =====
+ *
+ * Same popup, rows, headings and facts grid as the Network panel; adds
+ * folding sections, expanded node details, type definitions and file chips.
+ */
+
+.adaptive-ros {
+    width: 500px;
+    spacing: 8px;
+}
+
+.adaptive-system-menu {
+    width: 440px;
+    spacing: 8px;
+}
+
+.adaptive-ros-value-box {
+    spacing: 8px;
+}
+
+.adaptive-ros-hint {
+    color: $text.quaternary;
+    font-size: 11px;
+}
+
+.adaptive-ros-setup-footer {
+    padding: 6px 6px 0 6px;
+    spacing: 6px;
+}
+
+.adaptive-ros-domain-entry {
+    min-width: 0;
+}
+
+.adaptive-ros-chips {
+    padding: 0 12px 4px 44px;
+}
+
+.adaptive-ros-chip-label {
+    padding-top: 3px;
+}
+
+.adaptive-ros-chip {
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid $white/12;
+    color: $text.primary;
+    font-size: 11px;
+}
+
+.adaptive-ros-chip:hover,
+.adaptive-ros-chip:focus {
+    border-color: $accent/45;
+    background-color: $white/8;
+}
+
+.adaptive-ros-section-toggle {
+    border-radius: 6px;
+}
+
+.adaptive-ros-section-toggle:hover,
+.adaptive-ros-section-toggle:focus {
+    background-color: $white/4;
+}
+
+.adaptive-ros-section-box {
+    spacing: 0;
+}
+
+.adaptive-ros-section .adaptive-cc-list-heading {
+    margin-left: 4px;
+}
+
+.adaptive-ros-chevron {
+    icon-size: 12px;
+    margin: 6px 0 0 6px;
+    color: $text.tertiary;
+}
+
+.adaptive-ros-expand {
+    width: 26px;
+    height: 26px;
+    margin-left: 6px;
+}
+
+.adaptive-ros-expand StIcon {
+    icon-size: 12px;
+}
+
+/* below the list: the topics picked for PlotJuggler */
+.adaptive-ros-footer {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid $white/8;
+}
+
+/* a topic picked for PlotJuggler */
+.adaptive-ros-picked {
+    background-color: $accent/24;
+    color: $accent;
+}
+
+.adaptive-ros-detail {
+    margin: 0 4px 6px 44px;
+    padding: 4px 0 6px 10px;
+    border-left: 2px solid $white/8;
+    spacing: 2px;
+}
+
+.adaptive-ros-group {
+    margin-top: 6px;
+    color: $text.tertiary;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.adaptive-ros-entry {
+    padding: 2px 0;
+    spacing: 1px;
+}
+
+.adaptive-ros-entry-meta {
+    spacing: 6px;
+}
+
+.adaptive-ros-name {
+    padding: 1px 4px;
+    border-radius: 5px;
+    color: $text.primary;
+    font-size: 12px;
+}
+
+.adaptive-ros-name:hover {
+    background-color: $white/8;
+}
+
+.adaptive-ros-type {
+    padding: 0 4px;
+    border-radius: 5px;
+    color: $accent;
+    font-size: 11px;
+}
+
+.adaptive-ros-type:hover,
+.adaptive-ros-type-open {
+    background-color: $accent/12;
+}
+
+.adaptive-ros-meta {
+    color: $text.tertiary;
+    font-size: 11px;
+}
+
+.adaptive-ros-rate {
+    font-feature-settings: "tnum";
+}
+
+.adaptive-ros-definition {
+    margin: 2px 0 4px 4px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background-color: $black/24;
+    color: $text.secondary;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.adaptive-ros-param-key {
+    color: $text.tertiary;
+    font-size: 11px;
+}
+
+.adaptive-ros-param {
+    color: $text.primary;
+    font-size: 11px;
+    font-feature-settings: "tnum";
+}
+
+/* The top-bar icon while recording, and while /diagnostics reports errors. */
+.adaptive-ros-recording {
+    color: $danger;
+}
+
+.adaptive-ros-attention {
+    color: $warn;
+}
+
+.adaptive-ros-search {
+    margin: 0 4px;
+}
+
+.adaptive-ros-buttons {
+    spacing: 4px;
+    padding-top: 2px;
+}
+
+/* A write waiting for its confirming click. */
+.adaptive-ros-armed,
+.adaptive-ros-armed:hover {
+    background-color: $warn/16;
+    color: $warn;
+}
+
+.adaptive-ros-armed-entry,
+.adaptive-ros-armed-entry:focus {
+    border-color: $warn;
+}
+
+.adaptive-ros-chip-active {
+    border-color: $accent/60;
+    background-color: $accent/16;
+}
+
+.adaptive-ros-setups {
+    padding: 6px 6px 0 6px;
+}
+
+.adaptive-ros-launch-heading {
+    padding-right: 6px;
+}
+
+.adaptive-ros-more {
+    padding: 2px 12px 4px 44px;
+}
+
+.adaptive-ros-group-row {
+    padding: 4px 12px 0 12px;
+}
+
+.adaptive-ros-param-edit {
+    padding: 0 4px;
+    border-radius: 5px;
+}
+
+.adaptive-ros-param-edit:hover,
+.adaptive-ros-param-edit:focus {
+    background-color: $white/8;
+}
+
+.adaptive-ros-parameter-entry {
+    padding: 2px 6px;
+    font-size: 11px;
+}
+
+.adaptive-ros-composer {
+    margin-top: 4px;
+    spacing: 3px;
+}
+
+.adaptive-ros-composer-entry {
+    min-height: 54px;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.adaptive-ros-thumbnail {
+    margin: 2px 0 2px 4px;
+    border-radius: 6px;
+    background-color: $black/24;
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+.adaptive-ros-tf-row {
+    spacing: 6px;
+    padding-right: 12px;
+}
+
+/* The live plot: taller than the shade's strips, same drawing. */
+.adaptive-ros-plot {
+    height: 72px;
+    margin: 4px 12px 2px 12px;
+}
+
+/* A run's log: its newest lines (the helper sends at most 60). */
+.adaptive-ros-log {
+    font-size: 8.5pt;
+}
+
+.adaptive-ros-focus-row {
+    spacing: 8px;
+    padding: 0 12px 0 18px;
+}
+
+.adaptive-ros-focus-centre {
+    margin: 6px 12px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: $text.primary;
+    font-weight: 600;
+    background-color: $accent/16;
+}
+
+/* ------------------------------------------------------------------
+ * Project indicator (projectIndicator.js): the active project, left of
+ * the top bar, with its branch and uncommitted count.
+ * ------------------------------------------------------------------ */
+.adaptive-project-box {
+    spacing: 0;
+}
+
+.adaptive-project-name {
+    font-weight: 600;
+}
+
+.adaptive-project-git {
+    color: $n11/60;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-project-git-dirty {
+    color: $warn;
+}
+
+.adaptive-project-path {
+    color: $n11/60;
+    font-size: 12px;
+}
+
+/* ------------------------------------------------------------------
+ * Dynamic Island (islandUI.js): in-panel anchor and floating overlay
+ * ------------------------------------------------------------------ */
+
+.adaptive-island-anchor {
+    spacing: 8px;
+}
+
+.adaptive-island-pill {
+    border-radius: 9999px;
+    background-color: $surface.window/95;
+    border: 1px solid $white/12;
+    box-shadow: 0 4px 12px $black/32;
+    padding: 0 10px;
+    height: 24px;
+    color: $white;
+    transition-duration: 160ms;
+}
+
+.adaptive-island-pill:hover {
+    border-color: $white/45;
+}
+
+.adaptive-island-pill-idle {
+    min-width: 0;
+}
+
+.adaptive-island-pill-compact {
+    min-width: 0;
+}
+
+.adaptive-island-pill-inner {
+    spacing: 12px;
+}
+
+.adaptive-island-idle-box {
+    spacing: 4px;
+}
+
+.adaptive-island-clock-text {
+    font-size: 12px;
+    font-weight: 500;
+    color: $white;
+}
+
+.adaptive-island-spark {
+    font-size: 11px;
+}
+
+.adaptive-island-spark-cyan {
+    color: $accent;
+}
+
+.adaptive-island-spark-amber {
+    color: $warn;
+}
+
+.adaptive-island-spark-crimson {
+    color: $danger;
+}
+
+.adaptive-island-compact-box {
+    width: 200px;
+    spacing: 8px;
+    padding-left: 12px;
+    border-left: 1px solid $white/16;
+}
+
+.adaptive-island-compact-icon {
+    font-size: 12px;
+    color: $accent;
+}
+
+.adaptive-island-compact-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: $white;
+}
+
+.adaptive-island-compact-secondary {
+    max-width: 64px;
+    font-size: 11px;
+    color: $white/60;
+}
+
+.adaptive-island-satellite {
+    width: 32px;
+    height: 24px;
+    border-radius: 9999px;
+    background-color: $surface.window/95;
+    border: 1px solid $white/12;
+    color: $white;
+    text-align: center;
+    box-shadow: 0 4px 12px $black/32;
+}
+
+.adaptive-island-satellite-icon {
+    font-size: 12px;
+    color: $accent;
+}
+
+/* Floating Overlay HUD */
+.adaptive-island-overlay {
+    border-radius: 24px;
+    background-color: $surface.window/95;
+    border: 1px solid $white/24;
+    box-shadow: 0 16px 36px $black/60;
+    color: $white;
+    padding: 14px 16px;
+}
+
+.adaptive-island-overlay-inner {
+    spacing: 10px;
+}
+
+.adaptive-island-card-header {
+    border-bottom: 1px solid $white/8;
+    padding-bottom: 6px;
+    spacing: 6px;
+}
+
+.adaptive-island-card-icon {
+    font-size: 13px;
+    color: $accent;
+}
+
+.adaptive-island-card-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: $white/80;
+    letter-spacing: 0.5px;
+}
+
+.adaptive-island-card-badge {
+    background-color: $white/8;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: $white;
+}
+
+.adaptive-island-card-btn {
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: $white/60;
+}
+
+.adaptive-island-card-btn:hover {
+    color: $white;
+}
+
+.adaptive-island-card-btn.pinned {
+    color: $accent;
+}
+
+.adaptive-island-card {
+    spacing: 12px;
+}
+
+.adaptive-island-actions {
+    spacing: 8px;
+}
+
+.adaptive-island-card-body {
+    spacing: 8px;
+}
+
+.adaptive-island-subcard {
+    background-color: $white/4;
+    border: 1px solid $white/4;
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+.adaptive-island-subcard-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: $white;
+}
+
+.adaptive-island-val-bold {
+    font-size: 13px;
+    font-weight: 700;
+    color: $white;
+}
+
+.adaptive-island-subtext {
+    font-size: 11px;
+    color: $white/60;
+}
+
+.adaptive-island-mono-subtext {
+    font-size: 11px;
+    font-family: monospace;
+    color: $white/80;
+}
+
+.adaptive-island-status-active {
+    font-size: 11px;
+    font-weight: 600;
+    color: $ok;
+}
+
+.adaptive-island-progress-track {
+    background-color: $white/8;
+    border-radius: 9999px;
+    height: 6px;
+}
+
+.adaptive-island-progress-fill {
+    border-radius: 9999px;
+    height: 6px;
+}
+
+.adaptive-island-fill-cyan {
+    background-color: $accent;
+}
+
+.adaptive-island-fill-amber {
+    background-color: $warn;
+}
+
+.adaptive-island-fill-green {
+    background-color: $ok;
+}
+
+.adaptive-island-footer-row {
+    spacing: 8px;
+    padding-top: 4px;
+}
+
+.adaptive-island-btn {
+    background-color: $white/8;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: $white;
+}
+
+.adaptive-island-btn:hover {
+    background-color: $white/16;
+}
+
+.adaptive-island-btn-alert {
+    background-color: $danger/16;
+    color: $danger.text;
+    border: 1px solid $danger/32;
+}
+
+.adaptive-island-btn-alert:hover {
+    background-color: $danger/32;
+    color: $white;
+}
+
+.adaptive-island-terminal {
+    background-color: $n0;
+    border: 1px solid $white/8;
+    border-radius: 6px;
+    padding: 6px 8px;
+    spacing: 2px;
+}
+
+.adaptive-island-terminal-line {
+    font-size: 11px;
+    font-family: monospace;
+    color: $text.tertiary;
+}
+
+.adaptive-island-terminal-line.active {
+    color: $accent;
+}
+
+.adaptive-island-media-art {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background-color: $white/8;
+    border: 1px solid $white/12;
+}
+
+.adaptive-island-media-art-icon {
+    font-size: 20px;
+    color: $ok;
+}
+
+.adaptive-island-transport-row {
+    spacing: 16px;
+}
+
+.adaptive-island-transport-btn {
+    font-size: 15px;
+    padding: 4px 10px;
+    color: $white/80;
+}
+
+.adaptive-island-transport-btn:hover {
+    color: $white;
+}
+
+.adaptive-island-btn-play {
+    background-color: $white/12;
+    border-radius: 9999px;
+    padding: 6px 12px;
+}
+
+.adaptive-island-big-digits {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: monospace;
+    color: $white;
+}
+
+.adaptive-island-chip {
+    background-color: $white/8;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: $white/80;
+}
+
+.adaptive-island-chip:hover {
+    background-color: $white/16;
+    color: $white;
+}
+
+/* --- THEME VARIATIONS --- */
+
+/* Theme 1: Liquid Glass (Default) */
+.adaptive-island-theme-liquid-glass.adaptive-island-overlay {
+    border-radius: 24px;
+    background-color: $surface.window/95;
+    border: 1px solid $white/12;
+}
+
+.adaptive-island-theme-liquid-glass .adaptive-island-pill {
+    border-radius: 9999px;
+}
+
+/* Theme 2: Dark Precision */
+.adaptive-island-theme-dark-precision.adaptive-island-overlay {
+    border-radius: 14px;
+    background-color: $n0;
+    border: 1px solid $white/12;
+    box-shadow: 0 20px 40px $black/95;
+    font-family: monospace;
+}
+
+.adaptive-island-theme-dark-precision .adaptive-island-pill {
+    border-radius: 8px;
+    background-color: $n0;
+    border: 1px solid $white/12;
+}
+
+.adaptive-island-theme-dark-precision .adaptive-island-satellite {
+    border-radius: 6px;
+    background-color: $n0;
+}
+
+/* Alert States */
+.adaptive-island-pill.caution,
+.adaptive-island-overlay.caution {
+    border-color: $warn !important;
+}
+
+.adaptive-island-pill.critical,
+.adaptive-island-overlay.critical {
+    border-color: $danger !important;
+}
+
+/* AI usage card: how much of each plan's limits is used */
+.adaptive-island-fill-red {
+    background-color: $danger.text;
+}
+
+.adaptive-island-usage {
+    spacing: 4px;
+}
+
+.adaptive-island-usage-rows {
+    spacing: 2px;
+}
+
+.adaptive-island-usage-row {
+    spacing: 8px;
+    padding-top: 2px;
+}
+
+.adaptive-island-usage-label {
+    min-width: 46px;
+    font-size: 11px;
+    font-weight: 600;
+    color: $white/80;
+}
+
+.adaptive-island-usage-value {
+    font-size: 11px;
+    font-weight: 700;
+    color: $white;
+}
+
+.adaptive-island-usage-caution {
+    color: $warn.text;
+}
+
+.adaptive-island-usage-critical {
+    color: $danger.text;
+}
+
+.adaptive-island-usage-reset {
+    padding-left: 54px;
+}
+
+/* Tasks: one row per running Agent Office task */
+.adaptive-island-task-list {
+    spacing: 4px;
+}
+
+.adaptive-island-task-row {
+    spacing: 8px;
+    padding: 4px 4px 4px 0;
+    border-radius: 10px;
+}
+
+.adaptive-island-task-row.selected {
+    background-color: $accent/12;
+}
+
+.adaptive-island-task-info {
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+.adaptive-island-task-info:hover {
+    background-color: $white/4;
+}
+
+.adaptive-island-task-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: $white;
+}
+
+/* Music */
+.adaptive-island-media-row {
+    spacing: 12px;
+}
+
+.adaptive-island-media-art {
+    width: 48px;
+    height: 48px;
+}
+
+.adaptive-island-media-art-image {
+    border-radius: 8px;
+}
+
+.adaptive-island-player-btn {
+    margin-top: 2px;
+    padding: 1px 6px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: $accent;
+}
+
+.adaptive-island-player-btn:hover {
+    background-color: $white/8;
+}
+
+.adaptive-island-player-btn:insensitive {
+    color: $white/60;
+}
+
+.adaptive-island-scrub-row {
+    spacing: 8px;
+}
+
+.adaptive-island-time {
+    min-width: 34px;
+    font-feature-settings: "tnum";
+}
+
+.adaptive-island-scrubber {
+    height: 6px;
+}
+
+.adaptive-island-scrubber:hover {
+    background-color: $white/16;
+}
+
+.adaptive-island-transport-btn:insensitive,
+.adaptive-island-btn:insensitive {
+    color: $white/32;
+}
+
+/* Keyboard focus: every island control shows where focus is */
+.adaptive-island-btn:focus,
+.adaptive-island-chip:focus,
+.adaptive-island-transport-btn:focus,
+.adaptive-island-card-btn:focus,
+.adaptive-island-task-info:focus,
+.adaptive-island-player-btn:focus,
+.adaptive-island-scrubber:focus {
+    box-shadow: inset 0 0 0 2px $accent/80;
+}
+
+/* ROS selectors participate in vertical layout, including expanded lists. */
+.adaptive-ros-dropdown { spacing: 6px; padding: 5px 8px; }
+.adaptive-ros-options { max-height: 176px; }
+.adaptive-ros-option { text-align: left; padding: 8px 10px; border-radius: 6px; }
+.adaptive-ros-option:hover, .adaptive-ros-option:focus { background-color: $accent/16; }
+.adaptive-ros-setups { spacing: 6px; }
+
+.adaptive-ros-setup { spacing: 3px; }
+.adaptive-ros-select { text-align: left; color: $text.primary; padding: 5px 6px; }
+.adaptive-ros-dropdown { padding: 2px 0; }
+
+/* ROS 2 New package dialog (rosPackageWizard.js) */
+.adaptive-ros-wizard { background-color: $surface.window; border: 1px solid $white/8; }
+.adaptive-ros-wizard .modal-dialog-content-box { padding: 22px 24px 12px 24px; spacing: 12px; }
+.adaptive-ros-wizard-header { spacing: 16px; }
+.adaptive-ros-wizard-title { font-size: 18px; font-weight: 700; color: $text.primary; }
+.adaptive-ros-wizard-subtitle { font-size: 12px; color: $text.tertiary; }
+.adaptive-ros-wizard-steps { spacing: 4px; }
+.adaptive-ros-wizard-step { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; color: $text.quaternary; }
+.adaptive-ros-wizard-step:checked { background-color: $accent; color: $white; }
+.adaptive-ros-wizard-step-done { color: $text.primary; }
+.adaptive-ros-wizard-body { spacing: 10px; }
+.adaptive-ros-wizard-heading { font-size: 13px; font-weight: 700; color: $text.primary; padding-top: 4px; }
+.adaptive-ros-wizard-hint { font-size: 12px; color: $text.tertiary; }
+.adaptive-ros-wizard-warning { font-size: 12px; color: $warn; }
+.adaptive-ros-wizard-error { font-size: 12px; color: $danger; }
+.adaptive-ros-wizard-grid { spacing: 10px; }
+.adaptive-ros-wizard-grid-row { spacing: 10px; }
+.adaptive-ros-wizard-card {
+    min-height: 118px; padding: 14px; border-radius: 12px; text-align: left;
+    background-color: $white/4; border: 1px solid $white/8;
+}
+.adaptive-ros-wizard-card:hover, .adaptive-ros-wizard-card:focus { background-color: $white/8; }
+.adaptive-ros-wizard-card:checked { background-color: $accent/16; border: 2px solid $accent; }
+.adaptive-ros-wizard-card StBoxLayout { spacing: 6px; }
+.adaptive-ros-wizard-card-icon { icon-size: 26px; color: $accent; }
+.adaptive-ros-wizard-card-title { font-size: 14px; font-weight: 700; color: $text.primary; }
+.adaptive-ros-wizard-card-subtitle { font-size: 11px; color: $text.tertiary; }
+.adaptive-ros-wizard-badge {
+    font-size: 10px; font-weight: 700; color: $text.secondary; padding: 1px 7px; border-radius: 999px;
+    background-color: $white/8;
+}
+.adaptive-ros-wizard-badge-warn { color: $warn; background-color: $warn/12; }
+.adaptive-ros-wizard-form { spacing: 12px; padding-right: 8px; }
+.adaptive-ros-wizard-field { spacing: 14px; }
+.adaptive-ros-wizard-field > StBoxLayout { spacing: 5px; }
+.adaptive-ros-wizard-label { width: 120px; font-size: 12px; font-weight: 600; color: $text.secondary; padding-top: 7px; }
+.adaptive-ros-wizard-pair { spacing: 8px; }
+.adaptive-ros-wizard-chip {
+    padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; color: $text.secondary;
+    background-color: $white/4; border: 1px solid $white/8;
+}
+.adaptive-ros-wizard-chip:hover, .adaptive-ros-wizard-chip:focus { background-color: $white/12; color: $text.primary; }
+.adaptive-ros-wizard-chip:checked { background-color: $accent/24; border-color: $accent; color: $white; }
+.adaptive-ros-wizard-chip-small { padding: 3px 9px; font-size: 11px; }
+.adaptive-ros-wizard-columns { spacing: 14px; }
+.adaptive-ros-wizard-column { spacing: 8px; }
+.adaptive-ros-wizard-selected {
+    width: 300px; padding: 10px; border-radius: 12px; background-color: $white/4;
+    border: 1px solid $white/8;
+}
+.adaptive-ros-wizard-chips { spacing: 6px; }
+.adaptive-ros-wizard-chip-row { spacing: 6px; }
+.adaptive-ros-wizard-scroll { border-radius: 8px; }
+.adaptive-ros-wizard-dep { spacing: 10px; padding: 6px 8px; border-radius: 8px; }
+.adaptive-ros-wizard-dep:hover { background-color: $white/4; }
+.adaptive-ros-wizard-dep-top { spacing: 6px; }
+.adaptive-ros-wizard-dep-name { font-size: 13px; font-weight: 600; color: $text.primary; font-family: monospace; }
+.adaptive-ros-wizard-dep-about { font-size: 11px; color: $text.tertiary; }
+.adaptive-ros-wizard-dep-button {
+    padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color: $accent;
+    background-color: $accent/12;
+}
+.adaptive-ros-wizard-dep-button:hover, .adaptive-ros-wizard-dep-button:focus { background-color: $accent/24; }
+.adaptive-ros-wizard-fact { spacing: 14px; }
+.adaptive-ros-wizard-value { font-size: 13px; color: $text.primary; }
+.adaptive-ros-wizard-file { font-family: monospace; font-size: 12px; color: $text.secondary; }
+.adaptive-ros-wizard-file-root { color: $text.primary; font-weight: 700; }
+.adaptive-ros-wizard-command {
+    font-family: monospace; font-size: 11px; color: $text.secondary; padding: 8px; border-radius: 8px;
+    background-color: $black/32;
+}
+.adaptive-ros-wizard-done { font-size: 20px; font-weight: 700; color: $ok; }
+.adaptive-ros-wizard .modal-dialog-linked-button:insensitive { color: $white/32; }

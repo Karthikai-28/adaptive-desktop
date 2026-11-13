@@ -71,8 +71,8 @@ install_inter() {
 echo "Installing Inter, the Adaptive UI typeface..."
 install_inter
 
-echo "Building theme from tokens..."
-"${REPO}/scripts/build-adaptive-theme.py"
+echo "Building every stylesheet from the tokens..."
+"${REPO}/scripts/build-tokens.py"
 
 echo "Building backgrounds from tokens..."
 "${REPO}/scripts/build-adaptive-backgrounds.py"
@@ -134,7 +134,7 @@ if [ "${DCONF_PROFILE:-}" = "adaptive" ]; then
     gsettings set org.gnome.desktop.background picture-uri-dark "$BG_URI"
     gsettings set org.gnome.desktop.background picture-options 'zoom'
     gsettings set org.gnome.desktop.background primary-color "$(
-        python3 -c "import json,sys; print(json.load(open('${REPO}/tokens/adaptive.tokens.json'))['color']['bg.canvas'])"
+        python3 -c "import sys; sys.path.insert(0, '${REPO}/scripts'); import adaptive_tokens; print(adaptive_tokens.load().hex('surface.window'))"
     )"
 
     # The lock shield already has its own image; point the screensaver key at

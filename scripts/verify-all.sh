@@ -83,6 +83,7 @@ shell_scripts() {
     shellcheck -S error "$REPO"/install.sh "$REPO"/uninstall.sh "$REPO"/scripts/*.sh
 }
 
+step "One colour system: every stylesheet is built from the tokens, no colour written by hand" python3 "$REPO/scripts/build-tokens.py" --check
 step "Shell modules parse" shell_syntax
 step "Every this._method() is defined" quiet shell_methods
 step "What one shell module takes from another is exported" quiet python3 "$REPO/scripts/verify-shell-imports.py" "$SHELL_DIR"

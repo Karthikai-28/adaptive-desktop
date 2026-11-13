@@ -1,25 +1,96 @@
 {
-  "color": {
-    "bg.canvas": "#1C1C1E",
-    "bg.deep": "#141416",
-    "surface.1": "#2C2C2E",
-    "surface.2": "#3A3A3C",
-    "material.menu": "#1E1E20",
-    "material.sidebar": "#28282A",
-    "divider": "#48484A",
-    "text.primary": "#F5F5F7",
-    "text.muted": "#98989D",
-    "text.tertiary": "#8E8E93",
-    "text.quaternary": "#636366",
-    "accent.primary": "#0A84FF",
-    "accent.hover": "#409CFF",
-    "accent.selection": "#0058D0",
-    "accent.cyan": "#64D2FF",
-    "accent.violet": "#5E5CE6",
-    "state.warning": "#FF9F0A",
-    "state.danger": "#FF453A",
-    "state.success": "#30D158"
+  "_about": [
+    "The one source of colour, size and motion for Adaptive Desktop. scripts/build-tokens.py turns it",
+    "into every stylesheet (shell, GTK theme, Files, Home, Agent Office, the TV page, the GTK apps);",
+    "scripts/build-tokens.py --check fails when a colour is written by hand anywhere else.",
+    "",
+    "Three tiers. ramp + hue are the raw material. alpha is the only set of strengths a colour may",
+    "be used at. color is what stylesheets name: a role that points at a ramp step or a hue.",
+    "In a *.src.css file write $role or $role/NN (NN from alpha), for example $text.primary, $white/8."
+  ],
+
+  "ramp": {
+    "_about": "Twelve neutrals n0..n11 from one hue: OKLCH, constant hue and chroma, these lightness steps.",
+    "hue": 286,
+    "chroma": 0.004,
+    "lightness": [0.165, 0.195, 0.228, 0.262, 0.297, 0.352, 0.408, 0.5, 0.62, 0.72, 0.84, 0.97]
   },
+
+  "hue": {
+    "white": "#FFFFFF",
+    "black": "#000000",
+    "blue": "#0A84FF",
+    "blue.light": "#409CFF",
+    "blue.deep": "#0058D0",
+    "blue.pale": "#9CCBFF",
+    "indigo": "#5E5CE6",
+    "cyan": "#64D2FF",
+    "green": "#30D158",
+    "green.pale": "#9FF0B5",
+    "orange": "#FF9F0A",
+    "orange.pale": "#FFCF85",
+    "red": "#FF453A",
+    "red.pale": "#FFA59E"
+  },
+
+  "alpha": [4, 8, 12, 16, 24, 32, 45, 60, 80, 95],
+
+  "color": {
+    "_about": "Depth is lightness: each surface level is one ramp step lighter than the one it sits on.",
+    "surface.ground": "{n1}",
+    "surface.window": "{n2}",
+    "surface.pane": "{n3}",
+    "surface.card": "{n4}",
+    "surface.raised": "{n5}",
+    "line.solid": "{n6}",
+
+    "text.primary": "{n11}",
+    "text.secondary": "{n10}",
+    "text.tertiary": "{n9}",
+    "text.quaternary": "{n8}",
+    "text.disabled": "{n7}",
+    "text.on-accent": "{white}",
+
+    "fill.1": "{white}/4",
+    "fill.2": "{white}/8",
+    "fill.3": "{white}/12",
+    "fill.4": "{white}/16",
+    "line.1": "{white}/8",
+    "line.2": "{white}/16",
+    "scrim": "{black}/45",
+
+    "accent": "{blue}",
+    "accent.hover": "{blue.light}",
+    "accent.pressed": "{blue.deep}",
+    "accent.tint": "{blue}/16",
+    "accent.text": "{blue.pale}",
+
+    "ok": "{green}",
+    "ok.tint": "{green}/16",
+    "ok.text": "{green.pale}",
+    "warn": "{orange}",
+    "warn.tint": "{orange}/16",
+    "warn.text": "{orange.pale}",
+    "danger": "{red}",
+    "danger.tint": "{red}/16",
+    "danger.text": "{red.pale}",
+
+    "series.1": "{blue}",
+    "series.2": "{indigo}",
+    "series.3": "{cyan}",
+    "series.4": "{n9}",
+    "series.5": "{n7}",
+
+    "glass": "{n1}/60",
+    "glass.pane": "{white}/4",
+    "glass.edge": "{white}/8"
+  },
+
+  "gradient": {
+    "_about": "The only gradient: Mario thinking or answering. Never decoration.",
+    "aurora": ["{blue}", "{indigo}", "{cyan}"]
+  },
+
   "radius": {
     "small": 8,
     "medium": 12,
@@ -44,7 +115,9 @@
     "feedback.ms": 120,
     "panel.ms": 180,
     "workspace.ms": 220,
-    "state.ms": 260
+    "state.ms": 260,
+    "ease.standard": "cubic-bezier(0.2, 0, 0, 1)",
+    "ease.exit": "cubic-bezier(0.3, 0, 1, 1)"
   },
   "typography": {
     "display.min": 22,
@@ -53,5 +126,20 @@
     "body": 12,
     "metadata": 10
   },
-  "_comment": "material.sidebar is the card material (rgba(44,44,46,.80)) flattened over bg.canvas, for panels that must be opaque. accent.selection is the selected-content blue that keeps white text readable."
+
+  "exempt": {
+    "_about": "Files whose colours are artwork or data, not interface. Everything else must use tokens.",
+    "scripts/build-file-icons.py": "icon artwork: the folder and file-type illustrations",
+    "services/agent-office/static/map.js": "pixel-art office map",
+    "services/agent-office/static/sprites.js": "pixel-art characters",
+    "services/agent-office/static/world.js": "pixel-art office furniture",
+    "scripts/install-terminal.py": "terminal ANSI colour scheme",
+    "terminal/install-kterm-ubuntu.sh": "terminal ANSI colour scheme",
+    "terminal/install-kterm-raspberry-pi.sh": "terminal ANSI colour scheme",
+    "extension/adaptive_files/tags.py": "file tag colours: labels the user picks, stored with the file",
+    "extension/adaptive-dark.xml": "syntax-highlighting scheme for file previews",
+    "apps/adaptive-annotate/shapes.py": "pen colours the user draws with",
+    "scripts/build-adaptive-backgrounds.py": "wallpaper artwork",
+    "scripts/build-tokens.py": "the generator itself"
+  }
 }

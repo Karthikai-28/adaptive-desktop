@@ -28,14 +28,13 @@ Rendered at 2x the panel (3840x2400) so an external monitor has headroom.
     ./scripts/build-adaptive-backgrounds.py
 """
 
-import json
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 REPO = Path(__file__).resolve().parent.parent
-TOKENS = REPO / "tokens" / "adaptive.tokens.json"
 OUT = REPO / "design" / "backgrounds"
 
 WIDTH = 3840
@@ -93,12 +92,14 @@ def render(top, bottom, accent):
 
 
 def main():
-    color = json.loads(TOKENS.read_text(encoding="utf-8"))["color"]
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import adaptive_tokens
+    tokens = adaptive_tokens.load()
 
     image = render(
-        rgb(color["bg.deep"]),
-        rgb(color["bg.canvas"]),
-        rgb(color["accent.primary"]),
+        rgb(tokens.hex("surface.ground")),
+        rgb(tokens.hex("surface.window")),
+        rgb(tokens.hex("accent")),
     )
 
     OUT.mkdir(parents=True, exist_ok=True)

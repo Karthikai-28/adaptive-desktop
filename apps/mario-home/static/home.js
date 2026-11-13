@@ -5,7 +5,8 @@
 
 const PANEL = location.pathname === "/panel";
 const state = { cards: {}, next: [], presence: { state: "ready" }, config: {} };
-const HUES = ["#5E5CE6", "#0A84FF", "#30D158", "#FF9F0A", "#BF5AF2", "#FF375F", "#64D2FF"];
+// Colours are the stylesheet's chart series (tokens); the script never spells one out.
+const HUES = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
 
 // ---------------------------------------------------------------- helpers
 function el(tag, attrs, ...kids) {
@@ -161,7 +162,7 @@ const render = {
     fill(body("mail"), tabs,
       items.length ? el("ul", { class: "rows" }, items.slice(0, 5).map((i) => el("li", {},
         el("button", { class: "mrow", type: "button", title: "Open this mail in Gmail", onclick: () => openUrl(i.link || inbox) },
-          el("span", { class: "avatar", style: `background:${hue(i.from)}33;color:${hue(i.from)}` }, (i.from || "?").trim()[0].toUpperCase()),
+          el("span", { class: "avatar", style: `--h:${hue(i.from)}` }, (i.from || "?").trim()[0].toUpperCase()),
           el("div", { class: "grow" }, el("div", { class: "ttl" }, i.from), el("div", { class: "sub" }, i.subject)),
           el("span", { class: "time" }, when(i.when))))))
         : empty("Inbox zero. Nothing unread."),
@@ -259,11 +260,11 @@ const render = {
     const inbox = boards.reduce((s, b) => s + (b.inbox || []).length, 0);
     count("thinking", inbox ? `${inbox} new` : "");
     if (d.error) return fill(body("thinking"), empty(d.error));
-    const ICON = { "builds-tech": ["i-code", "#0A84FF"], "career-learning": ["i-cap", "#BF5AF2"], "business-income": ["i-chart", "#30D158"], "life-family": ["i-home", "#FF9F0A"] };
+    const ICON = { "builds-tech": ["i-code", "var(--s1)"], "career-learning": ["i-cap", "var(--s2)"], "business-income": ["i-chart", "var(--s3)"], "life-family": ["i-home", "var(--s4)"] };
     fill(body("thinking"), el("div", { class: "boards" }, boards.slice(0, 4).map((b) => {
       const [ic, col] = ICON[b.slug] || ["i-layers", hue(b.slug)];
       return el("button", { class: "board", type: "button", onclick: () => openUrl(b.url) },
-        el("div", { class: "board-head" }, el("span", { class: "bi", style: `background:${col}26;color:${col}` }, icon(ic)),
+        el("div", { class: "board-head" }, el("span", { class: "bi", style: `--h:${col}` }, icon(ic)),
           el("div", { class: "grow" }, el("div", { class: "ttl" }, b.title),
             el("div", { class: "sub" }, b.inbox && b.inbox.length ? `${b.inbox.length} waiting in Inbox` : "Inbox clear"))),
         el("ul", { class: "sections" }, [...(b.inbox || []).slice(0, 2).map((x) => el("li", { class: "new" }, x)),
@@ -281,7 +282,7 @@ const render = {
       const rest = [1, 2].map((k) => files[(i + k) % files.length]).filter((x) => x !== f);
       return [
         el("button", { class: "headline", type: "button", style: "flex-direction:row;align-items:center;gap:12px", onclick: () => act({ id: "open_file", arg: f.path }) },
-          el("span", { class: "bi", style: `background:${col}26;color:${col}` }, icon(ic)),
+          el("span", { class: "bi", style: `--h:${col}` }, icon(ic)),
           el("div", { style: "min-width:0" }, el("div", { class: "ttl", style: "font-size:14px" }, f.name),
             el("div", { class: "sub" }, [kind, size(f.size), whenLong(f.when)].filter(Boolean).join(" · ")))),
         el("ul", { class: "rows", style: "margin-top:auto" }, rest.map((x) => el("li", { style: "cursor:pointer", onclick: () => act({ id: "open_file", arg: x.path }) },
@@ -343,7 +344,7 @@ const render = {
         el("div", { class: "grow" },
           el("div", { class: "between" }, el("span", { style: "font-size:14px;font-weight:600" }, name[0].toUpperCase() + name.slice(1)),
             el("span", { class: "sub" }, p.used == null ? "no data yet" : `${pct(p.used)} ${String(p.window || "").toLowerCase()}`)),
-          el("div", { class: "bar" }, el("i", { style: `width:${p.used || 0}%;${p.used > 80 ? "background:#FF453A" : ""}` })),
+          el("div", { class: "bar" }, el("i", { style: `width:${p.used || 0}%;${p.used > 80 ? "background:var(--danger)" : ""}` })),
           el("div", { class: "sub", style: "margin-top:5px" }, (p.windows || []).map((w) => `${w.label} ${pct(w.used)}${w.resets ? `, resets ${new Date(w.resets * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}` : ""}`).join(" · "))));
     }));
   },

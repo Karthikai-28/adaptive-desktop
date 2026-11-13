@@ -28,16 +28,21 @@ If the Yaru bundle is missing the symlink is skipped and the sheet still
 loads; it just loses the base.
 
 Colors, radii and spacing come from tokens/adaptive.tokens.json so no hex value
-is duplicated per application. Regenerate after editing the tokens:
+is duplicated per application. The rules below name colours as $tokens (see
+scripts/adaptive_tokens.py). Regenerate after editing the tokens, together
+with every other stylesheet:
 
-    ./scripts/build-adaptive-theme.py
+    ./scripts/build-tokens.py
 """
 
-import json
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import adaptive_tokens  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
-TOKENS = REPO / "tokens" / "adaptive.tokens.json"
+TOKENS = adaptive_tokens.TOKENS
 THEME = REPO / "theme" / "Adaptive"
 
 BASE_NAME = "Yaru-blue-dark"
@@ -45,48 +50,49 @@ BASE_RESOURCE = Path("/usr/share/themes") / BASE_NAME / "gtk-3.0" / "gtk.gresour
 BASE_IMPORT = f"resource:///com/ubuntu/themes/{BASE_NAME}/3.0/gtk.css"
 
 # Token name -> GTK custom color name.
-COLOR_NAMES = {
-    "bg.canvas": "ad_bg",
-    "bg.deep": "ad_bg_deep",
-    "surface.1": "ad_surface",
-    "surface.2": "ad_surface_2",
-    "material.menu": "ad_menu",
-    "material.sidebar": "ad_sidebar",
-    "divider": "ad_divider",
-    "text.primary": "ad_text",
-    "text.muted": "ad_muted",
-    "text.tertiary": "ad_tertiary",
-    "text.quaternary": "ad_quaternary",
-    "accent.primary": "ad_accent",
-    "accent.hover": "ad_accent_hover",
-    "accent.selection": "ad_selection",
-    "accent.cyan": "ad_cyan",
-    "accent.violet": "ad_violet",
-    "state.warning": "ad_warning",
-    "state.danger": "ad_danger",
-    "state.success": "ad_success",
-}
+COLOR_NAMES = (
+    ("surface.window", "ad_bg"),
+    ("surface.ground", "ad_bg_deep"),
+    ("surface.card", "ad_surface"),
+    ("surface.raised", "ad_surface_2"),
+    ("surface.window", "ad_menu"),
+    ("surface.pane", "ad_sidebar"),
+    ("line.solid", "ad_divider"),
+    ("text.primary", "ad_text"),
+    ("text.secondary", "ad_secondary"),
+    ("text.tertiary", "ad_muted"),
+    ("text.quaternary", "ad_tertiary"),
+    ("text.disabled", "ad_quaternary"),
+    ("accent", "ad_accent"),
+    ("accent.hover", "ad_accent_hover"),
+    ("accent.pressed", "ad_selection"),
+    ("cyan", "ad_cyan"),
+    ("indigo", "ad_violet"),
+    ("warn", "ad_warning"),
+    ("danger", "ad_danger"),
+    ("ok", "ad_success"),
+)
 
 
 def load_tokens():
-    return json.loads(TOKENS.read_text(encoding="utf-8"))
+    return adaptive_tokens.load()
 
 
 def color_block(tokens):
     lines = ["/* Design tokens - generated from tokens/adaptive.tokens.json */", ""]
 
-    for token, name in COLOR_NAMES.items():
-        value = tokens["color"][token]
+    for token, name in COLOR_NAMES:
+        value = tokens.gtk(token)
         lines.append(f"@define-color {name:<16} {value};")
 
     lines += [
         "",
         "/* Materials from the palette table (shell stylesheet.css, end) */",
         "",
-        "@define-color ad_fill          alpha(#FFFFFF, 0.08);",
-        "@define-color ad_fill_strong   alpha(#FFFFFF, 0.12);",
-        "@define-color ad_tile          alpha(#FFFFFF, 0.045);",
-        "@define-color ad_hairline      alpha(#FFFFFF, 0.09);",
+        "@define-color ad_fill          $white/8;",
+        "@define-color ad_fill_strong   $white/12;",
+        "@define-color ad_tile          $white/4;",
+        "@define-color ad_hairline      $white/8;",
         "",
         "/* GTK's own named colors, so widgets Yaru draws from them follow */",
         "",
@@ -95,12 +101,12 @@ def color_block(tokens):
         "@define-color theme_base_color          @ad_bg;",
         "@define-color theme_text_color          @ad_text;",
         "@define-color theme_selected_bg_color   @ad_selection;",
-        "@define-color theme_selected_fg_color   #FFFFFF;",
+        "@define-color theme_selected_fg_color   $white;",
         "@define-color theme_unfocused_bg_color  @ad_bg;",
         "@define-color theme_unfocused_fg_color  @ad_muted;",
         "@define-color theme_unfocused_base_color @ad_bg;",
         "@define-color theme_unfocused_text_color @ad_muted;",
-        "@define-color theme_unfocused_selected_bg_color alpha(#FFFFFF, 0.14);",
+        "@define-color theme_unfocused_selected_bg_color $white/12;",
         "@define-color theme_unfocused_selected_fg_color @ad_text;",
         "@define-color insensitive_bg_color      @ad_surface;",
         "@define-color insensitive_fg_color      @ad_quaternary;",
@@ -123,7 +129,7 @@ def color_block(tokens):
 
 
 def component_block(tokens):
-    radius = tokens["radius"]
+    radius = tokens.raw["radius"]
 
     return f"""
 /* ---------------------------------------------------------
@@ -151,17 +157,17 @@ window.background:backdrop {{
 
 * {{
     caret-color: @ad_accent;
-    outline-color: alpha(@ad_accent, 0.55);
+    outline-color: $accent/60;
     -gtk-icon-shadow: none;
 }}
 
 decoration {{
     border-radius: {radius["medium"]}px {radius["medium"]}px 0 0;
-    box-shadow: 0 12px 32px alpha(#000000, 0.45), 0 0 0 1px @ad_hairline;
+    box-shadow: 0 12px 32px $black/45, 0 0 0 1px @ad_hairline;
 }}
 
 decoration:backdrop {{
-    box-shadow: 0 6px 18px alpha(#000000, 0.35), 0 0 0 1px @ad_hairline;
+    box-shadow: 0 6px 18px $black/32, 0 0 0 1px @ad_hairline;
 }}
 
 /* ---------------------------------------------------------
@@ -271,13 +277,13 @@ headerbar button.titlebutton:hover,
 headerbar button.titlebutton.close:hover,
 .titlebar button.titlebutton.close:hover {{
     background-color: @ad_danger;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 headerbar button.suggested-action,
 .titlebar button.suggested-action {{
     background-color: @ad_accent;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 headerbar button.suggested-action:hover,
@@ -386,7 +392,7 @@ scrolledwindow.view list row {{
 scrolledwindow.view list row:selected,
 scrolledwindow.view list row:selected:focus {{
     background-color: @ad_selection;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 scrolledwindow.view list row image.sidebar-icon {{
@@ -394,7 +400,7 @@ scrolledwindow.view list row image.sidebar-icon {{
 }}
 
 scrolledwindow.view list row:selected image.sidebar-icon {{
-    color: #FFFFFF;
+    color: $white;
 }}
 
 /* ---------------------------------------------------------
@@ -425,7 +431,7 @@ flowbox flowboxchild:selected,
 .view text selection,
 textview text selection {{
     background-color: @ad_selection;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 treeview.view:selected:backdrop,
@@ -468,8 +474,8 @@ rubberband,
 .view rubberband,
 treeview.view rubberband,
 flowbox rubberband {{
-    border: 1px solid alpha(@ad_accent, 0.80);
-    background-color: alpha(@ad_accent, 0.18);
+    border: 1px solid $accent/80;
+    background-color: $accent/16;
 }}
 
 /* Grouped lists - Settings-style rows on a card, hairline between */
@@ -491,7 +497,7 @@ list row:hover {{
 list row:selected,
 list row:selected:focus {{
     background-color: @ad_selection;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 list row:selected:backdrop {{
@@ -534,7 +540,7 @@ button:hover {{
 
 button:active,
 button:checked {{
-    background-color: alpha(#FFFFFF, 0.18);
+    background-color: $white/16;
     border-color: @ad_hairline;
     color: @ad_text;
 }}
@@ -564,7 +570,7 @@ button.suggested-action,
 button.default {{
     border-color: transparent;
     background-color: @ad_accent;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 button.suggested-action:hover,
@@ -573,8 +579,8 @@ button.default:hover {{
 }}
 
 button.suggested-action:disabled {{
-    background-color: alpha(@ad_accent, 0.35);
-    color: alpha(#FFFFFF, 0.55);
+    background-color: $accent/32;
+    color: $white/60;
 }}
 
 button.destructive-action {{
@@ -584,7 +590,7 @@ button.destructive-action {{
 }}
 
 button.destructive-action:hover {{
-    background-color: alpha(@ad_danger, 0.18);
+    background-color: $danger/16;
 }}
 
 /* Yaru paints these buttons with a background image (green for suggested)
@@ -642,7 +648,7 @@ spinbutton.vertical entry {{
 entry:focus,
 spinbutton:focus {{
     border-color: @ad_accent;
-    box-shadow: 0 0 0 2px alpha(@ad_accent, 0.35);
+    box-shadow: 0 0 0 2px $accent/32;
 }}
 
 entry:disabled {{
@@ -663,7 +669,7 @@ switch {{
     border: none;
     border-radius: 99px;
     background-image: none;
-    background-color: alpha(#FFFFFF, 0.16);
+    background-color: $white/16;
     color: transparent;
 }}
 
@@ -678,18 +684,18 @@ switch slider {{
     border: none;
     border-radius: 99px;
     background-image: none;
-    background-color: #FFFFFF;
-    box-shadow: 0 1px 3px alpha(#000000, 0.30);
+    background-color: $white;
+    box-shadow: 0 1px 3px $black/32;
 }}
 
 check,
 radio {{
     min-width: 14px;
     min-height: 14px;
-    border: 1px solid alpha(#FFFFFF, 0.22);
+    border: 1px solid $white/24;
     background-image: none;
     background-color: @ad_fill;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 check {{
@@ -710,7 +716,7 @@ levelbar trough {{
     border: none;
     border-radius: 99px;
     background-image: none;
-    background-color: alpha(#FFFFFF, 0.14);
+    background-color: $white/12;
 }}
 
 scale highlight,
@@ -727,15 +733,15 @@ scale slider {{
     border: none;
     border-radius: 99px;
     background-image: none;
-    background-color: #FFFFFF;
-    box-shadow: 0 1px 3px alpha(#000000, 0.35);
+    background-color: $white;
+    box-shadow: 0 1px 3px $black/32;
 }}
 
 levelbar block.filled,
 levelbar block.high {{ background-color: @ad_accent; }}
 levelbar block.low {{ background-color: @ad_warning; }}
 levelbar block.full {{ background-color: @ad_danger; }}
-levelbar block.empty {{ background-color: alpha(#FFFFFF, 0.14); }}
+levelbar block.empty {{ background-color: $white/12; }}
 
 combobox button.combo,
 button.combo {{
@@ -753,10 +759,10 @@ menu,
 .context-menu {{
     padding: 5px;
     border-radius: {radius["medium"] - 2}px;
-    border: 1px solid alpha(#FFFFFF, 0.12);
+    border: 1px solid $white/12;
     background-image: none;
     background-color: @ad_menu;
-    box-shadow: 0 10px 30px alpha(#000000, 0.50);
+    box-shadow: 0 10px 30px $black/45;
     color: @ad_text;
 }}
 
@@ -772,7 +778,7 @@ menu,
 
 .csd.popup decoration {{
     border-radius: {radius["medium"] - 2}px;
-    box-shadow: 0 8px 24px alpha(#000000, 0.45);
+    box-shadow: 0 8px 24px $black/45;
 }}
 
 popover modelbutton,
@@ -791,7 +797,7 @@ menu menuitem:hover,
 .menu menuitem:hover,
 menuitem:hover {{
     background-color: @ad_accent;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 menuitem accelerator,
@@ -801,7 +807,7 @@ popover modelbutton accelerator {{
 
 menuitem:hover accelerator,
 popover modelbutton:hover accelerator {{
-    color: alpha(#FFFFFF, 0.75);
+    color: $white/80;
 }}
 
 menuitem:disabled,
@@ -868,7 +874,7 @@ stackswitcher > button,
 
 stackswitcher > button:checked,
 .stack-switcher > button:checked {{
-    background-color: alpha(#FFFFFF, 0.20);
+    background-color: $white/16;
 }}
 
 /* ---------------------------------------------------------
@@ -888,15 +894,15 @@ scrollbar slider {{
     margin: 2px;
     border: none;
     border-radius: 99px;
-    background-color: alpha(#FFFFFF, 0.30);
+    background-color: $white/32;
 }}
 
 scrollbar slider:hover {{
-    background-color: alpha(#FFFFFF, 0.46);
+    background-color: $white/45;
 }}
 
 scrollbar slider:active {{
-    background-color: alpha(#FFFFFF, 0.58);
+    background-color: $white/60;
 }}
 
 separator {{
@@ -926,14 +932,14 @@ messagedialog .dialog-action-area button.destructive-action,
 dialog .dialog-action-area button.destructive-action {{
     background-image: none;
     background-color: @ad_danger;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 messagedialog .dialog-action-area button.suggested-action,
 dialog .dialog-action-area button.suggested-action {{
     background-image: none;
     background-color: @ad_accent;
-    color: #FFFFFF;
+    color: $white;
 }}
 
 messagedialog .dialog-action-area button:not(.destructive-action):not(.suggested-action),
@@ -952,14 +958,14 @@ infobar > revealer > box {{
 }}
 
 infobar.info > revealer > box,
-infobar.question > revealer > box {{ background-color: alpha(@ad_accent, 0.18); }}
-infobar.warning > revealer > box {{ background-color: alpha(@ad_warning, 0.18); }}
-infobar.error > revealer > box {{ background-color: alpha(@ad_danger, 0.18); }}
+infobar.question > revealer > box {{ background-color: $accent/16; }}
+infobar.warning > revealer > box {{ background-color: $warn/16; }}
+infobar.error > revealer > box {{ background-color: $danger/16; }}
 
 tooltip,
 tooltip.background {{
     padding: 4px 8px;
-    border: 1px solid alpha(#FFFFFF, 0.12);
+    border: 1px solid $white/12;
     border-radius: {radius["small"] - 2}px;
     background-color: @ad_menu;
     box-shadow: none;
@@ -978,8 +984,8 @@ label.dim-label {{
 
 selection,
 label selection {{
-    background-color: alpha(@ad_accent, 0.45);
-    color: #FFFFFF;
+    background-color: $accent/45;
+    color: $white;
 }}
 
 link,
@@ -1010,7 +1016,8 @@ def render(tokens, with_base):
     if with_base:
         header += [f'@import url("{BASE_IMPORT}");', ""]
 
-    return "\n".join(header) + color_block(tokens) + "\n" + component_block(tokens)
+    body = color_block(tokens) + "\n" + component_block(tokens)
+    return "\n".join(header) + tokens.compile_css(body, "scripts/build-adaptive-theme.py")
 
 
 def index_theme():
@@ -1046,23 +1053,37 @@ def link_base(gtk3):
     return True
 
 
-def main():
-    tokens = load_tokens()
+def has_base():
+    """Whether the committed sheet imports Yaru: the form every machine with Yaru produces."""
+    return BASE_RESOURCE.exists() or not (THEME / "gtk-3.0" / "gtk.css").exists()
+
+
+def outputs(tokens):
+    """{path: text}, for scripts/build-tokens.py (which writes and checks them)."""
+    css = render(tokens, has_base())
     gtk3 = THEME / "gtk-3.0"
-    gtk3.mkdir(parents=True, exist_ok=True)
-
-    with_base = link_base(gtk3)
-    css = render(tokens, with_base)
-
     # GTK loads gtk.css for the theme and gtk-dark.css for its dark variant.
     # Adaptive is dark either way, so both get the same sheet.
-    (gtk3 / "gtk.css").write_text(css, encoding="utf-8")
-    (gtk3 / "gtk-dark.css").write_text(css, encoding="utf-8")
-    (THEME / "index.theme").write_text(index_theme(), encoding="utf-8")
+    return {gtk3 / "gtk.css": css, gtk3 / "gtk-dark.css": css, THEME / "index.theme": index_theme()}
 
+
+def link(verbose=True):
+    gtk3 = THEME / "gtk-3.0"
+    gtk3.mkdir(parents=True, exist_ok=True)
+    with_base = link_base(gtk3)
+    if verbose:
+        print(f"  base                  {BASE_NAME if with_base else 'none (Yaru bundle missing)'}")
+    return with_base
+
+
+def main():
+    tokens = load_tokens()
+    link(verbose=False)
+    for path, text in outputs(tokens).items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
     print(f"Generated {THEME}")
-    print(f"  gtk-3.0/gtk.css       {len(css.splitlines())} lines")
-    print(f"  base                  {BASE_NAME if with_base else 'none (Yaru bundle missing)'}")
+    link()
     print(f"  colors from           {TOKENS.relative_to(REPO)}")
 
 

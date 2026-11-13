@@ -16,16 +16,17 @@
 /* Design tokens - generated from tokens/adaptive.tokens.json */
 
 @define-color ad_bg            #1C1C1E;
-@define-color ad_bg_deep       #141416;
-@define-color ad_surface       #2C2C2E;
-@define-color ad_surface_2     #3A3A3C;
-@define-color ad_menu          #1E1E20;
-@define-color ad_sidebar       #28282A;
-@define-color ad_divider       #48484A;
-@define-color ad_text          #F5F5F7;
-@define-color ad_muted         #98989D;
-@define-color ad_tertiary      #8E8E93;
-@define-color ad_quaternary    #636366;
+@define-color ad_bg_deep       #151517;
+@define-color ad_surface       #2D2D2F;
+@define-color ad_surface_2     #3B3B3D;
+@define-color ad_menu          #1C1C1E;
+@define-color ad_sidebar       #242426;
+@define-color ad_divider       #49494C;
+@define-color ad_text          #F5F5F8;
+@define-color ad_secondary     #CACACD;
+@define-color ad_muted         #A4A4A7;
+@define-color ad_tertiary      #868688;
+@define-color ad_quaternary    #636365;
 @define-color ad_accent        #0A84FF;
 @define-color ad_accent_hover  #409CFF;
 @define-color ad_selection     #0058D0;
@@ -37,10 +38,10 @@
 
 /* Materials from the palette table (shell stylesheet.css, end) */
 
-@define-color ad_fill          alpha(#FFFFFF, 0.08);
-@define-color ad_fill_strong   alpha(#FFFFFF, 0.12);
-@define-color ad_tile          alpha(#FFFFFF, 0.045);
-@define-color ad_hairline      alpha(#FFFFFF, 0.09);
+@define-color ad_fill          rgba(255, 255, 255, 0.08);
+@define-color ad_fill_strong   rgba(255, 255, 255, 0.12);
+@define-color ad_tile          rgba(255, 255, 255, 0.04);
+@define-color ad_hairline      rgba(255, 255, 255, 0.08);
 
 /* GTK's own named colors, so widgets Yaru draws from them follow */
 
@@ -54,7 +55,7 @@
 @define-color theme_unfocused_fg_color  @ad_muted;
 @define-color theme_unfocused_base_color @ad_bg;
 @define-color theme_unfocused_text_color @ad_muted;
-@define-color theme_unfocused_selected_bg_color alpha(#FFFFFF, 0.14);
+@define-color theme_unfocused_selected_bg_color rgba(255, 255, 255, 0.12);
 @define-color theme_unfocused_selected_fg_color @ad_text;
 @define-color insensitive_bg_color      @ad_surface;
 @define-color insensitive_fg_color      @ad_quaternary;
@@ -97,17 +98,17 @@ window.background:backdrop {
 
 * {
     caret-color: @ad_accent;
-    outline-color: alpha(@ad_accent, 0.55);
+    outline-color: rgba(10, 132, 255, 0.60);
     -gtk-icon-shadow: none;
 }
 
 decoration {
     border-radius: 12px 12px 0 0;
-    box-shadow: 0 12px 32px alpha(#000000, 0.45), 0 0 0 1px @ad_hairline;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px @ad_hairline;
 }
 
 decoration:backdrop {
-    box-shadow: 0 6px 18px alpha(#000000, 0.35), 0 0 0 1px @ad_hairline;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32), 0 0 0 1px @ad_hairline;
 }
 
 /* ---------------------------------------------------------
@@ -414,8 +415,8 @@ rubberband,
 .view rubberband,
 treeview.view rubberband,
 flowbox rubberband {
-    border: 1px solid alpha(@ad_accent, 0.80);
-    background-color: alpha(@ad_accent, 0.18);
+    border: 1px solid rgba(10, 132, 255, 0.80);
+    background-color: rgba(10, 132, 255, 0.16);
 }
 
 /* Grouped lists - Settings-style rows on a card, hairline between */
@@ -480,7 +481,7 @@ button:hover {
 
 button:active,
 button:checked {
-    background-color: alpha(#FFFFFF, 0.18);
+    background-color: rgba(255, 255, 255, 0.16);
     border-color: @ad_hairline;
     color: @ad_text;
 }
@@ -519,8 +520,8 @@ button.default:hover {
 }
 
 button.suggested-action:disabled {
-    background-color: alpha(@ad_accent, 0.35);
-    color: alpha(#FFFFFF, 0.55);
+    background-color: rgba(10, 132, 255, 0.32);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 button.destructive-action {
@@ -530,7 +531,7 @@ button.destructive-action {
 }
 
 button.destructive-action:hover {
-    background-color: alpha(@ad_danger, 0.18);
+    background-color: rgba(255, 69, 58, 0.16);
 }
 
 /* Yaru paints these buttons with a background image (green for suggested)
@@ -588,7 +589,7 @@ spinbutton.vertical entry {
 entry:focus,
 spinbutton:focus {
     border-color: @ad_accent;
-    box-shadow: 0 0 0 2px alpha(@ad_accent, 0.35);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.32);
 }
 
 entry:disabled {
@@ -609,7 +610,7 @@ switch {
     border: none;
     border-radius: 99px;
     background-image: none;
-    background-color: alpha(#FFFFFF, 0.16);
+    background-color: rgba(255, 255, 255, 0.16);
     color: transparent;
 }
 
@@ -625,14 +626,14 @@ switch slider {
     border-radius: 99px;
     background-image: none;
     background-color: #FFFFFF;
-    box-shadow: 0 1px 3px alpha(#000000, 0.30);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.32);
 }
 
 check,
 radio {
     min-width: 14px;
     min-height: 14px;
-    border: 1px solid alpha(#FFFFFF, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.24);
     background-image: none;
     background-color: @ad_fill;
     color: #FFFFFF;
@@ -656,7 +657,7 @@ levelbar trough {
     border: none;
     border-radius: 99px;
     background-image: none;
-    background-color: alpha(#FFFFFF, 0.14);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
 scale highlight,
@@ -674,14 +675,14 @@ scale slider {
     border-radius: 99px;
     background-image: none;
     background-color: #FFFFFF;
-    box-shadow: 0 1px 3px alpha(#000000, 0.35);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.32);
 }
 
 levelbar block.filled,
 levelbar block.high { background-color: @ad_accent; }
 levelbar block.low { background-color: @ad_warning; }
 levelbar block.full { background-color: @ad_danger; }
-levelbar block.empty { background-color: alpha(#FFFFFF, 0.14); }
+levelbar block.empty { background-color: rgba(255, 255, 255, 0.12); }
 
 combobox button.combo,
 button.combo {
@@ -699,10 +700,10 @@ menu,
 .context-menu {
     padding: 5px;
     border-radius: 10px;
-    border: 1px solid alpha(#FFFFFF, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     background-image: none;
     background-color: @ad_menu;
-    box-shadow: 0 10px 30px alpha(#000000, 0.50);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
     color: @ad_text;
 }
 
@@ -718,7 +719,7 @@ menu,
 
 .csd.popup decoration {
     border-radius: 10px;
-    box-shadow: 0 8px 24px alpha(#000000, 0.45);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 popover modelbutton,
@@ -747,7 +748,7 @@ popover modelbutton accelerator {
 
 menuitem:hover accelerator,
 popover modelbutton:hover accelerator {
-    color: alpha(#FFFFFF, 0.75);
+    color: rgba(255, 255, 255, 0.80);
 }
 
 menuitem:disabled,
@@ -814,7 +815,7 @@ stackswitcher > button,
 
 stackswitcher > button:checked,
 .stack-switcher > button:checked {
-    background-color: alpha(#FFFFFF, 0.20);
+    background-color: rgba(255, 255, 255, 0.16);
 }
 
 /* ---------------------------------------------------------
@@ -834,15 +835,15 @@ scrollbar slider {
     margin: 2px;
     border: none;
     border-radius: 99px;
-    background-color: alpha(#FFFFFF, 0.30);
+    background-color: rgba(255, 255, 255, 0.32);
 }
 
 scrollbar slider:hover {
-    background-color: alpha(#FFFFFF, 0.46);
+    background-color: rgba(255, 255, 255, 0.45);
 }
 
 scrollbar slider:active {
-    background-color: alpha(#FFFFFF, 0.58);
+    background-color: rgba(255, 255, 255, 0.60);
 }
 
 separator {
@@ -898,14 +899,14 @@ infobar > revealer > box {
 }
 
 infobar.info > revealer > box,
-infobar.question > revealer > box { background-color: alpha(@ad_accent, 0.18); }
-infobar.warning > revealer > box { background-color: alpha(@ad_warning, 0.18); }
-infobar.error > revealer > box { background-color: alpha(@ad_danger, 0.18); }
+infobar.question > revealer > box { background-color: rgba(10, 132, 255, 0.16); }
+infobar.warning > revealer > box { background-color: rgba(255, 159, 10, 0.16); }
+infobar.error > revealer > box { background-color: rgba(255, 69, 58, 0.16); }
 
 tooltip,
 tooltip.background {
     padding: 4px 8px;
-    border: 1px solid alpha(#FFFFFF, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
     background-color: @ad_menu;
     box-shadow: none;
@@ -924,7 +925,7 @@ label.dim-label {
 
 selection,
 label selection {
-    background-color: alpha(@ad_accent, 0.45);
+    background-color: rgba(10, 132, 255, 0.45);
     color: #FFFFFF;
 }
 

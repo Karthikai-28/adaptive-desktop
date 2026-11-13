@@ -1,3 +1,5 @@
+/* GENERATED from preview.src.css by scripts/build-tokens.py. Edit preview.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
 /*
  * Adaptive Files - what is specific to Files
  *
@@ -26,9 +28,9 @@
  * the tint is painted once; the sidebar and the inspector float on it as
  * lighter panes, as in Finder. Only Files does this - the session theme
  * keeps other windows opaque. */
-@define-color ad_glass        alpha(#1C1C1E, 0.58);
-@define-color ad_glass_pane   alpha(#FFFFFF, 0.055);
-@define-color ad_glass_edge   alpha(#FFFFFF, 0.10);
+@define-color ad_glass        rgba(28, 28, 30, 0.60);
+@define-color ad_glass_pane   rgba(255, 255, 255, 0.04);
+@define-color ad_glass_edge   rgba(255, 255, 255, 0.08);
 
 .nautilus-window,
 .nautilus-window.background,
@@ -71,12 +73,12 @@
 
 .nautilus-window headerbar button:not(.titlebutton):not(.text-button) {
     border: 1px solid @ad_glass_edge;
-    background-color: alpha(#FFFFFF, 0.06);
-    box-shadow: inset 0 1px alpha(#FFFFFF, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .nautilus-window headerbar button:not(.titlebutton):hover {
-    background-color: alpha(#FFFFFF, 0.12);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
 .nautilus-window headerbar .linked > button:not(:first-child) {
@@ -180,7 +182,7 @@
     border: 1px solid @ad_glass_edge;
     border-radius: 14px;
     background-color: @ad_glass_pane;
-    box-shadow: inset 0 1px alpha(#FFFFFF, 0.07);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .nautilus-window placessidebar list {
@@ -254,7 +256,7 @@
  * while blue would turn every icon navy. */
 .view.nautilus-canvas-item:selected,
 .view.nautilus-canvas-item:active {
-    background-color: #DCDCE1;
+    background-color: #CACACD;
 }
 
 .view.nautilus-canvas-item.label-text {
@@ -277,17 +279,17 @@
 }
 
 .view.nautilus-canvas-item.dim-label:selected {
-    color: alpha(#FFFFFF, 0.78);
+    color: rgba(255, 255, 255, 0.80);
 }
 
 .nautilus-canvas-item.thumbnail {
     border-radius: 4px;
-    box-shadow: 0 0 0 1px alpha(#FFFFFF, 0.10), 0 2px 6px alpha(#000000, 0.35);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.32);
 }
 
 /* List view: no rules between rows; the selection carries the eye */
 .nautilus-list-view .view:not(:drop(active)) {
-    border-bottom: 1px solid alpha(#FFFFFF, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .nautilus-list-view .view,
@@ -312,9 +314,9 @@
 
 rubberband,
 .nautilus-window .view rubberband {
-    border: 1px solid alpha(@ad_accent, 0.85);
+    border: 1px solid rgba(10, 132, 255, 0.80);
     border-radius: 3px;
-    background-color: alpha(@ad_accent, 0.16);
+    background-color: rgba(10, 132, 255, 0.16);
 }
 
 /* Floating status: a small pill in the corner, not a tab glued to the edge */
@@ -323,10 +325,10 @@ rubberband,
 .floating-bar.bottom.right {
     margin: 10px;
     padding: 3px 10px;
-    border: 1px solid alpha(#FFFFFF, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 8px;
     background-color: @ad_menu;
-    box-shadow: 0 4px 14px alpha(#000000, 0.40);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
     color: @ad_muted;
 }
 
@@ -356,18 +358,18 @@ rubberband,
 
 .search-information {
     padding: 4px;
-    background-color: alpha(@ad_accent, 0.18);
+    background-color: rgba(10, 132, 255, 0.16);
     color: @ad_text;
 }
 
 /* Conflict dialog rows (Nautilus draws these light yellow) */
 .conflict-row {
-    background: alpha(@ad_warning, 0.16);
+    background: rgba(255, 159, 10, 0.16);
     color: @ad_text;
 }
 
 .conflict-row:hover {
-    background-color: alpha(@ad_warning, 0.24);
+    background-color: rgba(255, 159, 10, 0.24);
 }
 
 .conflict-row:selected {
@@ -377,7 +379,7 @@ rubberband,
 
 /* Properties dialog usage pie: accent for used, track for free */
 @define-color disk_space_used    @ad_accent;
-@define-color disk_space_free    #3A3A3C;
+@define-color disk_space_free    #3B3B3D;
 @define-color disk_space_unknown @ad_quaternary;
 
 .disk-space-display,
@@ -397,8 +399,8 @@ rubberband,
  * through light-theme greys. */
 @keyframes needs_attention_keyframes {
     0%   { background-color: transparent; }
-    30%  { background-color: alpha(@ad_accent, 0.40); }
-    90%  { background-color: alpha(@ad_accent, 0.40); }
+    30%  { background-color: rgba(10, 132, 255, 0.45); }
+    90%  { background-color: rgba(10, 132, 255, 0.45); }
     100% { background-color: transparent; }
 }
 
@@ -427,7 +429,7 @@ rubberband,
     border-radius: 14px;
     background-color: @ad_glass_pane;
     background-image: none;
-    box-shadow: inset 0 1px alpha(#FFFFFF, 0.07);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
 }
 
 /* Hero: icon or preview, name, kind */
@@ -452,7 +454,7 @@ rubberband,
     margin-top: 10px;
     padding: 10px;
     border-radius: 12px;
-    background-color: alpha(#000000, 0.18);
+    background-color: rgba(0, 0, 0, 0.16);
     border: 1px solid @ad_hairline;
 }
 
@@ -639,7 +641,7 @@ rubberband,
     min-height: 240px;
     border: 1px solid @ad_hairline;
     border-radius: 10px;
-    background-color: alpha(#000000, 0.24);
+    background-color: rgba(0, 0, 0, 0.24);
 }
 
 .adaptive-text-frame > border {
@@ -671,7 +673,7 @@ rubberband,
     margin-top: 10px;
     padding: 8px 11px;
     border-radius: 10px;
-    background-color: alpha(@ad_accent, 0.12);
+    background-color: rgba(10, 132, 255, 0.12);
 }
 
 /* Toolbar toggles for the inspector and terminal: accent glyph when on */
@@ -683,7 +685,7 @@ rubberband,
 /* Terminal drawer under the file view */
 .adaptive-terminal-slot {
     border-top: 1px solid @ad_hairline;
-    background-color: #141416;
+    background-color: #151517;
 }
 
 .adaptive-terminal-slot vte-terminal {
