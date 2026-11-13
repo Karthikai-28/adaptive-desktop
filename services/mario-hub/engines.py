@@ -35,6 +35,17 @@ SYSTEM = (
     "in that repo, and it will hand the work to Claude Code after Karthi confirms.")
 
 
+def model_name(model):
+    """A model id as people say it: claude-sonnet-5-5 -> Sonnet 5.5, gemini-3.8-flash-low -> Gemini 3.8 Flash."""
+    found = re.match(r"claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?", model or "", re.I)
+    if found:
+        return f"{found.group(1).capitalize()} {found.group(2)}" + (f".{found.group(3)}" if found.group(3) else "")
+    found = re.match(r"gemini-([\d.]+)-([a-z]+)", model or "", re.I)
+    if found:
+        return f"Gemini {found.group(1)} {found.group(2).capitalize()}"
+    return (model or "").capitalize()
+
+
 def order(cfg):
     """The engines to try, in order, with unknown names left out; local is always the last resort."""
     names = [n for n in (cfg.get("brain") or ENGINES) if n in ENGINES]

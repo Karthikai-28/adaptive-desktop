@@ -413,7 +413,7 @@ const render = {
     const b = state.brain || {};
     const pill = $("#brain");
     pill.className = `pill ${b.engine === "claude" ? "ok" : "warn"}`;
-    pill.textContent = b.engine === "claude" ? "Claude" : b.engine === "gemini"
+    pill.textContent = b.engine === "claude" ? (b.model || "Claude") : b.engine === "gemini"
       ? (/limit/.test((b.skipped || {}).claude || "") ? "Gemini · Claude at its limit" : "Gemini") : b.engine ? "On this laptop" : "Claude";
     pill.title = brainLine();
   },
@@ -449,7 +449,8 @@ function brainLine() {
   const b = state.brain || {};
   if (!b.engine) return "Claude answers";
   const why = Object.entries(b.skipped || {}).map(([n, w]) => `${ENGINE[n] || n} is ${w}`);
-  return `${ENGINE[b.engine] || b.engine} answers${why.length ? ` · ${why.join("; ")}` : ""}`;
+  const who = b.engine === "claude" && b.model ? `Claude ${b.model}` : ENGINE[b.engine] || b.engine;
+  return `${who} answers${why.length ? ` · ${why.join("; ")}` : ""}`;
 }
 
 function greet() {

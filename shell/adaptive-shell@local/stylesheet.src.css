@@ -3494,3 +3494,14 @@
 }
 .adaptive-ros-wizard-done { font-size: 20px; font-weight: 700; color: $ok; }
 .adaptive-ros-wizard .modal-dialog-linked-button:insensitive { color: $white/32; }
+
+/* ===== Window glass =====
+ *
+ * The bands windowGlass.js puts behind a Files window. They carry the blurred
+ * wallpaper; this colour is what shows until that picture exists, so the
+ * window is never a see-through pane.
+ */
+
+.adaptive-window-glass {
+    background-color: $surface.ground;
+}

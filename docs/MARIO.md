@@ -132,7 +132,7 @@ The hub is a user service that starts at boot (lingering is on), before anyone l
 2. **Answer**: everything else that is a question or chat goes, with a few lines of live context
    (time, weather, today's events, unread mail per account, open tasks, repo state), to the first of
    `brain` (default `["claude", "gemini", "local"]`) that can answer:
-   - **Claude**: `claude -p` (`claude_model`, Sonnet by default) with Mario's own system prompt and
+   - **Claude**: `claude -p` (`claude_model`, `claude-sonnet-5-5` by default; the ask bar names it) with Mario's own system prompt and
      no tools but web search and web fetch, so it can look things up but never run or change
      anything; one conversation per hub run (`--resume`). It runs in `~/.local/share/adaptive-desktop/mario/brain`.
    - **Gemini**: when Claude is at its usage limit (the AI usage tile at 100 % in a window that has

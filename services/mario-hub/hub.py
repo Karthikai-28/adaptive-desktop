@@ -141,7 +141,8 @@ class Hub:
         names = engines.order(self.cfg)
         why = {n: self.engine_ready(n) for n in names}
         first = next(n for n in names if why[n] is None)
-        return {"engine": first, "label": engines.LABEL[first], "order": names,
+        model = {"claude": self.cfg.get("claude_model"), "gemini": self.cfg.get("gemini_model")}.get(first)
+        return {"engine": first, "label": engines.LABEL[first], "model": engines.model_name(model), "order": names,
                 "skipped": {n: w for n, w in why.items() if w and names.index(n) < names.index(first)}}
 
     async def push_brain(self):

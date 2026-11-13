@@ -34,8 +34,9 @@ DEFAULTS = {
     "brain": ["claude", "gemini", "local"],
     # Claude Code, headless, on the Claude subscription: answers, and multi-step dev work in a repo
     # (that only after you confirm)
+    # The model is named in full so an alias moving on never changes who answers.
     "claude_cmd": "claude",
-    "claude_model": "sonnet",
+    "claude_model": "claude-sonnet-5-5",
     "claude_timeout_s": 1800,
     # Gemini through the Antigravity CLI on the AI Pro subscription: a fast model for answers, a
     # stronger one when it takes a code hand-off because Claude is at its limit
