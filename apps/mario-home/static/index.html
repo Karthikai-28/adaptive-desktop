@@ -73,15 +73,14 @@
       <div class="row r2">
         <section class="card" id="c-mail"><header class="ch"><svg class="ci"><use href="#i-mail"/></svg><h3>Mail</h3><span class="count"></span><button class="open" type="button" data-open="https://mail.google.com/" aria-label="Open Gmail"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card" id="c-tasks"><header class="ch"><svg class="ci"><use href="#i-check"/></svg><h3>Tasks</h3><span class="count"></span></header><div class="body"></div></section>
-        <section class="card" id="c-focus"><header class="ch"><svg class="ci"><use href="#i-sun"/></svg><h3>Focus</h3></header><div class="body"></div></section>
         <section class="card" id="c-next"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>Next step</h3></header><div class="body"></div></section>
       </div>
       <div class="grid4">
         <section class="card narrow" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="dots"></span></header><div class="body"></div></section>
-        <section class="card wide" id="c-thinking"><header class="ch"><svg class="ci"><use href="#i-layers"/></svg><h3>Thinking Space</h3><span class="count"></span><button class="open" type="button" data-open-hub aria-label="Open the Thinking Space hub"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+        <section class="card narrow" id="c-thinking"><header class="ch"><svg class="ci"><use href="#i-layers"/></svg><h3>Thinking Space</h3><span class="count"></span><button class="open" type="button" data-open-hub aria-label="Open the Thinking Space hub"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card tall" id="c-news"><header class="ch"><svg class="ci"><use href="#i-news"/></svg><h3>News</h3><span class="meta" id="news-src"></span></header><div class="body"></div><i class="roll" aria-hidden="true"></i></section>
         <section class="card narrow" id="c-recent"><header class="ch"><svg class="ci"><use href="#i-file"/></svg><h3>Recent files</h3><span class="dots"></span></header><div class="body"></div></section>
-        <section class="card narrow" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
+        <section class="card" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
         <section class="card narrow" id="c-week"><header class="ch"><svg class="ci"><use href="#i-chart"/></svg><h3>This week</h3><span class="dots"></span></header><div class="body"></div></section>
       </div>
     </div>
@@ -89,7 +88,6 @@
     <aside class="side">
       <section class="card compact" id="c-weather"><div class="body"></div></section>
       <section class="card compact" id="c-today"><header class="ch"><svg class="ci"><use href="#i-cal"/></svg><h3>Today</h3><span class="count"></span><span class="meta" id="today-date"></span><button class="open" type="button" data-open="https://calendar.google.com/" aria-label="Open Google Calendar"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
-      <section class="card" id="c-downloads"><header class="ch"><svg class="ci"><use href="#i-folder"/></svg><h3>Downloads</h3></header><div class="body"></div></section>
       <section class="card" id="c-ai"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>AI assistants</h3></header><div class="body"></div></section>
       <button class="card compact row-card" id="c-phone" type="button"><svg class="ci"><use href="#i-phone"/></svg><span class="body"></span><svg class="chev"><use href="#i-chev"/></svg></button>
     </aside>
@@ -112,7 +110,14 @@
 </section>
 
 <div id="offline" class="offline" hidden>Mario Hub is not answering. Retrying…</div>
-<div id="voice-status" class="voice-status" hidden role="status" aria-live="polite"><span></span><button type="button" class="btn" id="voice-cancel">Cancel</button></div>
+<!-- Talking to Mario: the strands move with your voice while it listens, then run flat while it works -->
+<div id="voice-status" class="voice-status" hidden data-phase="idle">
+  <div class="wave" aria-hidden="true"><svg viewBox="0 0 600 64" preserveAspectRatio="none">
+    <defs><linearGradient id="aurora" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="600" y2="0"><stop class="a" offset="0"/><stop class="b" offset=".55"/><stop class="c" offset="1"/></linearGradient></defs>
+    <g class="strands"><path class="w1"/><path class="w2"/><path class="w3"/></g>
+  </svg><i class="working"></i></div>
+  <div class="voice-line" role="status" aria-live="polite"><span></span><button type="button" class="btn" id="voice-cancel">Cancel</button></div>
+</div>
 <script src="/static/home.js"></script>
 </body>
 </html>

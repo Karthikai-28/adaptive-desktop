@@ -71,6 +71,18 @@ def make_view(path):
     return view
 
 
+def fade_in(win, ms=160):
+    """Bring a window up from clear over a few frames (the compositor applies the opacity)."""
+    started = GLib.get_monotonic_time()
+
+    def step():
+        t = min(1.0, (GLib.get_monotonic_time() - started) / (ms * 1000))
+        win.set_opacity(1 - (1 - t) ** 3)       # ease out
+        return t < 1
+
+    GLib.timeout_add(16, step)
+
+
 def workarea():
     display = Gdk.Display.get_default()
     monitor = display.get_primary_monitor() or display.get_monitor(0)
@@ -143,8 +155,12 @@ class Panel(Gtk.Application):
         area = workarea()
         self.win.resize(PANEL_W, area.height - 32)
         self.win.move(area.x + area.width - PANEL_W - 16, area.y + 16)
+        self.win.set_opacity(0)
         self.win.show_all()
         self.win.present_with_time(Gtk.get_current_event_time() or GLib.get_monotonic_time() // 1000)
+        fade_in(self.win)
+        # the page slides its content in and puts the keyboard on Talk to Mario
+        self.win.get_child().run_javascript("window.marioShown && window.marioShown()", None, None, None)
 
 
 def main():

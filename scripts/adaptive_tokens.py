@@ -193,8 +193,22 @@ def output_for(source):
     return source.with_name(source.name[:-len(SOURCE_SUFFIX)] + ".css")
 
 
+def check_braces(text, where):
+    """A stray or missing brace does not fail anywhere: the browser just drops the next rule."""
+    depth = 0
+    plain = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    for number, line in enumerate(plain.splitlines(), 1):
+        for char in line:
+            depth += (char == "{") - (char == "}")
+            if depth < 0:
+                raise TokenError(f"{where}:{number}: a closing brace with nothing to close")
+    if depth:
+        raise TokenError(f"{where}: {depth} opening brace(s) never closed")
+
+
 def render(tokens, source):
     relative = source.relative_to(REPO)
+    check_braces(source.read_text(encoding="utf-8"), str(relative))
     banner = (f"/* GENERATED from {relative.name} by scripts/build-tokens.py. Edit {relative.name}, "
               f"then run the script.\n   Colours come from tokens/adaptive.tokens.json. */\n")
     return banner + tokens.compile_css(source.read_text(encoding="utf-8"), str(relative))

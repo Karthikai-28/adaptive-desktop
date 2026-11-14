@@ -82,8 +82,15 @@ async def main(tmp):
             for _ in range(60):
                 if await ev('!!document.querySelector("#c-projects .tile-nav")'): break
                 await asyncio.sleep(.1)
-            assert await ev('document.querySelectorAll(".card").length') == 15
-            assert await ev('!document.querySelector("#c-apps")')
+            assert await ev('document.querySelectorAll(".card").length') == 13
+            assert await ev('!document.querySelector("#c-apps, #c-focus, #c-downloads")')
+            # one screen: the page never scrolls, and whatever is long scrolls inside its own tile
+            assert await ev('document.documentElement.scrollHeight <= innerHeight && getComputedStyle(document.body).overflowY === "hidden"')
+            assert await ev('getComputedStyle(document.querySelector("#c-tasks .task-list")).overflowY === "auto"')
+            cut = await ev('[...document.querySelectorAll(".card")].filter(c => c.scrollHeight > c.clientHeight + 2).map(c => c.id)')
+            assert not cut, cut
+            thinking, projects = await ev('[document.querySelector("#c-thinking").offsetWidth, document.querySelector("#c-projects").offsetWidth]')
+            assert abs(thinking - projects) <= 2, (thinking, projects)   # Thinking Space is one column, like Projects
             await ev('Object.values(LIVE).forEach(t => t.paused=true); true')
             assert await ev('LIVE.projects.faces.length') == 4
             await ev('LIVE.projects.i=0; document.querySelector("#c-projects [aria-label=\\"Next slide\\"]").click(); true')
@@ -92,22 +99,22 @@ async def main(tmp):
             assert await ev('LIVE.projects.i === 2 && document.querySelector("#c-projects .face").textContent.includes("Project 2")')
             await ev('document.querySelector("#c-projects").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowLeft",bubbles:true})); true')
             assert await ev('LIVE.projects.i') == 1
-            await ev('document.querySelector("#c-downloads .face button").click(); true')
-            await asyncio.sleep(.1)
-            assert ('open_file', '/fixture/0.pdf') in calls
             assert await ev('document.querySelectorAll("#c-tasks .tick").length') == 12
             await ev('document.querySelector("#c-tasks input").value="keep this draft"; render.tasks(); true')
             assert await ev('document.querySelector("#c-tasks input").value') == 'keep this draft'
-            await ev('focusAction("reset"); focusAction("toggle"); true')
-            assert await ev('focusState.end > Date.now() && document.querySelector("#focus-start").textContent==="Pause"')
-            await ev('focusState.end=Date.now()-1; updateFocus(); true')
-            assert await ev('document.querySelector("#focus-message").textContent.includes("complete")')
+            # the listening picture: strands at the microphone's level, drifting only while it listens
+            await ev('voiceStatus("Listening", true, "listening", 0.5); true')
+            assert await ev('(() => { const b = document.querySelector("#voice-status"); return !b.hidden && b.dataset.phase === "listening" && b.style.getPropertyValue("--level") === "0.5" && getComputedStyle(b.querySelector(".w1")).animationName === "drift" && b.querySelector(".w1").getAttribute("d").length > 50; })()')
+            await ev('voiceStatus("Working", false, "working"); true')
+            assert await ev('getComputedStyle(document.querySelector(".wave .w1")).animationName === "none" && getComputedStyle(document.querySelector(".wave .working")).animationName === "working"')
+            await ev('voiceStatus(""); true')
+            assert await ev('document.querySelector("#voice-status").hidden && document.querySelector("#voice-status").dataset.phase === "idle"')
             await ev('toggleVoice()')
             assert ('ask', 'Open terminal') in calls
             assert await ev('document.querySelector("#answer").textContent.includes("Done from voice")')
             await ev('cancelVoice(); document.querySelector("#answer").hidden=true; true')
             # Controls must be visible inside their cards at the target laptop size.
-            clipped = await ev('''[...document.querySelectorAll('.tile-nav button, #focus-start, #c-tasks .add')].filter(n=>!n.closest('[hidden]')).filter(n=>{let a=n.getBoundingClientRect(),b=n.closest('.card').getBoundingClientRect();return a.bottom>b.bottom || a.right>b.right}).map(n=>n.closest('.card').id)''')
+            clipped = await ev('''[...document.querySelectorAll('.tile-nav button, #c-tasks .add')].filter(n=>!n.closest('[hidden]')).filter(n=>{let a=n.getBoundingClientRect(),b=n.closest('.card').getBoundingClientRect();return a.bottom>b.bottom || a.right>b.right}).map(n=>n.closest('.card').id)''')
             assert not clipped, clipped
             shot = await call('Page.captureScreenshot', {'format': 'png'})
             Path('/tmp/mario-home.png').write_bytes(base64.b64decode(shot['data']))
@@ -115,9 +122,10 @@ async def main(tmp):
             for _ in range(60):
                 if await ev('document.body.classList.contains("is-panel")'): break
                 await asyncio.sleep(.1)
+            assert await ev('document.body.classList.contains("shown") && typeof window.marioShown === "function" && document.activeElement === document.querySelector("#panel .voice-toggle")')
             await ev('toggleVoice()')
             assert await ev('document.querySelector("#log").textContent.includes("Done from voice")')
-            print('PASS: layout, rapid/wrapping/keyboard slides, downloads, all tasks, draft preservation, focus deadline, spoken request in Home and panel')
+            print('PASS: one screen with in-tile scrolling, rapid/wrapping/keyboard slides, all tasks, draft preservation, the listening picture, spoken request in Home and panel')
             print('Screenshot: /tmp/mario-home.png')
     finally:
         chrome.terminate()

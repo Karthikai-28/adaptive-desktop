@@ -35,9 +35,9 @@ own clock, like live tiles: each at its own pace and offset so they never all mo
 while the pointer is over the tile or the screen is hidden; previous/next buttons and a slide counter show which face is up. Arrow keys on a focused tile and horizontal swipes also move between faces. A manual turn pauses that tile until Play; keyboard focus and reduced-motion preferences stop automatic turns too.
 New data redraws the current face in place without turning it. The top bar keeps the clock.
 
-Mail and Tasks each use half their previous width; Focus and Next step fill the space beside them. Apps is removed; Downloads takes its place in the side column. Below them (Today remains under the weather) is a four-column block: Projects, Recent files and Quick note take one
-column each (half the width they had, full row height), Thinking Space takes two, and News runs down
-the last column through both rows.
+The top row is Mail, Tasks and Next step. Home is one screen and never scrolls as a page: a list that is longer than its tile (mail, tasks, today's events, the boards, notes) scrolls inside that tile. Below them (Today remains under the weather) is a four-column block: Projects and Thinking Space side by side
+(one column each; the boards are compact rows), Recent files and This week under them, Quick note down the
+third column and News down the last, both through two rows.
 
 | Card | Shows | Opens / does |
 | --- | --- | --- |
@@ -51,9 +51,7 @@ the last column through both rows.
 | News (live) | One headline at a time with the article's picture across the top of the tile, cropped to fit (outlets that block it get their name on a colour instead), rolling to the next every 30 s (a bar along the bottom fills to the next; paused under the pointer), source and age, two "Up next" with thumbnails; RSS from `news` in `mario.json` (Google News Tech and India, Hacker News by default), refreshed every 15 min. `"cards_off": ["news"]` stops the fetching | The article itself, picture or headline (only headlines on Home open) |
 | Thinking Space | The four boards with their sections, or what is waiting in their Inbox | The board, the hub |
 | Weather (live) | Now, feels-like, rain chance; the next six hours; today's high, low and rain (Open-Meteo) | |
-| Focus | Pick an open task and run a 25-minute session; pause, resume or reset. A saved deadline survives reloads and suspend | Local timer, synced between Home and panel through browser storage |
 | Next step | One actionable suggestion at a time: uncommitted work, stopped services, system issues | Open its action or add it as a task |
-| Downloads | The five newest completed downloads, with type and size | Open the displayed file |
 | AI assistants | Claude and Gemini: usage of the fullest window and when each resets | claude.ai, Gemini |
 | Phone | Adaptive Link state | The phone's screen |
 
@@ -115,7 +113,10 @@ it the hub asks Ollama directly (`fallback_model`, LOOM's `default_chat`) and sa
 
 ## Voice commands
 
-Press **Talk to Mario** on Home or in the **Super+J** panel, then speak. About two seconds of
+Press **Talk to Mario** on Home or in the **Super+J** panel, then speak. The panel fades and slides in
+each time Super+J shows it, with the keyboard already on Talk to Mario. While Mario listens, three
+strands in its colours move with your voice (the hub reports the microphone's level ten times a second),
+so you can see that it hears you; while it recognises and answers they lie low and a line runs along them. About two seconds of
 silence sends the request automatically; **Finish speaking** sends sooner. **Cancel**, Escape,
 hiding the page, or losing its connection stops capture/recognition. No wake word is needed.
 

@@ -228,7 +228,7 @@ const render = {
     });
     // the tile is small: start at the first event still to come (all-day ones stay), not at this morning's
     const ahead = rows.filter((r) => !r.past);
-    fill(body("today"), events.length ? el("ul", { class: "timeline" }, (ahead.length ? ahead : rows).slice(0, 5).map(({ e, past, live }) => {
+    fill(body("today"), events.length ? el("ul", { class: "timeline" }, (ahead.length ? ahead : rows).map(({ e, past, live }) => {
       return el("li", { class: live ? "now" : past ? "past" : "" },
         el("span", { class: "at" }, e.all_day ? "All day" : e.start),
         el("span", { class: "rail" }, el("i")),
@@ -273,28 +273,7 @@ const render = {
         el("button", { class: "btn", type: "button", onclick: async (e) => {
           const res = await post("/api/task", { text: s.text });
           if (res.ok) { e.target.textContent = "Added"; e.target.disabled = true; }
-        } }, "Add task"))]) : [() => empty("No loose ends right now. Choose a task and start a focus session.")]);
-  },
-
-  downloads() {
-    const files = data("downloads").files || [];
-    setFaces("downloads", files.length ? files.map((f) => () => [
-      el("b", { class: "ttl", title: f.name }, f.name),
-      el("span", { class: "sub" }, `${kindOf(f.name)} · ${size(f.size)}`),
-      el("button", { class: "btn", type: "button", onclick: () => act({ id: "open_file", arg: f.path }) }, "Open file")])
-      : [() => empty("No recent downloads.")], { every: 12000 });
-  },
-
-  focus() {
-    if (body("focus").children.length) return;
-    const task = el("select", { id: "focus-task", "aria-label": "Task to focus on" });
-    fill(body("focus"), task,
-      el("div", { id: "focus-clock", class: "focus-clock", role: "timer" }, "25:00"),
-      el("span", { id: "focus-message", class: "muted", "aria-live": "polite" }, "One task. Twenty-five minutes."),
-      el("div", { class: "tile-actions" },
-        el("button", { id: "focus-start", class: "btn primary", type: "button", onclick: () => focusAction("toggle") }, "Start"),
-        el("button", { class: "btn", type: "button", onclick: () => focusAction("reset") }, "Reset")));
-    updateFocusTasks(); updateFocus();
+        } }, "Add task"))]) : [() => empty("No loose ends right now.")]);
   },
 
   projects() {
@@ -373,7 +352,7 @@ const render = {
     const form = el("form", { class: "note-box", style: "padding:6px 8px 6px 12px", onsubmit: async (e) => {
       e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/note", { text });
     } }, input, el("button", { class: "mini", type: "submit" }, "Save"));
-    fill(body("note"), form, items.length ? el("ul", { class: "rows" }, items.slice(0, 3).map((n) => {
+    fill(body("note"), form, items.length ? el("ul", { class: "rows" }, items.slice(0, 12).map((n) => {
       const [at, ...text] = n.split(" · ");
       return el("li", {}, el("span", { class: "sub grow", style: "color:var(--soft)" }, text.join(" · ")), el("span", { class: "time" }, at));
     })) : el("div", { class: "sub" }, "Kept on this laptop"));
@@ -503,12 +482,12 @@ const render = {
 
 // card -> renderers that read it
 const FEEDS = {
-  mail: ["mail", "daysum"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum", "focusTasks"],
+  mail: ["mail", "daysum"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
   builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
-  downloads: ["downloads"], recent: ["recent"], notes: ["note"], weather: ["weather"], phone: ["phone"], news: ["news"],
+  recent: ["recent"], notes: ["note"], weather: ["weather"], phone: ["phone"], news: ["news"],
   news_media: ["news"], usage: ["ai"],
 };
-function draw(name) { try { if (name === "focusTasks") return updateFocusTasks(); render[name](); } catch (e) { console.error(name, e); } }
+function draw(name) { try { render[name](); } catch (e) { console.error(name, e); } }
 function renderAll() { Object.keys(render).forEach(draw); renderPresence(); greet(); }
 
 function renderPresence() {
@@ -608,6 +587,12 @@ function connect(delay = 500) {
 document.addEventListener("DOMContentLoaded", () => {
   if (PANEL) {
     document.body.classList.add("is-panel");
+    // The host calls this each time Super+J shows the panel: it comes in again, ready to talk.
+    window.marioShown = () => {
+      document.body.classList.remove("shown"); void document.body.offsetWidth; document.body.classList.add("shown");
+      const talk = $("#panel .voice-toggle"); if (talk) talk.focus();
+    };
+    window.marioShown();
     $("#home").hidden = true; $("#panel").hidden = false;
     $("#panel-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#panel-input"); ask(i.value, "panel"); i.value = ""; });
     $("#panel .voice-toggle").focus();
@@ -634,47 +619,30 @@ document.addEventListener("DOMContentLoaded", () => {
   connect();
 });
 
-// Focus follows a deadline, so a background tab or suspend never slows its clock.
-let focusState;
-try { focusState = JSON.parse(localStorage.getItem("mario-focus")); } catch (_) { /* private storage */ }
-if (!focusState || typeof focusState.remaining !== "number") focusState = { remaining: 1500, end: 0, task: "" };
-function saveFocus() { try { localStorage.setItem("mario-focus", JSON.stringify(focusState)); } catch (_) { /* optional */ } }
-function updateFocusTasks() {
-  const select = $("#focus-task");
-  if (!select) return;
-  const tasks = (data("tasks").open || []).map((t) => t.text);
-  if (focusState.task && !tasks.includes(focusState.task)) tasks.unshift(focusState.task);
-  fill(select, el("option", { value: "" }, "Choose a task…"), tasks.map((t) => el("option", { value: t }, t)));
-  select.value = focusState.task || "";
-  select.onchange = () => { focusState.task = select.value; saveFocus(); };
-}
-function focusAction(action) {
-  if (action === "reset") focusState = { remaining: 1500, end: 0, task: focusState.task };
-  else if (focusState.end) { focusState.remaining = Math.max(0, Math.ceil((focusState.end - Date.now()) / 1000)); focusState.end = 0; }
-  else { if (!focusState.remaining) focusState.remaining = 1500; focusState.end = Date.now() + focusState.remaining * 1000; }
-  saveFocus(); updateFocus();
-}
-function updateFocus() {
-  if (!$("#focus-clock")) return;
-  const left = focusState.end ? Math.max(0, Math.ceil((focusState.end - Date.now()) / 1000)) : focusState.remaining;
-  if (focusState.end && !left) { focusState.end = 0; focusState.remaining = 0; saveFocus(); }
-  $("#focus-clock").textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}`;
-  $("#focus-start").textContent = focusState.end ? "Pause" : left < 1500 && left > 0 ? "Resume" : "Start";
-  $("#focus-message").textContent = !left ? "Session complete. Take a five-minute break." : focusState.end ? "Focus time · keep going" : "Ready when you are.";
-  $("#focus-task").disabled = !!focusState.end;
-}
-setInterval(updateFocus, 1000);
-window.addEventListener("storage", (e) => {
-  if (e.key !== "mario-focus") return;
-  try { const next = JSON.parse(e.newValue); if (next && typeof next.remaining === "number") focusState = next; } catch (_) { return; }
-  updateFocusTasks(); updateFocus();
-});
-
 // The desktop host uses WebKitGTK, which has no Web Speech recognizer. Capture and recognition
 // belong to the local hub; the page only starts a bounded, explicit microphone session.
 let voiceId = null, voiceGeneration = 0, voiceBusy = false;
-function voiceStatus(text, active = false) {
+// The picture of a voice session: three strands that move with the microphone while Mario listens
+// ("listening", level 0..1 from the hub), run low while it recognises and answers ("working"), and
+// go away once the answer is on the page ("idle").
+function wavePath(waves, height) {
+  // twice the picture's width, so it can drift by one width and repeat without a seam
+  const step = 600 / waves / 2;
+  let d = "M0 32";
+  for (let i = 0; i < waves * 4; i++) d += ` Q${(i + 0.5) * step} ${32 + (i % 2 ? height : -height)} ${(i + 1) * step} 32`;
+  return d;
+}
+function voicePhase(phase, level = 0) {
+  const box = $("#voice-status");
+  if (!box.querySelector(".w1").getAttribute("d")) {
+    [["w1", 3, 58], ["w2", 4, 44], ["w3", 6, 30]].forEach(([c, n, a]) => box.querySelector(`.${c}`).setAttribute("d", wavePath(n, a)));
+  }
+  box.dataset.phase = phase;
+  box.style.setProperty("--level", phase === "listening" ? String(Math.max(0.06, Math.min(1, level))) : phase === "working" ? "0.12" : "0");
+}
+function voiceStatus(text, active = false, phase = "idle", level = 0) {
   $("#voice-status").hidden = !text;
+  voicePhase(text ? phase : "idle", level);
   $("#voice-status span").textContent = text;
   $("#voice-cancel").textContent = active ? "Cancel" : "Dismiss";
   document.querySelectorAll(".voice-toggle").forEach((b) => {
@@ -692,7 +660,7 @@ async function toggleVoice() {
   if (voiceBusy) return;
   voiceBusy = true;
   const generation = ++voiceGeneration;
-  voiceStatus("Opening microphone…", true);
+  voiceStatus("Opening microphone…", true, "working");
   try {
     const start = await post("/api/voice/start");
     if (generation !== voiceGeneration) {
@@ -707,7 +675,7 @@ async function toggleVoice() {
       if (result.error) throw new Error(result.error);
       if (result.state === "done") {
         voiceId = null;
-        voiceStatus(`Heard: “${result.text}” · Working…`);
+        voiceStatus(`Heard: “${result.text}” · Working…`, false, "working");
         if (PANEL) $("#log").append(el("div", { class: "me" }, result.text));
         const res = await post("/api/ask", { text: result.text, spoken: true });
         if (generation !== voiceGeneration) return;
@@ -715,8 +683,11 @@ async function toggleVoice() {
         voiceStatus(res.error || res.answer || "Review Mario’s plan below, then choose Run.");
         break;
       }
-      voiceStatus(result.state === "listening" ? "Listening… speak now; a pause sends your command." : "Recognizing your words on this laptop…", true);
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const listening = result.state === "listening";
+      voiceStatus(listening ? "Listening… speak now; a pause sends your command." : "Recognizing your words on this laptop…", true,
+        listening ? "listening" : "working", result.level || 0);
+      // while you speak the level is read often enough for the strands to follow your voice
+      await new Promise((resolve) => setTimeout(resolve, listening ? 110 : 300));
     }
   } catch (e) {
     if (generation === voiceGeneration) {

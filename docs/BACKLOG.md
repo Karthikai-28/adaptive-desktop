@@ -1110,6 +1110,16 @@ features: ideas go to a Later list and are built only if their absence has stopp
 
 ### Phase 3 — Home as a space
 
+- ✅ Direction changed by the operator on 2026-11-14: Home keeps its cards (and the voice work from
+  the parallel session) rather than the six-card Today of the plan. Focus and Downloads removed;
+  Thinking Space is one column; Quick note runs down two rows.
+- ✅ One screen, never a scrolling page: the hidden panel section no longer takes a screen of
+  space, the narrow-screen page scroll is gone, and long lists scroll inside their own tile.
+- ✅ Talking to Mario is drawn: strands at the microphone's level while it listens, a running line
+  while it works; the Super+J panel fades and slides in. Checked in Chrome
+  (`verify-mario-ui.py`); 🔬 not yet tried with a real voice.
+- ✅ Mario answers with `claude-sonnet-5-5` by default (confirmed with a real question).
+
 - ⬜ Home stops being the desktop layer: one key (Super+H) and a dock button summon and dismiss
   it; double Ctrl shows the bare wallpaper.
 - ⬜ Tabs: Today, Mail (Gmail), Calendar, Thinking Space, Mario; listed in `mario.json`.

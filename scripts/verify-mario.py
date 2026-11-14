@@ -555,13 +555,14 @@ def test_page():
         out = subprocess.run(["node", "--check", str(js)], capture_output=True, text=True)
         check("home.js parses", out.returncode == 0, out.stderr[:200])
     html = (REPO / "apps" / "mario-home" / "static" / "index.html").read_text()
+    host_text = (REPO / "apps" / "mario-home" / "host.py").read_text()
     import re as _re
     script = js.read_text()
     css = (REPO / "apps" / "mario-home" / "static" / "home.css").read_text()
     cards = _re.findall(r'id="c-([a-z]+)"', html)
-    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "ai", "phone", "news", "week", "focus", "next", "downloads"]
-    check("Your day has its fifteen cards, once each", sorted(cards) == sorted(want), str(cards))
-    for gone in ("apps", "reels", "system", "loom", "tonight", "cook", "trynext", "agents", "exposure", "usage", "quick"):
+    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "ai", "phone", "news", "week", "next"]
+    check("Your day has its thirteen cards, once each", sorted(cards) == sorted(want), str(cards))
+    for gone in ("apps", "focus", "downloads", "reels", "system", "loom", "tonight", "cook", "trynext", "agents", "exposure", "usage", "quick"):
         check(f"no {gone} card", f'id="c-{gone}"' not in html)
     drawn = set(_re.findall(r"^  (\w+)\(\) \{", script, _re.M))
     check("every card is drawn", all(c in drawn for c in want if c != "apps"), str([c for c in want if c not in drawn]))
@@ -582,9 +583,17 @@ def test_page():
     opens = _re.findall(r'data-open="([^"]+)"', html)
     for gone in ("downloads", "lock"):
         check(f"no {gone} button", f'data-launch="{gone}"' not in html)
-    check("Projects, Recent files and Quick note are one column wide (half the old width), full height",
-          all(_re.search(rf'class="card narrow" id="c-{c}"', html) for c in ("projects", "recent", "note"))
-          and "repeat(4, minmax(0, 1fr))" in css)
+    check("Projects, Thinking Space and Recent files are one column wide; Quick note runs down both rows",
+          all(_re.search(rf'class="card narrow" id="c-{c}"', html) for c in ("projects", "thinking", "recent"))
+          and "repeat(4, minmax(0, 1fr))" in css and "#c-thinking { grid-area: 1 / 2; }" in css
+          and "#c-note { grid-area: 1 / 3 / 3 / 4; }" in css)
+    check("the page never scrolls; lists scroll inside their tiles",
+          _re.search(r"html, body \{[^}]*overflow: hidden", css) is not None and "[hidden] { display: none !important; }" in css
+          and _re.search(r"\.rows, \.timeline, \.boards[^{]*\{[^}]*overflow-y: auto", css) is not None
+          and ".home { overflow: auto; }" not in css)
+    check("talking to Mario draws the microphone's level; the panel comes in when Super+J shows it",
+          "voicePhase(" in script and "result.level" in script and "@keyframes drift" in css and "@keyframes panel-in" in css
+          and "window.marioShown" in script and "marioShown" in host_text and "fade_in(" in host_text)
     check("no 'all systems up to date' line", "all systems up to date" not in script.lower() and 'id="status"' not in html)
     check("News rolls every 30 seconds", 'setFaces("news", items.map(face), { every: 30000' in script)
     check("News shows each headline's picture, cover-fitted edge to edge, from the hub",

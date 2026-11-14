@@ -60,8 +60,8 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: rgba(255
 /* lower block: four equal columns, two rows. Projects, Recent files and Quick note take one column
    each (half the width of the old cards, full height); Thinking Space takes two; News runs down the last. */
 .grid4 { min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 18px; }
-#c-projects { grid-area: 1 / 1; } #c-thinking { grid-area: 1 / 2 / 2 / 4; } #c-news { grid-area: 1 / 4 / 3 / 5; }
-#c-recent { grid-area: 2 / 1; } #c-note { grid-area: 2 / 2; } #c-week { grid-area: 2 / 3; }
+#c-projects { grid-area: 1 / 1; } #c-thinking { grid-area: 1 / 2; } #c-news { grid-area: 1 / 4 / 3 / 5; }
+#c-recent { grid-area: 2 / 1; } #c-week { grid-area: 2 / 2; } #c-note { grid-area: 1 / 3 / 3 / 4; }
 .side { min-height: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; }
 
 /* -- cards -------------------------------------------------------------------------------- */
@@ -166,9 +166,12 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: rgba(255
 .mini svg { width: 13px; height: 13px; }
 
 /* thinking space boards */
-.boards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 10px; flex: 1; min-height: 0; }
-.board { border: 1px solid var(--line); border-radius: 14px; background: var(--card-2); padding: 12px 14px; display: flex; flex-direction: column; justify-content: flex-start; gap: 10px; min-width: 0; text-align: left; overflow: hidden; }
-.board-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.boards { display: flex; flex-direction: column; gap: 6px; flex: 0 1 auto; min-height: 0; }
+.board { flex: none; border: 1px solid var(--line); border-radius: var(--r-s); background: var(--card-2); padding: 7px 10px; display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.board .sections { display: none; }
+.board .bi { width: 30px; height: 30px; border-radius: 9px; }
+.board .bi svg { width: 16px; height: 16px; }
+.board-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .sections { list-style: none; margin: 0; padding: 0 0 0 2px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--soft); min-height: 0; }
 .sections li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; position: relative; }
 .sections li::before { content: ""; position: absolute; left: 0; top: 7px; width: 4px; height: 4px; border-radius: 50%; background: var(--muted); }
@@ -299,11 +302,9 @@ body.is-panel { background: #151517; }
 .offline { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #242426; border: 1px solid rgba(255, 159, 10, 0.45); border-radius: 999px; padding: 8px 16px; font-size: 12px; z-index: 9; }
 
 /* Half-width inboxes leave room for work you can act on. */
-.r2 { grid-template-columns: 1.15fr 1fr 1.15fr 1fr; }
-#c-mail .body, #c-tasks .task-list { overflow-y: auto; }
+.r2 { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); }
 #c-tasks .add { flex-shrink: 0; margin-top: auto; }
 #c-tasks .ttl { white-space: normal; }
-#c-downloads { min-height: 166px; }
 #c-weather { height: 128px; }
 .tile-nav { display: flex; align-items: center; gap: 5px; flex: none; margin-top: auto; }
 .tile-nav button { background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-s); min-width: 28px; min-height: 26px; }
@@ -315,23 +316,52 @@ body.is-panel { background: #151517; }
 .card.paused .roll, .card:focus-within .roll { animation-play-state: paused; }
 .tile-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
 .next-text { font-size: 17px; line-height: 1.5; overflow-y: auto; }
-.focus-clock { font-size: 48px; font-variant-numeric: tabular-nums; font-weight: 650; margin: auto 0; }
-#focus-task { width: 100%; color: var(--text); background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-s); padding: 8px; font: inherit; }
-#focus-task option { background: var(--ground); }
 .voice-toggle { flex: none; white-space: nowrap; }
-.voice-status { position: fixed; bottom: 82px; left: 50%; transform: translateX(-50%); width: min(680px, 90vw); max-height: 35vh; overflow: auto; z-index: 12; display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: var(--ground); border: 1px solid var(--blue); border-radius: var(--r); }
-.voice-status span { flex: 1; white-space: pre-wrap; }
-.voice-status button { flex: none; }
-@media (prefers-reduced-motion: reduce) { .face, .roll { animation: none !important; } }
-@media (max-width: 1300px) {
-  .home { overflow: auto; } .main { overflow: visible; } .left { grid-template-rows: auto auto; }
-  .r2 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 290px; }
-  .grid4 { grid-template-rows: repeat(2, 240px); } .greet h1 { font-size: 23px; }
-  .ask kbd, #brain { display: none; }
+.voice-status { position: fixed; bottom: 82px; left: 50%; transform: translateX(-50%); width: min(680px, 90vw); max-height: 45vh; z-index: 12;
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; background: #242426; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: var(--r);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45); animation: voice-in var(--state) cubic-bezier(0.2, 0, 0, 1) both; }
+.voice-line { display: flex; align-items: center; gap: 12px; min-height: 0; }
+.voice-line span { flex: 1; min-height: 0; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; }
+.voice-line button { flex: none; }
+/* The strands: Mario's mark, wide. Their height is your voice (--level, from the hub); they drift
+   only while the microphone is open. The one place the aurora gradient is used at size. */
+.wave { position: relative; height: 56px; overflow: hidden; }
+.voice-status[data-phase="idle"] .wave { display: none; }
+.wave svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.wave stop.a { stop-color: #0A84FF; } .wave stop.b { stop-color: #5E5CE6; } .wave stop.c { stop-color: #64D2FF; }
+.wave .strands { transform-box: view-box; transform-origin: 50% 50%; transform: scaleY(var(--level, 0)); transition: transform 130ms cubic-bezier(0.2, 0, 0, 1); }
+.wave path { fill: none; stroke: url(#aurora); stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.wave .w1 { stroke-width: 2.6; } .wave .w2 { stroke-width: 2; opacity: .7; } .wave .w3 { stroke-width: 1.4; opacity: .45; }
+.voice-status[data-phase="listening"] .w1 { animation: drift 2.6s linear infinite; }
+.voice-status[data-phase="listening"] .w2 { animation: drift 1.9s linear infinite reverse; }
+.voice-status[data-phase="listening"] .w3 { animation: drift 1.3s linear infinite; }
+/* working: the strands lie low and a line runs along them until the answer is here */
+.wave .working { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; background: linear-gradient(90deg, #0A84FF, #5E5CE6 55%, #64D2FF);
+  transform-origin: 0 50%; transform: scaleX(0); opacity: 0; }
+.voice-status[data-phase="working"] .working { opacity: 1; animation: working 1.2s cubic-bezier(0.2, 0, 0, 1) infinite; }
+@keyframes drift { to { transform: translateX(-600px); } }
+@keyframes working { 0% { transform: scaleX(0); transform-origin: 0 50%; } 50% { transform: scaleX(1); transform-origin: 0 50%; } 51% { transform: scaleX(1); transform-origin: 100% 50%; } 100% { transform: scaleX(0); transform-origin: 100% 50%; } }
+@keyframes voice-in { from { opacity: 0; transform: translateX(-50%) translateY(14px) scale(.98); } }
+/* the panel comes in from its edge of the screen each time Super+J shows it */
+body.is-panel.shown .panel { animation: panel-in var(--state) cubic-bezier(0.2, 0, 0, 1) both; }
+@keyframes panel-in { from { opacity: 0; transform: translateX(28px); } }
+@media (prefers-reduced-motion: reduce) {
+  .wave path, .wave .working, .voice-status, body.is-panel.shown .panel { animation: none !important; }
+  .voice-status[data-phase="working"] .working { transform: scaleX(1); }
 }
+@media (prefers-reduced-motion: reduce) { .face, .roll { animation: none !important; } }
+@media (max-width: 1300px) { .greet h1 { font-size: 23px; } .ask kbd, #brain { display: none; } }
 
 .voice-hint { flex: 1; min-width: 0; color: var(--soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#c-mail .rows { flex: none; }
-#c-mail .body, .task-list { scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
-#c-mail .body::-webkit-scrollbar, .task-list::-webkit-scrollbar { width: 5px; }
-#c-mail .body::-webkit-scrollbar-thumb, .task-list::-webkit-scrollbar-thumb { background: var(--muted); border-radius: var(--r-s); }
+
+/* What does not fit scrolls inside its own tile; the page itself never scrolls. The list takes
+   the room the tile has left, so a header or a footer (Open Mail, Add task) stays in place. */
+.rows, .timeline, .boards, .next-text, .upnext { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.24) transparent; }
+.rows::-webkit-scrollbar, .timeline::-webkit-scrollbar, .boards::-webkit-scrollbar, .next-text::-webkit-scrollbar, .upnext::-webkit-scrollbar { width: 6px; }
+.rows::-webkit-scrollbar-thumb, .timeline::-webkit-scrollbar-thumb, .boards::-webkit-scrollbar-thumb, .next-text::-webkit-scrollbar-thumb, .upnext::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.24); border-radius: 3px; }
+.rows::-webkit-scrollbar-thumb:hover, .timeline::-webkit-scrollbar-thumb:hover, .boards::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.45); }
+.rows > li { flex: none; }
+.foot { flex: none; }
+/* the side column: weather and the assistants take what they need, Today takes the rest */
+#c-ai, #c-phone { flex: none; }

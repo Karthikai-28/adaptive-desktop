@@ -42,6 +42,7 @@ class Voice:
         self.proc = None
         self.touched = 0
         self.finish = False
+        self.level = 0.0     # how loud the last 100 ms were, 0..1: the page draws it while you speak
 
     def available(self):
         return (shutil.which("parec") and (VOICE_DIR / "venv/bin/python").exists()
@@ -54,7 +55,7 @@ class Voice:
             return {"error": "Voice needs setup on this laptop: run scripts/install-mario-voice.sh."}
         self.id = secrets.token_urlsafe(24)
         self.state, self.text, self.error = "listening", "", ""
-        self.touched, self.finish = time.monotonic(), False
+        self.touched, self.finish, self.level = time.monotonic(), False, 0.0
         self.task = asyncio.create_task(self.run())
         return {"id": self.id, "state": self.state}
 
@@ -67,7 +68,8 @@ class Voice:
             self.state, self.text = "cancelled", ""
         elif action == "finish":
             self.finish = True
-        return {"state": self.state, "text": self.text, "error": self.error}
+        return {"state": self.state, "text": self.text, "error": self.error,
+                "level": round(self.level, 3) if self.state == "listening" else 0}
 
     async def kill(self):
         proc, self.proc = self.proc, None
@@ -96,6 +98,8 @@ class Voice:
                     raise RuntimeError("Microphone stopped because the page disconnected.")
                 chunk = await asyncio.wait_for(self.proc.stdout.readexactly(3200), timeout=3)
                 pcm.extend(chunk)
+                # square root, so ordinary speech already moves the picture and a shout does not clip it
+                self.level = min(1.0, (audioop.rms(chunk, 2) / 6000) ** 0.5)
                 if gate.feed(chunk):
                     break
             await self.kill()
@@ -137,5 +141,6 @@ class Voice:
             self.state, self.error = "error", str(exc)[:220]
         finally:
             pcm.clear()
+            self.level = 0.0
             await self.kill()
             await self.presence("ready")
