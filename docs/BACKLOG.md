@@ -380,6 +380,20 @@ part of `verify-all.sh --quick`). **None is verified live yet.**
   across suspend and across `--restart-shell`. Record each one with
   `scripts/record-live-verification.py`.
 
+### Shade v3.3 — the notification column laid out properly (2026-11-15)
+
+- 🔬 The heading row fits: it read "Notificati…" because the title was the one
+  part of the row allowed to give way. "Expand all" shows only while some group
+  is folded (more than three notifications); before, it sat there doing nothing.
+- 🔬 Cards end before the overlay scrollbar. With enough notifications to
+  scroll, the bar was drawn over every card's right border and corners.
+- 🔬 A notification's time shares its title's baseline instead of hanging below
+  it, and the clock lines up with the cards' contents.
+- Checked in the nested shell (`verify-shell-nested.sh`, two layout checks that
+  measure the row, the cards and the scrollbar) and by eye at 1440x900 there.
+  Live: the stylesheet is in place; the "Expand all" rule is JavaScript and
+  arrives with the next shell restart or login.
+
 ### Shade v3.2 — correctness and idle-work pass (2026-10-20)
 
 - ✅ Focus summaries now use a bounded durable arrival ledger, so withdrawn
@@ -1151,6 +1165,15 @@ features: ideas go to a Later list and are built only if their absence has stopp
 - 🔬 Tabs: Today plus the sites in `"tabs"` (`mario.json`), default Mail and Calendar, each in its
   own view with a profile of its own. Gmail's sign-in page loads inside Home; signing in is the
   operator's to do once.
+- 🔬 Signing in to a tab stays in Home (2026-11-15). It did not: signed out, Calendar landed on
+  Google's advert for the product, whose "Sign in" link asks for a new window, and every new window
+  went to the browser, so the sign-in happened in Chrome's profile and Home stayed signed out.
+  `site_rules.py` now keeps sign-in pages in the tab's view, skips the advert for the sign-in form,
+  and loads the other tabs again once one is signed in (they share the profile). Sandbox: both tabs
+  reach Google's form in the view and a real click on "Sign in" stays there, nothing sent to the
+  browser. Not tried: a real account's password and 2-Step steps, which only the operator can do;
+  if Google answers "this browser or app may not be secure" there, that is Google refusing the
+  embedded WebKit view and needs a separate decision.
 - ✅ Home's ground is the blurred wallpaper under a graphite tint (`/glass.png` from the hub).
 
 ### Phase 4 — motion
