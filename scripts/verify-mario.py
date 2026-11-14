@@ -559,16 +559,16 @@ def test_page():
     script = js.read_text()
     css = (REPO / "apps" / "mario-home" / "static" / "home.css").read_text()
     cards = _re.findall(r'id="c-([a-z]+)"', html)
-    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "apps", "ai", "phone", "news", "week"]
-    check("Your day has its thirteen cards, once each", sorted(cards) == sorted(want), str(cards))
-    for gone in ("focus", "reels", "system", "loom", "tonight", "cook", "trynext", "downloads", "agents", "exposure", "usage", "quick"):
+    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "ai", "phone", "news", "week", "focus", "next", "downloads"]
+    check("Your day has its fifteen cards, once each", sorted(cards) == sorted(want), str(cards))
+    for gone in ("apps", "reels", "system", "loom", "tonight", "cook", "trynext", "agents", "exposure", "usage", "quick"):
         check(f"no {gone} card", f'id="c-{gone}"' not in html)
     drawn = set(_re.findall(r"^  (\w+)\(\) \{", script, _re.M))
     check("every card is drawn", all(c in drawn for c in want if c != "apps"), str([c for c in want if c not in drawn]))
     sys.path.insert(0, str(REPO / "services" / "mario-hub"))
     import hub as hub_mod
     launches = _re.findall(r'data-launch="([a-z]+)"', html)
-    check("every app button is a known command", launches and all(k in hub_mod.LAUNCH for k in launches),
+    check("every app button is a known command", all(k in hub_mod.LAUNCH for k in launches),
           str([k for k in launches if k not in hub_mod.LAUNCH]))
     check("Code and Screenshot use programs this kind of laptop has (Antigravity IDE, Adaptive Annotate)",
           hub_mod.LAUNCH["screenshot"][-1].endswith(("adaptive-annotate/main.py", "--interactive"))

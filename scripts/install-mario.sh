@@ -6,6 +6,7 @@
 #   scripts/install-mario.sh --mail      connect a Gmail account to the Mail card (IMAP, read-only);
 #                                        run it again to add another; --main makes it the main one
 #   scripts/install-mario.sh --calendar  connect the Today card (your calendar's private iCal address)
+#   scripts/install-mario.sh --voice     install local English speech recognition
 #
 # It installs: python3-aiohttp and WebKitGTK for Python (apt, asks for sudo), the
 # adaptive-mario-hub user service (127.0.0.1:8791), the Mario Home autostart entry (Adaptive session
@@ -30,6 +31,7 @@ for arg in "$@"; do
         --mail) MODE=mail ;;
         --main) MAKE_MAIN=yes ;;
         --calendar) MODE=calendar ;;
+        --voice) MODE=voice ;;
         -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
     esac
@@ -92,6 +94,10 @@ PY
 if [ "$MODE" = status ]; then
     check
     exit $((MISSING > 0))
+fi
+
+if [ "$MODE" = voice ]; then
+    exec "$REPO/scripts/install-mario-voice.sh"
 fi
 
 if [ "$MODE" = mail ]; then

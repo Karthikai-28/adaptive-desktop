@@ -1051,23 +1051,28 @@ Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `d
 - ✅ **Ask**: instant answers from state, LOOM locally (Ollama fallback), Claude Code plans held
   until Run, with folder-only edits and no push/send.
 - ✅ **Home as "Your day"** (`apps/mario-home/static/`): Mail (IMAP, read-only), Today (iCal), Tasks
-  (Quick Note inboxes, tick and add, Mario's suggestions incl. system trouble), then a four-column
+  (Quick Note inboxes, tick and add), both half-width alongside Focus and Next step, then a four-column
   block: Projects, Recent files, Quick note one column each, Thinking Space two, This week, and News
-  (RSS, rolling every 30 s) down the last column; side column with weather, apps, AI assistants,
+  (RSS, rolling every 30 s) down the last column; side column with weather, downloads, AI assistants,
   phone; live tiles turning on their own (paused under the pointer), AI usage for Claude and Gemini only;
   checked in headless Chrome against a live hub, with the panel, plan card and presence marks.
-- ✅ `scripts/verify-mario.py` in `verify-all.sh --quick`.
+- ✅ Manual tile slides: previous/next, arrow keys, swipe, pause/play; no stale animation on rapid clicks.
+- ✅ Voice-first Home and panel: bounded local microphone capture, local English recognition,
+  direct task/note/launch commands, existing answer routing, local spoken replies; cancellation and
+  disconnect cleanup. Installed model also checked against a synthetic spoken phrase.
+- ✅ `scripts/verify-mario.py` and `verify-mario-voice.py` in `verify-all.sh --quick`;
+  `verify-mario-ui.py` exercises the page in isolated Chrome without paid model calls.
 
 ### Live, not yet tried
 
+- 🔬 Real spoken command and audible reply using the operator’s selected microphone/speakers.
 - 🔬 `host.py` as the desktop layer under GNOME 42 X11 (desktop hint, work area, all workspaces).
 - 🔬 `host.py --panel` toggle on Super+J after `install-keybindings.sh`.
 - 🔬 Against the real LOOM backend, Ollama on the GTX 1050, and `claude -p` in a repo.
 
 ### Next
 
-- Phase 2: Google Sheet and Calendar read directly. Phase 3: voice (push-to-talk + "Mario" wake
-  word, local). Phase 4: notes into board Inboxes, island and phone. Phase 5: council, nightly
+- Phase 2: Google Sheet and Calendar read directly. Phase 3: optional “Mario” wake word (explicit microphone commands are implemented). Phase 4: notes into board Inboxes, island and phone. Phase 5: council, nightly
   review, routines.
 
 ## Milestone 21 — Finish and freeze

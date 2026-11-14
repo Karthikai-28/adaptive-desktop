@@ -51,3 +51,4 @@ dist/
 .local/office-pydeps/
 apps/adaptive-link-android/cloud.properties
 .local/mario-pydeps/
+.local/mario-voice/

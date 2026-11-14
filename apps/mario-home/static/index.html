@@ -49,9 +49,11 @@
     <form id="ask-form" class="ask" autocomplete="off">
       <span class="mark" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>
       <label for="ask" class="sr">Ask Mario</label>
-      <input id="ask" placeholder="Ask Mario: your day, mail, repos, anything">
+      <span id="voice-hint" class="voice-hint">Speak a command or ask about your day</span>
+      <input id="ask" hidden placeholder="Ask Mario">
       <span id="brain" class="pill" title="Who answers your questions">Claude</span>
-      <kbd>Super J</kbd>
+      <button type="button" class="btn primary voice-toggle" aria-label="Talk to Mario">Talk to Mario</button>
+      <button type="button" class="btn" id="type-toggle">Type instead</button><kbd>Super J</kbd>
       <div id="answer" class="answer" hidden></div>
     </form>
   </header>
@@ -71,6 +73,8 @@
       <div class="row r2">
         <section class="card" id="c-mail"><header class="ch"><svg class="ci"><use href="#i-mail"/></svg><h3>Mail</h3><span class="count"></span><button class="open" type="button" data-open="https://mail.google.com/" aria-label="Open Gmail"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card" id="c-tasks"><header class="ch"><svg class="ci"><use href="#i-check"/></svg><h3>Tasks</h3><span class="count"></span></header><div class="body"></div></section>
+        <section class="card" id="c-focus"><header class="ch"><svg class="ci"><use href="#i-sun"/></svg><h3>Focus</h3></header><div class="body"></div></section>
+        <section class="card" id="c-next"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>Next step</h3></header><div class="body"></div></section>
       </div>
       <div class="grid4">
         <section class="card narrow" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="dots"></span></header><div class="body"></div></section>
@@ -85,18 +89,7 @@
     <aside class="side">
       <section class="card compact" id="c-weather"><div class="body"></div></section>
       <section class="card compact" id="c-today"><header class="ch"><svg class="ci"><use href="#i-cal"/></svg><h3>Today</h3><span class="count"></span><span class="meta" id="today-date"></span><button class="open" type="button" data-open="https://calendar.google.com/" aria-label="Open Google Calendar"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
-      <section class="card" id="c-apps"><header class="ch"><svg class="ci"><use href="#i-apps"/></svg><h3>Apps</h3></header>
-        <div class="apps">
-          <button class="app" type="button" data-launch="terminal"><svg><use href="#i-term"/></svg>Terminal</button>
-          <button class="app" type="button" data-launch="files"><svg><use href="#i-folder"/></svg>Files</button>
-          <button class="app" type="button" data-launch="code"><svg><use href="#i-code"/></svg>Code</button>
-          <button class="app" type="button" data-launch="browser"><svg><use href="#i-globe"/></svg>Browser</button>
-          <button class="app" type="button" data-launch="settings"><svg><use href="#i-gear"/></svg>Settings</button>
-          <button class="app" type="button" data-launch="calculator"><svg><use href="#i-calc"/></svg>Calculator</button>
-          <button class="app" type="button" data-launch="screenshot"><svg><use href="#i-shot"/></svg>Screenshot</button>
-          <button class="app" type="button" data-launch="monitor"><svg><use href="#i-pulse"/></svg>System Monitor</button>
-        </div>
-      </section>
+      <section class="card" id="c-downloads"><header class="ch"><svg class="ci"><use href="#i-folder"/></svg><h3>Downloads</h3></header><div class="body"></div></section>
       <section class="card" id="c-ai"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>AI assistants</h3></header><div class="body"></div></section>
       <button class="card compact row-card" id="c-phone" type="button"><svg class="ci"><use href="#i-phone"/></svg><span class="body"></span><svg class="chev"><use href="#i-chev"/></svg></button>
     </aside>
@@ -108,6 +101,7 @@
   <header class="panel-head">
     <span class="mark big" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>
     <div><div class="title">Mario</div><div class="muted" id="panel-sub">Claude answers</div></div>
+    <button type="button" class="btn primary voice-toggle" aria-label="Talk to Mario">Talk to Mario</button>
   </header>
   <div id="log" class="log" aria-live="polite"></div>
   <form id="panel-form" class="composer" autocomplete="off">
@@ -118,6 +112,7 @@
 </section>
 
 <div id="offline" class="offline" hidden>Mario Hub is not answering. Retrying…</div>
+<div id="voice-status" class="voice-status" hidden role="status" aria-live="polite"><span></span><button type="button" class="btn" id="voice-cancel">Cancel</button></div>
 <script src="/static/home.js"></script>
 </body>
 </html>

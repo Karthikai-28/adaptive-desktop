@@ -32,10 +32,10 @@ do, then the work itself, then capture. A side column holds the always-there too
 room their content needs; nothing is there to fill a gap, and nothing appears twice. Everything
 updates live over the hub's WebSocket, and the tiles marked *live* also turn between faces on their
 own clock, like live tiles: each at its own pace and offset so they never all move at once, paused
-while the pointer is over the tile or the screen is hidden; dots in the header show which face is up.
+while the pointer is over the tile or the screen is hidden; previous/next buttons and a slide counter show which face is up. Arrow keys on a focused tile and horizontal swipes also move between faces. A manual turn pauses that tile until Play; keyboard focus and reduced-motion preferences stop automatic turns too.
 New data redraws the current face in place without turning it. The top bar keeps the clock.
 
-Below Mail and Tasks (Today is a small tile in the side column, under the weather) is a four-column block: Projects, Recent files and Quick note take one
+Mail and Tasks each use half their previous width; Focus and Next step fill the space beside them. Apps is removed; Downloads takes its place in the side column. Below them (Today remains under the weather) is a four-column block: Projects, Recent files and Quick note take one
 column each (half the width they had, full row height), Thinking Space takes two, and News runs down
 the last column through both rows.
 
@@ -43,7 +43,7 @@ the last column through both rows.
 | --- | --- | --- |
 | Mail | Unread count over every account, then one tab per account (the main one first and shown by default, each with its unread count) and up to five newest unread (sender, subject, time), read-only over IMAP. A refused login says why; for a Google account password (Gmail wants an app password) a button opens the app-password page | A message opens that conversation in Gmail, in its own account (Gmail's thread id); the header and "Open" open that account's inbox |
 | Today | Small tile under the weather: date, and today's events still to come on a timeline, the current one highlighted (private iCal address) | Google Calendar |
-| Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; tick to finish; add a task; "Mario suggests" in the rows left over (unpushed work, stopped services) with their action or + to make it a task | `/api/task`, `/api/task/done` |
+| Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; scroll through all tasks, tick to finish, or add a task. Draft text and selection survive live refreshes | `/api/task`, `/api/task/done` |
 | Projects (live) | One repo per face, newest first (last commit, branch, changes / to push / to pull / up to date), then an Agents face: terminal agent sessions and Agent Office | Code, Terminal |
 | Recent files (live) | The newest files take turns on top (type, size, when), the next two listed below | The file |
 | Quick note | Capture a thought; the three latest notes (`~/.local/share/adaptive-desktop/mario/notes.md`). Does not turn, so typing is never interrupted | `/api/note` |
@@ -51,7 +51,9 @@ the last column through both rows.
 | News (live) | One headline at a time with the article's picture across the top of the tile, cropped to fit (outlets that block it get their name on a colour instead), rolling to the next every 30 s (a bar along the bottom fills to the next; paused under the pointer), source and age, two "Up next" with thumbnails; RSS from `news` in `mario.json` (Google News Tech and India, Hacker News by default), refreshed every 15 min. `"cards_off": ["news"]` stops the fetching | The article itself, picture or headline (only headlines on Home open) |
 | Thinking Space | The four boards with their sections, or what is waiting in their Inbox | The board, the hub |
 | Weather (live) | Now, feels-like, rain chance; the next six hours; today's high, low and rain (Open-Meteo) | |
-| Apps | Terminal, Files, Code (VS Code's `code`, else Antigravity IDE), Browser, Settings, Calculator, Screenshot (`gnome-screenshot`, else Adaptive Annotate), System Monitor | `LAUNCH` |
+| Focus | Pick an open task and run a 25-minute session; pause, resume or reset. A saved deadline survives reloads and suspend | Local timer, synced between Home and panel through browser storage |
+| Next step | One actionable suggestion at a time: uncommitted work, stopped services, system issues | Open its action or add it as a task |
+| Downloads | The five newest completed downloads, with type and size | Open the displayed file |
 | AI assistants | Claude and Gemini: usage of the fullest window and when each resets | claude.ai, Gemini |
 | Phone | Adaptive Link state | The phone's screen |
 
@@ -69,7 +71,7 @@ those). So the dock, the top bar and everything on it (the island, ROS 2, the sy
 network, Control Center, the keyboard-layout switch on Super+Space) work exactly as without it.
 Mario's panel is on Super+J.
 
-The ask bar shows who answers next (Claude / Gemini · Claude at its limit / On this laptop; the
+The ask bar leads with **Talk to Mario**, with **Type instead** as a fallback. It shows who answers next (Claude / Gemini · Claude at its limit / On this laptop; the
 reason is in its tooltip and under the panel's title), and
 "Your day" sums it up: events, open tasks, unread mail. Brief me now includes the calendar, mail and
 tasks.
@@ -110,6 +112,33 @@ Answers need `claude` (Claude Code, logged in to the Claude subscription) and, f
 limit, `agy` (the Antigravity CLI, logged in to the Google account with AI Pro); `--status` reports
 both. For answers with neither cloud, run LOOM's backend (`local-ai/app/backend`, port 8765); without
 it the hub asks Ollama directly (`fallback_model`, LOOM's `default_chat`) and says so under the answer.
+
+## Voice commands
+
+Press **Talk to Mario** on Home or in the **Super+J** panel, then speak. About two seconds of
+silence sends the request automatically; **Finish speaking** sends sooner. **Cancel**, Escape,
+hiding the page, or losing its connection stops capture/recognition. No wake word is needed.
+
+- “Add a task review the build” writes a task immediately.
+- “Take a note: try the new layout” saves a Quick note immediately.
+- “Open terminal”, “open files”, “open mail”, or “open calendar” use the existing launch whitelist.
+- “Brief me” and other questions use the existing Mario answer routing.
+- Code changes still show their plan and require **Run**.
+
+`services/mario-hub/voice.py` captures the default PulseAudio microphone in memory using `parec`:
+30-second maximum, eight seconds to begin speaking, and a five-second page heartbeat. Recognition
+runs in a killable subprocess (`voice_transcribe.py`), using faster-whisper base.en on CPU with int8
+and speech filtering. Audio never goes to a cloud service or a recording file. Only the resulting
+request enters Mario's normal answer path. Replies are spoken locally through Speech Dispatcher
+(`spd-say`) when installed, and remain visible in the page.
+
+```sh
+scripts/install-mario-voice.sh    # dedicated .local/mario-voice environment and public English model
+```
+
+The desktop host is WebKitGTK, so this does not depend on Chrome-only browser speech recognition.
+If Mario hears nothing, check the default input and mute state in Ubuntu Sound settings. Recognition
+currently expects English. The microphone is activated only by pressing the button, never at login.
 
 ## After a restart
 
@@ -182,7 +211,7 @@ strand). Reduced motion stops every animation.
 | Phase | What | Notes |
 | --- | --- | --- |
 | 2 | Read the Google Sheet directly; Calendar card | Through the Link's Google project (`--link-cloud`), read-only scopes |
-| 3 | Voice: push-to-talk and a "Mario" wake word | `services/mario-voice/`: faster-whisper on the GTX 1050 (int8, `small`), openWakeWord with a custom "Mario" model; both local. Super+J toggles listening (GNOME gives no key-up), silence ends it; the listener sets presence through `/api/presence` and posts the text to `/api/ask`, so a spoken question is answered like a typed one: Claude first, Gemini at Claude's limit. Answers spoken with Piper. The mic light in the top bar shows whenever the wake word is listening |
+| 3 | Optional “Mario” wake word | Explicit microphone commands are implemented; always-listening wake-word detection remains future work |
 | 4 | "Mario, note that…" writes a sticky into the right board's Inbox | Through the Thinking Space boards' database, confirmed |
 | 4 | Island and phone | The shell island shows presence and the current plan; the Link app gets the ask box |
 | 5 | Council mode, nightly review, routines | Three local models on big questions; a nightly look back that proposes one fix; "remember this as…" |
@@ -194,6 +223,8 @@ canvas lists all 19 with what each contributes.
 ## Check
 
 ```sh
+python3 scripts/verify-mario-voice.py  # fake microphone lifecycle, cancellation and commands
+python3 scripts/verify-mario-ui.py     # isolated Chrome: slides, focus, tasks and voice routing
 python3 scripts/verify-mario.py   # collectors, decisions, hub over HTTP/WebSocket, page; part of verify-all --quick
 python3 services/mario-hub/hub.py --once   # one full state as JSON, from this machine
 ```

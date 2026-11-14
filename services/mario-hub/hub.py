@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,7 @@ import brain  # noqa: E402
 import collectors  # noqa: E402
 import config as config_mod  # noqa: E402
 import engines  # noqa: E402
+from voice import Voice  # noqa: E402
 
 STATIC = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "static"
 PRESENCE = ("ready", "listening", "thinking", "doing", "needs_you")
@@ -58,7 +60,7 @@ def editor():
     return ["code"]
 
 
-# Commands Home may start: the Apps card, and the Phone card (the phone's screen).
+# Commands Home and spoken requests may start, including the phone's screen.
 # Only these run; a missing program shows its launcher dimmed.
 LAUNCH = {
     "terminal": ["gnome-terminal"],
@@ -102,6 +104,7 @@ class Hub:
         self.last_brain = None
         self.tasks = []
         self.notes_file = config_mod.DATA_DIR / "notes.md"
+        self.voice = Voice(self.set_presence, launch_env)
 
     # ------------------------------------------------------------ state
     def public_config(self):
@@ -240,6 +243,7 @@ class Hub:
             self.tasks.append(asyncio.create_task(self.run_collector(name)))
 
     async def stop(self, _app=None):
+        await self.voice.close()
         for t in self.tasks:
             t.cancel()
         for ws in list(self.clients):
@@ -281,6 +285,9 @@ class Hub:
         text = str(text or "").strip()[:4000]
         if not text:
             return {"error": "Ask something."}
+        command = await self.direct_command(text)
+        if command is not None:
+            return command
         quick = brain.quick_answer(text, self.snapshot())
         if quick:
             return {"route": "instant", "answer": quick, "via": "Mario", "model": "", "ms": 0}
@@ -305,6 +312,43 @@ class Hub:
             await self.push_brain()
         # route: "instant" (from Home's own data), "answer" (engine says who), or "handoff" (a plan)
         return {"route": "answer", **result}
+
+    async def direct_command(self, text):
+        """Small explicit commands execute through the same bounded actions as the tiles."""
+        text = re.sub(r"^(?:hey\s+)?mario[,\s:]+", "", text.strip(), flags=re.I)
+        capture = re.fullmatch(r"(?:please\s+)?(add (?:a )?task|(?:take|add|save) (?:a )?note|note that)\s*[:,-]?\s+(.+)", text, re.I)
+        if capture:
+            task = "task" in capture[1].lower()
+            result = await (self.add_task(capture[2]) if task else self.add_note(capture[2]))
+            return {"route": "command", "via": "Mario", **result,
+                    "answer": ("Task added: " if task else "Note saved: ") + capture[2] if result.get("ok") else ""}
+        launch = re.fullmatch(r"(?:please\s+)?open (?:the\s+)?(.+?)[.!]?", text, re.I)
+        if launch:
+            name = launch[1].strip().lower()
+            alias = {"system monitor": "monitor", "file manager": "files", "editor": "code"}
+            name = alias.get(name, name)
+            urls = {"mail": "https://mail.google.com/", "gmail": "https://mail.google.com/",
+                    "calendar": "https://calendar.google.com/"}
+            if name in LAUNCH or name in urls:
+                result = await asyncio.to_thread(self.action, "url" if name in urls else "launch", urls.get(name, name))
+                return {"route": "command", "via": "Mario", **result,
+                        "answer": f"Opening {name}." if result.get("ok") else ""}
+        return None
+
+    async def speak(self, text):
+        if not text or not shutil.which("spd-say"):
+            return
+        try:
+            # Argument vector only: dictated content is never a shell command.
+            proc = await asyncio.create_subprocess_exec("spd-say", "--", str(text)[:1200],
+                                                       env=launch_env(), stdout=asyncio.subprocess.DEVNULL,
+                                                       stderr=asyncio.subprocess.DEVNULL)
+            await asyncio.wait_for(proc.wait(), 3)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        except OSError:
+            pass
 
     async def run_handoff(self, plan):
         plan["status"] = "running"
@@ -504,7 +548,21 @@ def make_app(hub, port):
         return data if isinstance(data, dict) else {}
 
     async def ask(request):
-        return web.json_response(await hub.ask((await read(request)).get("text")))
+        data = await read(request)
+        result = await hub.ask(data.get("text"))
+        if data.get("spoken") is True:
+            await hub.speak(result.get("error") or result.get("answer") or "Review the plan, then choose Run to start.")
+        return web.json_response(result)
+
+    async def voice(request):
+        if request.content_type != "application/json":
+            return web.json_response({"error": "JSON required"}, status=415)
+        action = request.match_info["action"]
+        if action == "start":
+            return web.json_response(await hub.voice.start())
+        if action not in ("status", "finish", "cancel"):
+            raise web.HTTPNotFound()
+        return web.json_response(await hub.voice.command(action, (await read(request)).get("id")))
 
     async def handoff(request):
         plan = hub.handoffs.get(request.match_info["id"])
@@ -558,6 +616,7 @@ def make_app(hub, port):
     app.router.add_get("/api/state", state)
     app.router.add_get("/ws", ws)
     app.router.add_post("/api/ask", ask)
+    app.router.add_post("/api/voice/{action}", voice)
     app.router.add_post("/api/handoff/{id}", handoff)
     app.router.add_post("/api/action", action)
     app.router.add_post("/api/presence", presence)

@@ -76,21 +76,53 @@ function setFaces(card, faces, { every = 9000, offset = 0, keep } = {}) {
   if (keep != null) { const j = faces.findIndex((f) => f.key === keep); if (j >= 0) t.i = j; }
   t.faces = faces;
   if (t.i >= faces.length) t.i = 0;
-  const dots = $(`#c-${card} .dots`);
-  if (dots) fill(dots, faces.length > 1 ? faces.map((_, j) => el("i", { class: j === t.i ? "on" : "" })) : []);
   fill(node, faces.length ? el("div", { class: "face" }, faces[t.i]()) : []);
+  liveControls(card);
 }
-function turn(card) {
+function liveControls(card) {
+  const t = LIVE[card], tile = $(`#c-${card}`);
+  let nav = tile.querySelector(".tile-nav");
+  if (!nav) {
+    nav = el("nav", { class: "tile-nav", "aria-label": `${card} slides` },
+      el("button", { type: "button", "aria-label": "Previous slide", onclick: () => turn(card, -1, true) }, "‹"),
+      el("span", { class: "slide-count", "aria-live": "polite" }),
+      el("button", { type: "button", "aria-label": "Next slide", onclick: () => turn(card, 1, true) }, "›"),
+      el("button", { type: "button", class: "pause", onclick: () => { t.paused = !t.paused; liveControls(card); } }, "Pause"));
+    tile.append(nav);
+    tile.tabIndex = 0;
+    tile.addEventListener("keydown", (e) => {
+      if (e.target.matches("input, textarea, select")) return;
+      if (["ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault(); turn(card, e.key === "ArrowLeft" ? -1 : 1, true);
+      }
+    });
+    let touch;
+    tile.addEventListener("touchstart", (e) => { touch = e.touches[0]; }, { passive: true });
+    tile.addEventListener("touchend", (e) => {
+      if (!touch || e.target.closest("button, input, textarea, a")) return;
+      const dx = e.changedTouches[0].clientX - touch.clientX, dy = e.changedTouches[0].clientY - touch.clientY;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) turn(card, dx < 0 ? 1 : -1, true);
+      touch = null;
+    });
+  }
+  nav.hidden = t.faces.length < 2;
+  nav.querySelector(".slide-count").textContent = `${t.i + 1} / ${t.faces.length}`;
+  const pause = nav.querySelector(".pause");
+  pause.textContent = t.paused ? "Play" : "Pause";
+  pause.setAttribute("aria-label", t.paused ? "Resume automatic slides" : "Pause automatic slides");
+  pause.setAttribute("aria-pressed", String(!!t.paused));
+  tile.classList.toggle("paused", !!t.paused);
+}
+function turn(card, direction = 1, manual = false) {
   const t = LIVE[card], node = body(card);
   if (!t || t.faces.length < 2) return;
-  t.i = (t.i + 1) % t.faces.length;
-  const old = node.querySelector(".face"), next = el("div", { class: "face in" }, t.faces[t.i]());
-  const dots = $(`#c-${card} .dots`);
-  if (dots) dots.querySelectorAll("i").forEach((d, j) => d.classList.toggle("on", j === t.i));
+  t.i = (t.i + direction + t.faces.length) % t.faces.length;
+  t.left = t.every;
+  if (manual) t.paused = true;
+  // Replace immediately: rapid repeated Next clicks must never replay an older animation timer.
+  fill(node, el("div", { class: "face in" }, t.faces[t.i]()));
+  liveControls(card);
   if (TURNED[card]) TURNED[card](t, true);
-  if (!old || matchMedia("(prefers-reduced-motion: reduce)").matches) return fill(node, next);
-  old.classList.add("out");
-  setTimeout(() => fill(node, next), 330);
 }
 const TURNED = {  // card -> called after each turn
   news(t, restart = true) {
@@ -103,7 +135,7 @@ const TURNED = {  // card -> called after each turn
 setInterval(() => {
   if (document.hidden) return;
   for (const [card, t] of Object.entries(LIVE)) {
-    if ($(`#c-${card}`).matches(":hover") || !t.faces || t.faces.length < 2) continue;
+    if (t.paused || matchMedia("(prefers-reduced-motion: reduce)").matches || $(`#c-${card}`).matches(":hover, :focus-within") || !t.faces || t.faces.length < 2) continue;
     if ((t.left -= 500) <= 0) { t.left = t.every; turn(card); }
   }
 }, 500);
@@ -112,7 +144,13 @@ async function post(url, payload) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload || {}) });
   return res.json();
 }
-const act = (action) => post("/api/action", action);
+async function act(action) {
+  try {
+    const result = await post("/api/action", action);
+    if (result.error) showAnswer(result, PANEL ? "panel" : "home");
+    return result;
+  } catch (_) { showAnswer({ error: "Mario Hub is not answering. Try again." }, PANEL ? "panel" : "home"); return { ok: false }; }
+}
 const openUrl = (url) => url && act({ id: "url", arg: url });
 
 // ----------------------------------------------------------------- cards
@@ -205,23 +243,58 @@ const render = {
     count("tasks", t.count || "");
     const input = el("input", { placeholder: "Add task", "aria-label": "Add a task" });
     const add = el("form", { class: "add", onsubmit: async (e) => {
-      e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/task", { text });
+      e.preventDefault(); const text = input.value;
+      if (!text.trim()) return;
+      try {
+        const result = await post("/api/task", { text });
+        if (result.ok) { const current = body("tasks").querySelector("input"); if (current && current.value === text) current.value = ""; }
+        else if (result.error) showAnswer(result, "home");
+      } catch (_) { showAnswer({ error: "Task not saved. Your draft is still here; try again." }, "home"); }
     } }, icon("i-plus"), input);
-    // six rows in all: your tasks first, then Mario's suggestions in whatever room is left
-    const shown = open.slice(0, open.length > 4 ? 6 : 4);
-    const suggestions = (state.next || []).filter((s) => s.action).slice(0, Math.max(0, Math.min(2, 6 - shown.length - (open.length ? 0 : 1))));
-    fill(body("tasks"), 
-      open.length ? el("ul", { class: "rows" }, shown.map((x) => el("li", {},
+    const keep = body("tasks").querySelector("input");
+    if (keep) input.value = keep.value;
+    const focused = keep === document.activeElement;
+    const selection = focused ? [keep.selectionStart, keep.selectionEnd] : null;
+    fill(body("tasks"),
+      open.length ? el("ul", { class: "rows task-list" }, open.map((x) => el("li", {},
         el("button", { class: "tick", type: "button", "aria-label": `Done: ${x.text}`, onclick: () => post("/api/task/done", { path: x.path, line: x.line }) }),
         el("div", { class: "grow" }, el("div", { class: "ttl", style: "font-weight:500" }, x.text)),
         el("span", { class: "dot", title: x.project, style: `background:${hue(x.project)}` }))))
-        : empty("No open tasks. Super+Alt+N or the box below adds one."),
-      suggestions.length ? el("div", { class: "sugg" }, icon("i-spark"), "Mario suggests") : null,
-      suggestions.length ? el("ul", { class: "rows" }, suggestions.map((s) => el("li", { style: "padding:6px 0" },
-        el("div", { class: "grow sub", style: "color:var(--soft)" }, s.text),
-        el("button", { class: "mini", type: "button", onclick: () => act(s.action) }, s.action.label || "Open"),
-        el("button", { class: "mini", type: "button", "aria-label": "Add as a task", onclick: () => post("/api/task", { text: s.text }) }, icon("i-plus"))))) : null,
-      el("div", { style: "margin-top:auto" }, add));
+        : empty("Nothing pending. Add a task or dictate one to Mario."), add);
+    if (focused) { input.focus(); input.setSelectionRange(...selection); }
+  },
+
+  next() {
+    const suggestions = (state.next || []).filter((s) => s.action);
+    setFaces("next", suggestions.length ? suggestions.map((s) => () => [
+      el("div", { class: "next-text" }, s.text),
+      el("div", { class: "tile-actions" },
+        el("button", { class: "btn primary", type: "button", onclick: () => act(s.action) }, s.action.label || "Open"),
+        el("button", { class: "btn", type: "button", onclick: async (e) => {
+          const res = await post("/api/task", { text: s.text });
+          if (res.ok) { e.target.textContent = "Added"; e.target.disabled = true; }
+        } }, "Add task"))]) : [() => empty("No loose ends right now. Choose a task and start a focus session.")]);
+  },
+
+  downloads() {
+    const files = data("downloads").files || [];
+    setFaces("downloads", files.length ? files.map((f) => () => [
+      el("b", { class: "ttl", title: f.name }, f.name),
+      el("span", { class: "sub" }, `${kindOf(f.name)} · ${size(f.size)}`),
+      el("button", { class: "btn", type: "button", onclick: () => act({ id: "open_file", arg: f.path }) }, "Open file")])
+      : [() => empty("No recent downloads.")], { every: 12000 });
+  },
+
+  focus() {
+    if (body("focus").children.length) return;
+    const task = el("select", { id: "focus-task", "aria-label": "Task to focus on" });
+    fill(body("focus"), task,
+      el("div", { id: "focus-clock", class: "focus-clock", role: "timer" }, "25:00"),
+      el("span", { id: "focus-message", class: "muted", "aria-live": "polite" }, "One task. Twenty-five minutes."),
+      el("div", { class: "tile-actions" },
+        el("button", { id: "focus-start", class: "btn primary", type: "button", onclick: () => focusAction("toggle") }, "Start"),
+        el("button", { class: "btn", type: "button", onclick: () => focusAction("reset") }, "Reset")));
+    updateFocusTasks(); updateFocus();
   },
 
   projects() {
@@ -430,12 +503,12 @@ const render = {
 
 // card -> renderers that read it
 const FEEDS = {
-  mail: ["mail", "daysum"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
+  mail: ["mail", "daysum"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum", "focusTasks"],
   builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
-  recent: ["recent"], notes: ["note"], weather: ["weather"], phone: ["phone"], news: ["news"],
+  downloads: ["downloads"], recent: ["recent"], notes: ["note"], weather: ["weather"], phone: ["phone"], news: ["news"],
   news_media: ["news"], usage: ["ai"],
 };
-function draw(name) { try { render[name](); } catch (e) { console.error(name, e); } }
+function draw(name) { try { if (name === "focusTasks") return updateFocusTasks(); render[name](); } catch (e) { console.error(name, e); } }
 function renderAll() { Object.keys(render).forEach(draw); renderPresence(); greet(); }
 
 function renderPresence() {
@@ -506,6 +579,10 @@ async function ask(text, where) {
   else { box.hidden = false; box.replaceChildren(el("span", { class: "muted" }, "…")); }
   let res;
   try { res = await post("/api/ask", { text }); } catch (e) { res = { error: "Mario Hub is not answering." }; }
+  showAnswer(res, where);
+}
+function showAnswer(res, where) {
+  const box = $("#answer"); box.hidden = false;
   if (where === "panel") { $("#log").append(answerNode(res)); $("#log").scrollTop = $("#log").scrollHeight; }
   else box.replaceChildren(el("button", { class: "close", type: "button", "aria-label": "Close", onclick: () => { box.hidden = true; } }, "×"), answerNode(res));
 }
@@ -520,7 +597,7 @@ function connect(delay = 500) {
     else if (msg.type === "card") {
       state.cards[msg.name] = { data: msg.data, at: msg.at };
       if (!PANEL) (FEEDS[msg.name] || []).forEach(draw);
-    } else if (msg.type === "next") { state.next = msg.items; if (!PANEL) draw("tasks"); }
+    } else if (msg.type === "next") { state.next = msg.items; if (!PANEL) draw("next"); }
     else if (msg.type === "presence") { state.presence = msg; renderPresence(); }
     else if (msg.type === "brain") { state.brain = msg; if (!PANEL) draw("brain"); renderPresence(); }
     else if (msg.type === "handoff") handoffEvent(msg);
@@ -533,7 +610,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.classList.add("is-panel");
     $("#home").hidden = true; $("#panel").hidden = false;
     $("#panel-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#panel-input"); ask(i.value, "panel"); i.value = ""; });
-    $("#panel-input").focus();
+    $("#panel .voice-toggle").focus();
   } else {
     $("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#ask"); ask(i.value, "home"); i.value = ""; });
     document.querySelectorAll("[data-ask]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.ask, "home")));
@@ -544,5 +621,108 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#answer").hidden = true; });
     setInterval(() => { greet(); draw("today"); }, 60000);
   }
+  document.querySelectorAll(".voice-toggle").forEach((b) => b.addEventListener("click", toggleVoice));
+  $("#voice-cancel").addEventListener("click", cancelVoice);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") cancelVoice(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) cancelVoice(); });
+  $("#type-toggle").addEventListener("click", () => {
+    const input = $("#ask"); input.hidden = !input.hidden;
+    $("#voice-hint").hidden = !input.hidden;
+    $("#type-toggle").textContent = input.hidden ? "Type instead" : "Use voice";
+    if (!input.hidden) input.focus();
+  });
   connect();
 });
+
+// Focus follows a deadline, so a background tab or suspend never slows its clock.
+let focusState;
+try { focusState = JSON.parse(localStorage.getItem("mario-focus")); } catch (_) { /* private storage */ }
+if (!focusState || typeof focusState.remaining !== "number") focusState = { remaining: 1500, end: 0, task: "" };
+function saveFocus() { try { localStorage.setItem("mario-focus", JSON.stringify(focusState)); } catch (_) { /* optional */ } }
+function updateFocusTasks() {
+  const select = $("#focus-task");
+  if (!select) return;
+  const tasks = (data("tasks").open || []).map((t) => t.text);
+  if (focusState.task && !tasks.includes(focusState.task)) tasks.unshift(focusState.task);
+  fill(select, el("option", { value: "" }, "Choose a task…"), tasks.map((t) => el("option", { value: t }, t)));
+  select.value = focusState.task || "";
+  select.onchange = () => { focusState.task = select.value; saveFocus(); };
+}
+function focusAction(action) {
+  if (action === "reset") focusState = { remaining: 1500, end: 0, task: focusState.task };
+  else if (focusState.end) { focusState.remaining = Math.max(0, Math.ceil((focusState.end - Date.now()) / 1000)); focusState.end = 0; }
+  else { if (!focusState.remaining) focusState.remaining = 1500; focusState.end = Date.now() + focusState.remaining * 1000; }
+  saveFocus(); updateFocus();
+}
+function updateFocus() {
+  if (!$("#focus-clock")) return;
+  const left = focusState.end ? Math.max(0, Math.ceil((focusState.end - Date.now()) / 1000)) : focusState.remaining;
+  if (focusState.end && !left) { focusState.end = 0; focusState.remaining = 0; saveFocus(); }
+  $("#focus-clock").textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}`;
+  $("#focus-start").textContent = focusState.end ? "Pause" : left < 1500 && left > 0 ? "Resume" : "Start";
+  $("#focus-message").textContent = !left ? "Session complete. Take a five-minute break." : focusState.end ? "Focus time · keep going" : "Ready when you are.";
+  $("#focus-task").disabled = !!focusState.end;
+}
+setInterval(updateFocus, 1000);
+window.addEventListener("storage", (e) => {
+  if (e.key !== "mario-focus") return;
+  try { const next = JSON.parse(e.newValue); if (next && typeof next.remaining === "number") focusState = next; } catch (_) { return; }
+  updateFocusTasks(); updateFocus();
+});
+
+// The desktop host uses WebKitGTK, which has no Web Speech recognizer. Capture and recognition
+// belong to the local hub; the page only starts a bounded, explicit microphone session.
+let voiceId = null, voiceGeneration = 0, voiceBusy = false;
+function voiceStatus(text, active = false) {
+  $("#voice-status").hidden = !text;
+  $("#voice-status span").textContent = text;
+  $("#voice-cancel").textContent = active ? "Cancel" : "Dismiss";
+  document.querySelectorAll(".voice-toggle").forEach((b) => {
+    b.textContent = active ? "Finish speaking" : "Talk to Mario";
+    b.setAttribute("aria-pressed", String(active));
+  });
+}
+async function cancelVoice() {
+  const id = voiceId; voiceId = null; voiceGeneration++; voiceBusy = false;
+  voiceStatus("");
+  if (id) await post("/api/voice/cancel", { id }).catch(() => {});
+}
+async function toggleVoice() {
+  if (voiceId) { await post("/api/voice/finish", { id: voiceId }); return; }
+  if (voiceBusy) return;
+  voiceBusy = true;
+  const generation = ++voiceGeneration;
+  voiceStatus("Opening microphone…", true);
+  try {
+    const start = await post("/api/voice/start");
+    if (generation !== voiceGeneration) {
+      if (start.id) await post("/api/voice/cancel", { id: start.id });
+      return;
+    }
+    if (start.error) throw new Error(start.error);
+    voiceId = start.id;
+    while (voiceId && generation === voiceGeneration) {
+      const result = await post("/api/voice/status", { id: voiceId });
+      if (generation !== voiceGeneration) return;
+      if (result.error) throw new Error(result.error);
+      if (result.state === "done") {
+        voiceId = null;
+        voiceStatus(`Heard: “${result.text}” · Working…`);
+        if (PANEL) $("#log").append(el("div", { class: "me" }, result.text));
+        const res = await post("/api/ask", { text: result.text, spoken: true });
+        if (generation !== voiceGeneration) return;
+        showAnswer(res, PANEL ? "panel" : "home");
+        voiceStatus(res.error || res.answer || "Review Mario’s plan below, then choose Run.");
+        break;
+      }
+      voiceStatus(result.state === "listening" ? "Listening… speak now; a pause sends your command." : "Recognizing your words on this laptop…", true);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  } catch (e) {
+    if (generation === voiceGeneration) {
+      const id = voiceId; voiceId = null;
+      if (id) await post("/api/voice/cancel", { id }).catch(() => {});
+      voiceStatus(e.message || "Could not reach Mario. Try again.");
+    }
+  } finally { if (generation === voiceGeneration) voiceBusy = false; }
+}
