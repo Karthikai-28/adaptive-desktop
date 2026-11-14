@@ -1091,8 +1091,12 @@ features: ideas go to a Later list and are built only if their absence has stopp
 - ✅ Terminal: the Terminator profile, both Starship prompts, the shell's fzf and suggestion
   colours and the editor's terminal use the `terminal` scheme from the tokens instead of Catppuccin
   (`scripts/install-terminal.py --apply`; live for new terminals).
-- ⬜ `tokens/handwritten-colours.json` to empty: 404 values in 32 files (the phone app's Kotlin,
-  inline colours in the Files inspector, Cast pages, Projects, Annotate, the shell's JS).
+- ✅ Code that draws takes its colours from generated modules: `designTokens.js` for the shell
+  (system monitor charts, temperature states, ROS plots, animation durations) and
+  `design_tokens.py` for the Files extension (charts, Nearby Share, the embedded terminal).
+- ⬜ `tokens/handwritten-colours.json` to empty: 340 values in 23 files, of which the phone app's
+  Kotlin is about 250; the rest are the Cast pages, Projects, Annotate, Quick Note, the pair
+  window, the TV page's script and Agent Office's charts.
 - ⬜ Agent Office is fed by tokens but is still a light panel with an indigo accent; restyle it onto
   the dark surfaces.
 
@@ -1131,14 +1135,24 @@ features: ideas go to a Later list and are built only if their absence has stopp
 
 ### Phase 4 — motion
 
-- ⬜ Motion tokens applied to Home, shell panels and the island; reduced motion honoured.
+- ✅ Home fades in over your work and its cards settle in; it fades out on leaving. The Super+J
+  panel fades and slides in. Talking to Mario is drawn from the microphone's level.
+- ✅ The shell's own animations read their durations from the tokens (`designTokens.js`): dock
+  hover and bounce, the island's card, the genie minimise. Passed the nested shell; live after a
+  shell restart.
+- ⬜ Not done, on purpose: a custom window open/close animation in the style of the web desktop
+  the operator saw (Nebula OS). It means replacing the shell's own window manager hooks; GNOME's
+  open and close stay, with the genie minimise.
 
 ### Phase 5 — purpose pass and freeze
 
+- ✅ Removed: `fix-bottom-dock-v2.sh`, `rollback-bottom-dock.sh` and `adaptive-dock-customize.sh`
+  (they patched `stylesheet.css` in place, which is generated now) and the numbered checks
+  `verify-01/03/04/05-*.sh` that nothing ran. From Home: the Apps grid, Focus and Downloads.
+- ⬜ For the operator to decide (nothing refers to them): `scripts/audit-nautilus.sh`,
+  `integrate-files-with-shell.py`, `preview-lock-screen.py`, `run-nautilus-fork.sh`,
+  `test-nested-island.sh`.
 - ⬜ One line of purpose per feature in `AGENTS.md`, or the feature is removed (list agreed first).
-  Known candidates: the scripts that patch `stylesheet.css` in place (`fix-bottom-dock-v2.sh`,
-  `adaptive-dock-customize.sh`, `rollback-bottom-dock.sh`), which now target a generated file.
-- ⬜ `map-check` is stale (412 files since the last stamp): bring the map up to date and stamp it.
 - ⬜ Close this backlog.
 
 ## Immediate next work
