@@ -1094,9 +1094,11 @@ features: ideas go to a Later list and are built only if their absence has stopp
 - ✅ Code that draws takes its colours from generated modules: `designTokens.js` for the shell
   (system monitor charts, temperature states, ROS plots, animation durations) and
   `design_tokens.py` for the Files extension (charts, Nearby Share, the embedded terminal).
-- ⬜ `tokens/handwritten-colours.json` to empty: 323 values in 23 files, of which the phone app's
-  Kotlin is about 250; the rest are the Cast pages, Projects, Annotate, Quick Note, the pair
-  window, the TV page's script and Agent Office's charts.
+- ✅ Quick Note, the pairing window, Annotate and Projects resolve their embedded stylesheets from
+  the tokens when they start; Projects' charts no longer draw in the replaced palette.
+- ⬜ `tokens/handwritten-colours.json` to empty: 291 values in 19 files. 249 are the phone app's
+  Kotlin (needs a generated colour file and an APK build); 42 are the Cast pages shown on the TV,
+  the TV launcher's tile colours and Agent Office's provider brand colours.
 - ✅ Agent Office restyled onto the system: graphite surfaces, the blue accent, Inter, dark native
   controls; its usage charts take the chart series and the page's line and label colours. The
   office map stays pixel art with its own palette. Checked in Chrome and by its own checks.
