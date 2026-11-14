@@ -58,6 +58,9 @@ class FingerprintWindow(Gtk.Window):
         self.test_finger = Gtk.DropDown.new_from_strings([])
         self.test_finger.add_css_class("choice")
         body.append(self.test_finger)
+        self.active_finger = Gtk.Label(label="Choose a finger to register, or test a saved finger.", wrap=True)
+        self.active_finger.add_css_class("card-title")
+        body.append(self.active_finger)
         self.visual = FingerprintVisual()
         body.append(self.visual)
         caption = Gtk.Label(label="Enrollment progress · fingerprint illustration")
@@ -126,7 +129,7 @@ class FingerprintWindow(Gtk.Window):
             names = ", ".join(f.replace("-", " ").capitalize() for f in fingers)
             self.saved.set_text(f"{self.reader.get('name', 'No supported reader')}\nRegistered: {names or 'none'}")
             self.choices = available_fingers(self.reader)
-            self.finger.set_model(Gtk.StringList.new([f.replace("-", " ").capitalize() for f in self.choices]))
+            self.finger.set_model(Gtk.StringList.new(["Choose a finger…"] + [f.replace("-", " ").capitalize() for f in self.choices]))
             self.finger.set_selected(0)
             allowed = data.get("can_setup", False) and data.get("gdm_pam_present", False)
             self.enroll.set_sensitive(allowed and bool(self.choices) and bool(shutil.which("fprintd-enroll")))
@@ -145,9 +148,13 @@ class FingerprintWindow(Gtk.Window):
     def _prepare(self, mode):
         if self.busy:
             return
-        selected = self.finger.get_selected() if mode == "enroll" else self.test_finger.get_selected()
+        selected = self.finger.get_selected() - 1 if mode == "enroll" else self.test_finger.get_selected()
         choices = self.choices if mode == "enroll" else self.registered
-        finger = choices[selected] if selected < len(choices) else None
+        finger = choices[selected] if 0 <= selected < len(choices) else None
+        if finger is None:
+            self.active_finger.set_text("Choose the finger you will place on the reader.")
+            self.message.set_text("Select a finger in ‘Finger to register’ above, then press Register finger.")
+            return
         self._busy(True)
         self.message.set_text("Checking the reader…")
         def checked(data):
@@ -181,6 +188,8 @@ class FingerprintWindow(Gtk.Window):
 
     def _start(self, mode, finger):
         self.last_finger = finger
+        name = finger.replace("-", " ").capitalize()
+        self.active_finger.set_text(f"{'Registering' if mode == 'enroll' else 'Testing'}: {name}")
         self.mode, self.passed, self.completed, self.failure = mode, 0, False, ""
         self.visual.update("scanning", 0, self.reader.get("stages", 1) if mode == "enroll" else 1)
         self.result.set_reveal_child(False)
@@ -255,7 +264,9 @@ class FingerprintWindow(Gtk.Window):
         self.cancel.set_sensitive(True)
         if self.completed and proc.get_successful() and not self.failure:
             self.visual.update("saved" if self.mode == "enroll" else "verified", self.visual.stages)
-            self._show_result("Finger registered. You can add another finger or test recognition." if self.mode == "enroll" else "Recognition succeeded. You can now test screen unlock.")
+            name = self.last_finger.replace("-", " ").capitalize()
+            self.active_finger.set_text(f"{name} · {'saved' if self.mode == 'enroll' else 'recognized'}")
+            self._show_result(f"Finger registered as {name}. Test recognition with that same finger." if self.mode == "enroll" else "Recognition succeeded. You can now test screen unlock.")
         else:
             self.visual.update("failed")
             self.progress.set_text("Not recognized" if self.mode == "verify" else "Enrollment incomplete")

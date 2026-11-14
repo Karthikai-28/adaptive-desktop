@@ -80,6 +80,18 @@ The corrected `/opt` trial successfully loaded both new components and exposed
 the VFS7552 and its two registered fingers through fprintd. Physical recognition
 is a separate result and must not be inferred from that successful startup.
 
+## Physical result, 2026-11-14
+
+The existing right-index enrollment did not match under the latest stack. The
+operator then used a fresh instance of the animated enrollment window and reported
+successful enrollment followed by failed recognition. A subsequent metadata check
+found the new slot was **right-middle-finger**, although the suggested slot had
+been left index. The physical finger used and selected verification slot need
+confirmation before treating this as a controlled same-finger comparison.
+The trial was stopped and the packaged driver restored. No permanent driver
+replacement or change to matching thresholds was made. Recognition remains
+unresolved; successful enrollment alone is not evidence that unlock works.
+
 During the trial, first test an existing registered finger. If it fails, register
 an unused finger with the new stack and verify that exact finger. Keep the finger
 centered on the small reader. Do not log out or remove the password during a

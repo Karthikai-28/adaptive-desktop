@@ -51,6 +51,9 @@ def main():
     assert "right-index-finger" not in window.choices
     assert window.registered == ["right-index-finger"]
     assert window._command("verify", "left-thumb")[-3:] == ["fprintd-verify", "-f", "left-thumb"]
+    window._prepare("enroll")
+    assert not window.busy and window.proc is None
+    assert "Choose the finger" in window.active_finger.get_text()
     window.visual.update("accepted", 3, 6)
     until(lambda: abs(window.visual.fraction - .5) < .01)
     window.visual.update("retry")
@@ -61,10 +64,20 @@ def main():
     window.visual.update("accepted", 4)
     assert window.visual.fraction == 4 / 6
     settings.set_property("gtk-enable-animations", animations)
+    commands = []
     def command(source):
-        window._command = lambda *_: [sys.executable, "-u", "-c", source]
+        def fixture(mode, finger):
+            commands.append((mode, finger))
+            return [sys.executable, "-u", "-c", source]
+        window._command = fixture
+    def select_finger(finger="left-index-finger"):
+        window.finger.set_selected(window.choices.index(finger) + 1)
     command("import time; print('Enroll result: enroll-stage-passed'); time.sleep(.15); print('Enroll result: enroll-completed')")
+    select_finger()
     window._prepare("enroll")
+    assert commands[-1] == ("enroll", "left-index-finger")
+    assert window.active_finger.get_text() == "Registering: Left index finger"
+    DATA["readers"][0]["fingers"].append("left-index-finger")
     assert window.spinner.get_spinning() and not window.enroll.get_sensitive()
     until(lambda: window.proc is None)
     assert "Finger registered" in window.result_label.get_text()
@@ -72,6 +85,8 @@ def main():
     assert window.progress.get_fraction() == 1 and not window.spinner.get_spinning()
     command("print('Verify result: verify-match (done)')")
     window._prepare("verify")
+    assert commands[-1] == ("verify", "left-index-finger")
+    assert window.active_finger.get_text() == "Testing: Left index finger"
     until(lambda: window.proc is None)
     assert "Recognition succeeded" in window.result_label.get_text()
     assert window.visual.phase == "verified"
@@ -81,15 +96,18 @@ def main():
     assert "not recognized" in window.result_label.get_text()
     assert window.visual.phase == "failed"
     command("import time; time.sleep(30)")
+    select_finger("left-thumb")
     window._prepare("enroll")
     window._cancel_or_close()
     until(lambda: window.proc is None)
     assert "cancelled" in window.result_label.get_text()
+    select_finger("left-thumb")
     window._prepare("enroll")
     GLib.source_remove(window.timer)
     window._timeout()
     until(lambda: window.proc is None)
     assert "timed out" in window.result_label.get_text()
+    select_finger("left-thumb")
     window._prepare("enroll")
     window.close()
     until(lambda: window.proc is None)

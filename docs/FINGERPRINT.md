@@ -5,7 +5,10 @@ pam_fprintd. Adaptive uses those backends; it never reads fingerprint images or
 templates and implements no fingerprint matching or authentication bypass.
 
 Open **Adaptive Settings → Updates & Recovery → Fingerprint unlock → Manage
-fingers**. Select an unregistered finger and press **Register finger**. A generic
+fingers**. Explicitly select an unregistered finger and press **Register finger**;
+there is no automatically chosen enrollment slot. The scan heading shows that
+finger throughout enrollment, and the saved slot is selected for the next test.
+A generic
 fingerprint illustration fills smoothly only as the reader accepts samples;
 retry scans leave progress unchanged. A scanning line, accepted-sample dots and
 separate saved/verified/failure states explain progress. The illustration is
@@ -94,6 +97,16 @@ cause on this particular machine. The shared PAM fingerprint
 profile was enabled and its password fallback inspected. A local terminal
 password-fallback check using `sudo -k true` completed with exit status 0.
 Fingerprint sudo authentication remains unverified because recognition fails.
+
+The latest official libfprint 1.94.100 and fprintd 1.94.5 were subsequently built
+and tested in an isolated, reversible trial. Twelve selected upstream tests
+passed; an existing right-index enrollment failed recognition. The operator also
+reported a fresh enrollment followed by failed recognition, but its saved slot
+was right middle rather than the suggested left index. That comparison needs
+confirmation of the physical finger and verification slot. The packaged stack
+was restored. See the
+[comparison and evidence](FINGERPRINT_DRIVER_TRIAL.md). The operator reports
+reliable recognition in Windows; Linux recognition remains unresolved.
 
 ## Upstream references
 
