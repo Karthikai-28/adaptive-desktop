@@ -52,3 +52,7 @@ dist/
 apps/adaptive-link-android/cloud.properties
 .local/mario-pydeps/
 .local/mario-voice/
+
+# Fingerprint driver sources, isolated builds and visual test artifacts
+.local/fingerprint-research/
+build/fingerprint-*

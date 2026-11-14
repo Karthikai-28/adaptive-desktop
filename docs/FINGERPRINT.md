@@ -36,8 +36,10 @@ a promise of support for every laptop.
 Install missing packages with `sudo apt install fprintd libpam-fprintd python3-gi`.
 The enrollment window uses the default reader chosen by fprintd, reports its
 registered fingers, and does not overwrite already registered fingers. Reopen
-or refresh Settings after attaching a new reader. No driver downloads, private
-firmware flashing or custom matching thresholds are applied.
+or refresh Settings after attaching a new reader. Normal setup does not download
+drivers, flash firmware or alter matching thresholds. The separate
+[VFS7552 driver comparison](FINGERPRINT_DRIVER_TRIAL.md) describes an explicit,
+temporary test of newer official releases.
 
 GDM already provides `/etc/pam.d/gdm-fingerprint`. Fingerprint enrollment enables
 the current session's writable GNOME fingerprint policy if needed; enforced
