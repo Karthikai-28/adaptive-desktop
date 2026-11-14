@@ -62,7 +62,7 @@ prove recognition on the physical laptop.
 - `.local/fingerprint-research/daemon-build/src/fprintd`
 
 After local administrator authorization, it copies them as root-owned files to
-`/run/adaptive-fingerprint-trial/` and adds only its own runtime systemd drop-in
+`/opt/adaptive-fingerprint-trial/` and adds only its own runtime systemd drop-in
 for fprintd. It checks the daemon actually loaded the trial library. Neither
 packaged binaries nor PAM configuration are replaced. The same system fprintd
 storage and authorization policy remain in use; templates are never inspected,
@@ -70,8 +70,15 @@ exported or copied by this workflow.
 
 The process restores the packaged daemon on exit, interruption or after ten
 minutes. End it sooner with `bash scripts/fingerprint-driver-trial.sh --stop`.
-The root-owned runtime files are removed during rollback. Existing unrelated
-service drop-ins are preserved. A normal reboot also clears `/run`.
+The root-owned trial files are removed during rollback. Existing unrelated
+service drop-ins are preserved. A normal reboot clears the `/run` override and
+therefore restores the packaged daemon even if cleanup was interrupted.
+This laptop mounts `/run` with `noexec`, so trial binaries use `/opt` rather than
+weakening that mount restriction. An initial `/run` trial failed at startup and
+successfully exercised the rollback path before any scan took place.
+The corrected `/opt` trial successfully loaded both new components and exposed
+the VFS7552 and its two registered fingers through fprintd. Physical recognition
+is a separate result and must not be inferred from that successful startup.
 
 During the trial, first test an existing registered finger. If it fails, register
 an unused finger with the new stack and verify that exact finger. Keep the finger

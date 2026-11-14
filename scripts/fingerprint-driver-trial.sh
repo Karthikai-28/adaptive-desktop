@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Temporarily try the locally built libfprint; restore the packaged daemon on exit.
-# Uses only /run for the root-owned trial library and service override.
+# Temporarily try the locally built fingerprint stack; restore packages on exit.
+# Copies root-owned trial binaries to /opt; the service override lives in /run.
 #   fingerprint-driver-trial.sh           administrator dialog, ten-minute trial
 #   fingerprint-driver-trial.sh --stop    request immediate rollback
 set -Eeuo pipefail
@@ -9,7 +9,7 @@ WORK="$REPO/.local/fingerprint-research"
 LIB="$WORK/build/libfprint/libfprint-2.so.2.0.0"
 DAEMON="$WORK/daemon-build/src/fprintd"
 STOP="$WORK/stop-trial"
-RUNTIME=/run/adaptive-fingerprint-trial
+RUNTIME=/opt/adaptive-fingerprint-trial
 OVERRIDE=/run/systemd/system/fprintd.service.d/90-adaptive-driver-trial.conf
 
 case "${1:-}" in
@@ -25,7 +25,7 @@ LC_ALL=C readelf -d "$LIB" | grep -Fq 'Library soname: [libfprint-2.so.2]' || {
 }
 if [ "$EUID" -ne 0 ]; then
     rm -f "$STOP"
-    exec pkexec /bin/bash "$0"
+    exec pkexec /bin/bash "$REPO/scripts/fingerprint-driver-trial.sh"
 fi
 [ ! -e "$RUNTIME" ] && [ ! -e "$OVERRIDE" ] || {
     echo 'A driver trial already exists; stop it before starting another.' >&2; exit 1;
