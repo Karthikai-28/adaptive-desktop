@@ -49,6 +49,7 @@ PARTS=(
     "keybindings|Adaptive keyboard shortcuts|status_keybindings|$S/install-keybindings.sh"
     "terminal|Terminal defaults and KTERM integration|status_terminal|install_terminal"
     "settings|Adaptive Settings app|status_settings|$S/install-adaptive-settings.sh"
+    "fingerprint|Detect fingerprint readers and enrollment status|status_fingerprint|check_fingerprint"
     "cast|Cast: this screen on a TV over Miracast|status_cast|$S/install-cast.sh"
     "phone|Phone: the paired Android phone and its apps in windows here (scrcpy)|status_phone|$S/install-phone.sh"
     "gestures|Touchpad gesture service|status_gestures|$S/install-gestures.sh"
@@ -98,6 +99,14 @@ status_phone() {
 
 status_settings() {
     [ -f "$APPS/com.karthi.AdaptiveSettings.desktop" ] || echo "not in the app grid"
+}
+
+check_fingerprint() {
+    /usr/bin/python3 "$S/fingerprint.py"
+}
+
+status_fingerprint() {
+    /usr/bin/python3 "$S/fingerprint.py" --install-status
 }
 
 status_terminal() {

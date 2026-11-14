@@ -31,6 +31,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import backend as B  # noqa: E402
+from fingerprint_ui import FingerprintWindow  # noqa: E402
 
 APP_ID = "com.karthi.AdaptiveSettings"
 HERE = Path(__file__).resolve().parent
@@ -638,6 +639,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
     # ===================================================== Updates & Recovery
 
     def _system_page(self):
+        fingerprints = Card("Fingerprint unlock", "Register fingers for login and screen unlock. Your password remains available.")
+        self.fingerprint_row = fingerprints.row("Checking reader…", "")
+        self.fingerprint_button = button("Manage fingers", self._open_fingerprints, "accent")
+        self.fingerprint_button.set_sensitive(False)
+        self.fingerprint_row.append(self.fingerprint_button)
+        self.fingerprint_row.append(button("Refresh", self._refresh_fingerprints))
+        self._refresh_fingerprints()
+
         self.repo_card = Card("Adaptive Desktop")
         self.repo_row = self.repo_card.row("Checking…", "")
         self.repo_check = button("Check for updates", self._check_updates)
@@ -677,7 +686,23 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.watchdog_row.append(self.watchdog_button)
         self._refresh_watchdog()
 
-        return [self.repo_card, ubuntu, self.session_card, self.watchdog_card, self.verify_card]
+        return [fingerprints, self.repo_card, ubuntu, self.session_card, self.watchdog_card, self.verify_card]
+
+    def _refresh_fingerprints(self):
+        def checked(ok, out, err):
+            try:
+                result = json.loads(out) if ok else {}
+            except ValueError:
+                result = {}
+            self.fingerprint_row.title.set_text(
+                ", ".join(r["name"] for r in result.get("readers", [])) or "Fingerprint reader unavailable")
+            set_hint(self.fingerprint_row, result.get("message", "Could not check the reader. Try Refresh."))
+            self.fingerprint_button.set_sensitive(result.get("can_setup", False))
+        run_async(["/usr/bin/python3", str(B.REPO / "scripts/fingerprint.py"), "--json"], checked)
+
+    def _open_fingerprints(self):
+        window = FingerprintWindow(self, B.REPO, run_async, self._refresh_fingerprints)
+        window.present()
 
     def _refresh_watchdog(self):
         tripped = B.watchdog_tripped()

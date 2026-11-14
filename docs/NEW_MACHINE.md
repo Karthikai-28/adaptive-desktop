@@ -108,6 +108,12 @@ any time to go through it again.
 
 ## After
 
+- For a supported laptop fingerprint reader, open **Adaptive Settings → Updates
+  & Recovery → Fingerprint unlock → Manage fingers**. Register and test one or
+  more fingers; optionally enable fingerprint for sudo there. The bootstrap
+  installs the Ubuntu packages and checks for a usable reader. Password login
+  remains available. See [fingerprint setup](FINGERPRINT.md).
+
 - `Alt+Space` the command palette, `Super+/` every shortcut.
 - Agent Office: http://127.0.0.1:8790 (Chrome, for voice input).
 - Things to record by hand on this machine (reboot, suspend, external

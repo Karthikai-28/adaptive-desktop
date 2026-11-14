@@ -190,6 +190,8 @@ PACKAGES=(
     dconf-cli desktop-file-utils gnome-terminal nautilus nautilus-extension-gnome-terminal
     gnome-shell-extension-prefs tesseract-ocr tesseract-ocr-eng fonts-inter mokutil
     libgdk-pixbuf2.0-bin ffmpegthumbnailer evince
+    # GNOME handles fingerprint login only when fprintd finds a supported reader.
+    fprintd libpam-fprintd
     # phone apps run in a private display of their own
     xvfb xfwm4 dbus
     # Python, and the GObject libraries the apps import

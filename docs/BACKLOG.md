@@ -222,6 +222,17 @@ contains a Command icon. Search lives in the app process, never in the shell.
 
 ## Milestone 8 — Settings
 
+- ✅ Fingerprint hardware detection and multiple-finger enrollment in Adaptive
+  Settings → Updates & Recovery, with animated scan/progress feedback and a
+  recognition test. Uses fprintd and Ubuntu's PAM profile; password fallback
+  stays available. `docs/FINGERPRINT.md`.
+- 🔬 Fingerprint recognition, lock/unlock, and sudo on physical hardware:
+  VFS7552 detected and enrollment succeeds on 2026-11-14; command-line and
+  operator Settings recognition tests failed, including a second finger.
+  sudo fingerprint profile enabled and the local password-fallback test
+  (`sudo -k true`) succeeded. Fingerprint unlock/sudo remain blocked by
+  recognition failure; see the driver references in `docs/FINGERPRINT.md`.
+
 Settings is `gnome-control-center` under our skin, not a reimplementation.
 It is GTK3 on Ubuntu 22.04 (41.7), so the session GTK theme is what makes it
 ours. The previous ✅ marks here described an 18-section launcher menu whose

@@ -106,6 +106,7 @@ step "Terminal routes and ROS shell setup" quiet python3 "$REPO/scripts/verify-t
 step "agy and claude as apps: shared sessions" quiet python3 "$REPO/scripts/verify-agent-apps.py"
 step "Phone: phone choice, its apps, scrcpy arguments" quiet python3 "$REPO/scripts/verify-phone.py"
 step "Adaptive Settings backend" quiet python3 "$REPO/scripts/verify-adaptive-settings.py"
+step "Fingerprint detection and setup guards" quiet python3 "$REPO/scripts/verify-fingerprint.py"
 step "Cast: Miracast elements, RTSP framing, format choice" quiet python3 "$REPO/scripts/verify-cast.py"
 step "Adaptive Home on the TV: tiles, remote navigation, socket frames" quiet node "$REPO/scripts/verify-tv-home.js"
 step "Agent Office (syntax, roster, API guards; no quota)" quiet "$REPO/scripts/verify-agent-office.sh"
@@ -125,6 +126,7 @@ step "Files inspector: every method the controller calls is defined" quiet inspe
 step "Files icons match their generator (scripts/build-file-icons.py)" quiet python3 "$REPO/scripts/build-file-icons.py" --check
 
 if [ "$QUICK" = 0 ]; then
+    step "Fingerprint enrollment window (virtual display, fixture reader)" quiet xvfb-run -a /usr/bin/python3 "$REPO/scripts/verify-fingerprint-ui.py"
     step "Command palette window (virtual display)" quiet python3 "$REPO/scripts/verify-palette.py"
     step "Annotate window (virtual display)" quiet python3 "$REPO/scripts/verify-annotate.py"
     step "Extension in a real GNOME Shell (nested, sandboxed)" quiet "$REPO/scripts/verify-shell-nested.sh" --extra "$REPO/scripts/verify-screen-text-nested.sh" --extra "$REPO/scripts/verify-ros-nested.sh" --extra "$REPO/scripts/verify-window-glass-nested.sh"

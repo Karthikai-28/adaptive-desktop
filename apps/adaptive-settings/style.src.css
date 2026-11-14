@@ -11,6 +11,18 @@
 @define-color ad_warning   $warn;
 @define-color ad_danger    $danger;
 
+.fingerprint-scan {
+    color: @ad_accent;
+}
+
+.fingerprint-progress text {
+    color: @ad_text;
+}
+
+.fingerprint-progress progress {
+    background-color: @ad_accent;
+}
+
 window.adaptive-settings {
     background-color: @ad_bg;
     color: @ad_text;

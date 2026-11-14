@@ -12,6 +12,16 @@ REPORT_DIR = REPO / "verification"
 
 CHECKS = [
     {
+        "id": "fingerprint_unlock",
+        "backlog": "Fingerprint recognition and screen unlock on physical hardware.",
+        "prompt": "After enrolling fingers in Adaptive Settings, does Test recognition succeed, and can each finger unlock the screen while password login still works?",
+    },
+    {
+        "id": "fingerprint_sudo",
+        "backlog": "Fingerprint and password fallback for sudo on physical hardware.",
+        "prompt": "After enabling the fingerprint PAM profile, does sudo -k true accept a registered finger, and does waiting for the scan timeout still allow your password?",
+    },
+    {
         "id": "tty_recovery",
         "backlog": "Test recovery from TTY.",
         "prompt": "From Ctrl+Alt+F3, can you log in, disable adaptive-shell@local, and return safely?",
