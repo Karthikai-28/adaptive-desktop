@@ -45,6 +45,8 @@ var COLOR = {
     'series.3': '#64D2FF',
     'series.4': '#A4A4A7',
     'series.5': '#636365',
+    'series.6': '#BF5AF2',
+    'series.7': '#FFD60A',
 };
 
 if (typeof module !== 'undefined' && module.exports) {

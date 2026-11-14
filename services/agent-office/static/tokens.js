@@ -11,10 +11,13 @@ const num = (n) => Math.round(n || 0).toLocaleString('en');
 const pct = (x) => `${(100 * (x || 0)).toFixed(x >= 0.995 || x < 0.1 ? 1 : 0)}%`;
 
 export const WINDOWS = [['1h', 'Last hour', 3600], ['6h', '6 hours', 6 * 3600], ['24h', '24 hours', 86400], ['7d', '7 days', 7 * 86400], ['all', 'All time', 0]];
+// Kinds of work are categories of data: they take the page's chart series (style.src.css, from the
+// desktop's tokens), read once here.
+const series = (n) => getComputedStyle(document.documentElement).getPropertyValue(`--s${n}`).trim();
 const KIND = {
-  task: ['Tasks', '#5865f2'], study: ['Study sessions', '#a46cf0'], meeting: ['Meetings', '#38bdf8'],
-  chat: ['Direct messages', '#2fb67c'], review: ['Reviewing work', '#f5a524'], minutes: ['Meeting notes', '#8b9cff'],
-  other: ['Other', '#b9bdd0'],
+  task: ['Tasks', series(1)], study: ['Study sessions', series(6)], meeting: ['Meetings', series(3)],
+  chat: ['Direct messages', series(2)], review: ['Reviewing work', series(7)], minutes: ['Meeting notes', series(4)],
+  other: ['Other', series(5)],
 };
 const STEP = {
   run_command: 'Run commands', view_file: 'Read files', replace_file_content: 'Edit files', multi_replace_file_content: 'Edit files',
@@ -28,7 +31,7 @@ const STEP = {
 };
 export const stepName = (s) => STEP[s] || String(s).replace(/_/g, ' ');
 const kindName = (k) => (KIND[k] || [k])[0];
-const kindColor = (k) => (KIND[k] || [0, '#b9bdd0'])[1];
+const kindColor = (k) => (KIND[k] || KIND.other)[1];
 const MODEL = (m) => { const x = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/i.exec(m || ''); return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}${x[3] ? '.' + x[3] : ''}` : /gemini/i.test(m) ? 'Gemini' : m; };
 
 const ENGINE_COLOR = { agy: '#4285f4', ollama: '#2fb67c', claude: '#d97757' };
@@ -46,7 +49,7 @@ export function createTokens(ctx) {
   const provSplit = (m) => { const e = Object.entries(m || {}).filter(([, v]) => v).sort((a, b) => b[1] - a[1]); return e.length > 1 || (e.length === 1 && !T.prov) ? e.map(([k, v]) => `${provName(k)} ${fmt(v)}`).join(' · ') : ''; };
   const since = () => { const w = WINDOWS.find(x => x[0] === T.win); return w && w[2] ? Date.now() / 1000 - w[2] : 0; };
   const nameOf = (id) => id === 'other' ? 'Setup & tests' : (S.roster[id]?.name || id);
-  const colorOf = (id) => id === 'other' ? '#b9bdd0' : (S.roster[id]?.look?.shirt || '#8b90a8');
+  const colorOf = (id) => id === 'other' ? KIND.other[1] : (S.roster[id]?.look?.shirt || series(4));
   const roleOf = (id) => id === MGR ? 'Manager · Claude' : id === 'other' ? 'Office test runs, not tied to an agent' : (S.roster[id]?.role || '');
   const windowLabel = () => (WINDOWS.find(x => x[0] === T.win) || WINDOWS[4])[1];
 
@@ -100,8 +103,8 @@ export function createTokens(ctx) {
       const left = Math.max(...tk.map(v => { lab.textContent = fmt(v); return lab.getComputedTextLength(); })) + 8; lab.remove();
       const y = (v) => (H - bottom) - (H - bottom - 6) * v / top;
       for (const v of tk) {
-        s.append(svg('line', { x1: left, x2: W, y1: y(v), y2: y(v), stroke: '#eceef5' }));
-        const t = svg('text', { x: left - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#6b7088' }); t.textContent = fmt(v); s.append(t);
+        s.append(svg('line', { x1: left, x2: W, y1: y(v), y2: y(v), class: 'tk-grid' }));
+        const t = svg('text', { x: left - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, class: 'tk-axis' }); t.textContent = fmt(v); s.append(t);
       }
       const n = tl.buckets.length, bw = (W - left) / n, gap = Math.min(3, bw * 0.2);
       const fmtT = (t) => { const d = new Date(t * 1000); return tl.size >= 86400 / 4 && d.getHours() === 0 ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
@@ -116,7 +119,7 @@ export function createTokens(ctx) {
           r.addEventListener('mouseleave', () => tipEl(box).classList.add('hidden'));
           s.append(r); acc += v;
         }
-        if (i % every === 0) { const t = svg('text', { x: x + bw / 2, y: H - 5, 'text-anchor': 'middle', 'font-size': 11, fill: '#6b7088' }); t.textContent = fmtT(b.t); s.append(t); }
+        if (i % every === 0) { const t = svg('text', { x: x + bw / 2, y: H - 5, 'text-anchor': 'middle', 'font-size': 11, class: 'tk-axis' }); t.textContent = fmtT(b.t); s.append(t); }
       });
     };
     requestAnimationFrame(draw);
@@ -138,11 +141,11 @@ export function createTokens(ctx) {
       const y = (v) => (H - bottom) - (H - bottom - 6) * v / top;
       const x = (i) => left + 4 + (W - left - 8) * (points.length === 1 ? 0.5 : i / (points.length - 1));
       for (const v of tk) {
-        s.append(svg('line', { x1: left, x2: W, y1: y(v), y2: y(v), stroke: '#eceef5' }));
-        const t = svg('text', { x: left - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#6b7088' }); t.textContent = fmt(v); s.append(t);
+        s.append(svg('line', { x1: left, x2: W, y1: y(v), y2: y(v), class: 'tk-grid' }));
+        const t = svg('text', { x: left - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, class: 'tk-axis' }); t.textContent = fmt(v); s.append(t);
       }
-      const a = svg('text', { x: left + 4, y: H - 4, 'font-size': 11, fill: '#6b7088' }); a.textContent = new Date(points[0].ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); s.append(a);
-      const z = svg('text', { x: W - 4, y: H - 4, 'font-size': 11, fill: '#6b7088', 'text-anchor': 'end' }); z.textContent = 'latest call'; s.append(z);
+      const a = svg('text', { x: left + 4, y: H - 4, 'font-size': 11, class: 'tk-axis' }); a.textContent = new Date(points[0].ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); s.append(a);
+      const z = svg('text', { x: W - 4, y: H - 4, 'font-size': 11, class: 'tk-axis', 'text-anchor': 'end' }); z.textContent = 'latest call'; s.append(z);
       const w = Math.max(1, (W - left - 8) / points.length - 0.5);
       points.forEach((p, i) => {
         const r = svg('rect', { x: x(i) - w / 2, width: w, y: y(p.ctx), height: Math.max(0.5, y(0) - y(p.ctx)), fill: kindColor(p.kind), opacity: 0.85 });

@@ -23,6 +23,6 @@
     "scripts/adaptive-quick-note.py": 6,
     "services/adaptive-link/pair_window.py": 6,
     "services/agent-office/static/app.js": 5,
-    "services/agent-office/static/tokens.js": 25
+    "services/agent-office/static/tokens.js": 8
   }
 }

@@ -33,7 +33,8 @@ To retune the whole desktop, change the ramp's hue, chroma or lightness list and
 - **Status is not decoration.** Green, orange and red only say ok, warning, error. On a tint
   (`ok.tint`) the label uses the pale partner (`ok.text`).
 - **Series colours are for data.** Blue, indigo, cyan, then two neutrals, in that order, to tell
-  chart series or categories apart.
+  chart series or categories apart. A chart with more than five categories goes on to purple and
+  yellow (`series.6`, `series.7`); nothing else uses those.
 - **One gradient.** `aurora` (blue → indigo → cyan) means Mario is thinking or answering. No other
   gradient exists; do not add one for atmosphere.
 - **The terminal has its own sixteen.** Programs need six distinct hues, so yellow and purple exist
@@ -133,6 +134,8 @@ A colour is only ever used at full strength or at one of: 4%, 8%, 12%, 16%, 24%,
 | `series.3` | `{cyan}` | `#64D2FF` |
 | `series.4` | `{n9}` | `#A4A4A7` |
 | `series.5` | `{n7}` | `#636365` |
+| `series.6` | `{purple}` | `#BF5AF2` |
+| `series.7` | `{yellow}` | `#FFD60A` |
 | `glass` | `{n1}/60` | `rgba(21, 21, 23, 0.60)` |
 | `glass.pane` | `{white}/4` | `rgba(255, 255, 255, 0.04)` |
 | `glass.edge` | `{white}/8` | `rgba(255, 255, 255, 0.08)` |

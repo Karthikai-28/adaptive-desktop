@@ -85,6 +85,8 @@
     "series.3": "{cyan}",
     "series.4": "{n9}",
     "series.5": "{n7}",
+    "series.6": "{purple}",
+    "series.7": "{yellow}",
 
     "glass": "{n1}/60",
     "glass.pane": "{white}/4",
