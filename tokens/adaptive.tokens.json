@@ -134,6 +134,7 @@
     "panel.ms": 180,
     "workspace.ms": 220,
     "state.ms": 260,
+    "genie.ms": 520,
     "ease.standard": "cubic-bezier(0.2, 0, 0, 1)",
     "ease.exit": "cubic-bezier(0.3, 0, 1, 1)"
   },

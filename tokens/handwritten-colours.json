@@ -20,18 +20,9 @@
     "apps/adaptive-projects/main.py": 10,
     "apps/adaptive-tv/app/home.js": 5,
     "apps/adaptive-tv/app/model.js": 5,
-    "extension/adaptive_files/common.py": 9,
-    "extension/adaptive_files/inspector_host.py": 19,
-    "extension/adaptive_files/nearby_share.py": 14,
-    "scripts/adaptive-dock-customize.sh": 7,
     "scripts/adaptive-quick-note.py": 6,
-    "scripts/adaptive-wallpaper.sh": 1,
     "services/adaptive-link/pair_window.py": 6,
     "services/agent-office/static/app.js": 5,
-    "services/agent-office/static/tokens.js": 25,
-    "shell/adaptive-shell@local/rosPanel.js": 1,
-    "shell/adaptive-shell@local/screenText.js": 5,
-    "shell/adaptive-shell@local/systemPanel.js": 5,
-    "shell/adaptive-shell@local/telemetry.js": 3
+    "services/agent-office/static/tokens.js": 25
   }
 }

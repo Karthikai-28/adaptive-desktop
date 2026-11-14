@@ -174,6 +174,7 @@ Ground `#151517`, text `#CACACD`, cursor `#0A84FF`. Applied by `scripts/install-
 | `motion.panel.ms` | 180ms |
 | `motion.workspace.ms` | 220ms |
 | `motion.state.ms` | 260ms |
+| `motion.genie.ms` | 520ms |
 | `motion.ease.standard` | cubic-bezier(0.2, 0, 0, 1) |
 | `motion.ease.exit` | cubic-bezier(0.3, 0, 1, 1) |
 

@@ -54,6 +54,7 @@ const Types = _loadModule("islandTypes");
 const DynamicIsland = _loadModule("dynamicIsland");
 const { describeUsage = () => [] } = _loadModule("islandQuota");
 const CastStatus = _loadModule("castStatus");
+const Motion = _loadModule("designTokens");
 const USAGE_TRACK_PX = 132;
 const { DynamicIslandBackend } = DynamicIsland;
 const { IslandEvents = {}, IslandPriority = {}, IslandDwellMs = {} } = Types;
@@ -1347,7 +1348,7 @@ var IslandOverlay = class IslandOverlay {
             this._actor.ease({
                 translation_y: 0,
                 opacity: 255,
-                duration: 220,
+                duration: Motion.PANEL_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
             });
         } else {
@@ -1391,7 +1392,7 @@ var IslandOverlay = class IslandOverlay {
             this._actor.ease({
                 translation_y: -6,
                 opacity: 0,
-                duration: 160,
+                duration: Motion.PANEL_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 onComplete: () => {
                     if (!this._actor || this._isExpanded) return;

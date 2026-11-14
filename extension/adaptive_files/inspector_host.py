@@ -180,10 +180,10 @@ class HostMixin:
             color.parse(value)
             return color
 
-        # Match Terminal's KTERM profile in the embedded VTE view.
-        palette = "#45475a:#f38ba8:#a6e3a1:#f9e2af:#89b4fa:#f5c2e7:#94e2d5:#bac2de:#585b70:#f38ba8:#a6e3a1:#f9e2af:#89b4fa:#f5c2e7:#94e2d5:#a6adc8"
-        terminal.set_colors(rgba("#cdd6f4"), rgba("#11111b"), [rgba(c) for c in palette.split(":")])
-        terminal.set_color_cursor(rgba("#f5e0dc"))
+        # The same scheme as Terminal: the tokens' "terminal" section.
+        from .design_tokens import TERMINAL
+        terminal.set_colors(rgba(TERMINAL["foreground"]), rgba(TERMINAL["background"]), [rgba(c) for c in TERMINAL["ansi"]])
+        terminal.set_color_cursor(rgba(TERMINAL["cursor"]))
         terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.ON)
         terminal.set_cursor_shape(Vte.CursorShape.IBEAM)
         terminal.set_hexpand(True)

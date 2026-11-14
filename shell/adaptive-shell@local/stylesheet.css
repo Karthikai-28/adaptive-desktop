@@ -3507,3 +3507,19 @@
 .adaptive-window-glass {
     background-color: #151517;
 }
+
+/* ===== Screen text =====
+ *
+ * The bar over a frozen screen while words are being picked (screenText.js).
+ */
+
+.adaptive-screen-text-bar {
+    background-color: #1C1C1E; color: #F5F5F8;
+    padding: 12px; spacing: 12px; border-radius: 12px;
+}
+.adaptive-screen-text-copy {
+    background-color: #0A84FF; color: #FFFFFF;
+    padding: 8px 16px; border-radius: 8px;
+}
+.adaptive-screen-text-button { padding: 8px; color: #F5F5F8; }
+.adaptive-screen-text-cancel { padding: 8px 12px; }

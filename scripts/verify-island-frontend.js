@@ -181,7 +181,7 @@ const closing = transition;
 overlay.showOverlay(anchorActor);
 closing.onComplete();
 check(overlay._actor.visible, "Interrupted closing callback cannot hide a reopened card");
-check(transition.duration === 220 && transition.translation_y === 0, "Reopening settles to the anchor without bounce");
+check(transition.duration === require("../shell/adaptive-shell@local/designTokens.js").PANEL_MS && transition.translation_y === 0, "Reopening settles to the anchor without bounce");
 
 // Clicking the island opens the shared center even with an active event.
 const centerMenu = { isOpen: false, toggle() { this.isOpen = !this.isOpen; } };

@@ -34,6 +34,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from adaptive_files import qr  # noqa: E402
+from adaptive_files.design_tokens import COLOR as _C, css as _css  # noqa: E402
 
 IDLE_LIMIT_S = 30 * 60
 
@@ -121,12 +122,12 @@ def make_handler(share):
             page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Shared files</title><style>
-body{{margin:0;padding:24px 16px;background:#1C1C1E;color:#F5F5F7;
+body{{margin:0;padding:24px 16px;background:{_C["surface.window"]};color:{_C["text.primary"]};
 font:16px -apple-system,system-ui,Inter,sans-serif}}
-h1{{font-size:20px;margin:0 0 4px}} p{{color:#98989D;margin:0 0 16px;font-size:14px}}
+h1{{font-size:20px;margin:0 0 4px}} p{{color:{_C["text.tertiary"]};margin:0 0 16px;font-size:14px}}
 .row{{display:flex;justify-content:space-between;gap:12px;padding:14px 16px;margin:8px 0;
-background:#2C2C2E;border-radius:12px;color:#F5F5F7;text-decoration:none}}
-.name{{overflow-wrap:anywhere}} .size{{color:#0A84FF;white-space:nowrap}}
+background:{_C["surface.card"]};border-radius:12px;color:{_C["text.primary"]};text-decoration:none}}
+.name{{overflow-wrap:anywhere}} .size{{color:{_C["accent"]};white-space:nowrap}}
 </style></head><body><h1>Shared from {html.escape(socket.gethostname())}</h1>
 <p>Tap a file to download it.</p>{''.join(rows)}</body></html>"""
             body = page.encode("utf-8")
@@ -188,18 +189,19 @@ class QrArea(Gtk.DrawingArea):
         return False
 
 
-CSS = b"""
-window { background-color: #1C1C1E; color: #F5F5F7; }
-.title { font-size: 17px; font-weight: 700; }
-.muted { color: #98989D; font-size: 12.5px; }
-.url { font-family: "JetBrains Mono", monospace; font-size: 12px; color: #0A84FF; }
-.status { color: #30D158; font-size: 12.5px; }
-.card { background-color: #FFFFFF; border-radius: 14px; padding: 12px; }
-button.stop { background-image: none; background-color: #FF453A; color: white;
-              border: none; border-radius: 8px; min-height: 30px; }
-button.quiet { background-image: none; background-color: alpha(white, 0.08); color: #F5F5F7;
-               border: none; border-radius: 8px; min-height: 30px; }
-"""
+# The window's own sheet, in the desktop's colours. The card stays white: it holds the QR code.
+CSS = f"""
+window {{ background-color: {_C["surface.window"]}; color: {_C["text.primary"]}; }}
+.title {{ font-size: 17px; font-weight: 700; }}
+.muted {{ color: {_C["text.tertiary"]}; font-size: 12.5px; }}
+.url {{ font-family: "JetBrains Mono", monospace; font-size: 12px; color: {_C["accent"]}; }}
+.status {{ color: {_C["ok"]}; font-size: 12.5px; }}
+.card {{ background-color: {_C["white"]}; border-radius: 14px; padding: 12px; }}
+button.stop {{ background-image: none; background-color: {_C["danger"]}; color: {_C["text.on-accent"]};
+              border: none; border-radius: 8px; min-height: 30px; }}
+button.quiet {{ background-image: none; background-color: {_css("white", 8)}; color: {_C["text.primary"]};
+               border: none; border-radius: 8px; min-height: 30px; }}
+""".encode()
 
 
 def main(argv):

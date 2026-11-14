@@ -10,7 +10,9 @@
 const { Clutter, GObject, Graphene, Meta } = imports.gi;
 const Main = imports.ui.main;
 
-const DURATION_MS = 520;
+const Me = imports.misc.extensionUtils.getCurrentExtension();
+// The genie is long on purpose: the eye has to follow the window into its icon.
+const DURATION_MS = Me.imports.designTokens.GENIE_MS;
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const smooth = v => {

@@ -16,11 +16,13 @@ const CC = Me.imports.ccUtil;
 const Sparkline = Me.imports.sparkline;
 const Telemetry = Me.imports.telemetry;
 
-const ACCENT_CPU = '#0A84FF';
-const ACCENT_GPU = '#5E5CE6';
-const ACCENT_NET = '#64D2FF';
-const WARNING = '#FF9F0A';
-const DANGER = '#FF453A';
+// chart series and status colours, from the tokens
+const { COLOR } = Me.imports.designTokens;
+const ACCENT_CPU = COLOR['series.1'];
+const ACCENT_GPU = COLOR['series.2'];
+const ACCENT_NET = COLOR['series.3'];
+const WARNING = COLOR['warn'];
+const DANGER = COLOR['danger'];
 
 const CONFIG_PATH = GLib.build_filenamev(
     [GLib.get_user_config_dir(), 'adaptive-desktop', 'system-panel.json']);

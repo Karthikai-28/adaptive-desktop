@@ -22,6 +22,7 @@ const Main = imports.ui.main;
 const ModalDialog = imports.ui.modalDialog;
 const Dialog = imports.ui.dialog;
 const PopupMenu = imports.ui.popupMenu;
+const Motion = imports.misc.extensionUtils.getCurrentExtension().imports.designTokens;
 
 // ----------------------------------------------------------------- settings
 
@@ -273,7 +274,7 @@ var WindowPreviews = class WindowPreviews {
         strip.set_position(x, Math.round(by - height - 10));
 
         strip.opacity = 0;
-        strip.ease({ opacity: 255, duration: 120, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+        strip.ease({ opacity: 255, duration: Motion.FEEDBACK_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
     }
 
     _preview(app, window) {

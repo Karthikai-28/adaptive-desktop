@@ -145,19 +145,19 @@ var ScreenText = class ScreenText {
         s.canvas = new St.DrawingArea({ width: global.screen_width, height: global.screen_height });
         s.actor.add_child(s.canvas);
         s.canvas.connect('repaint', () => this._paint(s));
-        const bar = new St.BoxLayout({ style: 'background-color: #1c1c1e; color: #f5f5f7; padding: 12px; spacing: 12px; border-radius: 12px;' });
+        const bar = new St.BoxLayout({ style_class: 'adaptive-screen-text-bar' });
         s.status = new St.Label({ text: 'Recognizing English text… · Esc cancels', y_align: Clutter.ActorAlign.CENTER });
         bar.add_child(s.status);
         s.copy = new St.Button({ label: 'Copy', can_focus: true, reactive: false,
-            style: 'background-color: #0a84ff; color: white; padding: 8px 16px; border-radius: 8px;' });
+            style_class: 'adaptive-screen-text-copy' });
         s.copy.opacity = 100;
         s.copy.connect('clicked', () => this._copy(s));
         bar.add_child(s.copy);
         const move = new St.Button({ label: 'Move', can_focus: true,
-            accessible_name: 'Move toolbar to the other edge', style: 'padding: 8px; color: #f5f5f7;' });
+            accessible_name: 'Move toolbar to the other edge', style_class: 'adaptive-screen-text-button' });
         bar.add_child(move);
         const cancel = new St.Button({ label: 'Cancel', can_focus: true,
-            style: 'padding: 8px 12px; color: #f5f5f7;' });
+            style_class: 'adaptive-screen-text-button adaptive-screen-text-cancel' });
         cancel.connect('clicked', () => this._close(s));
         bar.add_child(cancel);
         s.actor.add_child(bar);

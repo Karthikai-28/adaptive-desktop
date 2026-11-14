@@ -24,6 +24,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TOKENS = REPO / "tokens" / "adaptive.tokens.json"
 BASELINE = REPO / "tokens" / "handwritten-colours.json"
+# written by build-tokens.py for the shell's JavaScript: generated, so its colours are not hand-written
+SHELL_TOKENS = REPO / "shell" / "adaptive-shell@local" / "designTokens.js"
+# the same for Python packages that are installed away from the checkout
+PYTHON_TOKENS = (REPO / "extension" / "adaptive_files" / "design_tokens.py",)
 
 SOURCE_SUFFIX = ".src.css"
 SKIP_DIRS = {".git", ".local", "vendor", "build", "dist", "node_modules", "logs", "__pycache__",
@@ -243,7 +247,7 @@ def count_colours(path):
 
 def handwritten(tokens):
     """{repo-relative path: count} for every file that still spells out colours."""
-    generated = {output_for(source) for source in sources()}
+    generated = {output_for(source) for source in sources()} | {SHELL_TOKENS, *PYTHON_TOKENS}
     found = {}
     for path in walk():
         relative = str(path.relative_to(REPO))

@@ -15,6 +15,7 @@ const DND = imports.ui.dnd;
 const ExtensionUtils = imports.misc.extensionUtils;
 
 const Me = ExtensionUtils.getCurrentExtension();
+const Motion = Me.imports.designTokens;
 const DockExtras = Me.imports.dockExtras;
 
 var ShellDock = class ShellDock {
@@ -1009,7 +1010,7 @@ var ShellDock = class ShellDock {
                 scale_x: scale,
                 scale_y: scale,
                 translation_y: lift,
-                duration: 120,
+                duration: Motion.FEEDBACK_MS,
                 mode:
                     Clutter.AnimationMode
                         .EASE_OUT_QUAD,

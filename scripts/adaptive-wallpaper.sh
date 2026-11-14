@@ -54,7 +54,8 @@ URI="file://$PICK"
 gsettings set org.gnome.desktop.background picture-uri "$URI"
 gsettings set org.gnome.desktop.background picture-uri-dark "$URI"
 gsettings set org.gnome.desktop.background picture-options 'zoom'
-gsettings set org.gnome.desktop.background primary-color '#141416'
+# what shows for a moment before the picture loads: the desktop's ground colour, from the tokens
+gsettings set org.gnome.desktop.background primary-color "$(python3 -c "import sys; sys.path.insert(0, '$REPO/scripts'); import adaptive_tokens; print(adaptive_tokens.load().hex('surface.ground'))")"
 gsettings set org.gnome.desktop.screensaver picture-uri "$URI"
 gsettings set org.gnome.desktop.screensaver picture-options 'zoom'
 

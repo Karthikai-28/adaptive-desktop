@@ -13,6 +13,7 @@ const PopupMenu = imports.ui.popupMenu;
 const ExtensionUtils = imports.misc.extensionUtils;
 
 const Me = ExtensionUtils.getCurrentExtension();
+const Motion = Me.imports.designTokens;
 const DockExtras = Me.imports.dockExtras;
 
 var ShellDockFeatures = class ShellDockFeatures {
@@ -226,11 +227,11 @@ var ShellDockFeatures = class ShellDockFeatures {
             }
             actor.ease({
                 translation_y: -Math.round(this._dockIconSize * 0.4),
-                duration: 190,
+                duration: Motion.PANEL_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 onComplete: () => actor.ease({
                     translation_y: 0,
-                    duration: 260,
+                    duration: Motion.STATE_MS,
                     mode: Clutter.AnimationMode.EASE_OUT_BOUNCE,
                     onComplete: () => once(remaining - 1),
                 }),

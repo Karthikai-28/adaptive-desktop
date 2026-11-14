@@ -47,9 +47,9 @@ const USER_HZ = 100;
 const PAGE_SIZE = 4096;
 
 // Thermal bands, from tokens/adaptive.tokens.json state.* colors.
-var THERMAL_OK = '#30D158';
-var THERMAL_WARM = '#FF9F0A';
-var THERMAL_HOT = '#FF453A';
+var THERMAL_OK = Me.imports.designTokens.COLOR['ok'];
+var THERMAL_WARM = Me.imports.designTokens.COLOR['warn'];
+var THERMAL_HOT = Me.imports.designTokens.COLOR['danger'];
 
 var tempColor = function (celsius) {
     if (!Number.isFinite(celsius))
