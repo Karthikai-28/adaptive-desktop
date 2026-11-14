@@ -101,10 +101,10 @@ Fingerprint sudo authentication remains unverified because recognition fails.
 The latest official libfprint 1.94.100 and fprintd 1.94.5 were subsequently built
 and tested in an isolated, reversible trial. Twelve selected upstream tests
 passed; an existing right-index enrollment failed recognition. The operator also
-reported a fresh enrollment followed by failed recognition, but its saved slot
-was right middle rather than the suggested left index. That comparison needs
-confirmation of the physical finger and verification slot. The packaged stack
-was restored. See the
+reported a fresh right-middle enrollment followed by failed recognition and
+confirmed using that physical finger. A repeat direct check of the exact saved
+slot with the latest stack returned `verify-no-match` (exit 1). The packaged
+stack was restored. See the
 [comparison and evidence](FINGERPRINT_DRIVER_TRIAL.md). The operator reports
 reliable recognition in Windows; Linux recognition remains unresolved.
 

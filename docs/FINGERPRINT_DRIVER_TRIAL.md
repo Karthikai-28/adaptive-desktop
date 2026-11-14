@@ -86,11 +86,16 @@ The existing right-index enrollment did not match under the latest stack. The
 operator then used a fresh instance of the animated enrollment window and reported
 successful enrollment followed by failed recognition. A subsequent metadata check
 found the new slot was **right-middle-finger**, although the suggested slot had
-been left index. The physical finger used and selected verification slot need
-confirmation before treating this as a controlled same-finger comparison.
-The trial was stopped and the packaged driver restored. No permanent driver
-replacement or change to matching thresholds was made. Recognition remains
-unresolved; successful enrollment alone is not evidence that unlock works.
+been left index. The operator confirmed using the physical **right middle
+finger**. The latest stack was loaded again and a direct
+`fprintd-verify -f right-middle-finger` check was started. After the operator
+touched that finger, it returned `verify-no-match (done)` and exited with status
+1. This rules out a Settings selection mismatch for that check.
+
+The trial was stopped and the packaged driver restored. The latest official
+stack did not fix recognition of this new enrollment. No permanent driver
+replacement or change to matching thresholds was made. Fingerprint unlock and
+sudo remain unresolved; successful enrollment alone is not evidence they work.
 
 During the trial, first test an existing registered finger. If it fails, register
 an unused finger with the new stack and verify that exact finger. Keep the finger

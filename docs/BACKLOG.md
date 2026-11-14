@@ -234,8 +234,9 @@ contains a Command icon. Search lives in the app process, never in the shell.
   recognition failure; see the driver references in `docs/FINGERPRINT.md`.
   Latest official libfprint 1.94.100 + fprintd 1.94.5 were built and passed 12
   targeted upstream tests, then tested live: the existing right index failed
-  recognition. A reported fresh-enrollment failure needs a same-finger recheck
-  because the saved slot differed from the suggested finger. The trial restored Ubuntu's
+  recognition. The operator confirmed a fresh right-middle enrollment used that
+  physical finger; a direct same-slot check also returned `verify-no-match`
+  (exit 1). The trial restored Ubuntu's
   packaged stack. `docs/FINGERPRINT_DRIVER_TRIAL.md` records the comparison.
 
 Settings is `gnome-control-center` under our skin, not a reimplementation.
