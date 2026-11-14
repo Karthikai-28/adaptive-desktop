@@ -17,7 +17,8 @@ is none.
 
 Today is the hub's page. Every other tab is a site kept open in a view of its own with a profile
 of its own (~/.local/share/adaptive-desktop/mario/web: signed in there once, it stays signed in),
-laid over the rectangle the page reports. Links that leave a tab's site open in the browser.
+laid over the rectangle the page reports. Signing in happens inside the tab; links that leave a
+tab's site open in the browser (site_rules.py decides which is which).
 
 GTK 3 + WebKitGTK (gir1.2-webkit2-4.1, or 4.0), as on Ubuntu 22.04; X11.
 """
@@ -37,6 +38,9 @@ for _v in ("4.1", "4.0"):
     except ValueError:
         continue
 from gi.repository import Gdk, Gio, GLib, Gtk, WebKit2  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_rules  # noqa: E402
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "adaptive-desktop" / "mario.json"
 PANEL_W = 760
@@ -100,11 +104,6 @@ def workarea():
     return monitor.get_workarea()
 
 
-def base_domain(uri):
-    host = (GLib.Uri.parse(uri, GLib.UriFlags.NONE).get_host() or "") if uri else ""
-    return ".".join(host.split(".")[-2:])
-
-
 def now(win):
     """A timestamp the window manager accepts for giving a window the keyboard."""
     try:
@@ -122,6 +121,8 @@ class Home(Gtk.Application):
         super().__init__(application_id="com.karthi.MarioHome", flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
         self.win = self.page = self.overlay = None
         self.sites = {}          # tab id -> its view
+        self.signing_in = {}     # tab id -> its view is on a sign-in page
+        self.sent_to_sign_in = set()
         self.site_context = None
         self.shown_at = 0
         self.hiding = False
@@ -271,7 +272,7 @@ class Home(Gtk.Application):
             return
         view = self.sites.get(tab)
         if not view:
-            view = self.sites[tab] = self.site_view(url)
+            view = self.sites[tab] = self.site_view(tab, url)
             self.overlay.add_overlay(view)
         self.fit(view, rect)
         view.show()
@@ -286,7 +287,7 @@ class Home(Gtk.Application):
         view.set_margin_top(y)
         view.set_size_request(width, height)
 
-    def site_view(self, url):
+    def site_view(self, tab, url):
         """A site's own view. All sites share one profile, kept apart from every other browser."""
         if not self.site_context:
             data = Path(GLib.get_user_data_dir()) / "adaptive-desktop" / "mario" / "web"
@@ -298,26 +299,64 @@ class Home(Gtk.Application):
                 str(data / "cookies.sqlite"), WebKit2.CookiePersistentStorage.SQLITE)
         view = WebKit2.WebView.new_with_context(self.site_context)
         view.set_background_color(Gdk.RGBA(0.11, 0.11, 0.118, 1))
-        home = base_domain(url)
+
+        def send(uri, new_window=False, clicked=False):
+            """True when the view must not go there itself."""
+            where = site_rules.route(uri, url, new_window=new_window, clicked=clicked)
+            if where == site_rules.BROWSER:
+                Gio.AppInfo.launch_default_for_uri(uri, None)
+            elif where == site_rules.HERE:
+                view.load_uri(uri)
+            return where != site_rules.STAY
 
         def policy(_view, decision, kind):
+            # signing in stays here (a sign-in page in the browser signs the browser in, not Home);
             # a link that leaves the site (a link in a mail) belongs in the browser
             if kind in (WebKit2.PolicyDecisionType.NAVIGATION_ACTION, WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION):
                 action = decision.get_navigation_action()
-                uri = action.get_request().get_uri()
-                new_window = kind == WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION
-                clicked = action.get_navigation_type() == WebKit2.NavigationType.LINK_CLICKED
-                if uri.startswith(("http://", "https://")) and (new_window or clicked) and \
-                        (new_window or base_domain(uri) != home):
-                    Gio.AppInfo.launch_default_for_uri(uri, None)
+                if send(action.get_request().get_uri(),
+                        new_window=kind == WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION,
+                        clicked=action.get_navigation_type() == WebKit2.NavigationType.LINK_CLICKED):
                     decision.ignore()
                     return True
             return False
 
+        def popup(_view, action):
+            # window.open(): there is one view per tab, so the page it asks for is routed, not opened
+            send(action.get_request().get_uri(), new_window=True)
+            return None
+
+        def loaded(_view, event):
+            if event != WebKit2.LoadEvent.COMMITTED:
+                return
+            uri = view.get_uri() or ""
+            sign_in = site_rules.signed_out_landing(uri, url)
+            if sign_in and tab not in self.sent_to_sign_in:     # once, so it cannot go round
+                self.sent_to_sign_in.add(tab)
+                view.load_uri(sign_in)
+                return
+            was = self.signing_in.get(tab, False)
+            self.signing_in[tab] = bool(sign_in) or site_rules.is_sign_in(uri, url)
+            if site_rules.host(uri) == site_rules.host(url):
+                self.sent_to_sign_in.discard(tab)
+                if was:
+                    self.signed_in(tab)
+
         view.connect("decide-policy", policy)
+        view.connect("create", popup)
+        view.connect("load-changed", loaded)
         view.connect("web-process-terminated", lambda v, *_: v.load_uri(url))
+        view.tab_url = url
         view.load_uri(url)
         return view
+
+    def signed_in(self, tab):
+        """The sites share one profile: signed in on one tab, the others still showing a sign-in
+        page are signed in too and only have to load again."""
+        for name, view in self.sites.items():
+            if name != tab and self.signing_in.get(name):
+                self.sent_to_sign_in.discard(name)
+                view.load_uri(view.tab_url)
 
 
 class Panel(Gtk.Application):

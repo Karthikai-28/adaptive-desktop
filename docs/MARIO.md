@@ -87,7 +87,13 @@ and Calendar (Google Calendar); another site is one more line:
          {"id": "sheets", "name": "Sheets", "url": "https://docs.google.com/spreadsheets/u/0/"}]
 ```
 
-A link that leaves a tab's own site (a link inside a mail) opens in the browser.
+Signing in happens inside the tab, never in the browser: the browser has its own profile, so a
+sign-in there leaves Home signed out. Signed out, Google sends Calendar and Gmail to an advert for
+the product whose "Sign in" link asks for a new window; Home skips that page for Google's sign-in
+form and loads any sign-in page a site opens (also "Add another account") in the tab's own view.
+The tabs share one profile, so one sign-in serves them all: the others load again by themselves.
+A link that leaves a tab's own site (a link inside a mail, a document, a pop-out window) opens in
+the browser. The rules are `apps/mario-home/site_rules.py` (pure, checked by `verify-mario.py`).
 `scripts/adaptive-home.sh show mail` opens Home on a tab directly.
 
 **Ground.** Home sits on glass: the wallpaper blurred once into

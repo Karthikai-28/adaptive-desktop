@@ -612,6 +612,33 @@ def test_page():
     check("Home's tabs: Today is the page, sites get their own view and profile, outside links go to the browser",
           all(x in host for x in ("script-message-received::home", "add_overlay", "set_persistent_storage", "launch_default_for_uri"))
           and all(x in script for x in ("window.homeSpace", "selectTab(", 'tell({ type: "tab"', "webRect()")))
+    sys.path.insert(0, str(REPO / "apps" / "mario-home"))
+    import site_rules as rules
+    mail_tab, cal_tab = "https://mail.google.com/mail/u/0/", "https://calendar.google.com/calendar/u/0/r"
+    sign_in = "https://accounts.google.com/ServiceLogin/identifier?continue=https://calendar.google.com/calendar/r"
+    check("signing in to a tab stays in Home: a \"Sign in\" link that asks for a new window loads in the tab's view",
+          rules.route(sign_in, cal_tab, new_window=True) == rules.HERE
+          and rules.route("https://accounts.google.com/AddSession?continue=x", mail_tab, new_window=True) == rules.HERE
+          and rules.route(sign_in, cal_tab) == rules.STAY and rules.route(sign_in, cal_tab, clicked=True) == rules.STAY
+          and "site_rules.route(" in host and '"create"' in host)
+    check("what leaves a tab's site still opens in the browser (a link in a mail, a document, a pop-out)",
+          rules.route("https://example.org/offer", mail_tab, clicked=True) == rules.BROWSER
+          and rules.route("https://docs.google.com/document/d/1", mail_tab, new_window=True) == rules.BROWSER
+          and rules.route("https://mail.google.com/mail/u/0/?view=btop", mail_tab, new_window=True) == rules.BROWSER
+          and rules.route("https://accounts.example.org/login", mail_tab, new_window=True) == rules.BROWSER
+          and rules.route("about:blank", mail_tab, new_window=True) == rules.STAY)
+    landing = rules.signed_out_landing("https://workspace.google.com/intl/en-US/products/calendar/", cal_tab)
+    check("signed out, Google's advert for Calendar or Gmail is skipped for the sign-in page that comes back to the tab",
+          landing == "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fcalendar.google.com%2Fcalendar%2Fu%2F0%2Fr"
+          and rules.signed_out_landing("https://www.google.com/intl/en/gmail/about/", mail_tab)
+          and rules.signed_out_landing(cal_tab, cal_tab) is None
+          and rules.signed_out_landing("https://accounts.google.com/v3/signin/identifier", cal_tab) is None
+          and rules.signed_out_landing("https://workspace.google.com/", "https://example.org/") is None
+          and "sent_to_sign_in" in host)
+    check("one sign-in serves every tab: the tabs still on a sign-in page load again",
+          "def signed_in" in host and "view.load_uri(view.tab_url)" in host
+          and rules.is_sign_in(sign_in, mail_tab) and not rules.is_sign_in(mail_tab, mail_tab)
+          and not rules.is_sign_in("https://accounts.example.org/", mail_tab))
     toggle = (REPO / "scripts" / "adaptive-home.sh").read_text()
     entry = (REPO / "apps" / "mario-home" / "adaptive-mario-home.desktop").read_text()
     check("Super+H sends a message to the running Home and starts it only when there is none",
