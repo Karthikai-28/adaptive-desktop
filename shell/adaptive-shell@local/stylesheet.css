@@ -683,8 +683,10 @@
     font-family: Inter;
 }
 
+/* The clock starts on the same line as the cards' contents below it, and the
+ * uptime chip ends where "Clear all" does. */
 .adaptive-shade-header {
-    padding: 2px 6px 0 8px;
+    padding: 2px 14px 0 18px;
     spacing: 12px;
 }
 
@@ -726,19 +728,22 @@
  * Notifications — header row, empty state, grouped cards
  * --------------------------------------------------------------- */
 
-/* Yaru draws a right-hand border on the list - the stray vertical line - and
- * pads it for a scrollbar the overlay scrollbars never need. */
+/* Yaru draws a right-hand border on the list - the stray vertical line. The
+ * scrollbar is an overlay: it is drawn over the right edge of whatever
+ * scrolls, so the cards stop short of it (the gutter on .message-list-sections)
+ * instead of losing their right border and corners under it. Both sides of a
+ * card end up 14px from the panel. */
 #calendarArea .adaptive-shade .message-list,
 #calendarArea .adaptive-shade .message-list:ltr {
     margin: 0;
-    padding: 12px 10px 10px 12px;
+    padding: 12px 4px 10px 14px;
     border-width: 1px;
 }
 
 #calendarArea .message-list-sections,
 #calendarArea .message-list-sections:ltr {
     margin: 0;
-    padding: 0;
+    padding: 0 10px 0 0;
     spacing: 10px;
 }
 
@@ -749,8 +754,8 @@
 
 /* GNOME's controls row, moved to the top by shade.js. */
 #calendarArea .message-list-controls.adaptive-notif-header {
-    padding: 0 0 10px 4px;
-    spacing: 10px;
+    padding: 0 10px 10px 4px;
+    spacing: 8px;
     border-width: 0;
 }
 
@@ -913,9 +918,19 @@
     background-color: #FF453A;
 }
 
+/* The heading row holds a title, a count, this action, Do Not Disturb and
+ * Clear all in one line: the action carries no margin of its own, or the title
+ * is the one that gives way and reads "Notificati...". */
+.adaptive-notif-heading-action {
+    margin: 0;
+}
+
+.adaptive-notif-group-clear {
+    margin: 0 4px;
+}
+
 .adaptive-notif-group-clear,
 .adaptive-notif-heading-action {
-    margin: 0 4px;
     padding: 2px 8px;
     border-radius: 999px;
     color: #0A84FF;
@@ -1025,7 +1040,10 @@
     font-size: 12px;
 }
 
+/* GNOME puts the time at the bottom of the title row, whose height is the
+ * close button's; the title is at the top. Lifted, the two share a baseline. */
 #calendarArea .message .message-secondary-bin > .event-time {
+    padding-bottom: 8px;
     color: #A4A4A7;
     font-feature-settings: "tnum";
     font-size: 11px;

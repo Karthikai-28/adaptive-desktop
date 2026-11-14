@@ -599,6 +599,16 @@ var GroupedNotificationSection = GObject.registerClass({
             group.setExpanded(expanded);
     }
 
+    // True when some group is long enough to fold: only then is there
+    // anything for "Expand all" to do.
+    get hasCollapsible() {
+        for (const group of this._groups.values()) {
+            if (group.messages.length > COLLAPSE_AFTER)
+                return true;
+        }
+        return false;
+    }
+
     vfunc_map() {
         for (const group of this._groups.values()) {
             for (const message of group.messages) {

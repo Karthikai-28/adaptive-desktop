@@ -319,6 +319,33 @@ print(",".join(str(b) for b in png))')"
     WATCHDOG="$HOME/.cache/adaptive-desktop/shell-watchdog.json"
     grep -q '"tripped":false' "$WATCHDOG"; check $? "watchdog recorded this start"
 
+    # ------------------------------------------------- notification center
+    # Laid out, not just built: the heading row has to fit its title, and a card
+    # must end before the overlay scrollbar instead of under it.
+    if command -v notify-send >/dev/null; then
+        SHADE='const find = (a, cls) => { if (a.has_style_class_name && a.has_style_class_name(cls)) return a;
+                for (const c of a.get_children()) { const r = find(c, cls); if (r) return r; } return null; };
+            const shade = async () => { const dm = Main.panel.statusArea.dateMenu; dm.menu.open(); await sleep(1500);
+                const box = dm.menu.box, view = dm._messageList._scrollView;
+                const title = find(box, "adaptive-notif-heading-label"), all = find(box, "adaptive-notif-heading-action");
+                const card = find(box, "adaptive-notif-group");
+                const out = [title.clutter_text.get_layout().is_ellipsized(), all.visible, view.vscrollbar_visible,
+                    Math.round(card.get_transformed_position()[0] + card.width),
+                    Math.round(view.vscroll.get_transformed_position()[0])];
+                dm.menu.close(); await sleep(400); return out; };'
+        notify-send -a "Sandbox Mail" "One message" "The only one from this app" 2>/dev/null; sleep 1.5
+        one="$(probe "$SLEEP $SHADE return shade();")"
+        python3 -c 'import json,sys; cut, all_, *_ = json.loads(sys.argv[1]); sys.exit(0 if not cut and not all_ else 1)' "$one" 2>/dev/null
+        check $? "the shade's heading reads \"Notifications\" in full, with no Expand all while no group folds ($one)"
+        for n in 1 2 3 4 5; do notify-send -a "Sandbox Files" "Copy $n finished" "$n items copied" 2>/dev/null; done
+        notify-send -u critical -a "Sandbox Power" "Battery low" "12% remaining" 2>/dev/null; sleep 2
+        many="$(probe "$SLEEP $SHADE return shade();")"
+        python3 -c 'import json,sys; cut, all_, bar, right, left = json.loads(sys.argv[1]); sys.exit(0 if not cut and all_ and bar and right < left else 1)' "$many" 2>/dev/null
+        check $? "with a folded group Expand all appears, and the cards end before the scrollbar ($many)"
+    else
+        echo "SKIP notification center layout: no notify-send"
+    fi
+
     for extra in "${EXTRAS[@]}"; do
         # shellcheck disable=SC1090
         . "$extra"

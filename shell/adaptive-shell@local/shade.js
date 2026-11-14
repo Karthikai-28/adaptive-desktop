@@ -341,7 +341,7 @@ var Shade = class Shade {
                 this._groupToggle.accessible_name = this._groupToggle.label +
                     ' notification groups';
             });
-            this._groupToggle.visible = !!this._grouped;
+            this._groupToggle.visible = false;      // _syncNotifCount shows it when a group folds
             heading.add_child(this._groupToggle);
             controls.insert_child_at_index(heading, 0);
             this._notifHeading = heading;
@@ -374,6 +374,9 @@ var Shade = class Shade {
         const count = this._grouped.count;
         this._notifCount.text = `${count}`;
         this._notifCount.visible = count > 0;
+        // "Expand all" with nothing folded is a button that does nothing
+        if (this._groupToggle)
+            this._groupToggle.visible = this._grouped.hasCollapsible;
     }
 
     _removeNotificationHeader() {
