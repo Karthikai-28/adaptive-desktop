@@ -1,7 +1,6 @@
 {
   "_about": "Colour values still written by hand, per file. scripts/build-tokens.py --check lets a count go down, never up; done is an empty list. Lower it with --rebaseline.",
   "files": {
-    "apps/adaptive-annotate/main.py": 10,
     "apps/adaptive-cast/player.html": 8,
     "apps/adaptive-cast/wall.html": 11,
     "apps/adaptive-link-android/app/src/main/java/com/karthi/adaptivelink/Approval.kt": 7,
@@ -17,11 +16,8 @@
     "apps/adaptive-link-android/app/src/main/java/com/karthi/adaptivelink/Screens.kt": 80,
     "apps/adaptive-link-android/app/src/main/java/com/karthi/adaptivelink/ShareActivity.kt": 7,
     "apps/adaptive-link-android/app/src/main/java/com/karthi/adaptivelink/Widgets.kt": 4,
-    "apps/adaptive-projects/main.py": 10,
     "apps/adaptive-tv/app/home.js": 5,
     "apps/adaptive-tv/app/model.js": 5,
-    "scripts/adaptive-quick-note.py": 6,
-    "services/adaptive-link/pair_window.py": 6,
     "services/agent-office/static/app.js": 5,
     "services/agent-office/static/tokens.js": 8
   }

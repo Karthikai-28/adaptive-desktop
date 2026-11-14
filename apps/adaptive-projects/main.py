@@ -12,6 +12,7 @@ Ordering is by last commit, most recent first, which is the order that answers
 import json
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -24,6 +25,20 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 APP_ID = "com.karthi.AdaptiveProjects"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
+
+# Colours come from the tokens: for Pango markup as hex, for cairo as three floats.
+sys.path.insert(0, str(REPO / "scripts"))
+import adaptive_tokens  # noqa: E402
+
+_TOKENS = adaptive_tokens.load()
+HEX = {name: _TOKENS.hex(name) for name in ("accent", "ok", "warn", "indigo", "text.disabled", "line.solid")}
+
+
+def _rgb(name):
+    return tuple(part / 255 for part in adaptive_tokens.rgb(_TOKENS.hex(name)))
+
+
+ACCENT, CYAN, INDIGO, WARN = _rgb("accent"), _rgb("cyan"), _rgb("indigo"), _rgb("warn")
 REGISTRY = Path.home() / ".config/adaptive-desktop/projects.json"
 
 # Notes live outside the repositories they describe, so reading a project
@@ -571,9 +586,9 @@ class Projects(Gtk.ApplicationWindow):
                 cr.rectangle(0, 0, width, height)
                 cr.fill()
                 if hands > 2:
-                    cr.set_source_rgba(0.95, 0.79, 0.42, 0.9)
+                    cr.set_source_rgba(*WARN, 0.9)
                 else:
-                    cr.set_source_rgba(0.47, 0.66, 1.0, 0.9)
+                    cr.set_source_rgba(*ACCENT, 0.9)
                 cr.rectangle(0, 0, width * share, height)
                 cr.fill()
 
@@ -657,11 +672,11 @@ class Projects(Gtk.ApplicationWindow):
     def _md_inline(self, body):
         """Inline markdown to Pango markup. Input must already be escaped."""
         body = re.sub(r"`([^`]+)`",
-                      r'<tt><span foreground="#0A84FF">\1</span></tt>', body)
+                      rf'<tt><span foreground="{HEX["accent"]}">\1</span></tt>', body)
         body = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", body)
         body = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?![*\w])", r"<i>\1</i>", body)
         body = re.sub(r"\[([^\]]+)\]\([^)]*\)",
-                      r'<span foreground="#0A84FF" underline="single">\1</span>',
+                      rf'<span foreground="{HEX["accent"]}" underline="single">\1</span>',
                       body)
         return body
 
@@ -682,8 +697,8 @@ class Projects(Gtk.ApplicationWindow):
         enough to make a block readable without a parser per language."""
         def paint(match):
             kind = match.lastgroup
-            colour = {"str": "#30D158", "com": "#636366",
-                      "num": "#FF9F0A", "kw": "#5E5CE6"}[kind]
+            colour = {"str": HEX["ok"], "com": HEX["text.disabled"],
+                      "num": HEX["warn"], "kw": HEX["indigo"]}[kind]
             weight = ' weight="bold"' if kind == "kw" else ""
             style = ' style="italic"' if kind == "com" else ""
             return (f'<span foreground="{colour}"{weight}{style}>'
@@ -761,15 +776,15 @@ class Projects(Gtk.ApplicationWindow):
             number = re.match(r"^(\s*)(\d+)\.\s+(.*)$", body)
 
             if quote:
-                body = ('<span foreground="#0A84FF">\u2503</span>  '
+                body = (f'<span foreground="{HEX["accent"]}">\u2503</span>  '
                         f"<i>{quote.group(1)}</i>")
             elif bullet:
                 body = (f"{bullet.group(1)}   "
-                        f'<span foreground="#0A84FF">\u2022</span>  '
+                        f'<span foreground="{HEX["accent"]}">\u2022</span>  '
                         f"{bullet.group(2)}")
             elif number:
                 body = (f"{number.group(1)}   "
-                        f'<span foreground="#0A84FF">{number.group(2)}.</span>'
+                        f'<span foreground="{HEX["accent"]}">{number.group(2)}.</span>'
                         f"  {number.group(3)}")
 
             out.append(self._md_inline(body))
@@ -848,7 +863,7 @@ class Projects(Gtk.ApplicationWindow):
                               for i, cell in enumerate(row))
             if index == 0:
                 out.append(f"<b>{cells}</b>")
-                out.append('<span foreground="#48484A">'
+                out.append(f'<span foreground="{HEX["line.solid"]}">'
                            + "\u2500" * min(len(cells), 92) + "</span>")
             else:
                 out.append(cells)
@@ -1556,10 +1571,8 @@ class Projects(Gtk.ApplicationWindow):
 
                     if count:
                         level = min(1.0, count / max(peak, 1))
-                        # cyan -> accent as the day gets busier
-                        cr.set_source_rgba(0.40 + 0.07 * level,
-                                           0.66 + 0.02 * level,
-                                           1.0, 0.22 + 0.78 * level)
+                        # the accent, stronger as the day gets busier
+                        cr.set_source_rgba(*ACCENT, 0.22 + 0.78 * level)
                     else:
                         cr.set_source_rgba(1, 1, 1, 0.05)
 
@@ -1607,18 +1620,18 @@ class Projects(Gtk.ApplicationWindow):
                 cr.line_to(*point(i))
             cr.line_to(width, height)
             cr.close_path()
-            cr.set_source_rgba(0.47, 0.66, 1.0, 0.16)
+            cr.set_source_rgba(*ACCENT, 0.16)
             cr.fill()
 
             cr.set_line_width(2)
-            cr.set_source_rgb(0.47, 0.66, 1.0)
+            cr.set_source_rgb(*ACCENT)
             cr.move_to(*point(0))
             for i in range(1, weeks):
                 cr.line_to(*point(i))
             cr.stroke()
 
             x, y = point(weeks - 1)
-            cr.set_source_rgb(0.40, 0.88, 1.0)
+            cr.set_source_rgb(*CYAN)
             cr.arc(x, y, 3.5, 0, 2 * 3.14159)
             cr.fill()
 
@@ -1656,7 +1669,7 @@ class Projects(Gtk.ApplicationWindow):
                     cx = left + hour * cell_w + cell_w / 2
                     cy = top + day * cell_h + cell_h / 2
 
-                    cr.set_source_rgba(0.40, 0.88, 1.0, 0.35 + 0.65 * share)
+                    cr.set_source_rgba(*CYAN, 0.35 + 0.65 * share)
                     cr.arc(cx, cy, radius, 0, 2 * 3.14159)
                     cr.fill()
 
@@ -1695,7 +1708,7 @@ class Projects(Gtk.ApplicationWindow):
                 cr.set_source_rgba(1, 1, 1, 0.06)
                 cr.rectangle(0, 0, width, height)
                 cr.fill()
-                cr.set_source_rgba(0.60, 0.55, 1.0, 0.85)
+                cr.set_source_rgba(*INDIGO, 0.85)
                 cr.rectangle(0, 0, width * share, height)
                 cr.fill()
 
@@ -1780,7 +1793,7 @@ class Projects(Gtk.ApplicationWindow):
                 cr.set_source_rgba(1, 1, 1, 0.06)
                 cr.rectangle(0, 0, width, height)
                 cr.fill()
-                cr.set_source_rgb(0.47, 0.66, 1.0)
+                cr.set_source_rgb(*ACCENT)
                 cr.rectangle(0, 0, width * share, height)
                 cr.fill()
 

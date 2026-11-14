@@ -25,18 +25,22 @@ from adaptive_files import qr  # noqa: E402 - the same encoder the Files share d
 
 APP_ID = "com.karthi.AdaptiveLinkPair"
 
-CSS = b"""
-window.pair { background-color: #1C1C1E; color: #F5F5F7; font-family: Inter, sans-serif; }
+sys.path.insert(0, str(HERE.parent.parent / "scripts"))
+import adaptive_tokens  # noqa: E402
+
+# The card stays white: it holds the QR code the phone scans.
+CSS = adaptive_tokens.sheet("""
+window.pair { background-color: $surface.window; color: $text.primary; font-family: Inter, sans-serif; }
 .pair-box { padding: 22px 26px; }
 .pair-title { font-size: 18px; font-weight: 700; }
-.pair-muted { color: #98989D; font-size: 13px; }
+.pair-muted { color: $text.tertiary; font-size: 13px; }
 .pair-code { font-size: 34px; font-weight: 700; letter-spacing: 4px; }
-.pair-card { background-color: #FFFFFF; border-radius: 14px; padding: 12px; }
-button.pair-primary { background: none; background-color: #0A84FF; color: white; border: none;
+.pair-card { background-color: $white; border-radius: 14px; padding: 12px; }
+button.pair-primary { background: none; background-color: $accent; color: $text.on-accent; border: none;
                       border-radius: 9px; min-height: 34px; padding: 0 18px; }
-button.pair-quiet { background: none; background-color: alpha(white, 0.08); color: #F5F5F7;
+button.pair-quiet { background: none; background-color: $fill.2; color: $text.primary;
                     border: none; border-radius: 9px; min-height: 34px; padding: 0 18px; }
-"""
+""", "pair_window.py")
 
 
 class PairWindow(Gtk.ApplicationWindow):

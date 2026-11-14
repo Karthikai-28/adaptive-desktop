@@ -80,14 +80,16 @@ def main():
     project = active_project_name()
     target = inbox_path(project)
 
-    css = b"""
-    window.quick-note { background-color: #1C1C1E; color: #F5F5F7; font-family: Inter, sans-serif; }
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import adaptive_tokens
+    css = adaptive_tokens.sheet("""
+    window.quick-note { background-color: $surface.window; color: $text.primary; font-family: Inter, sans-serif; }
     .qn-box { padding: 16px 18px; }
-    .qn-title { font-size: 13px; font-weight: 600; color: #98989D; }
+    .qn-title { font-size: 13px; font-weight: 600; color: $text.tertiary; }
     .qn-entry { min-height: 38px; font-size: 15px; border-radius: 10px;
-                background-color: #141416; color: #F5F5F7; }
-    .qn-recent { font-size: 12px; color: #8E8E93; }
-    """
+                background-color: $surface.ground; color: $text.primary; }
+    .qn-recent { font-size: 12px; color: $text.quaternary; }
+    """, "adaptive-quick-note.py")
 
     class QuickNote(Gtk.ApplicationWindow):
         def __init__(self, app):

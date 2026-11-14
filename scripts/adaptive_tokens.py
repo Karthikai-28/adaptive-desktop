@@ -177,6 +177,12 @@ def load():
     return Tokens(json.loads(TOKENS.read_text(encoding="utf-8")))
 
 
+def sheet(text, where="embedded stylesheet"):
+    """A stylesheet written inside a Python program, with its $tokens resolved, as bytes for
+    Gtk.CssProvider.load_from_data. For the small windows that carry their sheet with them."""
+    return load().compile_css(text, where).encode()
+
+
 # ---- sources and outputs ---------------------------------------------------------------------
 
 def walk(root=REPO):

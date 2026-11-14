@@ -34,17 +34,20 @@ import shapes as S  # noqa: E402
 APP_ID = "com.karthi.AdaptiveAnnotate"
 SAVE_DIR = Path.home() / "Pictures" / "Screenshots"
 
-CSS = b"""
-window.annotate { background-color: #1C1C1E; color: #F5F5F7; font-family: Inter, sans-serif; }
-.an-bar { padding: 8px 10px; background-color: #2C2C2E; border-bottom: 1px solid #48484A; }
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+import adaptive_tokens  # noqa: E402
+
+CSS = adaptive_tokens.sheet("""
+window.annotate { background-color: $surface.window; color: $text.primary; font-family: Inter, sans-serif; }
+.an-bar { padding: 8px 10px; background-color: $surface.card; border-bottom: 1px solid $line.solid; }
 .an-bar button { min-height: 30px; padding: 0 10px; border-radius: 8px; background: none;
-                 border: none; box-shadow: none; color: #F5F5F7; }
-.an-bar button:hover { background-color: #3A3A3C; }
-.an-bar button:checked { background-color: #0A84FF; color: white; }
+                 border: none; box-shadow: none; color: $text.primary; }
+.an-bar button:hover { background-color: $surface.raised; }
+.an-bar button:checked { background-color: $accent; color: $text.on-accent; }
 .an-swatch { min-width: 22px; min-height: 22px; padding: 0; border-radius: 11px; }
-.an-status { font-size: 12px; color: #98989D; }
-.an-entry { min-height: 30px; border-radius: 8px; background-color: #141416; color: #F5F5F7; }
-"""
+.an-status { font-size: 12px; color: $text.tertiary; }
+.an-entry { min-height: 30px; border-radius: 8px; background-color: $surface.ground; color: $text.primary; }
+""", "adaptive-annotate")
 
 TOOL_LABELS = (
     ("arrow", "Arrow", "a"), ("rect", "Box", "r"), ("pen", "Pen", "p"),
