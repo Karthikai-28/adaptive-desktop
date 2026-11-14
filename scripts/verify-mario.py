@@ -605,12 +605,27 @@ def test_page():
     check("live tiles turn on their own and pause under the pointer",
           "setInterval(" in script and ':hover' in script and all(f'setFaces("{c}"' in script for c in ("projects", "recent", "week", "weather")))
     host = (REPO / "apps" / "mario-home" / "host.py").read_text()
-    check("Home stays a plain desktop layer (no focus grab, never maximized or fullscreen, off the taskbar)",
-          all(x in host for x in ("WindowTypeHint.DESKTOP", "set_focus_on_map(False)", "unmaximize()", "unfullscreen()",
-                                  "set_skip_taskbar_hint(True)", "get_workarea()")))
+    check("Home is a layer you summon, not the desktop: above the windows, off the taskbar, hidden until asked",
+          all(x in host for x in ("WindowTypeHint.DOCK", "set_skip_taskbar_hint(True)", "get_workarea()", "--background",
+                                  "HANDLES_COMMAND_LINE", "def hide_home", "notify::is-active"))
+          and "WindowTypeHint.DESKTOP" not in host)
+    check("Home's tabs: Today is the page, sites get their own view and profile, outside links go to the browser",
+          all(x in host for x in ("script-message-received::home", "add_overlay", "set_persistent_storage", "launch_default_for_uri"))
+          and all(x in script for x in ("window.homeSpace", "selectTab(", 'tell({ type: "tab"', "webRect()")))
+    toggle = (REPO / "scripts" / "adaptive-home.sh").read_text()
+    entry = (REPO / "apps" / "mario-home" / "adaptive-mario-home.desktop").read_text()
+    check("Super+H sends a message to the running Home and starts it only when there is none",
+          "org.gtk.Actions.Activate" in toggle and "com.karthi.MarioHome" in toggle and "host.py" in toggle
+          and "--background" in entry)
+    gestures = (REPO / "scripts" / "adaptive-gestures.py").read_text()
+    check("showing the desktop (double Ctrl) sends Home away too, leaving the wallpaper",
+          '"hide", "[]", "{}"' in gestures and "com.karthi.MarioHome" in gestures)
+    check("Home's ground is the blurred wallpaper the hub serves",
+          '"/glass.png"' in (REPO / "services" / "mario-hub" / "hub.py").read_text() and "/glass.png?" in script and ".backdrop" in css)
     keys = (REPO / "scripts" / "install-keybindings.sh").read_text()
     check("Mario is on Super+J and Super+Space stays the keyboard-layout switch",
           '"adaptive-mario" "Mario"' in keys and '--panel" "<Super>j"' in keys
+          and 'adaptive-home.sh" "<Super>h"' in keys and """minimize "['<Super><Alt>h']\"""" in keys
           and "claim_accelerator org.gnome.desktop.wm.keybindings switch-input-source '<Super>space'" in keys
           and "release_accelerator org.gnome.desktop.wm.keybindings switch-input-source" not in keys)
     check("header links open only allowed sites", all(u.startswith(hub_mod.OPEN_URL_PREFIXES) for u in opens), str(opens))

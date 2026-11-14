@@ -108,8 +108,11 @@ class Hub:
 
     # ------------------------------------------------------------ state
     def public_config(self):
+        tabs = [{"id": str(x["id"]), "name": str(x.get("name") or x["id"]), "url": str(x["url"])}
+                for x in self.cfg.get("tabs") or [] if isinstance(x, dict) and x.get("id") and
+                str(x.get("url", "")).startswith("https://")]
         return {"backup_at": self.cfg.get("backup_at", ""), "cards_off": self.cfg.get("cards_off", []),
-                "host": os.uname().nodename,
+                "host": os.uname().nodename, "tabs": tabs,
                 "launch": {k: bool(shutil.which(v[0]) or Path(v[0]).exists() or (len(v) > 1 and Path(v[1]).exists()))
                            for k, v in LAUNCH.items()}}
 
@@ -499,6 +502,43 @@ class Hub:
 
 # ---------------------------------------------------------------- web
 
+GLASS = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "adaptive-desktop" / "glass.png"
+GLASS_TOOL = config_mod.ADAPTIVE_REPO / "shell" / "adaptive-shell@local" / "tools" / "glass_wallpaper.py"
+
+
+def glass_backdrop():
+    """Home's backdrop: the wallpaper blurred once (the same picture the shell puts behind Files).
+    The shell keeps it current; this makes it when it is missing or older than the wallpaper, so
+    Home does not depend on the shell having run. None when there is no wallpaper to read."""
+    env = {**os.environ, **collectors.session_env(), "DCONF_PROFILE": "adaptive"}
+    source = ""
+    for key in ("picture-uri-dark", "picture-uri"):
+        try:
+            out = subprocess.run(["gsettings", "get", "org.gnome.desktop.background", key], env=env,
+                                 capture_output=True, text=True, timeout=5).stdout.strip().strip("'")
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        path = out[7:] if out.startswith("file://") else out
+        if path and Path(path).is_file():
+            source = path
+            break
+    stamp = GLASS.with_suffix(".src")
+    wanted = f"{source}\n{Path(source).stat().st_mtime_ns}" if source else ""
+    try:
+        current = stamp.read_text()
+    except OSError:
+        current = None
+    if source and (current != wanted or not GLASS.is_file()):
+        try:
+            done = subprocess.run(["/usr/bin/python3", str(GLASS_TOOL), source, "1920", "1080", str(GLASS)],
+                                  capture_output=True, timeout=60)
+            if done.returncode == 0:
+                stamp.write_text(wanted)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return GLASS if GLASS.is_file() else None
+
+
 @web.middleware
 async def loopback_only(request, handler):
     """Refuse other hosts (DNS rebinding) and cross-site writes from pages in a browser."""
@@ -553,6 +593,12 @@ def make_app(hub, port):
         if data.get("spoken") is True:
             await hub.speak(result.get("error") or result.get("answer") or "Review the plan, then choose Run to start.")
         return web.json_response(result)
+
+    async def glass(_request):
+        path = await asyncio.to_thread(glass_backdrop)
+        if not path:
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
     async def voice(request):
         if request.content_type != "application/json":
@@ -617,6 +663,7 @@ def make_app(hub, port):
     app.router.add_get("/ws", ws)
     app.router.add_post("/api/ask", ask)
     app.router.add_post("/api/voice/{action}", voice)
+    app.router.add_get("/glass.png", glass)
     app.router.add_post("/api/handoff/{id}", handoff)
     app.router.add_post("/api/action", action)
     app.router.add_post("/api/presence", presence)

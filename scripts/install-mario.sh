@@ -235,6 +235,23 @@ systemctl --user daemon-reload
 systemctl --user enable --now "$UNIT" >/dev/null
 systemctl --user restart "$UNIT"
 adaptive_render "$REPO/apps/mario-home/adaptive-mario-home.desktop" "$AUTOSTART"
+# Home as an app: a dock button and a search result that do what Super+H does.
+chmod +x "$REPO/scripts/adaptive-home.sh"
+adaptive_render "$REPO/apps/mario-home/adaptive-home.desktop" "$HOME/.local/share/applications/adaptive-home.desktop"
+update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+if [ "${DCONF_PROFILE:-}" = adaptive ] || [ -n "${MARIO_PIN_HOME:-}" ]; then
+    # first in the dock, once; taking it out of the dock later is respected
+    PINNED="${XDG_STATE_HOME:-$HOME/.local/state}/adaptive-desktop/home-pinned"
+    if [ ! -e "$PINNED" ]; then
+        DCONF_PROFILE=adaptive python3 - <<'PY' && mkdir -p "$(dirname "$PINNED")" && touch "$PINNED"
+import ast, subprocess
+raw = subprocess.check_output(["gsettings", "get", "org.gnome.shell", "favorite-apps"], text=True).strip()
+apps = ast.literal_eval(raw.removeprefix("@as ").strip()) if raw else []
+if "adaptive-home.desktop" not in apps:
+    subprocess.run(["gsettings", "set", "org.gnome.shell", "favorite-apps", repr(["adaptive-home.desktop", *apps])], check=True)
+PY
+    fi
+fi
 
 for _ in 1 2 3 4 5 6 7 8 9 10; do
     curl -fsS -o /dev/null --max-time 1 "http://127.0.0.1:$(port)/api/state" 2>/dev/null && break
@@ -243,6 +260,6 @@ done
 echo
 check || true
 echo
-echo "  Home appears at the next Adaptive login, or now: $REPO/apps/mario-home/host.py &"
-echo "  Super+J opens Mario once scripts/install-keybindings.sh has run."
+echo "  Home is loaded at the next Adaptive login; show it now with: $REPO/scripts/adaptive-home.sh"
+echo "  Super+H shows and hides Home, Super+J opens Mario, once scripts/install-keybindings.sh has run."
 echo "  Connect Mail and Today: scripts/install-mario.sh --mail, then --calendar."

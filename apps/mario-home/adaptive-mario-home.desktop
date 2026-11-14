@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=Mario Home
-Comment=Mario's Home as the desktop: live builds, boards, reels and Mario
-Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/mario-home/host.py
-Icon=user-desktop
+Comment=Load Home at login, hidden, so Super+H shows it at once
+Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/mario-home/host.py --background
+Icon=go-home
 NoDisplay=true
 OnlyShowIn=GNOME;
 X-GNOME-Autostart-enabled=true

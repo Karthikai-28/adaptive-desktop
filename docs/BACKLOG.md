@@ -1120,11 +1120,14 @@ features: ideas go to a Later list and are built only if their absence has stopp
   (`verify-mario-ui.py`); 🔬 not yet tried with a real voice.
 - ✅ Mario answers with `claude-sonnet-5-5` by default (confirmed with a real question).
 
-- ⬜ Home stops being the desktop layer: one key (Super+H) and a dock button summon and dismiss
-  it; double Ctrl shows the bare wallpaper.
-- ⬜ Tabs: Today, Mail (Gmail), Calendar, Thinking Space, Mario; listed in `mario.json`.
-- ⬜ Today rebuilt (agenda, mail from people, projects, suggestions, capture); fits 1080 and 1200.
-  Apps, AI assistants, Phone, Recent files and self-turning tiles removed; News off Today.
+- 🔬 Home is a layer you summon, not the desktop (`host.py`, `scripts/adaptive-home.sh`): Super+H
+  and a dock button show and hide it over the work area; Escape or opening something sends it away;
+  double Ctrl leaves the bare wallpaper. Tried live through the command (19 ms, keyboard on Home,
+  hides cleanly); the Super+H key itself and double Ctrl still need pressing by hand.
+- 🔬 Tabs: Today plus the sites in `"tabs"` (`mario.json`), default Mail and Calendar, each in its
+  own view with a profile of its own. Gmail's sign-in page loads inside Home; signing in is the
+  operator's to do once.
+- ✅ Home's ground is the blurred wallpaper under a graphite tint (`/glass.png` from the hub).
 
 ### Phase 4 — motion
 

@@ -264,6 +264,11 @@ def cycle(step):
 def show_desktop():
     """Minimise everything, or restore it if the desktop is already bare, so a
     second swipe down undoes the first."""
+    # Home is a layer over the desktop, not a window in the stack: showing the desktop sends it
+    # away too, so what is left is the wallpaper.
+    subprocess.run(["gdbus", "call", "--session", "--dest", "com.karthi.MarioHome", "--object-path",
+                    "/com/karthi/MarioHome", "--method", "org.gtk.Actions.Activate", "hide", "[]", "{}"],
+                   capture_output=True, timeout=3)
     stack = windows()
     if not stack:
         return

@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
-"""Show Mario Hub's pages on the desktop: Home as the desktop layer, the panel on a key.
+"""Show Mario Hub's pages on the desktop: Home as a layer you summon, the panel on a key.
 
-    host.py            Home: a desktop-type window over the primary monitor's work area, under
-                       every other window and on every workspace (started at login, Adaptive
-                       session only)
-    host.py --panel    the Mario panel: a window at the right edge, above the others; running it
-                       again while it is open closes it (Super+J)
+    host.py --background   start Home loaded and hidden (the login entry does this, Adaptive session only)
+    host.py                show Home, or hide it if it is showing (Super+H; --toggle is the same)
+    host.py --show [TAB]   show Home, on Today or a tab from "tabs" in mario.json (mail, calendar, ...)
+    host.py --hide         hide Home
+    host.py --panel        the Mario panel: a window at the right edge, above the others; running it
+                           again while it is open closes it (Super+J)
 
-Both load http://127.0.0.1:<port>/ from Mario Hub and retry until it answers. GTK 3 + WebKitGTK
-(gir1.2-webkit2-4.1, or 4.0), as on Ubuntu 22.04; X11, where GNOME 42 honours the desktop hint.
+Home is not the desktop: the wallpaper is. Home is one window over the work area (the top bar
+stays), above every other window while it is up and gone when it is not, so whatever you were doing
+is untouched underneath. It hides when you press Escape, press its key again, or when another
+window takes the keyboard (you opened something from it). scripts/adaptive-home.sh is the fast
+way in for a key binding: it asks the running Home over D-Bus and only starts this file when there
+is none.
+
+Today is the hub's page. Every other tab is a site kept open in a view of its own with a profile
+of its own (~/.local/share/adaptive-desktop/mario/web: signed in there once, it stays signed in),
+laid over the rectangle the page reports. Links that leave a tab's site open in the browser.
+
+GTK 3 + WebKitGTK (gir1.2-webkit2-4.1, or 4.0), as on Ubuntu 22.04; X11.
 """
 import json
 import os
@@ -89,47 +100,224 @@ def workarea():
     return monitor.get_workarea()
 
 
-class Home(Gtk.Application):
-    def __init__(self):
-        super().__init__(application_id="com.karthi.MarioHome", flags=Gio.ApplicationFlags.FLAGS_NONE)
-        self.win = None
+def base_domain(uri):
+    host = (GLib.Uri.parse(uri, GLib.UriFlags.NONE).get_host() or "") if uri else ""
+    return ".".join(host.split(".")[-2:])
 
-    def do_activate(self):
-        if self.win:
-            return
+
+def now(win):
+    """A timestamp the window manager accepts for giving a window the keyboard."""
+    try:
+        gi.require_version("GdkX11", "3.0")
+        from gi.repository import GdkX11
+        return GdkX11.x11_get_server_time(win.get_window())
+    except (ValueError, ImportError, TypeError):
+        return Gtk.get_current_event_time() or GLib.get_monotonic_time() // 1000
+
+
+class Home(Gtk.Application):
+    """One instance per session; later launches hand it their arguments."""
+
+    def __init__(self):
+        super().__init__(application_id="com.karthi.MarioHome", flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = self.page = self.overlay = None
+        self.sites = {}          # tab id -> its view
+        self.site_context = None
+        self.shown_at = 0
+        self.hiding = False
+        self.had_keyboard = False     # since it was last shown
+        for name, param, call in (("toggle", None, lambda *_: self.toggle()),
+                                  ("show", GLib.VariantType.new("s"), lambda _a, v: self.show_home(v.get_string())),
+                                  ("hide", None, lambda *_: self.hide_home())):
+            action = Gio.SimpleAction.new(name, param)
+            action.connect("activate", call)
+            self.add_action(action)
+
+    # ---- the command line: the first launch and every later one ---------------------------
+    def do_command_line(self, line):
+        args = line.get_arguments()[1:]
+        fresh = self.win is None
+        if fresh:
+            self.build()
+        if "--background" in args:
+            pass                                  # loaded, waiting for its key
+        elif "--hide" in args:
+            self.hide_home()
+        elif "--show" in args:
+            rest = args[args.index("--show") + 1:]
+            self.show_home(rest[0] if rest and not rest[0].startswith("-") else "")
+        else:
+            self.toggle()
+        return 0
+
+    def build(self):
         win = Gtk.ApplicationWindow(application=self, title="Mario Home")
-        win.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
+        # A dock-type window sits above ordinary windows, is on every workspace, stays out of the
+        # taskbar and the window switcher, and the shell does not animate it: the fade is ours.
+        win.set_type_hint(Gdk.WindowTypeHint.DOCK)
         win.set_decorated(False)
         win.set_skip_taskbar_hint(True)
         win.set_skip_pager_hint(True)
-        win.set_keep_below(True)
-        win.set_focus_on_map(False)   # appearing at login never takes focus from an app
+        win.set_accept_focus(True)
         win.stick()
+        self.page = make_view("/")
+        manager = self.page.get_user_content_manager()
+        manager.register_script_message_handler("home")
+        manager.connect("script-message-received::home", self.from_page)
+        self.overlay = Gtk.Overlay()
+        self.overlay.add(self.page)
+        win.add(self.overlay)
+        win.connect("delete-event", lambda *_: (self.hide_home(), True)[1])
+        win.connect("key-press-event", self.key)
+        win.connect("notify::is-active", self.focus_moved)
+        Gdk.Screen.get_default().connect("monitors-changed", lambda *_: self.place())
+        self.win = win
+        self.place()
+        self.overlay.show()
+        self.page.show()
+        self.hold()                               # no window on screen, still running
 
-        def place(*_):
-            area = workarea()
-            win.move(area.x, area.y)
-            win.resize(area.width, area.height)
+    def place(self):
+        area = workarea()
+        self.win.move(area.x, area.y)
+        self.win.resize(area.width, area.height)
 
-        # The shell's dock hides for fullscreen or maximized windows and the top bar treats them
-        # as covering the screen. Home is neither: it fills the work area (which leaves out the top
-        # bar and the rail; the page keeps the floating dock's band free) and stays a plain desktop
-        # layer, so the dock, the top bar and everything on them keep working exactly as without it.
-        def stay_plain(_win, event):
-            state = event.new_window_state
-            if state & Gdk.WindowState.FULLSCREEN:
-                win.unfullscreen()
-            if state & Gdk.WindowState.MAXIMIZED:
-                win.unmaximize()
-                GLib.idle_add(lambda: (place(), False)[1])
+    # ---- show and hide ---------------------------------------------------------------------
+    def toggle(self):
+        if self.win.get_visible() and not self.hiding:
+            self.hide_home()
+        else:
+            self.show_home("")
+
+    def show_home(self, tab=""):
+        self.hiding = False
+        self.place()
+        if not self.win.get_visible():
+            self.had_keyboard = False
+            self.win.set_opacity(0)
+            self.win.show()
+            fade_in(self.win)
+        self.shown_at = GLib.get_monotonic_time()
+        self.win.present_with_time(now(self.win))
+        self.js(f"window.homeSpace && homeSpace.open({json.dumps(tab or '')})")
+
+    def hide_home(self):
+        if not self.win.get_visible() or self.hiding:
+            return
+        self.hiding = True
+        started = GLib.get_monotonic_time()
+
+        def step():
+            if not self.hiding:                   # shown again while fading out
+                return False
+            t = min(1.0, (GLib.get_monotonic_time() - started) / 120000)
+            self.win.set_opacity(1 - t)
+            if t < 1:
+                return True
+            self.win.hide()
+            self.win.set_opacity(1)
+            self.hiding = False
+            self.js("window.homeSpace && homeSpace.closed()")
             return False
 
-        win.connect("window-state-event", stay_plain)
-        place()
-        Gdk.Screen.get_default().connect("monitors-changed", place)
-        win.add(make_view("/"))
-        win.show_all()
-        self.win = win
+        GLib.timeout_add(16, step)
+
+    def focus_moved(self, *_):
+        """Another window has the keyboard: something was opened from Home, so Home steps aside.
+        Not at once: a menu or a moment without focus while Home is still arriving is not that."""
+        def check():
+            settled = GLib.get_monotonic_time() - self.shown_at > 600000
+            # only once Home has had the keyboard: if the window manager never gave it, hiding
+            # here would make Home flash up and vanish
+            if self.win.get_visible() and not self.win.is_active() and settled and self.had_keyboard:
+                self.hide_home()
+            return False
+        if self.win.is_active():
+            self.had_keyboard = True
+        else:
+            GLib.timeout_add(250, check)
+
+    def key(self, _win, event):
+        ctrl = event.state & Gdk.ModifierType.CONTROL_MASK and not event.state & Gdk.ModifierType.MOD1_MASK
+        digit = event.keyval - Gdk.KEY_0
+        if ctrl and 1 <= digit <= 9:              # also while a site has the keyboard
+            self.js(f"homeSpace.select({digit})")
+            return True
+        return False
+
+    def js(self, script):
+        self.page.run_javascript(script, None, None, None)
+
+    # ---- tabs --------------------------------------------------------------------------------
+    def from_page(self, _manager, result):
+        try:
+            msg = json.loads(result.get_js_value().to_string())
+        except (ValueError, AttributeError, GLib.Error):
+            return
+        kind = msg.get("type")
+        if kind == "close":
+            self.hide_home()
+        elif kind == "tab":
+            self.select(msg.get("id"), msg.get("url"), msg.get("rect"))
+        elif kind == "rect" and msg.get("rect"):
+            for view in self.sites.values():
+                self.fit(view, msg["rect"])
+
+    def select(self, tab, url, rect):
+        for name, view in self.sites.items():
+            view.set_visible(name == tab)
+        if tab == "today" or not url or not url.startswith("https://") or not rect:
+            self.page.grab_focus()
+            return
+        view = self.sites.get(tab)
+        if not view:
+            view = self.sites[tab] = self.site_view(url)
+            self.overlay.add_overlay(view)
+        self.fit(view, rect)
+        view.show()
+        view.grab_focus()
+
+    @staticmethod
+    def fit(view, rect):
+        x, y, width, height = (int(v) for v in rect)
+        view.set_halign(Gtk.Align.START)
+        view.set_valign(Gtk.Align.START)
+        view.set_margin_start(x)
+        view.set_margin_top(y)
+        view.set_size_request(width, height)
+
+    def site_view(self, url):
+        """A site's own view. All sites share one profile, kept apart from every other browser."""
+        if not self.site_context:
+            data = Path(GLib.get_user_data_dir()) / "adaptive-desktop" / "mario" / "web"
+            cache = Path(GLib.get_user_cache_dir()) / "adaptive-desktop" / "mario-web"
+            data.mkdir(parents=True, exist_ok=True)
+            manager = WebKit2.WebsiteDataManager(base_data_directory=str(data), base_cache_directory=str(cache))
+            self.site_context = WebKit2.WebContext.new_with_website_data_manager(manager)
+            self.site_context.get_cookie_manager().set_persistent_storage(
+                str(data / "cookies.sqlite"), WebKit2.CookiePersistentStorage.SQLITE)
+        view = WebKit2.WebView.new_with_context(self.site_context)
+        view.set_background_color(Gdk.RGBA(0.11, 0.11, 0.118, 1))
+        home = base_domain(url)
+
+        def policy(_view, decision, kind):
+            # a link that leaves the site (a link in a mail) belongs in the browser
+            if kind in (WebKit2.PolicyDecisionType.NAVIGATION_ACTION, WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION):
+                action = decision.get_navigation_action()
+                uri = action.get_request().get_uri()
+                new_window = kind == WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION
+                clicked = action.get_navigation_type() == WebKit2.NavigationType.LINK_CLICKED
+                if uri.startswith(("http://", "https://")) and (new_window or clicked) and \
+                        (new_window or base_domain(uri) != home):
+                    Gio.AppInfo.launch_default_for_uri(uri, None)
+                    decision.ignore()
+                    return True
+            return False
+
+        view.connect("decide-policy", policy)
+        view.connect("web-process-terminated", lambda v, *_: v.load_uri(url))
+        view.load_uri(url)
+        return view
 
 
 class Panel(Gtk.Application):
@@ -164,14 +352,15 @@ class Panel(Gtk.Application):
 
 
 def main():
-    panel = "--panel" in sys.argv[1:]
+    args = sys.argv[1:]
+    if "--panel" in args:
+        return Panel().run([sys.argv[0]])
     # The autostart entry is seen by the normal Ubuntu session too, which must stay as it was:
-    # Home only covers the desktop inside the Adaptive session (its wrapper sets this profile).
-    if not panel and os.environ.get("DCONF_PROFILE") != "adaptive" and not os.environ.get("MARIO_ANY_SESSION"):
+    # Home only exists inside the Adaptive session (its wrapper sets this profile).
+    if os.environ.get("DCONF_PROFILE") != "adaptive" and not os.environ.get("MARIO_ANY_SESSION"):
         print("Mario Home runs in the Adaptive Desktop session only (MARIO_ANY_SESSION=1 overrides).")
         return 0
-    app = Panel() if panel else Home()
-    return app.run([sys.argv[0]])
+    return Home().run(sys.argv)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; }
 /* A rule that sets display (.panel, .card) must not bring a hidden element back. */
 [hidden] { display: none !important; }
 body { background: var(--ground); }
+/* Home's ground is glass: the wallpaper blurred once, under a graphite tint. The picture is the
+   one the shell puts behind Files, so the two backdrops are the same material. */
+.backdrop { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; }
+body:not(.is-panel)::before { content: ""; position: fixed; inset: 0; z-index: -1; background: rgba(21, 21, 23, 0.60); }
 .sr { position: absolute; left: -9999px; }
 .muted { color: var(--muted); font-size: 12px; }
 button { font: inherit; color: var(--text); cursor: pointer; }
@@ -365,3 +369,17 @@ body.is-panel.shown .panel { animation: panel-in var(--state) cubic-bezier(0.2, 
 .foot { flex: none; }
 /* the side column: weather and the assistants take what they need, Today takes the rest */
 #c-ai, #c-phone { flex: none; }
+
+/* -- tabs: Today and the sites kept open inside Home --------------------------------------- */
+.tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-s); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); flex: none; }
+.tab { border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; padding: 6px 14px; min-height: 30px; border-radius: 9px;
+  display: inline-flex; align-items: center; gap: 7px; transition: background var(--feedback), color var(--feedback); }
+.tab:hover { color: var(--text); }
+.tab.on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.tab .n { font-size: 10px; font-weight: 600; color: #FFFFFF; background: var(--blue); border-radius: 999px; padding: 1px 6px; }
+/* where a site's own view sits; this shows only until that view has drawn */
+.web { min-height: 0; border-radius: var(--r); background: #1C1C1E; border: 1px solid var(--line); display: grid; place-items: center; }
+/* Home arriving: the cards settle in, a little after one another, each time it is summoned */
+body.opening #home .card { animation: rise var(--state) cubic-bezier(0.2, 0, 0, 1) both; animation-delay: calc(var(--i, 0) * 22ms); }
+@keyframes rise { from { opacity: 0; transform: translateY(12px) scale(.985); } }
+@media (prefers-reduced-motion: reduce) { body.opening #home .card { animation: none; } }

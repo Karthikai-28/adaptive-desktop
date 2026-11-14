@@ -1,6 +1,6 @@
 # Mario
 
-Mario is the assistant layer of Adaptive Desktop: a live **Home** on the desktop, a **panel** on
+Mario is the assistant layer of Adaptive Desktop: a live **Home** you summon with Super+H, a **panel** on
 Super+J, and **Mario Hub**, the loopback service both read from. Claude answers first (the Claude
 subscription, through Claude Code's headless mode); when Claude is at its usage limit, Gemini answers
 (the AI Pro subscription, through the Antigravity CLI); LOOM and Ollama on this laptop answer only
@@ -20,7 +20,7 @@ reads what is already on the machine. Actions are added on top, one confirmed st
 | Who answers | `services/mario-hub/engines.py` | Claude, then Gemini, then the laptop: the command lines, reading each CLI's reply, recognising a usage limit, the live context sent with a question |
 | Settings | `services/mario-hub/config.py`, `~/.config/adaptive-desktop/mario.json` | Repos, Thinking Space checkout, mail accounts, `brain` order and models, LOOM/Ollama/Office URLs, backup time |
 | Home and panel | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`) | One page: `/` is Home, `/panel` the panel. DOM only, no framework, no `innerHTML` |
-| Host | `apps/mario-home/host.py` (GTK 3 + WebKitGTK) | Home as a desktop-type window over the work area (Adaptive session only); `--panel` toggles the panel window |
+| Host | `apps/mario-home/host.py` (GTK 3 + WebKitGTK), `scripts/adaptive-home.sh` | Home as a layer over the work area: loaded hidden at login (`--background`), shown and hidden by Super+H (a D-Bus message, about 20 ms), with one view per tab; `--panel` toggles the panel window |
 | Unit and login entry | `services/adaptive-mario-hub.service`, `apps/mario-home/adaptive-mario-home.desktop` | Templates filled with the checkout's path |
 
 The shell's top bar, rail and island stay the shell's; Home fills only the work area.
@@ -59,15 +59,41 @@ There is no "all systems up to date" line. System trouble (pending or security u
 90 %, low battery, a failed user service) shows only when it happens, as a Mario suggestion in Tasks
 with an Update (Software Updater) or Check (System Monitor) button.
 
-### The shell around it stays as it is
+### Home is a layer, the wallpaper is the desktop
 
-Home is only the desktop layer. It fills the work area, which leaves out the top bar and the rail;
-the dock floats over the desktop without reserving space (autohide keeps it up when nothing covers
-it), so Home keeps a band at the bottom free for it (`--dock` in `home.css`). It sits below every window, is off the taskbar and the dock, never takes
-focus when it appears, and is kept from being maximized or fullscreen (the dock hides only for
-those). So the dock, the top bar and everything on it (the island, ROS 2, the system monitor,
-network, Control Center, the keyboard-layout switch on Super+Space) work exactly as without it.
-Mario's panel is on Super+J.
+Home is not the desktop any more. It is one window over the work area (the top bar stays), above
+every other window while it is up and gone when it is not, so whatever you were doing is untouched
+underneath.
+
+| You do | What happens |
+| --- | --- |
+| Super+H, or the Home button in the dock | Home fades in over your work with the keyboard on it; the cards settle in. Again: it fades out and you are back where you were |
+| Escape | Closes what is open, innermost first: an answer, a voice session, then Home |
+| Open something from Home (a mail, a file, a terminal) | Home steps aside as soon as the new window takes the keyboard |
+| Double Ctrl | Everything is minimised and Home is sent away: the bare wallpaper. Again brings the windows back |
+| Ctrl+1 … Ctrl+9 | Today, then each tab |
+
+GNOME's own Super+H (minimise the focused window) moves to Super+Alt+H, because a binding of
+Mutter's wins over a custom one on the same key.
+
+**Tabs.** Today is the hub's page. Every other tab is a site from `"tabs"` in `mario.json`, kept
+open inside Home in a view and a profile of its own (`~/.local/share/adaptive-desktop/mario/web`):
+sign in there once and it stays signed in, apart from your browser. The defaults are Mail (Gmail)
+and Calendar (Google Calendar); another site is one more line:
+
+```json
+"tabs": [{"id": "mail", "name": "Mail", "url": "https://mail.google.com/mail/u/0/"},
+         {"id": "calendar", "name": "Calendar", "url": "https://calendar.google.com/calendar/u/0/r"},
+         {"id": "sheets", "name": "Sheets", "url": "https://docs.google.com/spreadsheets/u/0/"}]
+```
+
+A link that leaves a tab's own site (a link inside a mail) opens in the browser.
+`scripts/adaptive-home.sh show mail` opens Home on a tab directly.
+
+**Ground.** Home sits on glass: the wallpaper blurred once into
+`~/.cache/adaptive-desktop/glass.png` under a graphite tint, the same picture the shell puts behind
+Files. The hub serves it at `/glass.png` and makes it itself when it is missing or older than the
+wallpaper, so Home does not wait for the shell.
 
 The ask bar leads with **Talk to Mario**, with **Type instead** as a fallback. It shows who answers next (Claude / Gemini · Claude at its limit / On this laptop; the
 reason is in its tooltip and under the panel's title), and
@@ -96,8 +122,8 @@ the installer puts in `.local/mario-pydeps`; without them only one-off events sh
 
 ```sh
 ./install.sh --only mario          # or scripts/install-mario.sh; --status changes nothing
-./scripts/install-keybindings.sh   # Super+J opens Mario; Super+Space stays the keyboard-layout switch
-apps/mario-home/host.py &          # Home now, instead of at the next Adaptive login
+./scripts/install-keybindings.sh   # Super+H is Home, Super+J opens Mario; Super+Space stays the keyboard-layout switch
+scripts/adaptive-home.sh           # show Home now (Super+H after install-keybindings.sh)
 ```
 
 For the boards and reel cards, clone the Thinking Space backup where `thinking_space` points

@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Home
+GenericName=Home
+Comment=Your day, mail and calendar over whatever you are doing; again to go back (Super+H)
+Exec=@ADAPTIVE_REPO@/scripts/adaptive-home.sh
+Icon=go-home
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=home;today;mail;calendar;mario;
+Actions=mail;calendar;
+
+[Desktop Action mail]
+Name=Mail
+Exec=@ADAPTIVE_REPO@/scripts/adaptive-home.sh show mail
+
+[Desktop Action calendar]
+Name=Calendar
+Exec=@ADAPTIVE_REPO@/scripts/adaptive-home.sh show calendar

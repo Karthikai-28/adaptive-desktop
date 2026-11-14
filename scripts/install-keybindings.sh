@@ -42,6 +42,7 @@ for name in [
     "adaptive-screen-text",
     "adaptive-cast",
     "adaptive-mario",
+    "adaptive-home",
 ]:
     key = f"{base}/{name}/"
     if key not in values:
@@ -85,6 +86,8 @@ set_binding "adaptive-screen-text" "Adaptive Copy Text from Screen" "gdbus call 
 # Cast to the last TV, or stop casting (apps/adaptive-cast).
 set_binding "adaptive-cast" "Adaptive Cast to TV" "${REPO}/scripts/adaptive-cast-launch.sh --toggle" "<Super>k"
 set_binding "adaptive-mario" "Mario" "${REPO}/apps/mario-home/host.py --panel" "<Super>j"
+# Home: your day, mail and calendar over whatever you are doing; the same key sends it away.
+set_binding "adaptive-home" "Home" "${REPO}/scripts/adaptive-home.sh" "<Super>h"
 
 #
 # GNOME's own switch-to-workspace-left/right also list Super+Alt+Left/Right.
@@ -161,6 +164,12 @@ PY
 }
 
 echo "Resolving accelerator conflicts:"
+# Super+H is Home. GNOME used it to minimise the focused window; that moves to Super+Alt+H
+# (a binding of Mutter's own would win over ours, so it cannot stay on the same key).
+if gsettings get org.gnome.desktop.wm.keybindings minimize | grep -q "'<Super>h'"; then
+    gsettings set org.gnome.desktop.wm.keybindings minimize "['<Super><Alt>h']"
+    echo "  moved minimize from <Super>h to <Super><Alt>h"
+fi
 release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-left '<Super><Alt>Left'
 release_accelerator org.gnome.desktop.wm.keybindings switch-to-workspace-right '<Super><Alt>Right'
 # Super+Space stays GNOME's keyboard-layout switch (the top bar's input source). An earlier

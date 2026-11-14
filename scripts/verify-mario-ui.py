@@ -82,6 +82,15 @@ async def main(tmp):
             for _ in range(60):
                 if await ev('!!document.querySelector("#c-projects .tile-nav")'): break
                 await asyncio.sleep(.1)
+            # tabs: Today, then the sites from the hub's config; a site tab swaps the cards for its slot
+            tabs = await ev('[...document.querySelectorAll("#tabs .tab")].map(t => t.firstChild.textContent)')
+            assert tabs[0] == 'Today' and len(tabs) >= 1, tabs
+            if len(tabs) > 1:
+                await ev('homeSpace.select(2); true')
+                assert await ev('document.querySelector(".main").hidden && !document.querySelector("#web").hidden && document.querySelector("#tabs .tab.on").firstChild.textContent !== "Today"')
+                await ev('homeSpace.select(1); true')
+            assert await ev('!document.querySelector(".main").hidden && document.querySelector("#web").hidden')
+            assert await ev('document.body.classList.contains("opening")')
             assert await ev('document.querySelectorAll(".card").length') == 13
             assert await ev('!document.querySelector("#c-apps, #c-focus, #c-downloads")')
             # one screen: the page never scrolls, and whatever is long scrolls inside its own tile

@@ -59,6 +59,12 @@ DEFAULTS = {
         {"name": "India", "url": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en"},
         {"name": "Hacker News", "url": "https://hnrss.org/frontpage"},
     ],
+    # Home's tabs after Today: each is a site kept open inside Home (signed in once, there). Add a
+    # line for any site you work in every day; "id" is its name in `host.py --show <id>`.
+    "tabs": [
+        {"id": "mail", "name": "Mail", "url": "https://mail.google.com/mail/u/0/"},
+        {"id": "calendar", "name": "Calendar", "url": "https://calendar.google.com/calendar/u/0/r"},
+    ],
     # cards that are off unless turned on here
     "cards_off": ["career"],
 }

@@ -43,6 +43,8 @@
 </svg>
 
 <!-- Home: the desktop layer. The shell's top bar and rail stay the shell's. -->
+<!-- Home's ground: the wallpaper blurred once (the hub's /glass.png), under a graphite tint -->
+<img id="backdrop" class="backdrop" alt="" aria-hidden="true" hidden>
 <main id="home" class="home">
   <header class="top">
     <div class="greet"><h1 id="greeting">Hello</h1><span id="date" class="muted"></span></div>
@@ -59,7 +61,8 @@
   </header>
 
   <div class="dayhead">
-    <h2>Your day</h2>
+    <!-- Today, then the sites from "tabs" in mario.json; the host keeps each one open under this row -->
+    <nav id="tabs" class="tabs" role="tablist" aria-label="Home"></nav>
     <span id="daysum" class="muted"></span>
     <span class="chips">
       <button class="chip" data-ask="Brief me">Brief me</button>
@@ -68,6 +71,7 @@
     </span>
   </div>
 
+  <div id="web" class="web" hidden><span class="web-wait muted"></span></div>
   <div class="main">
     <div class="left">
       <div class="row r2">

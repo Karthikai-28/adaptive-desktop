@@ -482,13 +482,64 @@ const render = {
 
 // card -> renderers that read it
 const FEEDS = {
-  mail: ["mail", "daysum"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
+  mail: ["mail", "daysum", "tabs"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
   builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
   recent: ["recent"], notes: ["note"], weather: ["weather"], phone: ["phone"], news: ["news"],
   news_media: ["news"], usage: ["ai"],
 };
-function draw(name) { try { render[name](); } catch (e) { console.error(name, e); } }
-function renderAll() { Object.keys(render).forEach(draw); renderPresence(); greet(); }
+// ------------------------------------------------------------------- tabs
+// Home is one window with tabs. Today is this page; every other tab is a site ("tabs" in
+// mario.json) that the desktop host keeps open in its own view, laid exactly over #web. The page
+// only says which tab is up and where that rectangle is. In a plain browser there is no host, so
+// a site tab offers to open in the browser instead.
+const HOST = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.home;
+const tell = (msg) => { if (HOST) HOST.postMessage(JSON.stringify(msg)); };
+let currentTab = "today";
+const siteTabs = () => state.config.tabs || [];
+function drawTabs() {
+  const unread = data("mail").unread;
+  fill($("#tabs"), [{ id: "today", name: "Today" }, ...siteTabs()].map((t, i) =>
+    el("button", { class: `tab${t.id === currentTab ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(t.id === currentTab),
+      title: `Ctrl+${i + 1}`, onclick: () => selectTab(t.id) }, t.name,
+      t.id === "mail" && unread ? el("span", { class: "n" }, unread > 999 ? "999+" : String(unread)) : null)));
+}
+function webRect() {
+  const r = $("#web").getBoundingClientRect();
+  return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+}
+function selectTab(id) {
+  const site = siteTabs().find((t) => t.id === id);
+  currentTab = site ? id : "today";
+  drawTabs();
+  $(".main").hidden = !!site;
+  $("#web").hidden = !site;
+  $(".dayhead .chips").hidden = !!site;
+  $("#daysum").hidden = !!site;
+  if (!site) return tell({ type: "tab", id: "today" });
+  fill($("#web"), HOST ? el("span", { class: "web-wait muted" }, `Opening ${site.name}…`)
+    : el("button", { class: "btn", type: "button", onclick: () => openUrl(site.url) }, `Open ${site.name} in the browser`));
+  // after layout, so the rectangle is the one the host should cover
+  requestAnimationFrame(() => tell({ type: "tab", id: site.id, url: site.url, rect: webRect() }));
+}
+// What the host calls: open() each time Home is shown, closed() once it is hidden, select() for
+// Ctrl+1..9 pressed while a site has the keyboard.
+window.homeSpace = {
+  open(tab) {
+    const picture = $("#backdrop");
+    picture.onload = () => { picture.hidden = false; };
+    picture.onerror = () => { picture.hidden = true; };
+    picture.src = `/glass.png?${Date.now()}`;        // the wallpaper may have changed since last time
+    document.querySelectorAll("#home .card").forEach((card, i) => card.style.setProperty("--i", i));
+    document.body.classList.remove("opening"); void document.body.offsetWidth; document.body.classList.add("opening");
+    greet();
+    selectTab(tab || currentTab);
+  },
+  closed() { cancelVoice(); $("#answer").hidden = true; },
+  select(n) { const all = ["today", ...siteTabs().map((t) => t.id)]; if (all[n - 1]) selectTab(all[n - 1]); },
+};
+
+function draw(name) { try { if (name === "tabs") return drawTabs(); render[name](); } catch (e) { console.error(name, e); } }
+function renderAll() { Object.keys(render).forEach(draw); renderPresence(); greet(); if (!PANEL) drawTabs(); }
 
 function renderPresence() {
   const p = state.presence || { state: "ready" };
@@ -603,7 +654,15 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openUrl(b.dataset.open)));
     $("[data-open-hub]").addEventListener("click", () => openUrl((data("thinking_space").hub || {}).url));
     $("#c-phone").addEventListener("click", () => act({ id: "launch", arg: "phone" }));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#answer").hidden = true; });
+    // Escape closes what is open, innermost first: an answer, a voice session, then Home itself
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (!$("#answer").hidden) $("#answer").hidden = true;
+        else if (!voiceId && !voiceBusy && $("#voice-status").hidden) tell({ type: "close" });
+      } else if (e.ctrlKey && !e.altKey && !e.metaKey && /^[1-9]$/.test(e.key)) { e.preventDefault(); window.homeSpace.select(Number(e.key)); }
+    });
+    window.addEventListener("resize", () => { if (currentTab !== "today") tell({ type: "rect", rect: webRect() }); });
+    window.homeSpace.open();
     setInterval(() => { greet(); draw("today"); }, 60000);
   }
   document.querySelectorAll(".voice-toggle").forEach((b) => b.addEventListener("click", toggleVoice));
