@@ -1,5 +1,5 @@
 // Home's own tiles (Watch next, Sticky note, Storage, Spotify, Photos), the weather's moving sky,
-// the accounts sheet and Mario's orb in the panel. Loaded after home.js, whose helpers (el, fill,
+// the accounts sheet and Mario's orb. Loaded after home.js, whose helpers (el, fill,
 // data, post, act, render, FEEDS ...) it uses; like there, everything shown comes from the hub.
 "use strict";
 
@@ -448,7 +448,7 @@ render.sheet = () => {
 };
 
 // -------------------------------------------------------------- Mario's orb
-// The panel's picture of Mario: rings that turn slowly while it waits, a ring that takes the shape
+// Mario's picture over your work: rings that turn slowly while it waits, a ring that takes the shape
 // of your voice while it listens (the microphone's level, from the hub), arcs that race while it
 // thinks, and waves that leave the ring and travel outward while it talks back.
 function startOrb() {
@@ -467,7 +467,7 @@ function startOrb() {
   const orb = { level: 0, heard: 0, phase: "idle", spin: 0, last: 0, ripples: [], lastRipple: 0 };
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.marioVoice = (phase, level) => { orb.phase = phase; orb.heard = phase === "listening" ? level : 0; };
-  const CAPTION = { ready: "Tap or press Space to talk", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…", doing: "Working…", needs_you: "Needs you" };
+  const CAPTION = { ready: "", listening: "", thinking: "Thinking…", speaking: "", doing: "Working…", needs_you: "Needs you" };
   const WAVES = [[3, 1.7, 0.42], [5, -2.6, 0.28], [8, 3.9, 0.18], [13, -5.3, 0.12]];     // lobes, turn rate, share
 
   function fit() {
@@ -481,7 +481,11 @@ function startOrb() {
     orb.last = ts;
     const t = ts / 1000;
     const st = orb.phase === "listening" ? "listening" : orb.phase === "working" ? "thinking" : (state.presence || {}).state || "ready";
-    if (cv.dataset.state !== st) { cv.dataset.state = st; $("#orb-caption").textContent = CAPTION[st] || ""; $("#orb-talk").setAttribute("aria-label", st === "listening" ? "Finish speaking" : "Talk to Mario"); }
+    if (cv.dataset.state !== st) {
+      cv.dataset.state = st; $("#orb-caption").textContent = CAPTION[st] || "";
+      $("#orb-talk").setAttribute("aria-label", st === "listening" ? "Finish speaking" : "Talk to Mario");
+      window.marioLayer.settle();
+    }
     // how far the ring swells: your voice, Mario's own speech (syllables and breaths), or a slow breath
     let want = 0.05 + 0.03 * Math.sin(t * 1.1);
     if (st === "listening") want = Math.max(0.1, orb.heard);
@@ -549,20 +553,13 @@ function startOrb() {
     ctx.fillStyle = col("t", 0.92); ctx.fill();
   }
   fit();
-  window.addEventListener("resize", fit);
+  new ResizeObserver(fit).observe(cv);          // the orb makes room when the answer arrives
   requestAnimationFrame(frame);
 }
 
 // --------------------------------------------------------------------- wiring
 document.addEventListener("DOMContentLoaded", () => {
-  if (PANEL) {
-    startOrb();
-    // Space talks to Mario unless you are typing
-    document.addEventListener("keydown", (e) => {
-      if (e.code === "Space" && !e.target.closest("input, textarea, button")) { e.preventDefault(); toggleVoice(); }
-    });
-    return;
-  }
+  if (PANEL) { startOrb(); return; }                // the layer's own wiring is layer.js
   document.querySelectorAll("[data-refresh]").forEach((b) => b.addEventListener("click", () => refreshCard(b)));
   $("#movies-sheet").addEventListener("click", () => openUrl(data("movies").sheet));
   $("#accounts-btn").addEventListener("click", () => openSheet(true));

@@ -3,7 +3,7 @@
 
     python3 hub.py [--port 8791] [--config FILE] [--once]
 
-  GET  /                 the Home page (apps/mario-home/static), /panel the Mario panel
+  GET  /                 the Home page (apps/mario-home/static), /panel Mario over your work (Super+J)
   GET  /api/state        every card, the Next step list and Mario's presence
   GET  /ws               the same, pushed: {"type": "card" | "next" | "presence" | "handoff", ...}
   POST /api/ask          {"text"} -> an answer (instant, Claude, Gemini, or the laptop's LOOM/Ollama)
@@ -12,6 +12,9 @@
   POST /api/handoff/ID   {"decision": "run" | "cancel"}: runs a plan only after you say so
   POST /api/action       {"id", "arg"}: a short whitelist (open a repo's terminal, a folder, ...)
   POST /api/presence     {"state", "detail"}: for the voice listener (listening, ...)
+  POST /api/voice/ACTION {"id"}: start, status (level and the words so far), finish, cancel
+  POST /api/wake         {"op": "status" | "enable" | "disable" | "forget"}: "Hey Mario" (wake.py)
+  POST /api/wake/train/ACTION {"id"}: start, status, cancel: teaching Mario your voice
   POST /api/task         {"text", "project"?}: a task into a Quick Note inbox (General by default)
   POST /api/task/done    {"path", "line"}: tick a task in a Quick Note inbox
   POST /api/note         {"text"}: add a line to Jot (~/.local/share/adaptive-desktop/mario/notes.md)
@@ -40,10 +43,12 @@ import config as config_mod  # noqa: E402
 import engines  # noqa: E402
 import tiles  # noqa: E402
 from voice import Voice  # noqa: E402
+from wake import Wake, screen_locked  # noqa: E402
 
 collectors.SCHEDULE.update(tiles.SCHEDULE)
 
 STATIC = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "static"
+HOST = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "host.py"
 PRESENCE = ("ready", "listening", "thinking", "speaking", "doing", "needs_you")
 OPEN_URL_PREFIXES = ("https://claude.ai/", "https://gemini.google.com/", "https://docs.google.com/", "https://github.com/",
                      "https://mail.google.com/", "https://calendar.google.com/",
@@ -95,7 +100,7 @@ def launch_env():
 
 
 class Hub:
-    def __init__(self, cfg, schedule=None, cfg_file=None):
+    def __init__(self, cfg, schedule=None, cfg_file=None, voice_file=None):
         self.cfg = cfg
         self.cfg_file = Path(cfg_file or config_mod.CONFIG_FILE)   # what Home's own settings edit
         self.sticky_file = tiles.STICKY
@@ -112,6 +117,9 @@ class Hub:
         self.tasks = []
         self.notes_file = config_mod.DATA_DIR / "notes.md"
         self.voice = Voice(self.set_presence, launch_env)
+        # "Hey Mario": only the running hub is given a file, so a check never opens a microphone
+        self.wake = Wake(launch_env, Path(voice_file) if voice_file else None, self.wake_fired, self.push_wake,
+                         lambda: self.presence.get("state") == "speaking")
 
     # ------------------------------------------------------------ state
     def public_config(self):
@@ -131,6 +139,7 @@ class Hub:
         state["next"] = brain.next_steps(state, limit=4)
         state["presence"] = self.presence
         state["brain"] = self.brain_status()
+        state["wake"] = self.wake.status()
         return state
 
     # ------------------------------------------------------------ brain
@@ -252,8 +261,10 @@ class Hub:
     async def start(self, _app=None):
         for name in self.schedule:
             self.tasks.append(asyncio.create_task(self.run_collector(name)))
+        await self.wake.start()
 
     async def stop(self, _app=None):
+        await self.wake.close()
         await self.voice.close()
         for t in self.tasks:
             t.cancel()
@@ -350,8 +361,30 @@ class Hub:
                         "answer": f"Opening {name}." if result.get("ok") else ""}
         return None
 
+    # ------------------------------------------------------ "Hey Mario"
+    async def push_wake(self):
+        await self.broadcast({"type": "wake", **self.wake.status()})
+
+    def show_mario(self, how):
+        """Bring Mario up over your work (apps/mario-home/host.py --panel)."""
+        try:
+            subprocess.Popen(["/usr/bin/python3", str(HOST), "--panel", how], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True, env=launch_env())
+        except OSError:
+            pass
+
+    async def wake_fired(self, mic, said, _score=None):
+        """The listener heard the phrase in the trained voice: a session on its microphone, starting
+        with what was said in that breath, and Mario comes up to show it. Not on a locked screen."""
+        if self.voice.busy() or await asyncio.to_thread(screen_locked, launch_env()):
+            mic.release()
+            return
+        started = await self.voice.start(mic=mic, prefill=said, wake=True)
+        if not started.get("error"):
+            self.show_mario("--wake")
+
     async def speak(self, text):
-        """Say it aloud. Presence is "speaking" until the voice has finished, so the panel's orb
+        """Say it aloud. Presence is "speaking" until the voice has finished, so the orb
         moves for exactly as long as Mario talks."""
         if not text or not shutil.which("spd-say"):
             return
@@ -686,10 +719,31 @@ def make_app(hub, port):
             return web.json_response({"error": "JSON required"}, status=415)
         action = request.match_info["action"]
         if action == "start":
-            return web.json_response(await hub.voice.start())
+            return web.json_response(await hub.voice.start(mic=None if hub.voice.busy() else hub.wake.lend()))
         if action not in ("status", "finish", "cancel"):
             raise web.HTTPNotFound()
         return web.json_response(await hub.voice.command(action, (await read(request)).get("id")))
+
+    async def wake(request):
+        op = (await read(request)).get("op")
+        if op in ("enable", "disable"):
+            return web.json_response(await hub.wake.enable(op == "enable"))
+        if op == "forget":
+            return web.json_response(await hub.wake.forget())
+        return web.json_response(hub.wake.status())
+
+    async def wake_train(request):
+        action = request.match_info["action"]
+        if action == "start":
+            if hub.voice.busy():
+                return web.json_response({"error": "Mario is listening. Finish that first."})
+            return web.json_response(await hub.wake.train_start())
+        sid = (await read(request)).get("id")
+        if action == "status":
+            return web.json_response(await hub.wake.train_status(sid))
+        if action == "cancel":
+            return web.json_response(await hub.wake.train_cancel(sid))
+        raise web.HTTPNotFound()
 
     async def handoff(request):
         plan = hub.handoffs.get(request.match_info["id"])
@@ -805,6 +859,8 @@ def make_app(hub, port):
     app.router.add_get("/ws", ws)
     app.router.add_post("/api/ask", ask)
     app.router.add_post("/api/voice/{action}", voice)
+    app.router.add_post("/api/wake", wake)
+    app.router.add_post("/api/wake/train/{action}", wake_train)
     app.router.add_get("/glass.png", glass)
     app.router.add_post("/api/handoff/{id}", handoff)
     app.router.add_post("/api/action", action)
@@ -826,7 +882,7 @@ def main():
     args = ap.parse_args()
     cfg = config_mod.load(args.config)
     port = args.port or int(cfg["port"])
-    hub = Hub(cfg, cfg_file=args.config)
+    hub = Hub(cfg, cfg_file=args.config, voice_file=None if args.once else config_mod.DATA_DIR / "voice.json")
     if args.once:
         async def once():
             await asyncio.gather(*(hub.collect_once(n) for n in hub.schedule))

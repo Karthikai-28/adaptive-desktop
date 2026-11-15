@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Install Mario: the live Home on the desktop, the Mario panel (Super+J) and Mario Hub.
+# Install Mario: the live Home on the desktop, Mario over your work (Super+J) and Mario Hub.
 #
 #   scripts/install-mario.sh             install whatever is missing and start the hub
 #   scripts/install-mario.sh --status    say what is missing; change nothing
 #   scripts/install-mario.sh --mail      connect a Gmail account to the Mail card (IMAP, read-only);
 #                                        run it again to add another; --main makes it the main one
 #   scripts/install-mario.sh --calendar  connect the Today card (your calendar's private iCal address)
-#   scripts/install-mario.sh --voice     install local English speech recognition
+#   scripts/install-mario.sh --voice     install local speech recognition and what "Hey Mario" needs
 #
 # It installs: python3-aiohttp and WebKitGTK for Python (apt, asks for sudo), the
 # adaptive-mario-hub user service (127.0.0.1:8791), the Mario Home autostart entry (Adaptive session

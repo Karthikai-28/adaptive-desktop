@@ -112,6 +112,7 @@ step "Adaptive Home on the TV: tiles, remote navigation, socket frames" quiet no
 step "Agent Office (syntax, roster, API guards; no quota)" quiet "$REPO/scripts/verify-agent-office.sh"
 step "Mario: collectors, decisions, hub guards, page" quiet python3 "$REPO/scripts/verify-mario.py"
 step "Mario: microphone lifecycle and spoken commands" quiet python3 "$REPO/scripts/verify-mario-voice.py"
+step "Mario: Hey Mario (the phrase, the voiceprint, the listener, training)" quiet python3 "$REPO/scripts/verify-mario-wake.py"
 
 inspector_static() {
     python3 - "$REPO" <<'PY'

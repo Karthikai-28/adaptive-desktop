@@ -1091,7 +1091,7 @@ Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `d
 - ✅ Voice-first Home and panel: bounded local microphone capture, local English recognition,
   direct task/note/launch commands, existing answer routing, local spoken replies; cancellation and
   disconnect cleanup. Installed model also checked against a synthetic spoken phrase.
-- ✅ `scripts/verify-mario.py` and `verify-mario-voice.py` in `verify-all.sh --quick`;
+- ✅ `scripts/verify-mario.py`, `verify-mario-voice.py` and `verify-mario-wake.py` in `verify-all.sh --quick`;
   `verify-mario-ui.py` exercises the page in isolated Chrome without paid model calls.
 
 ### Live, not yet tried
@@ -1103,7 +1103,7 @@ Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `d
 
 ### Next
 
-- Phase 2: Google Sheet and Calendar read directly. Phase 3: optional “Mario” wake word (explicit microphone commands are implemented). Phase 4: notes into board Inboxes, island and phone. Phase 5: council, nightly
+- Phase 2: Google Sheet and Calendar read directly. Phase 3: “Hey Mario” in the operator's voice is built (Milestone 21 Phase 3); to be trained and tuned by them. Phase 4: notes into board Inboxes, island and phone. Phase 5: council, nightly
   review, routines.
 
 ## Milestone 21 — Finish and freeze
@@ -1203,6 +1203,24 @@ features: ideas go to a Later list and are built only if their absence has stopp
   the reply is spoken (presence `speaking`; drawn for the length of the speech, since Speech
   Dispatcher reports no level). Checked in headless Chrome and drawn once in WebKitGTK; not yet
   seen with a real voice on Super+J.
+
+- 🔬 **Mario over your work, live words, Hey Mario (2026-11-15).** Super+J is no longer a window at
+  the edge: the orb appears at the centre of the screen with nothing around or behind it, listening
+  at once; everything else stays visible and keeps running, and a click beside it goes through
+  (`host.py --panel`: a see-through dock-type window, the page cut to the outlines `layer.js`
+  reports, because WebKitGTK 2.50 leaves trails on a see-through page). The words appear under
+  the orb as they are said (`voice.py` asks the recogniser again about every half second), then
+  the answer. Pause detection is measured against the room, not a fixed loudness (this laptop's
+  room is twice the old threshold, so a pause never ended a request). **Hey Mario**: off until
+  trained (the phrase four times, under the orb); then a speech detector, the speaker model and
+  Whisper, in that order, on this laptop; the session starts on the same microphone with the
+  breath that held the phrase; Mario comes up without the keyboard and leaves by itself
+  (`wake.py`, `voice_worker.py`, `voice_rules.py`; models by `install-mario-voice.sh`). Sandbox:
+  `verify-mario-voice.py`, `verify-mario-wake.py` (also `--real` with made-up voices: trained
+  voice about 9 in 10, another voice about 1 in 14, other words never), `verify-mario-ui.py`.
+  Seen live: the layer and its outlines over real windows, the microphone feeding both paths.
+  Not tried, only the operator can: a spoken request end to end, training with their voice, and
+  how strict the voice match should be after a few days.
 
 ### Phase 4 — motion
 

@@ -1,7 +1,8 @@
 # Mario
 
-Mario is the assistant layer of Adaptive Desktop: a live **Home** you summon with Super+H, a **panel** on
-Super+J, and **Mario Hub**, the loopback service both read from. Claude answers first (the Claude
+Mario is the assistant layer of Adaptive Desktop: a live **Home** you summon with Super+H, **Mario over
+your work** on Super+J or when you say “Hey Mario” (the orb at the centre of the screen), and
+**Mario Hub**, the loopback service both read from. Claude answers first (the Claude
 subscription, through Claude Code's headless mode); when Claude is at its usage limit, Gemini answers
 (the AI Pro subscription, through the Antigravity CLI); LOOM and Ollama on this laptop answer only
 when neither cloud does. Multi-step work in a repo goes to Claude Code (Gemini while Claude is out),
@@ -20,8 +21,9 @@ reads what is already on the machine. Actions are added on top, one confirmed st
 | Decisions | `services/mario-hub/brain.py` (pure) | Instant answers from state, answer vs hand-off, the hand-off's limits, the Next step list |
 | Who answers | `services/mario-hub/engines.py` | Claude, then Gemini, then the laptop: the command lines, reading each CLI's reply, recognising a usage limit, the live context sent with a question |
 | Settings | `services/mario-hub/config.py`, `~/.config/adaptive-desktop/mario.json` | Repos, Thinking Space checkout, mail accounts, `brain` order and models, LOOM/Ollama/Office URLs, backup time |
-| Home and panel | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`, `tiles.js`) | One page: `/` is Home, `/panel` the panel. `home.js` is the frame (connection, tabs, slides, voice), `tiles.js` the newer tiles, the accounts sheet, the photo viewer and the panel's orb. DOM only, no framework, no `innerHTML` |
-| Host | `apps/mario-home/host.py` (GTK 3 + WebKitGTK), `scripts/adaptive-home.sh` | Home as a layer over the work area: loaded hidden at login (`--background`), shown and hidden by Super+H (a D-Bus message, about 20 ms), with one view per tab; `--panel` toggles the panel window |
+| Home and Mario's layer | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`, `tiles.js`, `layer.js`) | One page: `/` is Home, `/panel` Mario over your work. `home.js` is the frame (connection, tabs, slides, the voice session), `tiles.js` the newer tiles, the accounts sheet, the photo viewer and the orb, `layer.js` the layer: words as you speak, the answer, typing instead, leaving by itself, Hey Mario's switch and training. DOM only, no framework, no `innerHTML` |
+| Voice | `services/mario-hub/voice.py`, `voice_worker.py`, `wake.py`, `voice_rules.py` (pure) | The microphone session and the words while you speak; the recogniser, in the voice environment; the “Hey Mario” listener and the training; what counts as the phrase and as your voice |
+| Host | `apps/mario-home/host.py` (GTK 3 + WebKitGTK), `scripts/adaptive-home.sh` | Home as a layer over the work area: loaded hidden at login (`--background`), shown and hidden by Super+H (a D-Bus message, about 20 ms), with one view per tab; `--panel` is Mario's layer at the centre of the screen (`--wake`, `--train`, `--quiet`, `--hide`) |
 | Unit and login entry | `services/adaptive-mario-hub.service`, `apps/mario-home/adaptive-mario-home.desktop` | Templates filled with the checkout's path |
 
 The shell's top bar, rail and island stay the shell's; Home fills only the work area.
@@ -183,7 +185,7 @@ the installer puts in `.local/mario-pydeps`; without them only one-off events sh
 
 ```sh
 ./install.sh --only mario          # or scripts/install-mario.sh; --status changes nothing
-./scripts/install-keybindings.sh   # Super+H is Home, Super+J opens Mario; Super+Space stays the keyboard-layout switch
+./scripts/install-keybindings.sh   # Super+H is Home, Super+J is Mario over your work; Super+Space stays the keyboard-layout switch
 scripts/adaptive-home.sh           # show Home now (Super+H after install-keybindings.sh)
 ```
 
@@ -198,15 +200,27 @@ limit, `agy` (the Antigravity CLI, logged in to the Google account with AI Pro);
 both. For answers with neither cloud, run LOOM's backend (`local-ai/app/backend`, port 8765); without
 it the hub asks Ollama directly (`fallback_model`, LOOM's `default_chat`) and says so under the answer.
 
-## Voice commands
+## Talking to Mario
 
-Press **Talk to Mario** on Home or in the **Super+J** panel, then speak. The panel fades and slides in
-each time Super+J shows it, with the keyboard already on Talk to Mario. On Home, while Mario listens, three
-strands in its colours move with your voice (the hub reports the microphone's level ten times a second),
-so you can see that it hears you; while it recognises and answers they lie low and a line runs along them.
-The panel has the **orb** instead (see Presence): a ring that swells with your voice and sends waves out when Mario talks back. About two seconds of
-silence sends the request automatically; **Finish speaking** sends sooner. **Cancel**, Escape,
-hiding the page, or losing its connection stops capture/recognition. No wake word is needed.
+**Super+J** brings Mario up over whatever you are doing: the orb, at the centre of the screen, and
+nothing else. It is not a window: nothing is drawn around or behind it, everything on the screen
+stays as it is and keeps running, and a click beside the orb goes to whatever is there. It is
+listening as soon as it appears.
+
+| You do | What happens |
+| --- | --- |
+| Super+J | The orb appears at the centre and listens. Again, or Escape: it goes |
+| Speak | The orb's ring takes the shape of your voice, and **your words appear under it as you say them** (recognised again about every half second of new speech) |
+| Pause for about two seconds | The request is sent; **Space** or a click on the orb sends it sooner. The words stay under the orb, the answer comes in below them and is read aloud; the orb grows smaller and glides up to make room |
+| Space, or click the orb | Talk again |
+| Any letter, or **Type** under the orb | A box to type the request instead |
+| Move to another window | Mario stays while it is working, then leaves by itself |
+
+The three small buttons under the orb (Type, Hey Mario, close) show only while Mario is not busy
+or the pointer is on it; while you speak there is only the orb and your words.
+
+On Home, **Talk to Mario** does the same in Home's own bar: three strands move with your voice and
+the words so far take the place of the hint.
 
 - “Add a task review the build” writes a task immediately.
 - “Take a note: try the new layout” saves the note at once: in Mario's own notes and on today's page of Mario Notes (`notes_dir`).
@@ -215,20 +229,80 @@ hiding the page, or losing its connection stops capture/recognition. No wake wor
 - “Brief me” and other questions use the existing Mario answer routing.
 - Code changes still show their plan and require **Run**.
 
+### Hey Mario
+
+Say **“Hey Mario”** and Mario comes up the same way, without a key, and only for your voice. The
+request can follow in the same breath: “Hey Mario, what is on today?”. It is off until you teach
+Mario your voice:
+
+1. Super+J, then **Set up Hey Mario** under the orb (`host.py --panel --train` opens it directly).
+2. **Start**, and say “Hey Mario” four times. Each time, Mario checks that it heard the phrase and
+   nothing else, and that it sounds like the times before; if not it says what it heard and asks
+   again. The orb moves with your voice and four dots fill.
+3. It is on. The same sheet has the switch, **Train again** and **Forget my voice**.
+
+How it listens, cheapest step first, all on this laptop (`voice_worker.py wake`):
+
+1. a small speech detector (Silero) notices that somebody began to speak;
+2. the speaker model (NVIDIA TitaNet small) compares the first second or so with your voiceprint;
+   another voice stops here;
+3. only then are the first words recognised (Whisper) and compared with the phrase
+   (`voice_rules.py`: “Hey Mario”, “Hi Mario”, “OK Mario”; not “Hey Maria”, not “Super Mario”).
+
+Then the hub starts an ordinary voice session **on the same open microphone**, beginning with the
+breath that held the phrase, so nothing said right after it is lost, and brings the orb up. Summoned
+this way Mario does not take the keyboard from what you are typing in, and it leaves by itself a
+few seconds after it has answered (longer for a long answer, not while the pointer is on it, not
+while a plan waits for **Run**). “Hey Mario” and then nothing: it steps back without a word.
+
+What to know:
+
+- **While Hey Mario is on, the microphone is open all the time** and its sound is examined on this
+  laptop only; nothing is recorded and nothing is sent anywhere. Turn it off with the switch and
+  the microphone is closed. It costs about 1 % of one processor core while the room is quiet.
+- The only thing kept is the **voiceprint**: four lists of numbers and their middle, in
+  `~/.local/share/adaptive-desktop/mario/voice.json`, readable by you alone. No recording is kept,
+  also not of the training. **Forget my voice** deletes the file.
+- It is a convenience, **not a lock**. A voice like yours, or a recording of you, can pass; what
+  Mario may do is limited in the same way whoever asks (Safety, below).
+- The listener pauses while a voice session has the microphone, while Mario is speaking and while
+  you train; it ignores the phrase while the screen is locked.
+- From the phrase to the orb takes a little under a second (the words are recognised by the same
+  model as your requests, about 0.6 s on this laptop).
+- Tried so far with made-up voices only (`verify-mario-wake.py --real`): a trained voice woke it
+  about nine times in ten, another voice saying the phrase about one time in fourteen, other words
+  never. With your own voice it is still to be tried.
+
+### How it is built
+
 `services/mario-hub/voice.py` captures the default PulseAudio microphone in memory using `parec`:
-30-second maximum, eight seconds to begin speaking, and a five-second page heartbeat. Recognition
-runs in a killable subprocess (`voice_transcribe.py`), using faster-whisper base.en on CPU with int8
-and speech filtering. Audio never goes to a cloud service or a recording file. Only the resulting
-request enters Mario's normal answer path. Replies are spoken locally through Speech Dispatcher
-(`spd-say`) when installed, and remain visible in the page.
+30-second maximum, eight seconds to begin speaking, and a five-second page heartbeat. What counts
+as speech is measured against the room (the quietest tenth of what was heard so far, so a fan is
+not speech), and the first 0.6 s after the microphone opens is not judged (many inputs start with a
+thump). Recognition runs in a separate process that is killed on cancel or timeout
+(`voice_worker.py`, faster-whisper base.en on CPU with int8 and speech filtering): it is asked for
+the words so far while you speak and once, carefully, for the whole request. Audio never goes to a
+cloud service or a recording file. Only the resulting request enters Mario's normal answer path.
+Replies are spoken locally through Speech Dispatcher (`spd-say`) when installed, and remain visible.
+`wake.py` is the “Hey Mario” listener and the training.
 
 ```sh
-scripts/install-mario-voice.sh    # dedicated .local/mario-voice environment and public English model
+scripts/install-mario-voice.sh    # dedicated .local/mario-voice environment; public models only:
+                                  # Whisper base.en, and for Hey Mario the speech detector and the speaker model
 ```
 
 The desktop host is WebKitGTK, so this does not depend on Chrome-only browser speech recognition.
 If Mario hears nothing, check the default input and mute state in Ubuntu Sound settings. Recognition
-currently expects English. The microphone is activated only by pressing the button, never at login.
+currently expects English. Without Hey Mario, the microphone opens only on Super+J or a button,
+never at login.
+
+**The layer.** `host.py --panel` is a see-through, undecorated window of the dock type (above
+other windows, on every workspace, not in the switcher, not animated by the shell) centred on the
+screen. WebKitGTK 2.50 does not erase a see-through page when it repaints, so anything that moved
+would leave a trail; instead the page is solid, `layer.js` reports the outline of every piece it
+draws (each frame while something moves), and the host shows the page only inside those outlines,
+with smooth edges and a shadow under each, and gives only those outlines to the pointer. The login
+entry loads the layer hidden, so the first Super+J is as fast as the others.
 
 ## After a restart
 
@@ -294,6 +368,11 @@ The hub is a user service that starts at boot (lingering is on), before anyone l
   after a second click; nothing that needs your password is run, only shown. `open_place` opens
   just the folders the Storage and sticky tiles list.
 - Anything that leaves the laptop needs your yes, every time.
+- “Hey Mario” is off until you train it. On, the microphone stays open and is examined on this
+  laptop only; the voiceprint is kept in a file only you can read, recordings are not kept at all,
+  and the phrase is ignored while the screen is locked. The voice match is a convenience, not a
+  lock: what a spoken request may do is the same short list whoever says it, and a code change
+  still waits for **Run**.
 
 ## Presence
 
@@ -302,19 +381,19 @@ WebSocket message carry the state: `ready` (strands nearly flat, still), `listen
 swing), `thinking` (a shuttle runs along them), `speaking` (while a reply is read aloud), `doing`
 (one line fills), `needs_you` (one amber strand). Reduced motion stops every animation.
 
-**The orb** (Super+J panel) is the same state drawn as a circle on a canvas, in the tokens'
+**The orb** (Super+J, “Hey Mario”) is the same state drawn as a circle on a canvas, in the tokens'
 colours: slow concentric rings and orbiting arcs at rest; while it listens the inner ring swells
 and roughens with the microphone's real level and ripples run outward; while it thinks the arcs
 spin up; while it speaks, waves travel round the ring and pulse outward for as long as the reply is
 being read (`spd-say -w`; Speech Dispatcher gives no sound level, so the talk-back waves are drawn,
-not measured). Clicking the orb is Talk to Mario. It stops drawing while the panel is hidden.
+not measured). Clicking the orb is Talk to Mario. It stops drawing while the layer is hidden.
 
 ## Next
 
 | Phase | What | Notes |
 | --- | --- | --- |
 | 2 | Read the Google Sheet directly and write the watched mark back to it; Photos from the library rather than one shared album | Through the Link's Google project (`--link-cloud`); the Sheet write needs a write scope and your yes |
-| 3 | Optional “Mario” wake word | Explicit microphone commands are implemented; always-listening wake-word detection remains future work |
+| 3 | Hey Mario with your own voice | Built and tried with made-up voices; needs your training and a few days of use to set how strict the voice match should be (`LOW`, `HIGH` in `voice_rules.py`) |
 | 4 | "Mario, note that…" writes a sticky into the right board's Inbox | Through the Thinking Space boards' database, confirmed |
 | 4 | Island and phone | The shell island shows presence and the current plan; the Link app gets the ask box |
 | 5 | Council mode, nightly review, routines | Three local models on big questions; a nightly look back that proposes one fix; "remember this as…" |
@@ -326,13 +405,17 @@ canvas lists all 19 with what each contributes.
 ## Check
 
 ```sh
-python3 scripts/verify-mario-voice.py  # fake microphone lifecycle, cancellation and commands
-python3 scripts/verify-mario-ui.py     # isolated Chrome: slides, focus, tasks, voice routing, the newer tiles, accounts sheet, photo viewer, orb
+python3 scripts/verify-mario-voice.py  # fake microphone: pauses, a noisy room, words while listening, cancellation, a session Hey Mario began, commands
+python3 scripts/verify-mario-wake.py   # Hey Mario with fakes: the phrase, the voiceprint, the listener, training; --real VOICE runs the real models on made-up voices
+python3 scripts/verify-mario-ui.py     # isolated Chrome: slides, focus, tasks, the newer tiles, accounts sheet, photo viewer; Mario's layer: orb, outlines, live words, answer, training
 python3 scripts/verify-mario.py   # collectors, decisions, hub over HTTP/WebSocket, page; part of verify-all --quick
 python3 services/mario-hub/hub.py --once   # one full state as JSON, from this machine
 ```
 
-Not covered by the check: the desktop hint and panel toggle under GNOME 42, the real `claude` and
-`agy` CLIs (the check feeds recorded replies), the news sites, LOOM and Ollama, a second Google
-account signing in from its chip, a real shared album of yours, Spotify actually playing, and the orb
-against a real voice. Record those with `scripts/record-live-verification.py` once tried live.
+Not covered by the check: the real `claude` and `agy` CLIs (the check feeds recorded replies), the
+news sites, LOOM and Ollama, a second Google account signing in from its chip, a real shared album
+of yours, Spotify actually playing, and everything that needs your voice: a spoken request end to
+end on Super+J, and Hey Mario trained by you. Seen on the real screen on 2026-11-15: the layer over
+other windows with only the orb showing, no trail when a piece comes or goes, the keyboard left
+where it was when it comes up the Hey Mario way, and the real microphone feeding the session and
+the listener. Record those with `scripts/record-live-verification.py` once tried live.

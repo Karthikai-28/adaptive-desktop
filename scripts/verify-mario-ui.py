@@ -64,10 +64,27 @@ async def main(tmp):
     h.ask = fake_ask
     async def quiet(*args): pass
     h.speak = quiet
-    async def start(): return {'id': 'fixture', 'state': 'listening'}
+    # a voice session that stays in "listening", with words so far, for as long as the check holds it
+    hold = {'on': False, 'state': 'done'}
+    async def start(**_): return {'id': 'fixture', 'state': 'listening'}
     async def command(action, sid):
-        return {'state': 'done', 'text': 'Open terminal'} if action == 'status' else {'state': 'cancelled'}
+        if action != 'status': return {'state': 'cancelled'}
+        if hold['on']: return {'state': 'listening', 'level': 0.6, 'partial': 'Open term'}
+        return {'state': 'done', 'text': 'Open terminal'} if hold['state'] == 'done' else {'state': hold['state'], 'text': ''}
     h.voice.start, h.voice.command = start, command
+    # "Hey Mario": no microphone, no models; training that mishears the first try, then hears the phrase four times
+    wake = {'available': True, 'trained': False, 'enabled': False, 'hearing': False, 'training': False, 'trained_at': 0, 'error': ''}
+    looks = {'n': 0}
+    h.wake.status = lambda: dict(wake)
+    async def train_start(): looks['n'] = time.monotonic(); return {'id': 'train', 'state': 'starting', 'step': 0, 'of': 4, 'level': 0, 'message': '', 'heard': ''}
+    async def train_status(sid):
+        step = min(4, int((time.monotonic() - looks['n']) / 0.7))
+        if step == 4: wake.update(trained=True, enabled=True, hearing=True, trained_at=now)
+        return {'id': 'train', 'state': 'done' if step == 4 else 'say', 'step': step, 'of': 4, 'level': 0.5, 'heard': 'Hey Mario',
+                'message': 'I heard “Hey Maria”. Say just “Hey Mario”.' if step == 0 else ''}
+    async def train_cancel(sid=None): return {'state': 'cancelled'}
+    async def enable(on): wake.update(enabled=on, hearing=on); await h.push_wake(); return dict(wake)
+    h.wake.train_start, h.wake.train_status, h.wake.train_cancel, h.wake.enable = train_start, train_status, train_cancel, enable
     port = 18991
     runner = web.AppRunner(hub.make_app(h, port))
     await runner.setup()
@@ -199,8 +216,17 @@ async def main(tmp):
             assert await ev('getComputedStyle(document.querySelector(".wave .w1")).animationName === "none" && getComputedStyle(document.querySelector(".wave .working")).animationName === "working"')
             await ev('voiceStatus(""); true')
             assert await ev('document.querySelector("#voice-status").hidden && document.querySelector("#voice-status").dataset.phase === "idle"')
-            await ev('toggleVoice()')
+            # the words so far take the hint's place while you speak
+            hold['on'] = True
+            await ev('toggleVoice(); true')
+            await asyncio.sleep(.5)
+            assert await ev('document.querySelector("#voice-status span").textContent') == '“Open term”'
+            hold['on'] = False
+            for _ in range(40):
+                if ('ask', 'Open terminal') in calls: break
+                await asyncio.sleep(.1)
             assert ('ask', 'Open terminal') in calls
+            await asyncio.sleep(.3)
             assert await ev('document.querySelector("#answer").textContent.includes("Done from voice")')
             await ev('cancelVoice(); document.querySelector("#answer").hidden=true; true')
             # Controls must be visible inside their cards at the target laptop size.
@@ -208,26 +234,98 @@ async def main(tmp):
             assert not clipped, clipped
             shot = await call('Page.captureScreenshot', {'format': 'png'})
             Path('/tmp/mario-home.png').write_bytes(base64.b64decode(shot['data']))
+            # Mario over your work (/panel), in a stand-in for its host: what the page tells it is kept
+            await call('Page.enable')
+            await call('Page.addScriptToEvaluateOnNewDocument', {'source':
+                'window.__told = []; window.webkit = {messageHandlers: {home: {postMessage: (m) => window.__told.push(JSON.parse(m))}}};'})
             await call('Page.navigate', {'url': f'http://127.0.0.1:{port}/panel'})
             for _ in range(60):
-                if await ev('document.body.classList.contains("is-panel")'): break
+                if await ev('document.body && document.body.classList.contains("is-panel") && (window.__told || []).some(m => m.type === "ready")'): break
                 await asyncio.sleep(.1)
-            assert await ev('document.body.classList.contains("shown") && typeof window.marioShown === "function" && document.activeElement === document.querySelector("#panel .voice-toggle")')
-            await ev('toggleVoice()')
-            assert await ev('document.querySelector("#log").textContent.includes("Done from voice")')
-            # the orb: drawn, and it follows the voice session and the speaking state
+            # only the orb until there is something to say
+            await ev('marioShown("quiet"); true')
             await asyncio.sleep(.5)
+            assert await ev('document.querySelector("#panel").classList.contains("shown") && document.querySelector("#heard").hidden && document.querySelector("#log").hidden && document.querySelector("#panel-form").hidden')
             drawn = await ev('(() => { const c = document.querySelector("#orb"); const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; })()')
             assert drawn > 2000, drawn
-            await ev('marioVoice("listening", 0.9); true')
-            await asyncio.sleep(.4)
-            assert await ev('document.querySelector("#orb").dataset.state === "listening" && document.querySelector("#orb-caption").textContent === "Listening…"')
+            # the orb is at the centre of the layer, and only what is drawn takes the pointer
+            box = await ev('(() => { const r = document.querySelector("#orb-stage").getBoundingClientRect(); return [r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight / 2, r.width]; })()')
+            assert abs(box[0]) < 2 and abs(box[1]) < 2 and box[2] == 280, box
+            # what the host shows of the page: the orb, a circle, and the three small buttons under it
+            shapes = await ev('window.__told.filter(m => m.type === "shape").pop().shapes')
+            assert len(shapes) == 4 and shapes[0][2:] == [280, 280, 140] and all(s[4] == 15 for s in shapes[1:]), shapes
+            # the key: it listens at once, your words appear as you say them, then the answer under the orb
+            calls.clear()
+            hold['on'] = True
+            await ev('marioShown("talk"); true')
+            await asyncio.sleep(.6)
+            assert await ev('document.querySelector("#orb").dataset.state === "listening" && document.querySelector("#heard-text").textContent === "Open term" && !document.querySelector("#heard").hidden')
+            assert await ev('getComputedStyle(document.querySelector("#layer-tools")).opacity === "0"')     # only the animation and the words
+            hold['on'] = False
+            for _ in range(40):
+                if await ev('document.querySelector("#log").textContent.includes("Done from voice")'): break
+                await asyncio.sleep(.1)
+            assert ('ask', 'Open terminal') in calls
+            assert await ev('document.querySelector("#heard-text").textContent === "Open terminal" && !document.querySelector("#log").hidden && document.querySelector("#panel").classList.contains("has-more")')
+            await asyncio.sleep(2)                      # past the moment kept for the reply to start being read
+            assert await ev('document.querySelector("#orb-stage").getBoundingClientRect().width') == 164     # the orb makes room
+            shapes = await ev('window.__told.filter(m => m.type === "shape").pop().shapes')
+            assert len(shapes) == 6 and shapes[0][2:] == [164, 164, 82], shapes       # orb, words, answer, three buttons
+            box = await ev('(() => { const r = document.querySelector("#log").getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()')
+            assert [round(v) for v in shapes[2][:4]] == [round(v) for v in box], (shapes[2], box)
+            shot = await call('Page.captureScreenshot', {'format': 'png'})
+            Path('/tmp/mario-layer-answer.png').write_bytes(base64.b64decode(shot['data']))
+            # it follows the speaking state
             await ev('marioVoice("idle", 0); state.presence = {state: "speaking"}; true')
             await asyncio.sleep(.4)
             assert await ev('document.querySelector("#orb").dataset.state === "speaking"')
+            await ev('state.presence = {state: "ready"}; true')
+            # "Hey Mario" heard: the hub's session is taken over; said and then nothing, Mario steps back
+            hold['state'] = 'silent'
+            await ev('window.__told.length = 0; marioShown("wake"); true')
+            for _ in range(40):
+                if await ev('window.__told.some(m => m.type === "close")'): break
+                await asyncio.sleep(.1)
+            assert await ev('window.__told.some(m => m.type === "close") && document.querySelector("#log").hidden')
+            hold['state'] = 'done'
+            # typing instead: any letter opens the box and asks the host for the keyboard
+            await ev('marioShown("quiet"); marioAttended(true); document.body.dispatchEvent(new KeyboardEvent("keydown", {key: "w", bubbles: true})); true')
+            assert await ev('!document.querySelector("#panel-form").hidden && document.activeElement === document.querySelector("#panel-input") && window.__told.some(m => m.type === "keyboard")')
+            await ev('document.querySelector("#panel-input").value = "what changed"; document.querySelector("#panel-form").requestSubmit(); true')
+            for _ in range(40):
+                if ('ask', 'what changed') in calls: break
+                await asyncio.sleep(.1)
+            assert ('ask', 'what changed') in calls
+            await asyncio.sleep(.3)
+            assert await ev('document.querySelector("#heard-text").textContent === "what changed" && document.querySelector("#panel-form").hidden')
+            # teaching Mario your voice: four times the phrase, a miss says what was heard, then it is on
+            assert await ev('document.querySelector("#tool-wake span").textContent') == 'Set up Hey Mario'
+            await ev('document.querySelector("#tool-wake").click(); true')
+            assert await ev('!document.querySelector("#train").hidden && document.querySelector("#train h3").textContent === "Teach Mario your voice"')
+            await ev('document.querySelector("#train .btn.primary").click(); true')
+            await asyncio.sleep(.35)
+            seen = await ev('[document.querySelector("#train h3").textContent, document.querySelector(".train-note").textContent, document.querySelector("#orb").dataset.state, document.querySelector("#train").hidden]')
+            assert seen[0] == 'Say “Hey Mario”' and 'Hey Maria' in seen[1] and seen[2] == 'listening', seen
+            for _ in range(60):
+                if await ev('document.querySelector("#train h3").textContent === "Mario knows your voice"'): break
+                await asyncio.sleep(.1)
+            assert await ev('document.querySelectorAll(".train-dots .got").length') == 4
+            await ev('[...document.querySelectorAll("#train .btn")].find(b => b.textContent === "Done").click(); true')
+            await h.push_wake()
+            await asyncio.sleep(.3)
+            assert await ev('document.querySelector("#train").hidden && document.querySelector("#tool-wake span").textContent === "Hey Mario" && document.querySelector("#tool-wake").dataset.state === "on"')
+            # the switch turns the listener off
+            await ev('document.querySelector("#tool-wake").click(); true')
+            await ev('document.querySelector("#train input[role=switch]").click(); true')
+            await asyncio.sleep(.4)
+            assert not wake['enabled'] and await ev('document.querySelector("#tool-wake").dataset.state === "off" && !document.querySelector("#train input[role=switch]").checked')
+            shot = await call('Page.captureScreenshot', {'format': 'png'})
+            Path('/tmp/mario-layer.png').write_bytes(base64.b64decode(shot['data']))
             print('PASS: one screen with in-tile scrolling, rapid/wrapping/keyboard slides, all tasks, draft preservation, account chips and sheet, '
-                  'movies, sticky note, storage, the weather sky, Spotify, photos full screen, the listening picture, spoken request in Home and panel, the orb')
-            print('Screenshot: /tmp/mario-home.png')
+                  'movies, sticky note, storage, the weather sky, Spotify, photos full screen, the listening picture with the words so far, '
+                  'spoken request in Home; Mario over your work: the orb at the centre, the outlines its host shows, live words, answer, '
+                  '"Hey Mario" hand-over and stepping back, typing instead, voice training and its switch')
+            print('Screenshots: /tmp/mario-home.png /tmp/mario-layer-answer.png /tmp/mario-layer.png')
     finally:
         chrome.terminate()
         await asyncio.to_thread(chrome.wait, 10)

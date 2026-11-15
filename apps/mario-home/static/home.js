@@ -1,4 +1,5 @@
-// Mario Home ("Your day") and the Mario panel: one page, two layouts (/ and /panel).
+// Mario Home ("Your day") and Mario over your work: one page, two layouts (/ and /panel; the
+// second is layer.js's).
 // Everything shown comes from Mario Hub over a WebSocket and updates live; cards render from
 // state only, so a reconnect redraws the whole day.
 "use strict";
@@ -518,16 +519,16 @@ async function ask(text, where) {
   text = text.trim();
   if (!text) return;
   const box = $("#answer");
-  if (where === "panel") $("#log").append(el("div", { class: "me" }, text));
+  if (where === "panel") window.marioLayer.asked(text);
   else { box.hidden = false; box.replaceChildren(el("span", { class: "muted" }, "…")); }
   let res;
   try { res = await post("/api/ask", { text }); } catch (e) { res = { error: "Mario Hub is not answering." }; }
   showAnswer(res, where);
 }
 function showAnswer(res, where) {
+  if (where === "panel") return window.marioLayer.answer(res);
   const box = $("#answer"); box.hidden = false;
-  if (where === "panel") { $("#log").append(answerNode(res)); $("#log").scrollTop = $("#log").scrollHeight; }
-  else box.replaceChildren(el("button", { class: "close", type: "button", "aria-label": "Close", onclick: () => { box.hidden = true; } }, "×"), answerNode(res));
+  box.replaceChildren(el("button", { class: "close", type: "button", "aria-label": "Close", onclick: () => { box.hidden = true; } }, "×"), answerNode(res));
 }
 
 // ------------------------------------------------------------------- live
@@ -536,13 +537,14 @@ function connect(delay = 500) {
   ws.onopen = () => { $("#offline").hidden = true; delay = 500; };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === "state") { Object.assign(state, msg); if (!PANEL) renderAll(); else renderPresence(); }
+    if (msg.type === "state") { Object.assign(state, msg); if (!PANEL) renderAll(); else { renderPresence(); window.marioLayer.wake(); } }
     else if (msg.type === "card") {
       state.cards[msg.name] = { data: msg.data, at: msg.at };
       if (!PANEL) { (FEEDS[msg.name] || []).forEach(draw); if (window.cardChanged) window.cardChanged(msg.name); }
     } else if (msg.type === "config") { state.config = msg.config; if (!PANEL) drawTabs(); }
-    else if (msg.type === "presence") { state.presence = msg; renderPresence(); }
+    else if (msg.type === "presence") { state.presence = msg; renderPresence(); if (PANEL) window.marioLayer.presence(); }
     else if (msg.type === "brain") { state.brain = msg; if (!PANEL) draw("brain"); renderPresence(); }
+    else if (msg.type === "wake") { state.wake = msg; if (PANEL) window.marioLayer.wake(); }
     else if (msg.type === "handoff") handoffEvent(msg);
   };
   ws.onclose = () => { $("#offline").hidden = false; setTimeout(() => connect(Math.min(delay * 2, 10000)), delay); };
@@ -551,16 +553,7 @@ function connect(delay = 500) {
 document.addEventListener("DOMContentLoaded", () => {
   if (PANEL) {
     document.body.classList.add("is-panel");
-    // The host calls this each time Super+J shows the panel: it comes in again, ready to talk.
-    window.marioShown = () => {
-      document.body.classList.remove("shown"); void document.body.offsetWidth; document.body.classList.add("shown");
-      const talk = $("#panel .voice-toggle"); if (talk) talk.focus();
-    };
-    window.marioShown();
-    $("#home").hidden = true; $("#panel").hidden = false;
-    $("#panel-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#panel-input"); ask(i.value, "panel"); i.value = ""; });
-    $("#panel .voice-toggle").focus();
-    $("#orb-talk").addEventListener("click", toggleVoice);
+    $("#home").hidden = true; $("#panel").hidden = false;      // the rest is layer.js
   } else {
     $("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#ask"); ask(i.value, "home"); i.value = ""; });
     document.querySelectorAll("[data-ask]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.ask, "home")));
@@ -582,7 +575,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".voice-toggle").forEach((b) => b.addEventListener("click", toggleVoice));
   $("#voice-cancel").addEventListener("click", cancelVoice);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") cancelVoice(); });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) cancelVoice(); });
+  // Home hidden means nobody is talking to it. Mario's layer is told by its host instead
+  // (marioHidden): "Hey Mario" brings it up while it is still hidden, with the session already on.
+  document.addEventListener("visibilitychange", () => { if (document.hidden && !PANEL) cancelVoice(); });
   $("#type-toggle").addEventListener("click", () => {
     const input = $("#ask"); input.hidden = !input.hidden;
     $("#voice-hint").hidden = !input.hidden;
@@ -614,15 +609,17 @@ function voicePhase(phase, level = 0) {
   if (window.marioVoice) window.marioVoice(phase, level);
   box.style.setProperty("--level", phase === "listening" ? String(Math.max(0.06, Math.min(1, level))) : phase === "working" ? "0.12" : "0");
 }
-function voiceStatus(text, active = false, phase = "idle", level = 0) {
-  $("#voice-status").hidden = !text;
+function voiceStatus(text, active = false, phase = "idle", level = 0, words = "") {
+  $("#voice-status").hidden = !text || PANEL;
   voicePhase(text ? phase : "idle", level);
-  $("#voice-status span").textContent = text;
+  // while you speak, the words so far take the place of the hint
+  $("#voice-status span").textContent = words && active ? `“${words}”` : text;
   $("#voice-cancel").textContent = active ? "Cancel" : "Dismiss";
   document.querySelectorAll(".voice-toggle").forEach((b) => {
     b.textContent = active ? "Finish speaking" : "Talk to Mario";
     b.setAttribute("aria-pressed", String(active));
   });
+  if (PANEL) window.marioLayer.voice(text, active, phase, words);
 }
 async function cancelVoice() {
   const id = voiceId; voiceId = null; voiceGeneration++; voiceBusy = false;
@@ -636,6 +633,7 @@ async function toggleVoice() {
   const generation = ++voiceGeneration;
   voiceStatus("Opening microphone…", true, "working");
   try {
+    // a session "Hey Mario" has just begun is handed over here instead of a new one
     const start = await post("/api/voice/start");
     if (generation !== voiceGeneration) {
       if (start.id) await post("/api/voice/cancel", { id: start.id });
@@ -647,20 +645,25 @@ async function toggleVoice() {
       const result = await post("/api/voice/status", { id: voiceId });
       if (generation !== voiceGeneration) return;
       if (result.error) throw new Error(result.error);
+      if (result.state === "silent") {                 // "Hey Mario" and then nothing
+        voiceId = null;
+        voiceStatus("");
+        if (PANEL) window.marioLayer.nothingSaid();
+        break;
+      }
       if (result.state === "done") {
         voiceId = null;
-        voiceStatus(`Heard: “${result.text}” · Working…`, false, "working");
-        if (PANEL) $("#log").append(el("div", { class: "me" }, result.text));
+        voiceStatus(`Heard: “${result.text}” · Working…`, false, "working", 0, result.text);
         const res = await post("/api/ask", { text: result.text, spoken: true });
         if (generation !== voiceGeneration) return;
         showAnswer(res, PANEL ? "panel" : "home");
-        voiceStatus(res.error || res.answer || "Review Mario’s plan below, then choose Run.");
+        voiceStatus(PANEL ? "" : res.error || res.answer || "Review Mario’s plan below, then choose Run.");
         break;
       }
       const listening = result.state === "listening";
       voiceStatus(listening ? "Listening… speak now; a pause sends your command." : "Recognizing your words on this laptop…", true,
-        listening ? "listening" : "working", result.level || 0);
-      // while you speak the level is read often enough for the strands to follow your voice
+        listening ? "listening" : "working", result.level || 0, result.partial || "");
+      // while you speak the level is read often enough for the picture to follow your voice
       await new Promise((resolve) => setTimeout(resolve, listening ? 110 : 300));
     }
   } catch (e) {

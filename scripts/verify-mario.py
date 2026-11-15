@@ -596,9 +596,21 @@ def test_page():
           _re.search(r"html, body \{[^}]*overflow: hidden", css) is not None and "[hidden] { display: none !important; }" in css
           and _re.search(r"\.rows, \.timeline, \.boards[^{]*\{[^}]*overflow-y: auto", css) is not None
           and ".home { overflow: auto; }" not in css)
-    check("talking to Mario draws the microphone's level; the panel comes in when Super+J shows it",
-          "voicePhase(" in script and "result.level" in script and "@keyframes drift" in css and "@keyframes panel-in" in css
-          and "window.marioShown" in script and "marioShown" in host_text and "fade_in(" in host_text)
+    layer_js = (REPO / "apps" / "mario-home" / "static" / "layer.js").read_text()
+    check("talking to Mario draws the microphone's level and shows the words so far",
+          "voicePhase(" in script and "result.level" in script and "result.partial" in script and "@keyframes drift" in css)
+    check("Super+J is Mario over your work: a layer at the centre of the screen of which only the orb is seen until there is something to say",
+          "@keyframes orb-in" in css and 'classList.toggle("layer-root"' in html and "window.marioShown" in layer_js
+          and "marioShown" in host_text and "Gdk.WindowTypeHint.DOCK" in host_text and "get_rgba_visual()" in host_text
+          and "def draw(self, win, cr)" in host_text and "cr.clip()" in host_text and "propagate_draw" in host_text
+          and "input_shape_combine_region" in host_text and 'type: "shape", shapes' in layer_js and "fade_in(" in host_text
+          and "panel-head" not in html and "panel-in" not in css)
+    layer_css = css[css.index("Mario over your work (Super+J"):css.index("Home is away")]
+    check("nothing in the layer reaches outside its own outline (the host cuts the page to the outlines)",
+          _re.search(r"box-shadow: (?!inset)", layer_css) is None and "requestAnimationFrame(everyFrame)" in layer_js)
+    check("Hey Mario comes up without taking the keyboard, and steps back on its own once it has answered",
+          'mode in ("talk", "train")' in host_text and "set_focus_on_map(keyboard)" in host_text
+          and "planLeave" in layer_js and 'post("/api/wake/train/start")' in layer_js and "nothingSaid" in script)
     check("no 'all systems up to date' line", "all systems up to date" not in script.lower() and 'id="status"' not in html)
     check("News rolls every 30 seconds", 'setFaces("news", items.map(face), { every: 30000' in script)
     check("News shows each headline's picture, cover-fitted edge to edge, from the hub",

@@ -287,10 +287,9 @@ kbd { font: 500 11px Inter, sans-serif; color: var(--soft); background: $white/8
 @media (prefers-reduced-motion: reduce) { .mark * { animation: none !important; } .mark[data-state="thinking"] .shuttle { left: 55%; } }
 
 /* -- panel and answers ---------------------------------------------------------------------- */
-body.is-panel { background: $surface.ground; }
-.panel { height: 100%; display: flex; flex-direction: column; }
-.panel-head { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--line); }
-.panel-head .title { font-size: 17px; font-weight: 600; }
+/* Mario over your work: the page is solid, in the colour of the orb's own ground, and its host
+   shows it only inside the shapes it draws (layer.js reports them), so this ground is never seen. */
+html.layer-root, html.layer-root body { background: $surface.ground; }
 .log { flex: 1; min-height: 0; overflow: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; }
 .me { align-self: flex-end; max-width: 78%; background: $accent.pressed; border-radius: 18px 18px 4px 18px; padding: 10px 14px; font-size: 14px; white-space: pre-wrap; }
 .mario { align-self: flex-start; max-width: 94%; display: flex; flex-direction: column; gap: 8px; font-size: 14px; white-space: pre-wrap; }
@@ -344,11 +343,8 @@ body.is-panel { background: $surface.ground; }
 @keyframes drift { to { transform: translateX(-600px); } }
 @keyframes working { 0% { transform: scaleX(0); transform-origin: 0 50%; } 50% { transform: scaleX(1); transform-origin: 0 50%; } 51% { transform: scaleX(1); transform-origin: 100% 50%; } 100% { transform: scaleX(0); transform-origin: 100% 50%; } }
 @keyframes voice-in { from { opacity: 0; transform: translateX(-50%) translateY(14px) scale(.98); } }
-/* the panel comes in from its edge of the screen each time Super+J shows it */
-body.is-panel.shown .panel { animation: panel-in var(--state) $motion.ease.standard both; }
-@keyframes panel-in { from { opacity: 0; transform: translateX(28px); } }
 @media (prefers-reduced-motion: reduce) {
-  .wave path, .wave .working, .voice-status, body.is-panel.shown .panel { animation: none !important; }
+  .wave path, .wave .working, .voice-status { animation: none !important; }
   .voice-status[data-phase="working"] .working { transform: scaleX(1); }
 }
 @media (prefers-reduced-motion: reduce) { .face, .roll { animation: none !important; } }
@@ -609,13 +605,69 @@ body.opening #home .card { animation: rise var(--state) $motion.ease.standard bo
 .lb-bar { position: fixed; top: 18px; right: 24px; display: flex; gap: 10px; }
 .lb-count { position: fixed; top: 30px; left: 28px; font-size: 13px; color: $white/80; font-variant-numeric: tabular-nums; }
 
-/* -- Mario's orb (the panel) --------------------------------------------------------------- */
-.orb-stage { position: relative; flex: none; height: 300px; display: grid; place-items: center; }
+/* -- Mario over your work (Super+J, "Hey Mario") --------------------------------------------- */
+/* A layer at the centre of the screen. The orb is all there is until there is something to say;
+   then the words, and the answer, come in under it and the orb makes room. Each piece is solid
+   (it sits on whatever you were doing) and nothing is seen between them: the host cuts the page
+   to the pieces' outlines and draws their shadows, so nothing here may reach outside its box. */
+/* The orb's centre is the centre of the layer (the centre of the screen) whatever is under it; when
+   an answer or a sheet needs the room, the orb grows smaller and glides up. */
+.layer { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 12px;
+  padding: calc(50vh - 140px) 16px 16px; pointer-events: none; transition: padding-top var(--state) $motion.ease.standard; }
+.layer.has-more { padding-top: max(16px, calc(50vh - 290px)); }
+.layer > * { flex: none; pointer-events: auto; }
+.orb-stage { position: relative; width: 280px; height: 280px; border-radius: 50%; background: $surface.ground;
+  box-shadow: inset 0 0 0 1px $line.2;
+  transition: width var(--state) $motion.ease.standard, height var(--state) $motion.ease.standard; }
+.layer.has-more .orb-stage { width: 164px; height: 164px; }
 #orb { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.orb-hit { position: relative; width: 200px; height: 200px; padding: 0; border: 0; border-radius: 50%; background: transparent; }
-.orb-hit:focus-visible { outline: 2px solid var(--blue); outline-offset: 8px; }
-.orb-caption { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px; color: var(--muted); pointer-events: none; }
-body.is-panel .voice-status .wave { display: none; }
+.orb-hit { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 50%; background: transparent; }
+.orb-hit:focus-visible { outline: 2px solid var(--blue); outline-offset: -6px; }
+.layer.shown .orb-stage { animation: orb-in 320ms $motion.ease.standard both; }
+@keyframes orb-in { from { opacity: 0; transform: scale(.6); } }
+/* the words: yours as you say them, then the request Mario is working on */
+.heard, .layer .log, .train, .layer .composer { width: min(620px, 100%); background: $surface.pane; border: 1px solid $line.2;
+  animation: rise var(--state) $motion.ease.standard both; }
+.heard { width: auto; max-width: min(620px, 100%); padding: 9px 20px; border-radius: 22px; text-align: center; display: flex; flex-direction: column; gap: 2px; }
+.orb-caption { font-size: 12px; color: var(--muted); }
+.orb-caption:empty, .heard-text:empty { display: none; }
+.heard-text { font-size: 17px; font-weight: 500; line-height: 1.35; max-height: 4.1em; overflow: hidden; }
+.heard-text.note { font-size: 14px; font-weight: 400; color: var(--soft); }
+.layer .log { flex: 0 1 auto; max-height: min(44vh, 380px); padding: 16px 18px; border-radius: var(--r); gap: 12px; }
+.layer .log .mario { max-width: 100%; font-size: 15px; line-height: 1.5; }
+.layer .composer { margin: 0; border-radius: 18px; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+/* the quiet row under it all: shown when Mario is not busy, or under the pointer */
+.layer-tools { display: flex; gap: 6px; opacity: 0; pointer-events: none; transition: opacity var(--feedback); }
+.layer.idle .layer-tools, .layer:hover .layer-tools, .layer:focus-within .layer-tools { opacity: 1; pointer-events: auto; }
+.tool { height: 30px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; border-radius: 15px; border: 1px solid $line.2;
+  background: $surface.pane; color: var(--soft); font-size: 12px; }
+.tool:focus-visible, .layer .btn:focus-visible { outline-offset: -3px; }
+.tool:hover { color: var(--text); }
+.tool svg { width: 14px; height: 14px; }
+#tool-wake[data-state="on"] svg { stroke: var(--ok); }
+#tool-wake[data-state="waiting"] svg { stroke: var(--warn); }
+/* teaching Mario your voice, and the Hey Mario switch */
+.train { padding: 18px 20px; border-radius: var(--r); display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.train h3 { margin: 0; font-size: 19px; font-weight: 600; }
+.train p { margin: 0; line-height: 1.5; }
+.train-note { min-height: 1.5em; color: var(--soft); }
+.train-note:empty { display: none; }
+.train-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 4px; }
+.train-dots { display: flex; gap: 10px; padding: 6px 0; }
+.train-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid $line.2; transition: background var(--state), border-color var(--state), transform var(--state) $motion.ease.standard; }
+.train-dots i.now { border-color: var(--blue); animation: dot-wait 1.1s ease-in-out infinite alternate; }
+.train-dots i.got { background: var(--ok); border-color: var(--ok); transform: scale(1.1); }
+@keyframes dot-wait { to { transform: scale(1.35); } }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; }
+.switch-row > span { display: flex; flex-direction: column; gap: 2px; }
+.switch-row input { appearance: none; -webkit-appearance: none; flex: none; width: 44px; height: 26px; margin: 0; border-radius: 13px; background: $fill.2;
+  position: relative; cursor: pointer; transition: background var(--feedback); }
+.switch-row input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: $white;
+  transition: transform var(--feedback) $motion.ease.standard; }
+.switch-row input:checked { background: var(--blue); }
+.switch-row input:checked::after { transform: translateX(18px); }
+@media (prefers-reduced-motion: reduce) { .layer.shown .orb-stage, .heard, .layer .log, .train, .train-dots i.now { animation: none !important; } }
 
 /* Home is away (hidden behind your work): nothing keeps moving for nobody. */
 body.away *, body.away *::before, body.away *::after { animation-play-state: paused !important; }

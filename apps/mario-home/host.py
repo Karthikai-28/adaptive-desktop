@@ -5,8 +5,11 @@
     host.py                show Home, or hide it if it is showing (Super+H; --toggle is the same)
     host.py --show [TAB]   show Home, on Today or a tab from "tabs" in mario.json (mail, calendar, ...)
     host.py --hide         hide Home
-    host.py --panel        the Mario panel: a window at the right edge, above the others; running it
-                           again while it is open closes it (Super+J)
+    host.py --panel        Mario over your work: the orb at the centre of the screen, listening;
+                           running it again while it is up sends it away (Super+J)
+    host.py --panel --wake    the same without taking the keyboard: "Hey Mario" was heard and the
+                              hub already has the session (--quiet: just the orb, no microphone;
+                              --train: teach Mario your voice; --hide; --background: loaded, hidden)
 
 Home is not the desktop: the wallpaper is. Home is one window over the work area (the top bar
 stays), above every other window while it is up and gone when it is not, so whatever you were doing
@@ -20,13 +23,23 @@ of its own (~/.local/share/adaptive-desktop/mario/web: signed in there once, it 
 laid over the rectangle the page reports. Signing in happens inside the tab; links that leave a
 tab's site open in the browser (site_rules.py decides which is which).
 
+Mario (Super+J) is not a window you manage either: a layer at the centre of the screen of which
+only the orb, the words as you say them, and the answer are seen. Everything behind it stays as
+it is and keeps running; a click beside the orb goes to whatever is there. The page itself is
+solid (WebKitGTK 2.50 does not erase a see-through page when it repaints, so anything that moved
+would leave a trail): the page reports the outline of each thing it draws, and this file shows
+the page only inside those outlines, with smooth edges and a shadow under each.
+
 GTK 3 + WebKitGTK (gir1.2-webkit2-4.1, or 4.0), as on Ubuntu 22.04; X11.
 """
 import json
+import math
 import os
+import subprocess
 import sys
 from pathlib import Path
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -43,7 +56,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import site_rules  # noqa: E402
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "adaptive-desktop" / "mario.json"
-PANEL_W = 760
+LAYER_W, LAYER_H = 760, 860     # Mario's layer; only what the page draws in it is visible
+SHADOW_STEPS, SHADOW_DROP = 12, 9
 
 
 def hub_url(path="/"):
@@ -54,10 +68,13 @@ def hub_url(path="/"):
     return f"http://127.0.0.1:{port}{path}"
 
 
-def make_view(path):
+def make_view(path, plain=False):
+    """plain: drawn without the graphics card, so that the window can cut the picture to shape
+    (Mario's layer; it is small and its page is light)."""
+    policy = WebKit2.HardwareAccelerationPolicy.NEVER if plain else WebKit2.HardwareAccelerationPolicy.ON_DEMAND
     settings = WebKit2.Settings(enable_developer_extras=bool(os.environ.get("MARIO_DEVTOOLS")),
                                 enable_write_console_messages_to_stdout=True,
-                                hardware_acceleration_policy=WebKit2.HardwareAccelerationPolicy.ON_DEMAND)
+                                hardware_acceleration_policy=policy)
     view = WebKit2.WebView(settings=settings)
     view.set_background_color(Gdk.RGBA(0.078, 0.078, 0.086, 1))
     if not os.environ.get("MARIO_DEVTOOLS"):
@@ -369,45 +386,216 @@ class Home(Gtk.Application):
 
 
 class Panel(Gtk.Application):
-    """Unique per session: a second launch reaches the first, which toggles."""
+    """Mario over your work. One per session: later launches hand it their arguments."""
 
     def __init__(self):
-        super().__init__(application_id="com.karthi.MarioPanel", flags=Gio.ApplicationFlags.FLAGS_NONE)
-        self.win = None
+        super().__init__(application_id="com.karthi.MarioPanel", flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = self.view = None
+        self.shapes = []           # the outline of each thing the page draws: x, y, width, height, corner
+        self.loaded = False        # the page is there to be told how it was summoned
+        self.mode = "quiet"
+        self.hiding = False
 
-    def do_activate(self):
-        if self.win and self.win.get_visible():
-            self.win.hide()
-            return
+    def do_command_line(self, line):
+        args = line.get_arguments()[1:]
         if not self.win:
-            win = Gtk.ApplicationWindow(application=self, title="Mario")
-            win.set_type_hint(Gdk.WindowTypeHint.DIALOG)
-            win.set_keep_above(True)
-            win.set_skip_taskbar_hint(True)
-            win.connect("delete-event", lambda w, _e: (w.hide(), True)[1])
-            win.connect("key-press-event", lambda w, e: (w.hide(), True)[1] if e.keyval == Gdk.KEY_Escape else False)
-            win.add(make_view("/panel"))
-            self.win = win
-        area = workarea()
-        self.win.resize(PANEL_W, area.height - 32)
-        self.win.move(area.x + area.width - PANEL_W - 16, area.y + 16)
-        self.win.set_opacity(0)
-        self.win.show_all()
-        self.win.present_with_time(Gtk.get_current_event_time() or GLib.get_monotonic_time() // 1000)
-        fade_in(self.win)
-        # the page slides its content in and puts the keyboard on Talk to Mario
-        self.win.get_child().run_javascript("window.marioShown && window.marioShown()", None, None, None)
+            self.build()
+        up = self.win.get_visible() and not self.hiding
+        if "--background" in args:
+            pass                                  # loaded, waiting for its key or its name
+        elif "--hide" in args:
+            self.hide()
+        elif "--wake" in args:
+            self.show("wake")
+        elif "--quiet" in args:
+            self.show("quiet")
+        elif "--train" in args:
+            self.show("train")
+        elif up:
+            self.hide()
+        else:
+            self.show("talk")
+        return 0
+
+    def build(self):
+        win = Gtk.ApplicationWindow(application=self, title="Mario")
+        # As Home: above ordinary windows, on every workspace, out of the taskbar and the window
+        # switcher, not animated by the shell. Unlike Home it has no ground of its own: the window
+        # is see-through and draw() puts only the page's shapes on it.
+        win.set_type_hint(Gdk.WindowTypeHint.DOCK)
+        win.set_decorated(False)
+        win.set_skip_taskbar_hint(True)
+        win.set_skip_pager_hint(True)
+        win.set_keep_above(True)
+        win.set_accept_focus(True)
+        win.stick()
+        visual = win.get_screen().get_rgba_visual()
+        if visual:
+            win.set_visual(visual)
+        win.set_app_paintable(True)
+        win.connect("draw", self.draw)
+        self.view = make_view("/panel", plain=True)
+        manager = self.view.get_user_content_manager()
+        manager.register_script_message_handler("home")
+        manager.connect("script-message-received::home", self.from_page)
+        self.view.connect("load-changed", self.reloaded)
+        win.add(self.view)
+        win.connect("delete-event", lambda *_: (self.hide(), True)[1])
+        win.connect("key-press-event", lambda _w, e: (self.hide(), True)[1] if e.keyval == Gdk.KEY_Escape else False)
+        win.connect("notify::is-active", lambda *_: self.js(f"window.marioAttended && marioAttended({json.dumps(win.is_active())})"))
+        self.view.show()
+        self.win = win
+        self.hold()                               # no window on screen, still running
+
+    @staticmethod
+    def outline(cr, x, y, width, height, corner):
+        corner = max(0.0, min(corner, width / 2, height / 2))
+        cr.new_sub_path()
+        cr.arc(x + width - corner, y + corner, corner, -math.pi / 2, 0)
+        cr.arc(x + width - corner, y + height - corner, corner, 0, math.pi / 2)
+        cr.arc(x + corner, y + height - corner, corner, math.pi / 2, math.pi)
+        cr.arc(x + corner, y + corner, corner, math.pi, 1.5 * math.pi)
+        cr.close_path()
+
+    def draw(self, win, cr):
+        """Nothing, then a soft shadow under each shape, then the page inside the shapes."""
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        if not self.shapes:
+            return True
+        for x, y, width, height, corner in self.shapes:
+            for step in range(SHADOW_STEPS):         # rings that widen and thin out: a blur, cheaply
+                grow = 1.5 + step * 3
+                cr.set_source_rgba(0, 0, 0, 0.034 * (1 - step / SHADOW_STEPS))
+                self.outline(cr, x - grow, y - grow + SHADOW_DROP, width + 2 * grow, height + 2 * grow, corner + grow)
+                cr.fill()
+        cr.push_group()
+        win.propagate_draw(win.get_child(), cr)
+        page = cr.pop_group()
+        for shape in self.shapes:
+            self.outline(cr, *shape)
+        cr.clip()
+        cr.set_source(page)
+        cr.paint()
+        return True
+
+    def place(self):
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        screen, area = monitor.get_geometry(), monitor.get_workarea()
+        # The centre of the screen itself, not of the work area: the orb belongs in the middle of
+        # what you see.
+        middle = screen.y + screen.height // 2
+        # as tall as fits around that centre inside the work area (the window manager moves a
+        # window that reaches under the bar or the dock, and the orb would leave the centre)
+        height = max(360, min(LAYER_H, 2 * min(middle - area.y, area.y + area.height - middle) - 16))
+        width = min(LAYER_W, screen.width - 32)
+        self.win.resize(width, height)
+        self.win.move(screen.x + (screen.width - width) // 2, screen.y + (screen.height - height) // 2)
+
+    def js(self, script):
+        if self.view:
+            self.view.run_javascript(script, None, None, None)
+
+    def show(self, mode):
+        self.mode = mode
+        self.hiding = False
+        self.place()
+        keyboard = mode in ("talk", "train")      # "Hey Mario" must not take the keyboard from your work
+        self.win.set_focus_on_map(keyboard)
+        if not self.win.get_visible():
+            self.win.set_opacity(0)
+            self.win.show()
+            fade_in(self.win)
+        else:
+            self.win.set_opacity(1)
+        if keyboard:
+            self.win.present_with_time(now(self.win))
+            self.view.grab_focus()
+        if self.loaded:
+            self.js(f"window.marioShown && marioShown({json.dumps(mode)})")
+
+    def hide(self):
+        if not self.win.get_visible() or self.hiding:
+            return
+        self.hiding = True
+        self.js("window.marioHidden && marioHidden()")    # the microphone goes off now, not after the fade
+        started = GLib.get_monotonic_time()
+
+        def step():
+            if not self.hiding:                   # shown again while fading out
+                return False
+            t = min(1.0, (GLib.get_monotonic_time() - started) / 120000)
+            self.win.set_opacity(1 - t)
+            if t < 1:
+                return True
+            self.win.hide()
+            self.win.set_opacity(1)
+            self.hiding = False
+            return False
+
+        GLib.timeout_add(16, step)
+
+    def reloaded(self, _view, event):
+        if event == WebKit2.LoadEvent.STARTED:
+            self.loaded = False
+
+    def from_page(self, _manager, result):
+        try:
+            msg = json.loads(result.get_js_value().to_string())
+        except (ValueError, AttributeError, GLib.Error):
+            return
+        kind = msg.get("type")
+        if kind == "close":
+            self.hide()
+        elif kind == "ready":
+            # the page has loaded (again): tell it how it was summoned, if it is showing
+            self.loaded = True
+            if self.win.get_visible() and not self.hiding:
+                self.js(f"window.marioShown && marioShown({json.dumps(self.mode)})")
+        elif kind == "shape":
+            self.shape(msg.get("shapes") or [])
+        elif kind == "keyboard" and self.win.get_visible():
+            self.win.present_with_time(now(self.win))
+            self.view.grab_focus()
+
+    def shape(self, shapes):
+        """What the page draws, as it is now: only these shapes are seen, and only they (grown a
+        little, so that neighbours meet) take the pointer; a click anywhere else in the layer
+        goes to the window underneath."""
+        clean = []
+        for item in shapes[:24]:
+            try:
+                x, y, width, height, corner = (float(v) for v in item)
+            except (TypeError, ValueError):
+                continue
+            if width > 0 and height > 0:
+                clean.append((x, y, width, height, corner))
+        if clean == self.shapes:
+            return
+        self.shapes = clean
+        region = cairo.Region()
+        for x, y, width, height, _corner in clean:
+            region.union(cairo.RectangleInt(int(x) - 4, int(y) - 7, int(width) + 9, int(height) + 15))
+        self.win.input_shape_combine_region(region)
+        self.win.queue_draw()
 
 
 def main():
     args = sys.argv[1:]
     if "--panel" in args:
-        return Panel().run([sys.argv[0]])
+        return Panel().run(sys.argv)
     # The autostart entry is seen by the normal Ubuntu session too, which must stay as it was:
     # Home only exists inside the Adaptive session (its wrapper sets this profile).
     if os.environ.get("DCONF_PROFILE") != "adaptive" and not os.environ.get("MARIO_ANY_SESSION"):
         print("Mario Home runs in the Adaptive Desktop session only (MARIO_ANY_SESSION=1 overrides).")
         return 0
+    if "--background" in args:
+        # the login entry loads Mario's layer too, so Super+J and "Hey Mario" are there at once
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--panel", "--background"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return Home().run(sys.argv)
 
 

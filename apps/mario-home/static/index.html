@@ -6,6 +6,8 @@
 <title>Mario</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/home.css">
+<!-- /panel is Mario over your work: nothing may be painted behind it, from the first frame -->
+<script>document.documentElement.classList.toggle("layer-root", location.pathname === "/panel");</script>
 </head>
 <body>
 <!-- Icons: one stroke set, used by id -->
@@ -53,6 +55,8 @@
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
   <symbol id="i-rain" viewBox="0 0 24 24"><path d="M7 15h10a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.5A3.3 3.3 0 0 0 7 15zM8 18l-1 3M12 18l-1 3M16 18l-1 3"/></symbol>
 </svg>
 
@@ -115,24 +119,28 @@
   </div>
 </main>
 
-<!-- Panel: Super+J opens this page at /panel in its own window -->
-<section id="panel" class="panel" hidden>
-  <header class="panel-head">
-    <span class="mark big" data-state="ready" aria-hidden="true"><svg viewBox="0 0 44 24"><path class="s1" d="M2 12C10 3 18 21 26 12S38 3 42 12"/><path class="s2" d="M2 12C10 21 18 3 26 12S38 21 42 12"/><path class="s3" d="M2 12H42"/></svg><i class="shuttle"></i></span>
-    <div><div class="title">Mario</div><div class="muted" id="panel-sub">Claude answers</div></div>
-    <button type="button" class="btn primary voice-toggle" aria-label="Talk to Mario">Talk to Mario</button>
-  </header>
+<!-- Mario over your work (/panel; Super+J or "Hey Mario"): the orb at the centre of the screen and
+     nothing behind it. Words appear under it as you say them, then the answer. -->
+<section id="panel" class="layer" hidden data-mode="quiet">
   <!-- Mario's presence: rings that turn while it waits, a ring that takes the shape of your voice
        while it listens, and waves that travel outward while it talks back -->
-  <div class="orb-stage"><canvas id="orb" aria-hidden="true"></canvas>
-    <button type="button" id="orb-talk" class="orb-hit" aria-label="Talk to Mario"></button>
-    <span id="orb-caption" class="orb-caption">Tap or press Space to talk</span></div>
-  <div id="log" class="log" aria-live="polite"></div>
-  <form id="panel-form" class="composer" autocomplete="off">
+  <div class="orb-stage" id="orb-stage"><canvas id="orb" aria-hidden="true"></canvas>
+    <button type="button" id="orb-talk" class="orb-hit" aria-label="Talk to Mario"></button></div>
+  <div id="heard" class="heard" role="status" aria-live="polite" hidden>
+    <span id="orb-caption" class="orb-caption"></span><span id="heard-text" class="heard-text"></span></div>
+  <div id="log" class="log" aria-live="polite" hidden></div>
+  <!-- Teaching Mario your voice, and the "Hey Mario" switch -->
+  <div id="train" class="train" role="dialog" aria-label="Hey Mario" hidden></div>
+  <form id="panel-form" class="composer" autocomplete="off" hidden>
     <label for="panel-input" class="sr">Message Mario</label>
     <input id="panel-input" placeholder="Message Mario">
     <button class="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6"/></svg></button>
   </form>
+  <nav id="layer-tools" class="layer-tools" aria-label="Mario">
+    <button type="button" class="tool" id="tool-type"><svg aria-hidden="true"><use href="#i-keys"/></svg>Type</button>
+    <button type="button" class="tool" id="tool-wake"><svg aria-hidden="true"><use href="#i-mic"/></svg><span>Hey Mario</span></button>
+    <button type="button" class="tool" id="tool-close" aria-label="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+  </nav>
 </section>
 
 <!-- Accounts: which addresses Home knows, and what is synced for each -->
@@ -158,5 +166,6 @@
 </div>
 <script src="/static/home.js"></script>
 <script src="/static/tiles.js"></script>
+<script src="/static/layer.js"></script>
 </body>
 </html>
