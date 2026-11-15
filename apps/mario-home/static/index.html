@@ -39,6 +39,20 @@
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 19h10a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.5A3.3 3.3 0 0 0 7 19z"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6L19 19M5 19l1.4-1.4M17.6 6.4L19 5"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5M8 9h8M8 13h4"/></symbol>
+  <symbol id="i-disk" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6l-9 6 9 6zM6 6v12"/></symbol>
+  <symbol id="i-skip" viewBox="0 0 24 24"><path d="M6 6l9 6-9 6zM18 6v12"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
   <symbol id="i-rain" viewBox="0 0 24 24"><path d="M7 15h10a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.5A3.3 3.3 0 0 0 7 15zM8 18l-1 3M12 18l-1 3M16 18l-1 3"/></symbol>
 </svg>
 
@@ -63,6 +77,8 @@
   <div class="dayhead">
     <!-- Today, then the sites from "tabs" in mario.json; the host keeps each one open under this row -->
     <nav id="tabs" class="tabs" role="tablist" aria-label="Home"></nav>
+    <span id="accts" class="accts" role="tablist" aria-label="Account" hidden></span>
+    <button class="chip" type="button" id="accounts-btn" aria-haspopup="dialog"><svg aria-hidden="true"><use href="#i-user"/></svg>Accounts</button>
     <span id="daysum" class="muted"></span>
     <span class="chips">
       <button class="chip" data-ask="Brief me">Brief me</button>
@@ -75,24 +91,25 @@
   <div class="main">
     <div class="left">
       <div class="row r2">
-        <section class="card" id="c-mail"><header class="ch"><svg class="ci"><use href="#i-mail"/></svg><h3>Mail</h3><span class="count"></span><button class="open" type="button" data-open="https://mail.google.com/" aria-label="Open Gmail"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card" id="c-tasks"><header class="ch"><svg class="ci"><use href="#i-check"/></svg><h3>Tasks</h3><span class="count"></span></header><div class="body"></div></section>
-        <section class="card" id="c-next"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>Next step</h3></header><div class="body"></div></section>
+        <section class="card" id="c-movies"><header class="ch"><svg class="ci"><use href="#i-film"/></svg><h3>Watch next</h3><span class="count"></span><button class="open" type="button" id="movies-sheet" aria-label="Open the list in Google Sheets"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+        <section class="card" id="c-sticky"><header class="ch"><svg class="ci"><use href="#i-pin"/></svg><h3>Sticky note</h3><span class="meta" id="sticky-state"></span></header><div class="body"></div></section>
+        <section class="card" id="c-storage"><header class="ch"><svg class="ci"><use href="#i-disk"/></svg><h3>Storage</h3><button class="open" type="button" data-refresh="storage" aria-label="Measure the disk again"><svg><use href="#i-refresh"/></svg></button></header><div class="body"></div></section>
       </div>
       <div class="grid4">
         <section class="card narrow" id="c-projects"><header class="ch"><svg class="ci"><use href="#i-branch"/></svg><h3>Projects</h3><span class="dots"></span></header><div class="body"></div></section>
         <section class="card narrow" id="c-thinking"><header class="ch"><svg class="ci"><use href="#i-layers"/></svg><h3>Thinking Space</h3><span class="count"></span><button class="open" type="button" data-open-hub aria-label="Open the Thinking Space hub"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
+        <section class="card tall bare" id="c-photos"><header class="ch"><svg class="ci"><use href="#i-image"/></svg><h3>Photos</h3><span class="meta" id="photos-meta"></span></header><div class="body"></div></section>
         <section class="card tall" id="c-news"><header class="ch"><svg class="ci"><use href="#i-news"/></svg><h3>News</h3><span class="meta" id="news-src"></span></header><div class="body"></div><i class="roll" aria-hidden="true"></i></section>
-        <section class="card narrow" id="c-recent"><header class="ch"><svg class="ci"><use href="#i-file"/></svg><h3>Recent files</h3><span class="dots"></span></header><div class="body"></div></section>
-        <section class="card" id="c-note"><header class="ch"><svg class="ci"><use href="#i-pen"/></svg><h3>Quick note</h3></header><div class="body"></div></section>
+        <section class="card narrow" id="c-spotify"><header class="ch"><svg class="ci"><use href="#i-music"/></svg><h3>Spotify</h3><span class="meta" id="spotify-meta"></span></header><div class="body"></div></section>
         <section class="card narrow" id="c-week"><header class="ch"><svg class="ci"><use href="#i-chart"/></svg><h3>This week</h3><span class="dots"></span></header><div class="body"></div></section>
       </div>
     </div>
 
     <aside class="side">
-      <section class="card compact" id="c-weather"><div class="body"></div></section>
+      <section class="card compact" id="c-weather"><div class="sky" aria-hidden="true"></div><div class="body"></div></section>
       <section class="card compact" id="c-today"><header class="ch"><svg class="ci"><use href="#i-cal"/></svg><h3>Today</h3><span class="count"></span><span class="meta" id="today-date"></span><button class="open" type="button" data-open="https://calendar.google.com/" aria-label="Open Google Calendar"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
-      <section class="card" id="c-ai"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>AI assistants</h3></header><div class="body"></div></section>
+      <section class="card" id="c-ai"><header class="ch"><svg class="ci"><use href="#i-spark"/></svg><h3>AI assistants</h3><span class="meta" id="ai-at"></span><button class="open" type="button" data-refresh="usage" aria-label="Read the usage again"><svg><use href="#i-refresh"/></svg></button></header><div class="body"></div></section>
       <button class="card compact row-card" id="c-phone" type="button"><svg class="ci"><use href="#i-phone"/></svg><span class="body"></span><svg class="chev"><use href="#i-chev"/></svg></button>
     </aside>
   </div>
@@ -105,6 +122,11 @@
     <div><div class="title">Mario</div><div class="muted" id="panel-sub">Claude answers</div></div>
     <button type="button" class="btn primary voice-toggle" aria-label="Talk to Mario">Talk to Mario</button>
   </header>
+  <!-- Mario's presence: rings that turn while it waits, a ring that takes the shape of your voice
+       while it listens, and waves that travel outward while it talks back -->
+  <div class="orb-stage"><canvas id="orb" aria-hidden="true"></canvas>
+    <button type="button" id="orb-talk" class="orb-hit" aria-label="Talk to Mario"></button>
+    <span id="orb-caption" class="orb-caption">Tap or press Space to talk</span></div>
   <div id="log" class="log" aria-live="polite"></div>
   <form id="panel-form" class="composer" autocomplete="off">
     <label for="panel-input" class="sr">Message Mario</label>
@@ -113,6 +135,18 @@
   </form>
 </section>
 
+<!-- Accounts: which addresses Home knows, and what is synced for each -->
+<div id="sheet" class="overlay" hidden><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <header class="ch"><svg class="ci"><use href="#i-user"/></svg><h3 id="sheet-title">Accounts</h3><button class="open" type="button" id="sheet-close" aria-label="Close"><svg><use href="#i-x"/></svg></button></header>
+  <div id="sheet-body" class="sheet-body"></div></section></div>
+<!-- A photo, full screen: arrows, the strip to pick one, Space to pause, Escape to leave -->
+<div id="lightbox" class="overlay lightbox" hidden role="dialog" aria-modal="true" aria-label="Photos">
+  <img id="lb-img" alt=""><span id="lb-count" class="lb-count"></span>
+  <button type="button" class="lb-btn lb-prev" id="lb-prev" aria-label="Previous photo"><svg><use href="#i-back"/></svg></button>
+  <button type="button" class="lb-btn lb-next" id="lb-next" aria-label="Next photo"><svg><use href="#i-chev"/></svg></button>
+  <div class="lb-bar"><button type="button" class="lb-btn" id="lb-play" aria-label="Pause the slideshow"><svg><use href="#i-pause"/></svg></button>
+    <button type="button" class="lb-btn" id="lb-close" aria-label="Close"><svg><use href="#i-x"/></svg></button></div>
+  <div id="lb-strip" class="lb-strip" role="listbox" aria-label="Pick a photo"></div></div>
 <div id="offline" class="offline" hidden>Mario Hub is not answering. Retrying…</div>
 <!-- Talking to Mario: the strands move with your voice while it listens, then run flat while it works -->
 <div id="voice-status" class="voice-status" hidden data-phase="idle">
@@ -123,5 +157,6 @@
   <div class="voice-line" role="status" aria-live="polite"><span></span><button type="button" class="btn" id="voice-cancel">Cancel</button></div>
 </div>
 <script src="/static/home.js"></script>
+<script src="/static/tiles.js"></script>
 </body>
 </html>

@@ -98,6 +98,7 @@ def fixture(root):
     write_csv(data / "history.csv", ["Date", "Tab", "Item", "Change", "From", "To", "Reel"],
               [["2026-11-11", "All tabs", "Saved Reels", "Created", "", "", ""]])
     cfg = config_mod.load(root / "none.json")
+    cfg["notes_dir"] = str(work / "Mario Notes fixture")     # never the real ~/Documents
     cfg.update(repos=[work, root / "missing"], thinking_space=ts, thinking_space_pull_s=0)
     return cfg, work
 
@@ -557,14 +558,18 @@ def test_page():
     html = (REPO / "apps" / "mario-home" / "static" / "index.html").read_text()
     host_text = (REPO / "apps" / "mario-home" / "host.py").read_text()
     import re as _re
-    script = js.read_text()
+    tiles_js = (REPO / "apps" / "mario-home" / "static" / "tiles.js").read_text()
+    script = js.read_text() + tiles_js
     css = (REPO / "apps" / "mario-home" / "static" / "home.css").read_text()
     cards = _re.findall(r'id="c-([a-z]+)"', html)
-    want = ["mail", "today", "tasks", "projects", "thinking", "recent", "note", "weather", "ai", "phone", "news", "week", "next"]
-    check("Your day has its thirteen cards, once each", sorted(cards) == sorted(want), str(cards))
+    want = ["today", "tasks", "projects", "thinking", "weather", "ai", "phone", "news", "week",
+            "movies", "sticky", "storage", "spotify", "photos"]
+    check("Your day has its fourteen cards, once each", sorted(cards) == sorted(want), str(cards))
+    for gone in ("mail", "next", "note", "recent"):
+        check(f"no {gone} card (the operator's decision of 2026-11-15)", f'id="c-{gone}"' not in html and f"\n  {gone}() {{" not in script)
     for gone in ("apps", "focus", "downloads", "reels", "system", "loom", "tonight", "cook", "trynext", "agents", "exposure", "usage", "quick"):
         check(f"no {gone} card", f'id="c-{gone}"' not in html)
-    drawn = set(_re.findall(r"^  (\w+)\(\) \{", script, _re.M))
+    drawn = set(_re.findall(r"^  (\w+)\(\) \{", script, _re.M)) | set(_re.findall(r"^render\.(\w+) = ", script, _re.M))
     check("every card is drawn", all(c in drawn for c in want if c != "apps"), str([c for c in want if c not in drawn]))
     sys.path.insert(0, str(REPO / "services" / "mario-hub"))
     import hub as hub_mod
@@ -577,16 +582,16 @@ def test_page():
     check("Home leaves the dock's band free at the bottom",
           _re.search(r"\.home \{ --dock: (\d+)px;[^}]*padding: [^;]*var\(--dock\)", css) is not None
           and int(_re.search(r"--dock: (\d+)px", css).group(1)) >= 66)
-    check("the mail fix opens Google's app-password page, and the hub allows it",
+    check("the accounts sheet opens Google's app-password page, and the hub allows it",
           "https://myaccount.google.com/apppasswords" in script
           and "https://myaccount.google.com/apppasswords".startswith(hub_mod.OPEN_URL_PREFIXES))
     opens = _re.findall(r'data-open="([^"]+)"', html)
     for gone in ("downloads", "lock"):
         check(f"no {gone} button", f'data-launch="{gone}"' not in html)
-    check("Projects, Thinking Space and Recent files are one column wide; Quick note runs down both rows",
-          all(_re.search(rf'class="card narrow" id="c-{c}"', html) for c in ("projects", "thinking", "recent"))
+    check("Projects, Thinking Space and Spotify are one column wide; Photos runs down both rows beside News",
+          all(_re.search(rf'class="card narrow" id="c-{c}"', html) for c in ("projects", "thinking", "spotify"))
           and "repeat(4, minmax(0, 1fr))" in css and "#c-thinking { grid-area: 1 / 2; }" in css
-          and "#c-note { grid-area: 1 / 3 / 3 / 4; }" in css)
+          and "#c-photos { grid-area: 1 / 3 / 3 / 4; }" in css)
     check("the page never scrolls; lists scroll inside their tiles",
           _re.search(r"html, body \{[^}]*overflow: hidden", css) is not None and "[hidden] { display: none !important; }" in css
           and _re.search(r"\.rows, \.timeline, \.boards[^{]*\{[^}]*overflow-y: auto", css) is not None
@@ -598,12 +603,27 @@ def test_page():
     check("News rolls every 30 seconds", 'setFaces("news", items.map(face), { every: 30000' in script)
     check("News shows each headline's picture, cover-fitted edge to edge, from the hub",
           "/news-img/" in script and 'newsPic(it, "hero")' in script and _re.search(r"\.hero img \{[^}]*object-fit: cover", css))
-    check("a mail opens its own conversation; the main account shows first",
-          "openUrl(i.link || inbox)" in script and "accounts[0]" in script)
+    check("a Google tab has one chip per account, which takes the tab there through Google's account chooser",
+          "accounts.google.com/AccountChooser?Email=" in tiles_js and 'tell({ type: "go"' in tiles_js
+          and "def go(self, tab, url)" in host_text and "site_rules.belongs(" in host_text)
+    check("tiles that hold a list scroll inside themselves and keep their place when redrawn",
+          "keepScroll(\"movies\"" in tiles_js and "keepScroll(\"storage\"" in tiles_js and ".scroll { flex: 1; min-height: 0; overflow-y: auto" in css)
+    check("AI assistants, Storage have a refresh button that reads the card again",
+          'data-refresh="usage"' in html and 'data-refresh="storage"' in html and 'post("/api/refresh"' in tiles_js)
+    check("the weather's sky moves with the weather; a tile shows when its data changed; nothing moves while Home is away",
+          all(x in css for x in ("@keyframes fall", "@keyframes cloud", "@keyframes twinkle", ".card.fresh::before", "body.away *"))
+          and "paintSky(" in tiles_js and "window.cardChanged" in tiles_js and 'classList.add("away")' in script)
+    check("less motion is honoured everywhere", "prefers-reduced-motion: reduce" in css and "animation-duration: .01ms !important" in css)
+    check("Mario's orb follows the microphone level and the speaking state; its colours come from the stylesheet",
+          'id="orb"' in html and "window.marioVoice" in tiles_js and '"speaking"' in tiles_js
+          and 'getPropertyValue(name)' in tiles_js and not _re.search(r"#[0-9a-fA-F]{6}\b", tiles_js))
+    check("the sticky note saves itself and Mario tidies it; a photo opens across the screen",
+          'post("/api/sticky"' in tiles_js and 'post("/api/sticky/tidy")' in tiles_js and 'id="lightbox"' in html and "lightbox(true)" in tiles_js
+          and 'id="lb-strip"' in html and "?thumb=1" in tiles_js)
     check("the ask bar says who answers (Claude first), not the old local-first brain",
           "LOOM ready" not in script and "answers locally first" not in script + html and 'id="brain"' in html)
     check("live tiles turn on their own and pause under the pointer",
-          "setInterval(" in script and ':hover' in script and all(f'setFaces("{c}"' in script for c in ("projects", "recent", "week", "weather")))
+          "setInterval(" in script and ':hover' in script and all(f'setFaces("{c}"' in script for c in ("projects", "week", "weather")))
     host = (REPO / "apps" / "mario-home" / "host.py").read_text()
     check("Home is a layer you summon, not the desktop: above the windows, off the taskbar, hidden until asked",
           all(x in host for x in ("WindowTypeHint.DOCK", "set_skip_taskbar_hint(True)", "get_workarea()", "--background",
@@ -700,10 +720,341 @@ async def test_after_boot(cfg):
         hub_mod.collectors.session_env = real_se
 
 
+def test_tiles(cfg, work):
+    print("Home's own tiles")
+    import datetime as dt
+    import tiles
+    # ---- movies: the Sheet's mirror, with marks kept here
+    cfg = dict(cfg, thinking_space=work / "sheet-mirror")     # its own mirror: the fixture's is for Mario's answers
+    data = cfg["thinking_space"] / "reels" / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "movies-shows.csv").write_text(
+        "Title,Where to watch in India,Status,Year,Type,Saved from\n"
+        "Alpha,Netflix,Yet to watch,2020,Movie,x\nBeta,Rent: Prime Video,Yet to watch,2021,Movie,x\n"
+        "Gamma,Prime Video,Watched,2019,Series,x\nDelta,Prime Video,Yet to watch,2018,Movie,x\n"
+        "A reel of five films,Open the reel for titles,Yet to watch,,List,x\n")
+    marks = work / "movies.json"
+    day = dt.date(2026, 11, 15)
+    m = tiles.movies(cfg, today=day, marks_path=marks)
+    titles = [i["title"] for i in m["items"]]
+    check("movies: titles only (a reel that lists several is left out), the Sheet's Watched counts",
+          sorted(titles) == ["Alpha", "Beta", "Delta", "Gamma"] and m["watched"] == 1 and m["left"] == 3, str(m))
+    check("movies: today and tomorrow are two different titles a subscription carries",
+          {m["today"], m["tomorrow"]} == {"Alpha", "Delta"}, f'{m["today"]} / {m["tomorrow"]}')
+    check("movies: tomorrow's pick is today's the day after",
+          tiles.movies(cfg, today=day + dt.timedelta(days=1), marks_path=marks)["today"] == m["tomorrow"])
+    tiles.mark_movie(m["today"], True, marks)
+    m2 = tiles.movies(cfg, today=day, marks_path=marks)
+    check("movies: marking one watched keeps it here, over the Sheet, and moves on to the next",
+          m2["watched"] == 2 and m2["today"] != m["today"] and next(i for i in m2["items"] if i["title"] == m["today"])["marked"])
+    tiles.mark_movie(m["today"], False, marks)
+    check("movies: the mark comes off again", tiles.movies(cfg, today=day, marks_path=marks)["watched"] == 1)
+    check("movies: no title, no mark", tiles.mark_movie("  ", True, marks)["ok"] is False)
+
+    # ---- storage: only the listed places are ever emptied
+    home = work / "home"
+    (home / ".cache" / "thumbnails").mkdir(parents=True)
+    (home / ".cache" / "thumbnails" / "a.png").write_bytes(b"x" * 3_000_000)
+    (home / ".cache" / "other").mkdir()
+    (home / ".cache" / "other" / "b.bin").write_bytes(b"x" * 2_000_000)
+    (home / "Downloads").mkdir()
+    (home / "Downloads" / "keep.iso").write_bytes(b"x" * 2_000_000)
+    real_env, real_tmp = os.environ.pop("XDG_CACHE_HOME", None), tiles._old_tmp
+    tiles._old_tmp = lambda days=7: []
+    try:
+        st = tiles.storage(cfg, home=home)
+        by = {p["id"]: p for p in st["places"]}
+        check("storage: the disk, and each place with its size, largest first",
+              st["total"] > 0 and 0 <= st["pct"] <= 100 and by["thumbnails"]["bytes"] >= 3_000_000
+              and by["cache"]["bytes"] >= 2_000_000 and by["cache"]["bytes"] < 3_000_000
+              and [p["bytes"] for p in st["places"]] == sorted((p["bytes"] for p in st["places"]), reverse=True), str(st["places"]))
+        check("storage: what Home may clear is counted apart from what it only shows",
+              by["thumbnails"]["clear"] and not by["downloads"]["clear"] and not by["cache"]["clear"]
+              and st["reclaim"] == by["thumbnails"]["bytes"])
+        check("storage: the biggest folders of Home are listed", any(f["name"] == ".cache" for f in st["folders"]))
+        check("storage: Downloads and other caches are never emptied from Home",
+              tiles.clear_storage("downloads", home)["ok"] is False and tiles.clear_storage("cache", home)["ok"] is False
+              and tiles.clear_storage("../etc", home)["ok"] is False and (home / "Downloads" / "keep.iso").exists())
+        freed = tiles.clear_storage("thumbnails", home)
+        check("storage: clearing thumbnails empties that folder and nothing beside it",
+              freed["ok"] and freed["freed"] >= 3_000_000 and not list((home / ".cache" / "thumbnails").iterdir())
+              and (home / ".cache" / "other" / "b.bin").exists(), str(freed))
+    finally:
+        tiles._old_tmp = real_tmp
+        if real_env is not None:
+            os.environ["XDG_CACHE_HOME"] = real_env
+    check("storage: admin places name their command instead of running it",
+          all(how.startswith("admin:sudo ") for _l, _p, _h, how in (tiles.storage_places(home)[k] for k in ("apt", "journal"))))
+
+    # ---- spotify (MPRIS)
+    check("spotify: the app itself is preferred, then any other player",
+          tiles.pick_player(["org.x", "org.mpris.MediaPlayer2.chromium.instance9", "org.mpris.MediaPlayer2.spotify"]).endswith(".spotify")
+          and tiles.pick_player(["org.mpris.MediaPlayer2.vlc"]).endswith(".vlc") and tiles.pick_player(["org.x"]) == "")
+    np = tiles.now_playing({"PlaybackStatus": "Playing", "Position": 61_000_000,
+                            "Metadata": {"xesam:title": "Song", "xesam:artist": ["A", "B"], "xesam:album": "LP",
+                                         "mpris:length": 245_000_000, "mpris:artUrl": "https://i.scdn.co/image/x"}})
+    check("spotify: title, artists, length and position in seconds",
+          np["title"] == "Song" and np["artist"] == "A, B" and np["length"] == 245 and np["position"] == 61 and np["status"] == "Playing")
+    check("spotify: only play/pause, next and previous are controls", tiles.spotify_control("quit")["ok"] is False)
+
+    # ---- photos: a shared album's page
+    page = ('<meta property="og:title" content="Trip &amp; home">'
+            '["AF1Qip_a",["https://lh3.googleusercontent.com/pw/AP1Gcz-first_1",4032,3024,null]'
+            '["AF1Qip_b",["https://lh3.googleusercontent.com/pw/AP1Gcz-second",1920,1080,null]'
+            '["https://lh3.googleusercontent.com/pw/AP1Gcz-first_1",4032,3024'
+            '["https://lh3.googleusercontent.com/pw/AP1Gcz-avatar",96,96')
+    title, found = tiles.parse_album(page)
+    check("photos: the album's title and each picture once, without the owner's avatar",
+          title == "Trip & home" and [f["src"][-7:] for f in found] == ["first_1", "-second"], f"{title} {found}")
+    jpeg = b"\xff\xd8" + b"x" * 5000
+    calls = []
+
+    def fake_fetch(url, limit, headers=None, until=None, timeout=10, data=None):
+        calls.append(url)
+        return (url, "text/html", page.encode()) if "share" in url else (url, "image/jpeg", jpeg)
+
+    album = "https://photos.google.com/share/abc?key=k"
+    folder = work / "photos"
+    ph = tiles.photos({"photos": {"album": album, "max": 10}}, folder=folder, fetch=fake_fetch)
+    check("photos: the pictures are copied here and named so the hub can serve them",
+          len(ph["items"]) == 2 and all(tiles.PHOTO_NAME.fullmatch(i["name"]) and (folder / i["name"]).exists() for i in ph["items"])
+          and ph["title"] == "Trip & home", str(ph))
+    before = len(calls)
+    tiles.photos({"photos": {"album": album, "max": 10}}, folder=folder, fetch=fake_fetch)
+    check("photos: a picture already here is not downloaded again", len(calls) - before == 1)
+    (folder / ("0" * 16 + ".jpg")).write_bytes(jpeg)
+    tiles.photos({"photos": {"album": album, "max": 10}}, folder=folder, fetch=fake_fetch)
+    check("photos: one taken out of the album is removed here", not (folder / ("0" * 16 + ".jpg")).exists())
+    try:
+        from PIL import Image
+        Image.new("RGB", (1600, 1200), (40, 90, 160)).save(folder / ("c" * 16 + ".jpg"), "JPEG")
+        small = tiles.photo_thumb("c" * 16 + ".jpg", folder=folder)
+        with Image.open(small) as im:
+            small_size = im.size
+        check("photos: the viewer's strip gets a small copy, made once and kept beside the pictures",
+              small == folder / "thumbs" / ("c" * 16 + ".jpg") and small_size == (240, 180)
+              and tiles.photo_thumb("c" * 16 + ".jpg", folder=folder).stat().st_mtime == small.stat().st_mtime, f"{small} {small_size}")
+        tiles.photos({"photos": {"album": album, "max": 10}}, folder=folder, fetch=fake_fetch)
+        check("photos: a picture taken out of the album loses its small copy too", not small.exists() and not (folder / ("c" * 16 + ".jpg")).exists())
+    except ImportError:
+        pass
+    check("photos: without an album the tile asks for one", tiles.photos({"photos": {"album": ""}}, folder=folder).get("setup") is True)
+    check("photos: a page with no pictures says how to share the album",
+          tiles.photos({"photos": {"album": album}}, folder=folder, fetch=lambda *a, **k: (album, "text/html", b"<html>")).get("fix") is True)
+    cfg_file = work / "mario-tiles.json"
+    cfg_file.write_text(json.dumps({"backup_at": "22:40"}))
+    check("photos: only a Google Photos share link is accepted",
+          tiles.set_album(cfg_file, "https://example.org/album")["ok"] is False
+          and tiles.set_album(cfg_file, album)["ok"] and json.loads(cfg_file.read_text()) == {"backup_at": "22:40", "photos": {"album": album}})
+    hops = []
+
+    def location(host, path, address=None, timeout=10):
+        hops.append(address)
+        if address is None:
+            raise OSError("timed out")           # the provider's own answer for goo.gl: nothing listens
+        return "https://photos.google.com/share/long?key=k"
+
+    long = tiles.expand_album_link("https://photos.app.goo.gl/short", location=location,
+                                   lookup=lambda name: {"Answer": [{"type": 5, "data": "x"}, {"type": 1, "data": "142.250.0.1"}]})
+    check("photos: a short link that does not load is looked up once more and kept as the long link",
+          long == "https://photos.google.com/share/long?key=k" and hops == [None, "142.250.0.1"])
+    check("photos: a short link that leads nowhere is refused with what to paste instead",
+          "long address" in tiles.set_album(cfg_file, "https://photos.app.goo.gl/short", expand=lambda u: "")["error"])
+
+    # ---- sticky note
+    sticky = work / "sticky.md"
+    tiles.write_sticky("buy cable\n- call priya\n2) idea for the island", sticky)
+    check("sticky: what you scribble is kept as you wrote it", tiles.read_sticky(sticky).startswith("buy cable"))
+    check("sticky: with nobody to ask, a tidy note is still a clean list",
+          tiles.rough_tidy(tiles.read_sticky(sticky)) == "- Buy cable\n- Call priya\n- Idea for the island")
+    note_cfg = {"notes_dir": str(work / "Mario Notes")}
+    when = dt.datetime(2026, 11, 15, 9, 5)
+    page_file = tiles.file_note(note_cfg, "- Buy cable", "From the sticky note", now=when)
+    tiles.file_note(note_cfg, "- Second", now=when.replace(hour=10))
+    text = page_file.read_text()
+    check("sticky: tidied notes are filed on the day's page of Mario Notes, each under its time",
+          page_file.name == "2026-11-15.md" and text.startswith("# Sunday, 15 November 2026")
+          and "## 09:05 · From the sticky note" in text and "## 10:05" in text and text.count("# Sunday") == 1, text)
+
+    # ---- accounts: what is synced for each
+    acfg = {"mail": {"accounts": ["a@x.com", {"user": "b@x.com", "mail": False}, {"user": "c@x.com", "calendar": False}], "main": "b@x.com"}}
+    listed = tiles.account_list(acfg)
+    check("accounts: the main one first; mail and calendar are on unless switched off",
+          [a["user"] for a in listed] == ["b@x.com", "a@x.com", "c@x.com"] and listed[0]["main"]
+          and [(a["mail"], a["calendar"]) for a in listed] == [(False, True), (True, True), (True, False)], str(listed))
+    check("accounts: an account whose mail is switched off is not read",
+          [a["user"] for a in collectors.mail_accounts(acfg)] == ["b@x.com", "a@x.com", "c@x.com"][1:] )
+    secrets = {("mario-calendar", "a@x.com"): "https://cal/a.ics", ("mario-calendar", "c@x.com"): "https://cal/c.ics",
+               ("mario-calendar", "ical"): "https://cal/old.ics"}
+    feeds = tiles.calendar_feeds(acfg, lookup=lambda service, account: secrets.get((service, account), ""))
+    check("accounts: a calendar is read only while it is switched on; the address saved before accounts is the main one's",
+          feeds == [{"user": "b@x.com", "url": "https://cal/old.ics"}, {"user": "a@x.com", "url": "https://cal/a.ics"}], str(feeds))
+    stored, cleared = [], []
+    store = lambda service, account, secret, label: stored.append((service, account, secret)) or ""  # noqa: E731
+    clear = lambda service, account: cleared.append((service, account))  # noqa: E731
+    cfg_file.write_text(json.dumps({"mail": {"user": "a@x.com", "imap_host": "imap.gmail.com"}, "backup_at": "22:40"}))
+    edit = lambda *a, **k: tiles.edit_accounts(cfg_file, *a, store=store, clear=clear, **k)  # noqa: E731
+    check("accounts: adding needs an address, once", edit("add", "not-an-address")["ok"] is False
+          and edit("add", "b@x.com")["ok"] and edit("add", "b@x.com")["ok"] is False)
+    edit("sync", "b@x.com", "calendar", on=False)
+    edit("main", "b@x.com")
+    saved = json.loads(cfg_file.read_text())
+    check("accounts: the older one-account form becomes a list; other settings are left alone",
+          saved["backup_at"] == "22:40" and "user" not in saved["mail"] and saved["mail"]["main"] == "b@x.com"
+          and saved["mail"]["accounts"] == [{"user": "a@x.com", "mail": True, "calendar": True}, {"user": "b@x.com", "mail": True, "calendar": False}], str(saved))
+    check("accounts: an app password goes to the keyring without its spaces; a calendar must be an iCal address",
+          edit("secret", "a@x.com", "mail", secret="abcd efgh ijkl mnop")["ok"] and stored[-1] == ("mario-mail", "a@x.com", "abcdefghijklmnop")
+          and edit("secret", "a@x.com", "calendar", secret="https://calendar.google.com/calendar/embed")["ok"] is False
+          and edit("secret", "a@x.com", "calendar", secret="https://calendar.google.com/calendar/ical/x/private-1/basic.ics")["ok"]
+          and "abcdefghijklmnop" not in cfg_file.read_text() and "basic.ics" not in cfg_file.read_text())
+    edit("remove", "b@x.com")
+    saved = json.loads(cfg_file.read_text())
+    check("accounts: removing one forgets its secrets and hands main to the next",
+          [a["user"] for a in saved["mail"]["accounts"]] == ["a@x.com"] and saved["mail"]["main"] == "a@x.com"
+          and ("mario-mail", "b@x.com") in cleared and ("mario-calendar", "b@x.com") in cleared)
+
+    # ---- calendar: every synced feed, merged
+    ics = ("BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:{}\nDTSTART:{}\nDTEND:{}\nEND:VEVENT\nEND:VCALENDAR\n")
+    today = dt.date.today().strftime("%Y%m%d")
+    pages = {"https://cal/old.ics": ics.format("Standup", today + "T090000", today + "T093000"),
+             "https://cal/a.ics": ics.format("Dentist", today + "T080000", today + "T083000")}
+    real_feed, real_kr = collectors.calendar_feed, collectors.keyring
+    collectors.keyring = lambda service, account: secrets.get((service, account), "")
+    collectors.calendar_feed = lambda url, day: ({"events": collectors._ics_events(pages[url], day)[0], "note": ""}
+                                                 if url in pages else {"fix": True, "events": [], "error": "gone"})
+    try:
+        cal = collectors.calendar(acfg)
+        check("calendar: the events of every synced account, in the order of the day, each with its account",
+              [(e["title"], e["account"]) for e in cal["events"]] == [("Dentist", "a@x.com"), ("Standup", "b@x.com")]
+              and cal["calendars"] == 2, str(cal))
+        off = {"mail": {"accounts": [{"user": "a@x.com", "calendar": False}]}}
+        check("calendar: every calendar switched off reads nothing and says so",
+              collectors.calendar(off).get("setup") is True and "switched off" in collectors.calendar(off)["error"])
+    finally:
+        collectors.calendar_feed, collectors.keyring = real_feed, real_kr
+
+    # ---- weather: what the sky is doing
+    check("weather: the scene the tile's sky plays",
+          [collectors.weather_scene(c, d) for c, d in ((0, 1), (0, 0), (3, 1), (63, 1), (95, 0), (73, 1), (45, 1), (53, 1))]
+          == ["clear", "clear-night", "clouds", "rain", "storm-night", "snow", "fog", "drizzle"])
+
+
+async def test_tile_endpoints(cfg, work):
+    print("Home's tiles over HTTP")
+    import aiohttp
+    from aiohttp import web
+    import hub as hub_mod
+    import tiles
+    cfg_file = work / "mario-live.json"
+    cfg_file.write_text(json.dumps({"mail": {"accounts": ["a@x.com"]}}))
+    live = dict(cfg, notes_dir=str(work / "Filed"))
+    hub = hub_mod.Hub(live, schedule={}, cfg_file=cfg_file)
+    hub.sticky_file = work / "live-sticky.md"
+    hub.notes_file = work / "live-notes.md"
+    real = (tiles.MOVIE_MARKS, tiles.PHOTOS_DIR, tiles.store_secret, tiles.clear_secret, hub_mod.config_mod.load)
+    tiles.MOVIE_MARKS, tiles.PHOTOS_DIR = work / "live-movies.json", work / "live-photos"
+    tiles.PHOTOS_DIR.mkdir()
+    (tiles.PHOTOS_DIR / ("a" * 16 + ".jpg")).write_bytes(b"\xff\xd8picture")
+    hub_mod.config_mod.load = lambda path=None: dict(live, **{k: v for k, v in json.loads(Path(path).read_text()).items()
+                                                               if k in ("mail", "photos")})
+    asked = []
+    hub.answer = lambda text: asked.append(text) or {"answer": "## Shopping\n- [ ] Buy an HDMI cable", "via": "Claude"}
+    port = 18793
+    runner = web.AppRunner(hub_mod.make_app(hub, port))
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        async with aiohttp.ClientSession() as s:
+            async def post(path, payload=None):
+                async with s.post(base + path, json=payload or {}) as r:
+                    return await r.json()
+            await post("/api/sticky", {"text": "buy hdmi cable"})
+            async with s.get(base + "/api/state") as r:
+                state = await r.json()
+            check("the sticky note is saved by the hub and is in the state", state["cards"]["sticky"]["data"]["text"] == "buy hdmi cable")
+            tidy = await post("/api/sticky/tidy")
+            filed = Path(tidy.get("page", "/nonexistent"))
+            check("Tidy with Mario: the engine is asked to rewrite the scribble, the result is filed, the sticky comes back empty",
+                  tidy.get("ok") and asked and "buy hdmi cable" in asked[0] and filed.parent == work / "Filed"
+                  and "Buy an HDMI cable" in filed.read_text() and hub.sticky_file.read_text() == "", str(tidy))
+            check("an empty sticky is not sent to anyone", (await post("/api/sticky/tidy")).get("ok") is False and len(asked) == 1)
+            hub.answer = lambda text: {"answer": "", "error": "Nobody answered"}
+            await post("/api/sticky", {"text": "call priya"})
+            rough = await post("/api/sticky/tidy")
+            check("when nobody answers, the note is still filed, as a plain list, and says so",
+                  rough.get("ok") and rough["text"] == "- Call priya" and "plain list" in rough["note"])
+            said = await hub.direct_command("Mario, tidy my sticky note")
+            check("\"tidy my sticky note\" is a spoken command", said is not None and said["route"] == "command")
+            bare = hub_mod.Hub({k: v for k, v in live.items() if k != "notes_dir"}, schedule={})
+            bare.notes_file, bare.sticky_file = work / "bare-notes.md", work / "bare-sticky.md"
+            check("settings without a notes folder file nothing outside the hub's own data (so a check cannot write into Documents)",
+                  (await bare.add_note("kept in the hub only"))["ok"] and tiles.notes_dir(bare.cfg) is None
+                  and "kept in the hub only" in bare.notes_file.read_text())
+            check("a dictated note is filed in Mario Notes too",
+                  (await post("/api/ask", {"text": "note that the review moved to Friday"})).get("ok")
+                  and "the review moved to Friday" in filed.read_text())
+            hub.schedule = {"movies": (lambda c: tiles.movies(c, marks_path=tiles.MOVIE_MARKS), 999)}
+            marked = await post("/api/movie", {"title": "Alpha", "watched": True})
+            check("marking a film watched is kept and the card is read again",
+                  marked.get("ok") and tiles.movie_marks()["Alpha"]["watched"] is True and "movies" in hub.cards)
+            check("refresh reads a card again now; an unknown card is refused",
+                  (await post("/api/refresh", {"card": "movies"})).get("ok") and (await post("/api/refresh", {"card": "nope"})).get("ok") is False)
+            async with s.get(base + "/photo/" + "a" * 16 + ".jpg") as r:
+                ok_photo = r.status == 200 and (await r.read()).endswith(b"picture")
+            async with s.get(base + "/photo/..%2Fmario.json") as r:
+                bad_photo = r.status
+            check("photos are served by name only", ok_photo and bad_photo == 404, f"{ok_photo} {bad_photo}")
+            async with s.get(base + "/photo/" + "a" * 16 + ".jpg?thumb=1") as r:
+                check("a picture that cannot be made smaller is served as it is", r.status == 200 and (await r.read()).endswith(b"picture"))
+            check("Home opens only the folders its tiles show",
+                  hub.action("open_place", "/etc")["ok"] is False and str(work / "Filed") in hub.open_places())
+            tiles.store_secret = lambda *a: ""
+            tiles.clear_secret = lambda *a: None
+            hub.schedule = {}
+            added = await post("/api/accounts", {"op": "add", "user": "b@x.com"})
+            await post("/api/accounts", {"op": "sync", "user": "b@x.com", "what": "mail", "on": False})
+            check("the accounts sheet adds an account and switches its sync; the hub reads its settings again",
+                  added.get("ok") and [a["user"] for a in tiles.account_list(hub.cfg)] == ["a@x.com", "b@x.com"]
+                  and tiles.account_list(hub.cfg)[1]["mail"] is False, str(hub.cfg.get("mail")))
+            check("a bad address is refused", (await post("/api/accounts", {"op": "add", "user": "x"})).get("ok") is False)
+            async with s.post(base + "/api/accounts", json={"op": "add", "user": "c@x.com"}, headers={"Origin": "https://evil.example"}) as r:
+                check("another site cannot change the accounts", r.status == 403)
+    finally:
+        tiles.MOVIE_MARKS, tiles.PHOTOS_DIR, tiles.store_secret, tiles.clear_secret, hub_mod.config_mod.load = real
+        await runner.cleanup()
+    spoke = []
+
+    async def fake_exec(*argv, **kw):
+        spoke.append(argv)
+
+        class P:
+            async def wait(self):
+                return 0
+        return P()
+
+    real_exec, real_which = asyncio.create_subprocess_exec, hub_mod.shutil.which
+    asyncio.create_subprocess_exec, hub_mod.shutil.which = fake_exec, lambda name: "/usr/bin/" + name
+    states = []
+    real_presence = hub.set_presence
+
+    async def watch(state, detail=""):
+        states.append(state)
+        await real_presence(state, detail)
+    hub.set_presence = watch
+    try:
+        await hub.speak("Hello there")
+    finally:
+        asyncio.create_subprocess_exec, hub_mod.shutil.which = real_exec, real_which
+    check("while Mario talks back the presence is \"speaking\", then ready; the words are one argument",
+          states == ["speaking", "ready"] and spoke and spoke[0][:3] == ("spd-say", "-w", "--") and spoke[0][3] == "Hello there", f"{states} {spoke}")
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         cfg, work = fixture(Path(tmp))
         test_collectors(cfg, work)
+        test_tiles(cfg, work)
         test_usage(cfg)
         test_brain(cfg, work)
         test_engines(cfg)
@@ -711,6 +1062,7 @@ def main():
             import aiohttp  # noqa: F401
             asyncio.run(test_answer(cfg))
             asyncio.run(test_hub(cfg))
+            asyncio.run(test_tile_endpoints(cfg, work))
             asyncio.run(test_after_boot(cfg))
         except ImportError:
             print("  skip hub checks: python3-aiohttp is not installed")

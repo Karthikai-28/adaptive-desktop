@@ -63,7 +63,7 @@ async def main():
         await v.command('cancel', v.id)
         assert v.state == 'cancelled' and v.text == '' and v.proc is None
     with tempfile.TemporaryDirectory() as tmp:
-        h = hub.Hub(dict(config.DEFAULTS, repos=[], thinking_space=Path(tmp)), schedule={})
+        h = hub.Hub(dict(config.DEFAULTS, repos=[], thinking_space=Path(tmp), notes_dir=str(Path(tmp) / 'Mario Notes')), schedule={})
         h.notes_file = Path(tmp) / 'notes.md'
         with patch.object(collectors, 'NOTES_DIR', Path(tmp) / 'tasks'):
             assert (await h.ask('Mario, add a task review the build'))['ok']

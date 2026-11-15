@@ -30,6 +30,11 @@ def is_sign_in(uri, tab_url):
         and name.split(".")[0] in SIGN_IN_LABELS
 
 
+def belongs(uri, tab_url):
+    """Home may send the tab's view there itself: the tab's own site or its sign-in pages."""
+    return (uri or "").startswith("https://") and (host(uri) == host(tab_url) or is_sign_in(uri, tab_url))
+
+
 def route(uri, tab_url, new_window=False, clicked=False):
     """STAY: the view goes there as it would. HERE: a new window was asked for, load it in this
     view instead. BROWSER: it belongs in the browser."""

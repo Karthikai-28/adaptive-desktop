@@ -260,6 +260,8 @@ class Home(Gtk.Application):
             self.hide_home()
         elif kind == "tab":
             self.select(msg.get("id"), msg.get("url"), msg.get("rect"))
+        elif kind == "go":
+            self.go(msg.get("id"), msg.get("url"))
         elif kind == "rect" and msg.get("rect"):
             for view in self.sites.values():
                 self.fit(view, msg["rect"])
@@ -277,6 +279,13 @@ class Home(Gtk.Application):
         self.fit(view, rect)
         view.show()
         view.grab_focus()
+
+    def go(self, tab, url):
+        """Take a tab's view somewhere on its own site: another account, through the site's own
+        account chooser (the chips beside the tabs)."""
+        view = self.sites.get(tab)
+        if view and site_rules.belongs(str(url or ""), view.tab_url):
+            view.load_uri(url)
 
     @staticmethod
     def fit(view, rect):

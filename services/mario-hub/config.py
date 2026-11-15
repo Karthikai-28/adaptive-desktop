@@ -49,8 +49,10 @@ DEFAULTS = {
     "usage_providers": ["claude", "gemini"],
     # the weather tile (Open-Meteo, no key); "cards_off": ["weather"] keeps the hub offline
     "weather": {"name": "Bengaluru", "lat": 12.97, "lon": 77.59},
-    # Mail card: IMAP, read-only; each account's app password is in the keyring
-    # (install-mario.sh --mail). "main" is the account Home shows first; without it, the first one.
+    # Accounts (Home's Accounts sheet edits this): each is an address, or {"user", "mail", "calendar"}
+    # where the two switches say what is synced for it. Mail is IMAP, read-only (an app password in
+    # the keyring); a calendar is its private iCal address, also in the keyring. "main" is the
+    # account shown first; without it, the first one.
     "mail": {"accounts": [], "main": "", "imap_host": "imap.gmail.com"},
     # News tile: RSS feeds, merged newest first; the tile rolls to the next headline every 30 s.
     # "cards_off": ["news"] keeps the hub from fetching them.
@@ -65,6 +67,11 @@ DEFAULTS = {
         {"id": "mail", "name": "Mail", "url": "https://mail.google.com/mail/u/0/"},
         {"id": "calendar", "name": "Calendar", "url": "https://calendar.google.com/calendar/u/0/r"},
     ],
+    # Photos tile: a Google Photos shared album ("Create link" on the album); set from the tile.
+    # The pictures are copied to the data folder, at most "max" of them.
+    "photos": {"album": "", "max": 60},
+    # Where the sticky note's tidied notes and dictated notes are filed, a page per day.
+    "notes_dir": "~/Documents/Mario Notes",
     # cards that are off unless turned on here
     "cards_off": ["career"],
 }

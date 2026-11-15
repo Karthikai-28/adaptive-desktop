@@ -154,7 +154,6 @@ async function act(action) {
 const openUrl = (url) => url && act({ id: "url", arg: url });
 
 // ----------------------------------------------------------------- cards
-let mailAccount = null;  // the account Mail shows: the main one until you pick another
 const newsMedia = (it) => (data("news_media").media || {})[it.link] || {};
 // a headline's picture, cover-fitted; without one, the outlet's initial on its own colour
 function newsPic(it, cls) {
@@ -166,48 +165,6 @@ function newsPic(it, cls) {
 }
 
 const render = {
-  mail() {
-    const m = data("mail");
-    count("mail", m.unread || "");
-    // every account is a tab; the main one (first) shows unless you picked another
-    const accounts = m.accounts || [];
-    const a = accounts.find((x) => x.user === mailAccount) || accounts[0] || m;
-    const inbox = a.inbox || "https://mail.google.com/";
-    $("#c-mail .open").dataset.open = inbox;
-    const tabs = accounts.length > 1 ? el("div", { class: "accts", role: "tablist" }, accounts.map((x, j) =>
-      el("button", { class: `acct${x === a ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(x === a),
-        title: `${x.user}${j === 0 ? " (main)" : ""}${x.error ? `: ${x.error}` : ""}`,
-        onclick: () => { mailAccount = x.user; draw("mail"); } },
-        el("span", { class: "nm" }, x.user.split("@")[0]), j === 0 ? el("small", {}, "main") : null,
-        x.unread ? el("span", { class: "n" }, x.unread > 999 ? "999+" : String(x.unread))
-          : x.unread == null && !x.waiting ? el("i", { class: "dot warn" }) : null))) : null;
-    if (a.unread == null && a.fix) {
-      // the login was refused: say why and how to put it right
-      return fill(body("mail"), tabs,
-        empty(a.error, el("br"), a.fix === "app_password"
-          ? "Make one named Mario (needs 2-Step Verification), then save it with "
-          : "Make a new app password, then save it again with ", code("scripts/install-mario.sh --mail")),
-        el("div", { class: "foot" }, el("button", { class: "btn primary", type: "button",
-          onclick: () => openUrl("https://myaccount.google.com/apppasswords") }, "Create an app password")));
-    }
-    if (a.unread == null) {
-      return fill(body("mail"), tabs, empty(a.setup ? "Connect Gmail once on this laptop: " : (a.error || "Checking mail…"),
-        a.setup ? code("scripts/install-mario.sh --mail") : null, a.setup ? el("br") : null,
-        a.setup ? "It reads unread headers only and never marks anything read." : null));
-    }
-    // a message opens that very conversation in Gmail, in its own account
-    const items = a.items || [];
-    fill(body("mail"), tabs,
-      items.length ? el("ul", { class: "rows" }, items.slice(0, 5).map((i) => el("li", {},
-        el("button", { class: "mrow", type: "button", title: "Open this mail in Gmail", onclick: () => openUrl(i.link || inbox) },
-          el("span", { class: "avatar", style: `--h:${hue(i.from)}` }, (i.from || "?").trim()[0].toUpperCase()),
-          el("div", { class: "grow" }, el("div", { class: "ttl" }, i.from), el("div", { class: "sub" }, i.subject)),
-          el("span", { class: "time" }, when(i.when))))))
-        : empty("Inbox zero. Nothing unread."),
-      el("div", { class: "foot" }, el("button", { class: "link", type: "button", onclick: () => openUrl(inbox) },
-        accounts.length > 1 ? `Open ${a.user.split("@")[0]}` : "Open Mail", icon("i-chev"))));
-  },
-
   today() {
     const c = data("calendar");
     const now = new Date();
@@ -264,18 +221,6 @@ const render = {
     if (focused) { input.focus(); input.setSelectionRange(...selection); }
   },
 
-  next() {
-    const suggestions = (state.next || []).filter((s) => s.action);
-    setFaces("next", suggestions.length ? suggestions.map((s) => () => [
-      el("div", { class: "next-text" }, s.text),
-      el("div", { class: "tile-actions" },
-        el("button", { class: "btn primary", type: "button", onclick: () => act(s.action) }, s.action.label || "Open"),
-        el("button", { class: "btn", type: "button", onclick: async (e) => {
-          const res = await post("/api/task", { text: s.text });
-          if (res.ok) { e.target.textContent = "Added"; e.target.disabled = true; }
-        } }, "Add task"))]) : [() => empty("No loose ends right now.")]);
-  },
-
   projects() {
     // one repo per face, newest first, then what the agents are doing
     const repos = (data("builds").repos || []).slice(0, 3);
@@ -322,41 +267,6 @@ const render = {
         el("ul", { class: "sections" }, [...(b.inbox || []).slice(0, 2).map((x) => el("li", { class: "new" }, x)),
           ...(b.sections || []).slice(0, 4 - Math.min(2, (b.inbox || []).length)).map((x) => el("li", {}, x))]));
     })));
-  },
-
-  recent() {
-    // the newest files take turns at the top; the two after it sit below
-    const files = (data("recent").files || []).slice(0, 4);
-    if (!files.length) return setFaces("recent", [() => empty("Files you open in any app show up here.")]);
-    const glyph = (f) => { const kind = kindOf(f.name); return [/Python|JavaScript|TypeScript|C\+\+|^C$|Shell|JSON|YAML|HTML|CSS/.test(kind) ? "i-code" : "i-file", hue(kind), kind]; };
-    const face = (f, i) => Object.assign(() => {
-      const [ic, col, kind] = glyph(f);
-      const rest = [1, 2].map((k) => files[(i + k) % files.length]).filter((x) => x !== f);
-      return [
-        el("button", { class: "headline", type: "button", style: "flex-direction:row;align-items:center;gap:12px", onclick: () => act({ id: "open_file", arg: f.path }) },
-          el("span", { class: "bi", style: `--h:${col}` }, icon(ic)),
-          el("div", { style: "min-width:0" }, el("div", { class: "ttl", style: "font-size:14px" }, f.name),
-            el("div", { class: "sub" }, [kind, size(f.size), whenLong(f.when)].filter(Boolean).join(" · ")))),
-        el("ul", { class: "rows", style: "margin-top:auto" }, rest.map((x) => el("li", { style: "cursor:pointer", onclick: () => act({ id: "open_file", arg: x.path }) },
-          el("span", { class: "ttl grow", style: "font-weight:400;color:var(--soft)" }, x.name), el("span", { class: "time" }, when(x.when)))))];
-    }, { key: f.path });
-    setFaces("recent", files.map(face), { every: 7000, offset: 2500, keep: (LIVE.recent && LIVE.recent.faces[LIVE.recent.i] || {}).key });
-  },
-
-  note() {
-    // the capture box and the three latest notes (no turning: typing here must not be interrupted)
-    const old = $("#note-in");
-    const keep = old ? { value: old.value, focused: document.activeElement === old } : null;
-    const items = data("notes").items || [];
-    const input = el("input", { id: "note-in", class: "note-in", placeholder: "Capture a thought…", "aria-label": "Capture a thought" });
-    const form = el("form", { class: "note-box", style: "padding:6px 8px 6px 12px", onsubmit: async (e) => {
-      e.preventDefault(); const text = input.value; input.value = ""; if (text.trim()) await post("/api/note", { text });
-    } }, input, el("button", { class: "mini", type: "submit" }, "Save"));
-    fill(body("note"), form, items.length ? el("ul", { class: "rows" }, items.slice(0, 12).map((n) => {
-      const [at, ...text] = n.split(" · ");
-      return el("li", {}, el("span", { class: "sub grow", style: "color:var(--soft)" }, text.join(" · ")), el("span", { class: "time" }, at));
-    })) : el("div", { class: "sub" }, "Kept on this laptop"));
-    if (keep) { input.value = keep.value; if (keep.focused) input.focus(); }
   },
 
   weather() {
@@ -482,10 +392,11 @@ const render = {
 
 // card -> renderers that read it
 const FEEDS = {
-  mail: ["mail", "daysum", "tabs"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
+  mail: ["daysum", "tabs"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
   builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
-  recent: ["recent"], notes: ["note"], weather: ["weather"], phone: ["phone"], news: ["news"],
-  news_media: ["news"], usage: ["ai"],
+  weather: ["weather"], phone: ["phone"], news: ["news"], news_media: ["news"], usage: ["ai"],
+  movies: ["movies"], sticky: ["sticky"], storage: ["storage"], spotify: ["spotify"], photos: ["photos"],
+  accounts: ["tabs", "sheet"],
 };
 // ------------------------------------------------------------------- tabs
 // Home is one window with tabs. Today is this page; every other tab is a site ("tabs" in
@@ -502,6 +413,7 @@ function drawTabs() {
     el("button", { class: `tab${t.id === currentTab ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(t.id === currentTab),
       title: `Ctrl+${i + 1}`, onclick: () => selectTab(t.id) }, t.name,
       t.id === "mail" && unread ? el("span", { class: "n" }, unread > 999 ? "999+" : String(unread)) : null)));
+  if (window.drawAccts) window.drawAccts();
 }
 function webRect() {
   const r = $("#web").getBoundingClientRect();
@@ -525,6 +437,7 @@ function selectTab(id) {
 // Ctrl+1..9 pressed while a site has the keyboard.
 window.homeSpace = {
   open(tab) {
+    document.body.classList.remove("away");      // the tiles move again
     const picture = $("#backdrop");
     picture.onload = () => { picture.hidden = false; };
     picture.onerror = () => { picture.hidden = true; };
@@ -534,11 +447,11 @@ window.homeSpace = {
     greet();
     selectTab(tab || currentTab);
   },
-  closed() { cancelVoice(); $("#answer").hidden = true; },
+  closed() { cancelVoice(); $("#answer").hidden = true; document.body.classList.add("away"); },
   select(n) { const all = ["today", ...siteTabs().map((t) => t.id)]; if (all[n - 1]) selectTab(all[n - 1]); },
 };
 
-function draw(name) { try { if (name === "tabs") return drawTabs(); render[name](); } catch (e) { console.error(name, e); } }
+function draw(name) { try { if (name === "tabs") return drawTabs(); if (render[name]) render[name](); } catch (e) { console.error(name, e); } }
 function renderAll() { Object.keys(render).forEach(draw); renderPresence(); greet(); if (!PANEL) drawTabs(); }
 
 function renderPresence() {
@@ -626,8 +539,8 @@ function connect(delay = 500) {
     if (msg.type === "state") { Object.assign(state, msg); if (!PANEL) renderAll(); else renderPresence(); }
     else if (msg.type === "card") {
       state.cards[msg.name] = { data: msg.data, at: msg.at };
-      if (!PANEL) (FEEDS[msg.name] || []).forEach(draw);
-    } else if (msg.type === "next") { state.next = msg.items; if (!PANEL) draw("next"); }
+      if (!PANEL) { (FEEDS[msg.name] || []).forEach(draw); if (window.cardChanged) window.cardChanged(msg.name); }
+    } else if (msg.type === "config") { state.config = msg.config; if (!PANEL) drawTabs(); }
     else if (msg.type === "presence") { state.presence = msg; renderPresence(); }
     else if (msg.type === "brain") { state.brain = msg; if (!PANEL) draw("brain"); renderPresence(); }
     else if (msg.type === "handoff") handoffEvent(msg);
@@ -647,6 +560,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#home").hidden = true; $("#panel").hidden = false;
     $("#panel-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#panel-input"); ask(i.value, "panel"); i.value = ""; });
     $("#panel .voice-toggle").focus();
+    $("#orb-talk").addEventListener("click", toggleVoice);
   } else {
     $("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#ask"); ask(i.value, "home"); i.value = ""; });
     document.querySelectorAll("[data-ask]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.ask, "home")));
@@ -697,6 +611,7 @@ function voicePhase(phase, level = 0) {
     [["w1", 3, 58], ["w2", 4, 44], ["w3", 6, 30]].forEach(([c, n, a]) => box.querySelector(`.${c}`).setAttribute("d", wavePath(n, a)));
   }
   box.dataset.phase = phase;
+  if (window.marioVoice) window.marioVoice(phase, level);
   box.style.setProperty("--level", phase === "listening" ? String(Math.max(0.06, Math.min(1, level))) : phase === "working" ? "0.12" : "0");
 }
 function voiceStatus(text, active = false, phase = "idle", level = 0) {

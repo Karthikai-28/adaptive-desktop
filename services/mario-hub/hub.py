@@ -38,12 +38,16 @@ import brain  # noqa: E402
 import collectors  # noqa: E402
 import config as config_mod  # noqa: E402
 import engines  # noqa: E402
+import tiles  # noqa: E402
 from voice import Voice  # noqa: E402
 
+collectors.SCHEDULE.update(tiles.SCHEDULE)
+
 STATIC = config_mod.ADAPTIVE_REPO / "apps" / "mario-home" / "static"
-PRESENCE = ("ready", "listening", "thinking", "doing", "needs_you")
+PRESENCE = ("ready", "listening", "thinking", "speaking", "doing", "needs_you")
 OPEN_URL_PREFIXES = ("https://claude.ai/", "https://gemini.google.com/", "https://docs.google.com/", "https://github.com/",
                      "https://mail.google.com/", "https://calendar.google.com/",
+                     "https://photos.google.com/", "https://photos.app.goo.gl/", "https://open.spotify.com/",
                      "https://myaccount.google.com/apppasswords",
                      "https://www.instagram.com/", "http://127.0.0.1:", "http://localhost:")
 REPO = config_mod.ADAPTIVE_REPO
@@ -77,6 +81,7 @@ LAUNCH = {
     "calculator": ["gnome-calculator"],
     "monitor": ["gnome-system-monitor"],
     "updates": ["update-manager"],
+    "spotify": [tiles.spotify_bin() or "spotify"],
 }
 
 
@@ -90,8 +95,10 @@ def launch_env():
 
 
 class Hub:
-    def __init__(self, cfg, schedule=None):
+    def __init__(self, cfg, schedule=None, cfg_file=None):
         self.cfg = cfg
+        self.cfg_file = Path(cfg_file or config_mod.CONFIG_FILE)   # what Home's own settings edit
+        self.sticky_file = tiles.STICKY
         self.schedule = schedule if schedule is not None else collectors.SCHEDULE
         self.cards = {}
         self.clients = set()
@@ -119,6 +126,7 @@ class Hub:
     def snapshot(self):
         cards = dict(self.cards)
         cards["notes"] = {"data": {"items": collectors.read_notes(self.notes_file)}, "at": 0}
+        cards["sticky"] = {"data": tiles.sticky_state(self.cfg, self.sticky_file), "at": 0}
         state = {"cards": cards, "config": self.public_config()}
         state["next"] = brain.next_steps(state, limit=4)
         state["presence"] = self.presence
@@ -325,6 +333,10 @@ class Hub:
             result = await (self.add_task(capture[2]) if task else self.add_note(capture[2]))
             return {"route": "command", "via": "Mario", **result,
                     "answer": ("Task added: " if task else "Note saved: ") + capture[2] if result.get("ok") else ""}
+        if re.fullmatch(r"(?:please\s+)?(?:tidy|clean|regulari[sz]e|file|sort out)(?: up)? (?:my |the )?(?:sticky(?: note)?|scribbles?|note)[.!]?", text, re.I):
+            result = await self.tidy_sticky()
+            return {"route": "command", "via": "Mario", **result,
+                    "answer": f"Tidied and filed in Mario Notes.\n\n{result['text']}" if result.get("ok") else ""}
         launch = re.fullmatch(r"(?:please\s+)?open (?:the\s+)?(.+?)[.!]?", text, re.I)
         if launch:
             name = launch[1].strip().lower()
@@ -339,19 +351,26 @@ class Hub:
         return None
 
     async def speak(self, text):
+        """Say it aloud. Presence is "speaking" until the voice has finished, so the panel's orb
+        moves for exactly as long as Mario talks."""
         if not text or not shutil.which("spd-say"):
             return
+        text = str(text)[:1200]
+        await self.set_presence("speaking")
         try:
-            # Argument vector only: dictated content is never a shell command.
-            proc = await asyncio.create_subprocess_exec("spd-say", "--", str(text)[:1200],
+            # Argument vector only: dictated content is never a shell command. -w waits for the end.
+            proc = await asyncio.create_subprocess_exec("spd-say", "-w", "--", text,
                                                        env=launch_env(), stdout=asyncio.subprocess.DEVNULL,
                                                        stderr=asyncio.subprocess.DEVNULL)
-            await asyncio.wait_for(proc.wait(), 3)
+            await asyncio.wait_for(proc.wait(), min(90, 4 + len(text) / 9))
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
         except OSError:
             pass
+        finally:
+            if self.presence.get("state") == "speaking":
+                await self.set_presence("ready")
 
     async def run_handoff(self, plan):
         plan["status"] = "running"
@@ -445,9 +464,65 @@ class Hub:
         self.notes_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.notes_file, "a") as f:
             f.write(f"- {time.strftime('%d %b %H:%M')} · {text}\n")
+        try:
+            await asyncio.to_thread(tiles.file_note, self.cfg, f"- {text}", "Note")
+        except OSError:
+            pass                                   # the note is kept above either way
+        await self.push_sticky()
         await self.broadcast({"type": "card", "name": "notes",
                               "data": {"items": collectors.read_notes(self.notes_file)}, "at": time.time()})
         return {"ok": True}
+
+    # ------------------------------------------------- Home's own tiles
+    async def push_sticky(self):
+        await self.broadcast({"type": "card", "name": "sticky",
+                              "data": tiles.sticky_state(self.cfg, self.sticky_file), "at": time.time()})
+
+    async def save_sticky(self, text):
+        await asyncio.to_thread(tiles.write_sticky, text, self.sticky_file)
+        await self.push_sticky()
+        return {"ok": True}
+
+    async def tidy_sticky(self):
+        """Mario rewrites the scribble as clean notes, files them on today's page of Mario Notes
+        and hands back an empty sticky."""
+        text = tiles.read_sticky(self.sticky_file).strip()
+        if not text:
+            return {"ok": False, "error": "The sticky note is empty."}
+        await self.set_presence("thinking", "tidying your note")
+        try:
+            res = await asyncio.to_thread(self.answer, tiles.TIDY_PROMPT + text)
+            tidy, via = (res.get("answer") or "").strip(), res.get("via") or ""
+            if not tidy:
+                tidy, via = tiles.rough_tidy(text), ""
+            page = await asyncio.to_thread(tiles.file_note, self.cfg, tidy, "From the sticky note")
+            await asyncio.to_thread(tiles.write_sticky, "", self.sticky_file)
+        except OSError as exc:
+            return {"ok": False, "error": f"Could not file the note: {exc}"}
+        finally:
+            await self.set_presence("ready")
+        await self.push_sticky()
+        return {"ok": True, "page": str(page), "text": tidy, "via": via,
+                "note": "" if via else "Nobody could be asked just now, so it was filed as a plain list."}
+
+    async def refresh(self, name):
+        """Read one card again now (a tile's refresh button)."""
+        if name not in self.schedule and name not in collectors.SCHEDULE:
+            return {"ok": False, "error": "no such card"}
+        await self.collect_once(name)
+        return {"ok": True, "at": time.time()}
+
+    async def reload_config(self, *cards):
+        """After Home changed mario.json: read it again and the cards it feeds."""
+        self.cfg = await asyncio.to_thread(config_mod.load, self.cfg_file)
+        await self.broadcast({"type": "config", "config": self.public_config()})
+        await asyncio.gather(*(self.collect_once(c) for c in cards))
+
+    def open_places(self):
+        """Folders the Storage and sticky tiles may open in Files."""
+        data = (self.cards.get("storage") or {}).get("data") or {}
+        return ({p["path"] for p in data.get("places", [])} | {f["path"] for f in data.get("folders", [])}
+                | {str(tiles.notes_dir(self.cfg) or "")} | {tiles.sticky_state(self.cfg, self.sticky_file)["page"]}) - {""}
 
     # ----------------------------------------------------------- actions
     def action(self, aid, arg):
@@ -482,6 +557,10 @@ class Hub:
             media = ((self.cards.get("news_media", {}).get("data") or {}).get("media") or {}).get(link) or {}
             url = media.get("url") or ""
             cmd = ["xdg-open", url if url.startswith(("https://", "http://")) else link]
+        elif aid == "open_place":
+            if str(arg) not in self.open_places() or not Path(str(arg)).exists():
+                return {"ok": False, "error": "only folders shown on Home open from here"}
+            cmd = ["xdg-open", str(arg)]
         elif aid == "open_file":
             listed = {f["path"] for name in ("recent", "downloads")
                       for f in (self.cards.get(name, {}).get("data") or {}).get("files", [])}
@@ -591,7 +670,9 @@ def make_app(hub, port):
         data = await read(request)
         result = await hub.ask(data.get("text"))
         if data.get("spoken") is True:
-            await hub.speak(result.get("error") or result.get("answer") or "Review the plan, then choose Run to start.")
+            # the answer goes to the page now; the voice carries on by itself
+            hub.speaking = asyncio.create_task(
+                hub.speak(result.get("error") or result.get("answer") or "Review the plan, then choose Run to start."))
         return web.json_response(result)
 
     async def glass(_request):
@@ -654,6 +735,67 @@ def make_app(hub, port):
         # the name is a hash of the picture's address: it never changes, so the page keeps it cached
         return web.FileResponse(path, headers={"Cache-Control": "max-age=604800, immutable"})
 
+    async def refresh(request):
+        return web.json_response(await hub.refresh(str((await read(request)).get("card"))))
+
+    async def movie(request):
+        data = await read(request)
+        result = await asyncio.to_thread(tiles.mark_movie, data.get("title"), data.get("watched") is True)
+        if result.get("ok"):
+            await hub.collect_once("movies")
+        return web.json_response(result)
+
+    async def storage_clear(request):
+        result = await asyncio.to_thread(tiles.clear_storage, (await read(request)).get("id"))
+        if result.get("ok"):
+            await hub.collect_once("storage")
+        return web.json_response(result)
+
+    async def spotify(request):
+        result = await asyncio.to_thread(tiles.spotify_control, (await read(request)).get("cmd"))
+        if result.get("ok"):
+            await asyncio.sleep(0.35)             # the player needs a moment before it reports the change
+            await hub.collect_once("spotify")
+        return web.json_response(result)
+
+    async def photos(request):
+        result = await asyncio.to_thread(tiles.set_album, hub.cfg_file, (await read(request)).get("album"))
+        if result.get("ok"):
+            await hub.reload_config("photos")
+        return web.json_response(result)
+
+    async def photo(request):
+        name = request.match_info["name"]
+        path = tiles.PHOTOS_DIR / name
+        if not tiles.PHOTO_NAME.fullmatch(name) or not path.is_file():
+            raise web.HTTPNotFound()
+        if request.query.get("thumb"):               # the viewer's strip: a small copy, made once
+            path = await asyncio.to_thread(tiles.photo_thumb, name)
+        return web.FileResponse(path, headers={"Cache-Control": "max-age=604800, immutable"})
+
+    async def sticky(request):
+        return web.json_response(await hub.save_sticky((await read(request)).get("text")))
+
+    async def sticky_tidy(_request):
+        return web.json_response(await hub.tidy_sticky())
+
+    async def accounts(request):
+        data = await read(request)
+        result = await asyncio.to_thread(tiles.edit_accounts, hub.cfg_file, data.get("op"), data.get("user"),
+                                         data.get("what"), data.get("on") is True, data.get("secret"))
+        if result.get("ok"):
+            await hub.reload_config("accounts", "mail", "calendar")
+        return web.json_response(result)
+
+    app.router.add_post("/api/refresh", refresh)
+    app.router.add_post("/api/movie", movie)
+    app.router.add_post("/api/storage/clear", storage_clear)
+    app.router.add_post("/api/spotify", spotify)
+    app.router.add_post("/api/photos", photos)
+    app.router.add_get("/photo/{name}", photo)
+    app.router.add_post("/api/sticky", sticky)
+    app.router.add_post("/api/sticky/tidy", sticky_tidy)
+    app.router.add_post("/api/accounts", accounts)
     app.router.add_post("/api/task", task)
     app.router.add_post("/api/task/done", task_done)
     app.router.add_post("/api/note", note)
@@ -684,7 +826,7 @@ def main():
     args = ap.parse_args()
     cfg = config_mod.load(args.config)
     port = args.port or int(cfg["port"])
-    hub = Hub(cfg)
+    hub = Hub(cfg, cfg_file=args.config)
     if args.once:
         async def once():
             await asyncio.gather(*(hub.collect_once(n) for n in hub.schedule))

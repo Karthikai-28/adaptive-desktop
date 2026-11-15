@@ -467,6 +467,15 @@ WMO = {0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog"
        95: "Thunderstorm", 96: "Thunderstorm", 99: "Thunderstorm"}
 
 
+def weather_scene(code, is_day=1):
+    """What the sky is doing, for the tile's moving picture: one of clear, clouds, fog, drizzle,
+    rain, snow, storm, with "-night" after dark."""
+    scene = ("clear" if code in (0, 1) else "clouds" if code in (2, 3) else "fog" if code in (45, 48)
+             else "drizzle" if code in (51, 53, 55) else "snow" if code in (71, 73, 75, 77, 85, 86)
+             else "storm" if code in (95, 96, 99) else "rain" if code in (61, 63, 65, 80, 81, 82) else "clouds")
+    return scene if is_day else scene + "-night"
+
+
 def weather(cfg):
     """Open-Meteo (no key, no account): now, today's range and the next hours. The one card
     that reaches the internet; turn it off with "cards_off": ["weather"]."""
@@ -474,7 +483,7 @@ def weather(cfg):
     if "weather" in cfg.get("cards_off", []) or not w.get("lat"):
         return {"off": True}
     url = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-           "&current=temperature_2m,weather_code,apparent_temperature"
+           "&current=temperature_2m,weather_code,apparent_temperature,is_day,wind_speed_10m"
            "&hourly=temperature_2m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,"
            "precipitation_probability_max&timezone=auto&forecast_days=1").format(**w)
     data, err = _http_json(url, timeout=6)
@@ -490,6 +499,7 @@ def weather(cfg):
     first = lambda k: (daily.get(k) or [None])[0]  # noqa: E731
     return {"place": w.get("name", ""), "temp": round(cur.get("temperature_2m", 0)),
             "feels": round(cur.get("apparent_temperature", 0)), "sky": WMO.get(cur.get("weather_code"), ""),
+            "scene": weather_scene(cur.get("weather_code"), cur.get("is_day", 1)), "wind": round(cur.get("wind_speed_10m") or 0),
             "high": first("temperature_2m_max"), "low": first("temperature_2m_min"),
             "rain": first("precipitation_probability_max"), "hours": hours}
 
@@ -702,6 +712,8 @@ def mail_accounts(cfg):
         user = str(a.get("user") or "").strip()
         if user and user.lower() not in seen:
             seen.add(user.lower())
+            if a.get("mail", True) is False:      # mail for this account is not synced
+                continue
             out.append({"user": user, "imap_host": a.get("imap_host") or host})
     main = str(m.get("main") or "").strip().lower()
     out.sort(key=lambda a: a["user"].lower() != main)   # stable: the rest keep their order
@@ -866,15 +878,38 @@ def _ics_events(text, day):
 
 
 def calendar(cfg):
-    """Today's events from your calendar's private iCal address (kept in the keyring:
-    install-mario.sh --calendar). Read-only."""
+    """Today's events from every synced calendar: each account's private iCal address (kept in
+    the keyring; Home's Accounts sheet or install-mario.sh --calendar). Read-only."""
     import datetime as dt
+    import tiles
     try:
-        url = keyring(service="mario-calendar", account="ical")
+        feeds = tiles.calendar_feeds(cfg)
     except KeyringNotReady:
         return {"waiting": True, "error": KEYRING_WAIT, "events": []}
-    if not url:
-        return {"setup": True, "error": "Calendar is not set up: scripts/install-mario.sh --calendar"}
+    if not feeds:
+        off = [a["user"] for a in tiles.account_list(cfg) if not a["calendar"]]
+        return {"setup": True, "error": "Every calendar is switched off in Accounts." if off
+                else "No calendar is connected: add its address in Accounts."}
+    events, notes, problems = [], [], []
+    for feed in feeds:
+        got = calendar_feed(feed["url"], dt.date.today())
+        if got.get("error"):
+            problems.append({**got, "user": feed["user"]})
+            continue
+        for e in got["events"]:
+            events.append({**e, "account": feed["user"]})
+        if got.get("note") and got["note"] not in notes:
+            notes.append(got["note"])
+    if problems and len(problems) == len(feeds):
+        first = problems[0]
+        return {k: first[k] for k in ("waiting", "fix", "error") if k in first} | {"events": []}
+    events.sort(key=lambda e: (not e.get("all_day"), e.get("start") or ""))
+    return {"events": events[:12], "note": " ".join(notes), "calendars": len(feeds),
+            "problems": [{"user": p["user"], "error": p["error"]} for p in problems]}
+
+
+def calendar_feed(url, day):
+    """One iCal address -> {"events", "note"} for `day`, or {"error", "waiting" | "fix"}."""
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
             text = resp.read().decode(errors="replace")
@@ -889,7 +924,7 @@ def calendar(cfg):
     if "BEGIN:VCALENDAR" not in text[:2000]:
         return {"fix": True, "events": [],
                 "error": "That address is not a calendar feed. Use \"Secret address in iCal format\" (it ends in .ics)."}
-    events, note = _ics_events(text, dt.date.today())
+    events, note = _ics_events(text, day)
     return {"events": events[:8], "note": note}
 
 
