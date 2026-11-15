@@ -15,11 +15,12 @@ reads what is already on the machine. Actions are added on top, one confirmed st
 | Part | Source | Job |
 | --- | --- | --- |
 | Mario Hub | `services/mario-hub/hub.py` (aiohttp, 127.0.0.1:8791) | Runs the collectors, pushes changed cards over `/ws`, answers `/api/ask`, holds Claude Code plans until you decide |
-| Collectors | `services/mario-hub/collectors.py` | Mail (IMAP, read-only), calendar (private iCal), tasks (Quick Note inboxes), builds (git), agents (terminal tmux sessions, Agent Office), Thinking Space boards, recent files, notes, weather (Open-Meteo), AI usage (`quotaSnapshot.py`, Claude and Gemini), phone (Adaptive Link socket), health (updates, disk, battery, failed services), LOOM and system for Mario's own status; Saved Reels, downloads, processes and ports stay available to Mario's answers |
+| Collectors | `services/mario-hub/collectors.py` | Mail (IMAP, read-only), calendar (private iCal, every account's merged), tasks (Quick Note inboxes), builds (git), agents (terminal tmux sessions, Agent Office), Thinking Space boards, recent files, notes, weather (Open-Meteo), AI usage (`quotaSnapshot.py`, Claude and Gemini), phone (Adaptive Link socket), health (updates, disk, battery, failed services), LOOM and system for Mario's own status; Saved Reels, downloads, processes and ports stay available to Mario's answers |
+| Tiles | `services/mario-hub/tiles.py` | The tiles that do more than read: Watch next (the Sheet's mirror plus your watched marks), Storage (sizes, and emptying the places Home may empty), Spotify (MPRIS on the session bus), Photos (a shared Google Photos album copied here), the sticky note and Mario Notes, and the accounts (`mario.json` and the keyring) |
 | Decisions | `services/mario-hub/brain.py` (pure) | Instant answers from state, answer vs hand-off, the hand-off's limits, the Next step list |
 | Who answers | `services/mario-hub/engines.py` | Claude, then Gemini, then the laptop: the command lines, reading each CLI's reply, recognising a usage limit, the live context sent with a question |
 | Settings | `services/mario-hub/config.py`, `~/.config/adaptive-desktop/mario.json` | Repos, Thinking Space checkout, mail accounts, `brain` order and models, LOOM/Ollama/Office URLs, backup time |
-| Home and panel | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`) | One page: `/` is Home, `/panel` the panel. DOM only, no framework, no `innerHTML` |
+| Home and panel | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`, `tiles.js`) | One page: `/` is Home, `/panel` the panel. `home.js` is the frame (connection, tabs, slides, voice), `tiles.js` the newer tiles, the accounts sheet, the photo viewer and the panel's orb. DOM only, no framework, no `innerHTML` |
 | Host | `apps/mario-home/host.py` (GTK 3 + WebKitGTK), `scripts/adaptive-home.sh` | Home as a layer over the work area: loaded hidden at login (`--background`), shown and hidden by Super+H (a D-Bus message, about 20 ms), with one view per tab; `--panel` toggles the panel window |
 | Unit and login entry | `services/adaptive-mario-hub.service`, `apps/mario-home/adaptive-mario-home.desktop` | Templates filled with the checkout's path |
 
@@ -27,33 +28,45 @@ The shell's top bar, rail and island stay the shell's; Home fills only the work 
 
 ## Your day (Home)
 
-Home is laid out for work, in the order a day is used: what came in, what is scheduled, what to
-do, then the work itself, then capture. A side column holds the always-there tools. Cards get the
-room their content needs; nothing is there to fill a gap, and nothing appears twice. Everything
-updates live over the hub's WebSocket, and the tiles marked *live* also turn between faces on their
-own clock, like live tiles: each at its own pace and offset so they never all move at once, paused
-while the pointer is over the tile or the screen is hidden; previous/next buttons and a slide counter show which face is up. Arrow keys on a focused tile and horizontal swipes also move between faces. A manual turn pauses that tile until Play; keyboard focus and reduced-motion preferences stop automatic turns too.
-New data redraws the current face in place without turning it. The top bar keeps the clock.
+Home is laid out for work: what to do, what to watch, what you scribbled, the disk; then the work
+itself, your pictures, the news and the music. A side column holds the always-there tools. Mail and
+Calendar are tabs, not tiles. Everything updates live over the hub's WebSocket, and the tiles
+marked *live* also turn between faces on their own clock, like live tiles: each at its own pace and
+offset so they never all move at once, paused while the pointer is over the tile or the screen is
+hidden; previous/next buttons and a slide counter show which face is up. Arrow keys on a focused
+tile and horizontal swipes also move between faces. A manual turn pauses that tile until Play;
+keyboard focus and reduced-motion preferences stop automatic turns too. New data redraws the
+current face in place without turning it. The top bar keeps the clock.
 
-The top row is Mail, Tasks and Next step. Home is one screen and never scrolls as a page: a list that is longer than its tile (mail, tasks, today's events, the boards, notes) scrolls inside that tile. Below them (Today remains under the weather) is a four-column block: Projects and Thinking Space side by side
-(one column each; the boards are compact rows), Recent files and This week under them, Quick note down the
-third column and News down the last, both through two rows.
+The top row is Tasks, Watch next, Sticky note and Storage. Home is one screen and never scrolls as
+a page: a list that is longer than its tile (tasks, the movie list, the storage rows, today's
+events, the boards) scrolls inside that tile. Below is a four-column block: Projects and Thinking
+Space side by side with Spotify and This week under them, Photos down the third column and News
+down the last, both through two rows. The side column is Weather, Today, AI assistants and Phone.
 
 | Card | Shows | Opens / does |
 | --- | --- | --- |
-| Mail | Unread count over every account, then one tab per account (the main one first and shown by default, each with its unread count) and up to five newest unread (sender, subject, time), read-only over IMAP. A refused login says why; for a Google account password (Gmail wants an app password) a button opens the app-password page | A message opens that conversation in Gmail, in its own account (Gmail's thread id); the header and "Open" open that account's inbox |
-| Today | Small tile under the weather: date, and today's events still to come on a timeline, the current one highlighted (private iCal address) | Google Calendar |
 | Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; scroll through all tasks, tick to finish, or add a task. Draft text and selection survive live refreshes | `/api/task`, `/api/task/done` |
+| Watch next | From the movie tracker Sheet (its nightly mirror, `reels/data/movies-shows.csv` in the Thinking Space checkout): one pick for **today** and one for **tomorrow** out of the titles not yet watched that a subscription of yours carries, then the whole list, scrolling, with where each one streams and a tally | The round tick marks a title watched or not (`/api/movie`); the header opens the Sheet. Marks are kept on this laptop (`~/.local/share/adaptive-desktop/mario/movies.json`) and laid over the Sheet's own Status; the Sheet is not written |
+| Sticky note | A paper note to scribble on; it saves as you type (`sticky.md` beside the other Mario data) and survives restarts | **Tidy with Mario**, or saying "tidy my sticky note": Mario rewrites the scribble as clean notes, adds them to today's page of Mario Notes (`notes_dir`, `~/Documents/Mario Notes/YYYY-MM-DD.md`) and hands back an empty note; the count of notes filed today opens that page. If nobody can be asked, it is filed as a plain list and says so |
+| Storage | A ring for how full the disk is, free space, how much can be had back; then rows, largest first, that scroll: Trash, thumbnails, pip / npm / Gradle caches, your week-old files in `/tmp`, Chrome and other caches, Downloads, apt's package downloads, the system journal; and the eight largest folders of your home | **Clear** on a row Home may empty (Trash, thumbnails, pip, npm, Gradle, old temporary files) asks once more, then empties it and says how much came back (`/api/storage/clear`). Rows that need your password show the command to copy; the rest open in Files. Refresh button; re-measured every 30 min |
 | Projects (live) | One repo per face, newest first (last commit, branch, changes / to push / to pull / up to date), then an Agents face: terminal agent sessions and Agent Office | Code, Terminal |
-| Recent files (live) | The newest files take turns on top (type, size, when), the next two listed below | The file |
-| Quick note | Capture a thought; the three latest notes (`~/.local/share/adaptive-desktop/mario/notes.md`). Does not turn, so typing is never interrupted | `/api/note` |
-| This week (live) | Commits per day for the last seven days across the watched repos; then this week against last, busiest day, today | |
-| News (live) | One headline at a time with the article's picture across the top of the tile, cropped to fit (outlets that block it get their name on a colour instead), rolling to the next every 30 s (a bar along the bottom fills to the next; paused under the pointer), source and age, two "Up next" with thumbnails; RSS from `news` in `mario.json` (Google News Tech and India, Hacker News by default), refreshed every 15 min. `"cards_off": ["news"]` stops the fetching | The article itself, picture or headline (only headlines on Home open) |
 | Thinking Space | The four boards with their sections, or what is waiting in their Inbox | The board, the hub |
-| Weather (live) | Now, feels-like, rain chance; the next six hours; today's high, low and rain (Open-Meteo) | |
-| Next step | One actionable suggestion at a time: uncommitted work, stopped services, system issues | Open its action or add it as a task |
-| AI assistants | Claude and Gemini: usage of the fullest window and when each resets | claude.ai, Gemini |
+| Photos | The pictures of one shared Google Photos album, crossfading one after another with a slow drift, a counter and a progress line | Previous / next, pause, and full screen: a viewer over the whole of Home with arrows, a strip of every picture to pick one from (small copies the hub makes once, `/photo/<name>?thumb=1`), Space to pause, Escape to leave. The first time it asks for the album's link; the gear changes it (`/api/photos`) |
+| News (live) | One headline at a time with the article's picture across the top of the tile, cropped to fit (outlets that block it get their name on a colour instead), rolling to the next every 30 s (a bar along the bottom fills to the next; paused under the pointer), source and age, two "Up next" with thumbnails; RSS from `news` in `mario.json` (Google News Tech and India, Hacker News by default), refreshed every 15 min. `"cards_off": ["news"]` stops the fetching | The article itself, picture or headline (only headlines on Home open) |
+| Spotify | What the Spotify app is playing: cover, title, artist, a moving position bar and an equaliser that dances only while it plays | Previous, play / pause, next (`/api/spotify`, the desktop app over MPRIS); when Spotify is not running, a button opens it |
+| This week (live) | Commits per day for the last seven days across the watched repos; then this week against last, busiest day, today | |
+| Weather (live) | Now, feels-like, rain chance; the next six hours; today's high, low and rain (Open-Meteo), over a moving sky that matches it: sun or stars when clear, drifting cloud, falling rain or drizzle, snow, fog, lightning in a storm, darker at night | |
+| Today | Small tile under the weather: date, and today's events still to come from every account's calendar on one timeline, the current one highlighted | Google Calendar |
+| AI assistants | Claude and Gemini: usage of the fullest window and when each resets, with the time it was last read | Refresh button reads it again now (`/api/refresh`); claude.ai, Gemini |
 | Phone | Adaptive Link state | The phone's screen |
+
+**Tiles are alive.** Every tile lifts under the pointer; a tile that just received new data is
+swept once by a line of light; live dots pulse; bars grow into place. All of it stops while Home is
+hidden (`body.away`) and under the reduced-motion preference, so a hidden Home costs nothing.
+
+**Refresh.** Tiles with a refresh button (`data-refresh`) ask the hub to run that collector now
+(`POST /api/refresh {"card": …}`); the hub pushes the result to every open page.
 
 There is no "all systems up to date" line. System trouble (pending or security updates, disk over
 90 %, low battery, a failed user service) shows only when it happens, as a Mario suggestion in Tasks
@@ -96,6 +109,13 @@ A link that leaves a tab's own site (a link inside a mail, a document, a pop-out
 the browser. The rules are `apps/mario-home/site_rules.py` (pure, checked by `verify-mario.py`).
 `scripts/adaptive-home.sh show mail` opens Home on a tab directly.
 
+**Accounts.** On a Google tab the bar shows one chip per account (the main one marked, each with
+its unread count on Mail). A chip takes that tab to that account: Home loads Google's account
+chooser for the address with the tab as the way back, so an account that is already signed in
+opens at once and a new one gets its sign-in form, in the tab. The page may only send a tab to its
+own site or its sign-in pages (`site_rules.belongs`). The person button beside the chips opens the
+**Accounts** sheet, below.
+
 **Ground.** Home sits on glass: the wallpaper blurred once into
 `~/.cache/adaptive-desktop/glass.png` under a graphite tint, the same picture the shell puts behind
 Files. The hub serves it at `/glass.png` and makes it itself when it is missing or older than the
@@ -106,7 +126,21 @@ reason is in its tooltip and under the panel's title), and
 "Your day" sums it up: events, open tasks, unread mail. Brief me now includes the calendar, mail and
 tasks.
 
-### Connecting mail and calendar
+### Accounts: mail and calendar
+
+The **Accounts** sheet (the person button in the tab bar) is where accounts are kept:
+
+- **Add account**: an address. It becomes a chip on the Google tabs; sign in to it once in the tab.
+- **Mail** and **Calendar** switches per account: on, the hub reads that account's unread mail (the
+  chip's count, "any mail", the briefing) or its calendar (Today, the briefing); off, it stops, and
+  nothing else about the account changes. That is sync and unsync.
+- **Connect** under a switch asks for what the hub needs to read on your behalf, and puts it in the
+  GNOME keyring: for Mail the account's Google **app password**, for Calendar that calendar's
+  **"Secret address in iCal format"** (Calendar settings → the calendar → Integrate calendar).
+  The Mail and Calendar tabs themselves need neither: they are Google's own pages, signed in.
+- **Make main** (the account shown first) and **Remove** (asks once more; also removes its secrets).
+
+The same from a terminal:
 
 ```sh
 scripts/install-mario.sh --mail       # a Gmail address + its Google app password -> GNOME keyring;
@@ -115,14 +149,35 @@ scripts/install-mario.sh --mail --main  # ... and make it the main one without a
 scripts/install-mario.sh --calendar   # the calendar's "Secret address in iCal format" -> keyring
 ```
 
-Accounts are kept as `"mail": {"accounts": [...], "main": "..."}` in `mario.json` (the older
-`"mail": {"user": ...}` still reads as one account); the main one is the tab Home shows first.
-Each step tries the login or the feed once before it finishes and says what is wrong if Gmail or
+Accounts are kept as `"mail": {"accounts": [{"user": …, "mail": true, "calendar": true}], "main": "..."}`
+in `mario.json` (the older `"mail": {"user": ...}` still reads as one account); a change from the
+sheet is written there and the hub reads its settings again at once (`/api/accounts`).
+Each terminal step tries the login or the feed once before it finishes and says what is wrong if Gmail or
 Google refuses (the password itself is never printed). The secrets stay in the keyring (`secret-tool`, attributes `service mario-mail`
-`account <address>`, one per account, and `service mario-calendar`); the hub reads them when it collects and never writes them to a file,
+`account <address>` and `service mario-calendar` `account <address>`, one per account; the older single
+`account ical` feed still reads); the hub reads them when it collects and never writes them to a file,
 a log or its state. Mail is read-only: headers of unread messages, fetched with `BODY.PEEK` so
 nothing is marked read. Recurring events need `icalendar` and `recurring_ical_events`, which
 the installer puts in `.local/mario-pydeps`; without them only one-off events show.
+
+### Photos, Spotify and the movie list
+
+- **Photos** shows one *shared album*: in Google Photos open an album → Share → **Create link**,
+  and paste that link into the tile. Anyone who has the link can see that album, which is how the
+  hub reads it without signing in; your library itself is never opened. Up to `photos.max` (60)
+  pictures are copied to `~/.local/share/adaptive-desktop/mario/photos/` at screen size, a batch
+  per half hour, and pictures taken out of the album are removed here; Home shows the copies
+  (`/photo/<name>`), so the tile turns without a network. A short `photos.app.goo.gl` link is
+  followed once to the long `photos.google.com/share/…` address and only that is kept: some
+  providers answer the name `goo.gl` with an address of their own where nothing listens (this
+  laptop's connection does), so when the plain way fails the name is looked up through Google's
+  public DNS over HTTPS and the certificate is still checked against the name.
+- **Spotify** is the desktop app (the snap, `/snap/bin/spotify`), driven over MPRIS on the session
+  bus: no Spotify account access, no token. The cover is fetched once per track from Spotify's
+  image server and kept with the news pictures.
+- **Watch next** reads the mirror the nightly backup makes of the tracker Sheet, so a title added
+  to the Sheet today appears tomorrow. Marking a title watched here does not change the Sheet;
+  writing it back needs Google sign-in for the Sheet and is phase 2.
 
 ## Install
 
@@ -146,14 +201,16 @@ it the hub asks Ollama directly (`fallback_model`, LOOM's `default_chat`) and sa
 ## Voice commands
 
 Press **Talk to Mario** on Home or in the **Super+J** panel, then speak. The panel fades and slides in
-each time Super+J shows it, with the keyboard already on Talk to Mario. While Mario listens, three
+each time Super+J shows it, with the keyboard already on Talk to Mario. On Home, while Mario listens, three
 strands in its colours move with your voice (the hub reports the microphone's level ten times a second),
-so you can see that it hears you; while it recognises and answers they lie low and a line runs along them. About two seconds of
+so you can see that it hears you; while it recognises and answers they lie low and a line runs along them.
+The panel has the **orb** instead (see Presence): a ring that swells with your voice and sends waves out when Mario talks back. About two seconds of
 silence sends the request automatically; **Finish speaking** sends sooner. **Cancel**, Escape,
 hiding the page, or losing its connection stops capture/recognition. No wake word is needed.
 
 - “Add a task review the build” writes a task immediately.
-- “Take a note: try the new layout” saves a Quick note immediately.
+- “Take a note: try the new layout” saves the note at once: in Mario's own notes and on today's page of Mario Notes (`notes_dir`).
+- “Tidy my sticky note” (also “clean up”, “regularise”, “file”) does what the tile's **Tidy with Mario** does.
 - “Open terminal”, “open files”, “open mail”, or “open calendar” use the existing launch whitelist.
 - “Brief me” and other questions use the existing Mario answer routing.
 - Code changes still show their plan and require **Run**.
@@ -221,7 +278,8 @@ The hub is a user service that starts at boot (lingering is on), before anyone l
   configured folders; links to claude.ai, Google Docs/Sheets, GitHub, Instagram and loopback;
   starting Agent Office. Nothing else runs.
 - Collectors read local files, loopback ports and the Link's Unix socket; Mail and Today read their
-  secrets from the keyring. What reaches the internet: Gmail (IMAP), the calendar feed, the weather
+  secrets from the keyring. What reaches the internet: Gmail (IMAP), the calendar feeds, the shared
+  Photos album and its pictures, the cover of the track Spotify plays, the weather
   (Open-Meteo, no key, the coordinates in `weather`) and News: the feeds, then for each headline once
   its page (Google News' redirect page, then the article) and its picture. Pictures are kept in
   `~/.local/share/adaptive-desktop/mario/news/` (cleared after three days) and served by the hub at
@@ -230,20 +288,32 @@ The hub is a user service that starts at boot (lingering is on), before anyone l
 - A question to Claude or Gemini carries the live context above (event titles, mail senders and
   subjects, task text, repo names): that is the point of asking them, and it goes to your own
   subscriptions. Instant answers ("brief me", "any mail") never leave the laptop.
+- **Tidy with Mario** sends the sticky note's text to whoever answers (Claude, else Gemini, else the
+  laptop), like any other question to Mario.
+- Storage's **Clear** empties only the six places named in `tiles.storage_places` as clearable,
+  after a second click; nothing that needs your password is run, only shown. `open_place` opens
+  just the folders the Storage and sticky tiles list.
 - Anything that leaves the laptop needs your yes, every time.
 
 ## Presence
 
 Mario's mark is three strands (your work, the world, you). `/api/presence` and the `presence`
 WebSocket message carry the state: `ready` (strands nearly flat, still), `listening` (strands
-swing), `thinking` (a shuttle runs along them), `doing` (one line fills), `needs_you` (one amber
-strand). Reduced motion stops every animation.
+swing), `thinking` (a shuttle runs along them), `speaking` (while a reply is read aloud), `doing`
+(one line fills), `needs_you` (one amber strand). Reduced motion stops every animation.
+
+**The orb** (Super+J panel) is the same state drawn as a circle on a canvas, in the tokens'
+colours: slow concentric rings and orbiting arcs at rest; while it listens the inner ring swells
+and roughens with the microphone's real level and ripples run outward; while it thinks the arcs
+spin up; while it speaks, waves travel round the ring and pulse outward for as long as the reply is
+being read (`spd-say -w`; Speech Dispatcher gives no sound level, so the talk-back waves are drawn,
+not measured). Clicking the orb is Talk to Mario. It stops drawing while the panel is hidden.
 
 ## Next
 
 | Phase | What | Notes |
 | --- | --- | --- |
-| 2 | Read the Google Sheet directly; Calendar card | Through the Link's Google project (`--link-cloud`), read-only scopes |
+| 2 | Read the Google Sheet directly and write the watched mark back to it; Photos from the library rather than one shared album | Through the Link's Google project (`--link-cloud`); the Sheet write needs a write scope and your yes |
 | 3 | Optional “Mario” wake word | Explicit microphone commands are implemented; always-listening wake-word detection remains future work |
 | 4 | "Mario, note that…" writes a sticky into the right board's Inbox | Through the Thinking Space boards' database, confirmed |
 | 4 | Island and phone | The shell island shows presence and the current plan; the Link app gets the ask box |
@@ -257,11 +327,12 @@ canvas lists all 19 with what each contributes.
 
 ```sh
 python3 scripts/verify-mario-voice.py  # fake microphone lifecycle, cancellation and commands
-python3 scripts/verify-mario-ui.py     # isolated Chrome: slides, focus, tasks and voice routing
+python3 scripts/verify-mario-ui.py     # isolated Chrome: slides, focus, tasks, voice routing, the newer tiles, accounts sheet, photo viewer, orb
 python3 scripts/verify-mario.py   # collectors, decisions, hub over HTTP/WebSocket, page; part of verify-all --quick
 python3 services/mario-hub/hub.py --once   # one full state as JSON, from this machine
 ```
 
 Not covered by the check: the desktop hint and panel toggle under GNOME 42, the real `claude` and
-`agy` CLIs (the check feeds recorded replies), Gmail opening a thread link, the news sites, LOOM and
-Ollama. Record those with `scripts/record-live-verification.py` once tried live.
+`agy` CLIs (the check feeds recorded replies), the news sites, LOOM and Ollama, a second Google
+account signing in from its chip, a real shared album of yours, Spotify actually playing, and the orb
+against a real voice. Record those with `scripts/record-live-verification.py` once tried live.

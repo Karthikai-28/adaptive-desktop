@@ -1081,7 +1081,7 @@ Design: https://claude.ai/artifact/3JCCG6J8ZT3XTXFGEAFGPy · plan and phases: `d
   loopback Host and Origin guards; action whitelist.
 - ✅ **Ask**: instant answers from state, LOOM locally (Ollama fallback), Claude Code plans held
   until Run, with folder-only edits and no push/send.
-- ✅ **Home as "Your day"** (`apps/mario-home/static/`): Mail (IMAP, read-only), Today (iCal), Tasks
+- ✅ **Home as "Your day"** (`apps/mario-home/static/`; the tiles as first built, reworked 2026-11-15, see Milestone 21 Phase 3): Mail (IMAP, read-only), Today (iCal), Tasks
   (Quick Note inboxes, tick and add), both half-width alongside Focus and Next step, then a four-column
   block: Projects, Recent files, Quick note one column each, Thinking Space two, This week, and News
   (RSS, rolling every 30 s) down the last column; side column with weather, downloads, AI assistants,
@@ -1175,6 +1175,34 @@ features: ideas go to a Later list and are built only if their absence has stopp
   if Google answers "this browser or app may not be secure" there, that is Google refusing the
   embedded WebKit view and needs a separate decision.
 - ✅ Home's ground is the blurred wallpaper under a graphite tint (`/glass.png` from the hub).
+- 🔬 **Home's tiles reworked on the operator's word (2026-11-15).** Out: Mail (it is a tab), Next
+  step, Quick note, Recent files. In: **Watch next** (today's and tomorrow's pick from the movie
+  tracker's mirror, a watched mark per title), **Sticky note** (scribble; "Tidy with Mario" or
+  "tidy my sticky note" rewrites it and files it on today's page of `~/Documents/Mario Notes`;
+  spoken notes are filed there too), **Storage** (disk ring, what can be cleared, largest folders,
+  Clear with a second click), **Photos** (a shared Google Photos album turning in a loop; back,
+  pause, full screen with a strip to pick from), **Spotify** (the desktop app over MPRIS).
+  AI assistants and Storage have a refresh button (`/api/refresh`). Every tile moves: lift under
+  the pointer, a sweep of light on new data, and the weather tile's sky does what the weather does
+  (rain, drizzle, snow, fog, storm, cloud, sun, stars). Motion stops while Home is hidden and under
+  reduced motion. Hub side in `services/mario-hub/tiles.py`, page side in `static/tiles.js`.
+  Sandbox: `verify-mario.py` (tiles, endpoints, page), `verify-mario-ui.py` (headless Chrome).
+  Live: the hub runs the new code and returns this machine's real movies, disk and weather; the
+  page was drawn from it in a WebKitGTK view. Not tried by hand: a real album of the operator's
+  (the tile is waiting for its link), Spotify actually playing, Clear on a real cache.
+  Known limit: the watched mark stays on the laptop; the Sheet is not written (phase 2).
+- 🔬 **Accounts (2026-11-15).** One chip per account beside the Google tabs switches that tab to
+  that account inside Home (Google's account chooser, kept in the tab by `site_rules.belongs`);
+  the Accounts sheet adds and removes accounts, picks the main one, turns Mail and Calendar sync on
+  or off per account and takes the app password / secret iCal address into the keyring
+  (`/api/accounts`). Today merges every synced account's calendar. Sandbox: a chip takes the tab to
+  Google's sign-in for that address and nothing goes to the browser. Not tried: signing a second
+  real account in, which only the operator can do.
+- 🔬 **The orb (2026-11-15).** The Super+J panel draws Mario as a circle: rings at rest, a ring
+  that swells with the microphone's level while it listens, waves running round and outward while
+  the reply is spoken (presence `speaking`; drawn for the length of the speech, since Speech
+  Dispatcher reports no level). Checked in headless Chrome and drawn once in WebKitGTK; not yet
+  seen with a real voice on Super+J.
 
 ### Phase 4 — motion
 
