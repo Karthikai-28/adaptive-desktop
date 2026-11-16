@@ -16,7 +16,8 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "services/adaptive-air"))
+HERE_AIR = REPO / "services/adaptive-air"
+sys.path.insert(0, str(HERE_AIR))
 
 import gestures  # noqa: E402
 import kinect  # noqa: E402
@@ -391,6 +392,137 @@ def check_demo():
           and any(z < 0 for z in zooms[3:]), zooms)
 
 
+def check_hub():
+    print("Kinect hub (frames, helpers, HTTP)")
+    import asyncio
+    import struct as st
+
+    import numpy as np
+
+    import frames
+    import kinect_hub as hub_mod
+    where = Path(tempfile.mkdtemp()) / "frames"
+    w = frames.Writer(where)
+    rgb = np.zeros((480, 640, 3), np.uint8)
+    rgb[:, :, 0] = 200
+    depth = np.full((480, 640), 1500, np.uint16)
+    depth[:240] = 0
+    w.write(rgb, depth, "ir", (10, 819, -5), 4.5, 29.7)
+    r = frames.Reader(where)
+    got_rgb, got_depth, head = r.read(timeout=0.5)
+    check("a frame goes through shared memory whole",
+          np.array_equal(got_rgb, rgb) and np.array_equal(got_depth, depth)
+          and head["mode"] == "ir" and head["accel"] == [10, 819, -5] and head["frames"] == 1, head)
+    try:
+        r.read(timeout=0.05)
+        check("a reader waits for a newer frame", False)
+    except OSError:
+        check("a reader waits for a newer frame", True)
+    check("a reader marks itself seen (the hub stays up for it)", w.client_seen() > 0)
+    check("the store is private to this user", (where.stat().st_mode & 0o777) == 0o600)
+    r.close()
+    w.close()
+    check("the hub removes the store when it stops", not where.exists())
+
+    check("level and upright: pitch 0, roll 0", hub_mod.angles([0, 819, 0]) == (0.0, 0.0))
+    p, rl = hub_mod.angles([0, 579, 579])
+    check("tipped forward 45 degrees reads as pitch 45", abs(p - 45) < 0.5 and abs(rl) < 0.5, (p, rl))
+    stats = hub_mod.depth_stats(depth)
+    check("depth stats: half the picture has no reading, the rest is 1.5 m",
+          abs(stats["valid"] - 50) < 1 and stats["nearest"] == 1500 == stats["median"]
+          and len(stats["hist"]) == 32 and max(stats["hist"]) == 1.0, stats)
+    xyz, col = hub_mod.point_cloud(rgb, depth, step=4)
+    check("point cloud: one point per valid sampled pixel, in metres",
+          len(xyz) == 120 * 160 // 2 and abs(float(xyz[:, 2].mean()) - 1.5) < 1e-4
+          and col.shape == (len(xyz), 3) and int(col[0, 0]) == 200, len(xyz))
+    centre = hub_mod.point_cloud(rgb, np.where(np.arange(640)[None, :] == 320, 2000, 0)
+                                 .astype(np.uint16).repeat(480, 0), step=1)[0]
+    check("point cloud: the middle column is straight ahead (x ~ 0)",
+          abs(float(centre[:, 0].mean())) < 0.01, float(centre[:, 0].mean()))
+    blob = hub_mod.cloud_bytes(xyz, col, 7)
+    n, seq = st.unpack("<II", blob[:8])
+    check("the cloud's wire format: count, seq, xyz, rgb", n == len(xyz) and seq == 7
+          and len(blob) == 8 + n * 15)
+    ply = hub_mod.ply_bytes(xyz, col)
+    check("a PLY export with a header and every point",
+          ply.startswith(b"ply\nformat binary_little_endian 1.0") and
+          f"element vertex {len(xyz)}".encode() in ply and len(ply.split(b"end_header\n", 1)[1]) == 15 * len(xyz))
+    img = hub_mod.colour_depth(depth)
+    check("depth colours: no reading is black", img.shape == (480, 640, 3) and not img[0].any()
+          and img[300].any())
+
+    d = Path(tempfile.mkdtemp())
+    for name, label in (("video10", "Phone Camera"), ("video11", "Kinect Camera")):
+        (d / name).mkdir()
+        (d / name / "name").write_text(label + "\n")
+    check("the webcam is the loopback device named Kinect Camera",
+          hub_mod.find_webcam(sysfs=str(d)) == "/dev/video11")
+    check("no Kinect Camera device: no webcam", hub_mod.find_webcam(sysfs=str(d / "none")) is None)
+
+    # The HTTP side against a stand-in hub (no Kinect).
+    from aiohttp.test_utils import TestClient, TestServer
+
+    class Stub(hub_mod.Hub):
+        def __init__(self):
+            super().__init__({})
+            self.rgb, self.depth, self.seq = rgb, depth, 2
+            self.status = "streaming"
+            self.sent = []
+
+        def command(self, name, value):
+            self.sent.append((name, value))
+
+    stub = Stub()
+
+    async def go():
+        client = TestClient(TestServer(hub_mod.make_app(stub)))
+        await client.start_server()
+        try:
+            out = {}
+            res = await client.get("/api/status")
+            out["status"] = (res.status, (await res.json())["status"])
+            res = await client.get("/frame/video.jpg")
+            out["video"] = (res.status, res.headers.get("Content-Type"), res.headers.get("X-Seq"),
+                            (await res.read())[:2])
+            res = await client.get("/frame/depth.jpg")
+            out["depth"] = res.status
+            res = await client.get("/frame/secret.jpg")
+            out["unknown"] = res.status
+            res = await client.get("/cloud.bin?step=4")
+            out["cloud"] = len(await res.read())
+            res = await client.get("/cloud.ply")
+            out["ply"] = (res.status, "attachment" in res.headers.get("Content-Disposition", ""))
+            res = await client.post("/api/tilt", json={"value": 12})
+            out["tilt"] = res.status
+            res = await client.post("/api/reboot", json={"value": 1})
+            out["reboot"] = res.status
+            res = await client.get("/")
+            out["page"] = "Kinect Studio" in await res.text()
+            res = await client.get("/studio/studio.css")
+            out["css"] = res.status
+            res = await client.get("/depth-scale.png")
+            out["scale"] = (await res.read())[:4]
+            return out
+        finally:
+            await client.close()
+    out = asyncio.run(go())
+    check("status answers JSON", out["status"] == (200, "streaming"), out["status"])
+    check("the colour view is a JPEG with its frame number",
+          out["video"] == (200, "image/jpeg", "2", b"\xff\xd8"), out["video"])
+    check("the depth view answers; unknown views do not",
+          out["depth"] == 200 and out["unknown"] == 404, (out["depth"], out["unknown"]))
+    check("the point cloud answers in its wire format", out["cloud"] == len(blob), out["cloud"])
+    check("the PLY export downloads", out["ply"] == (200, True), out["ply"])
+    check("controls reach the hub; unknown ones are refused",
+          out["tilt"] == 200 and stub.sent == [("tilt", 12)] and out["reboot"] == 404,
+          (out["tilt"], stub.sent, out["reboot"]))
+    check("the Studio page, its stylesheet and the depth scale are served",
+          out["page"] and out["css"] == 200 and out["scale"] == b"\x89PNG", out)
+    page = (HERE_AIR / "studio/studio.js").read_text()
+    for path in ("/frame/", "/cloud.bin", "/api/status", "/api/led", "/api/tilt", "/presence"):
+        check(f"the page uses {path}", path.split("/api/")[-1] in page or path in page)
+
+
 def hardware():
     print("Hardware")
     p = kinect.probe()
@@ -420,6 +552,7 @@ def main():
     check_probe()
     check_protocol()
     check_demo()
+    check_hub()
     if "--hardware" in sys.argv:
         hardware()
     print()
