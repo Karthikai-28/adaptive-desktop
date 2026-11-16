@@ -16,6 +16,9 @@ cast as the window.
   main.py --media play|pause|stop   control what --play started
   main.py --youtube URL        open a YouTube link in the TV's own app
   main.py --wall               show the wall page (clock, weather, vitals) on the TV
+  main.py --tv on|off|mute|unmute|volume-up|volume-down|home|back|play|pause
+                               the TV's remote (webOS), with or without a cast
+  main.py --tv-volume N        set the TV's volume, 0-100
   main.py --status             print the current cast state as JSON
 
 Debugging, without the running copy:
@@ -58,11 +61,20 @@ def parser():
     p.add_argument("--media", choices=("play", "pause", "stop"))
     p.add_argument("--youtube", metavar="URL")
     p.add_argument("--wall", action="store_true")
+    p.add_argument("--tv", choices=sorted(TV_COMMANDS))
+    p.add_argument("--tv-volume", type=int, metavar="0-100")
     p.add_argument("--status", action="store_true")
     p.add_argument("--list", action="store_true")
     p.add_argument("--connect", metavar="NAME")
     p.add_argument("--seconds", type=int, default=0)
     return p
+
+
+# The TV remote by name: what --tv takes, and the remote button (or call) it is.
+TV_COMMANDS = {"on": None, "off": None, "mute": None, "unmute": None, "volume-up": "VOLUMEUP",
+               "volume-down": "VOLUMEDOWN", "home": "HOME", "back": "BACK", "play": "PLAY",
+               "pause": "PAUSE"}
+TV_HOLD_S = 20            # the app stays up this long for the TV to answer
 
 
 # --- debugging paths (no running copy) -------------------------------------
@@ -238,9 +250,31 @@ class App(Gtk.Application):
             self.ensure_cast().tv.youtube(args.youtube)
         elif args.wall:
             self.show_wall()
+        elif args.tv:
+            self.tv_command(args.tv)
+        elif args.tv_volume is not None:
+            self.keep_up()
+            cast.tv.set_volume(max(0, min(100, args.tv_volume)))
         elif not (args.show or args.set):
             self.present_window()
         return 0
+
+    def keep_up(self):
+        """Stay running while the TV answers a remote command (started with no window)."""
+        self.hold()
+        GLib.timeout_add_seconds(TV_HOLD_S, lambda: self.release() or GLib.SOURCE_REMOVE)
+
+    def tv_command(self, name):
+        tv = self.ensure_cast().tv
+        self.keep_up()
+        if name == "on":
+            tv.power_on()
+        elif name == "off":
+            tv.power_off()
+        elif name in ("mute", "unmute"):
+            tv.set_mute(name == "mute")
+        else:
+            tv.button(TV_COMMANDS[name])
 
     def do_activate(self):
         self.present_window()
