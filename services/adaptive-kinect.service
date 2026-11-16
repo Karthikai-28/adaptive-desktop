@@ -1,0 +1,16 @@
+[Unit]
+Description=Kinect hub: the Kinect for Air's gestures, Kinect Studio (127.0.0.1:8792) and the Kinect webcam
+
+[Service]
+# A template: scripts/install-air.sh puts this checkout's path in place of @ADAPTIVE_REPO@.
+# Started on demand (Air, Kinect Studio, the webcam switch); it stops itself when nothing uses it.
+WorkingDirectory=@ADAPTIVE_REPO@/services/adaptive-air
+ExecStart=@ADAPTIVE_REPO@/.local/air-venv/bin/python @ADAPTIVE_REPO@/services/adaptive-air/kinect_hub.py
+Environment=PYTHONUNBUFFERED=1
+Environment=ADAPTIVE_REPO=@ADAPTIVE_REPO@
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=5
