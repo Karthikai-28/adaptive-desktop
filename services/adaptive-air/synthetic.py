@@ -1,7 +1,7 @@
 """Hands drawn joint by joint, the way MediaPipe reports them: for the checks and the demo.
 
 hand(cx, cy, size, shape) gives 21 landmarks of an upright hand whose palm centre is at (cx, cy)
-in image fractions; shape is open | fist | point | pinch | pinch-middle | vee.
+in image fractions; shape is open | fist | point | L | pinch | pinch-middle | vee; gap is the L's thumb-index opening.
 """
 
 import gestures
@@ -11,12 +11,12 @@ MCP = {"index": (-0.30, -0.95), "middle": (0.0, -1.0), "ring": (0.25, -0.93),
 ORDER = ("index", "middle", "ring", "pinky")
 
 
-def hand(cx=0.5, cy=0.5, size=0.12, shape="open", depth=None, side="Right"):
+def hand(cx=0.5, cy=0.5, size=0.12, shape="open", depth=None, side="Right", gap=1.0):
     pts = [(0.0, 0.0)] + [None] * 20
     for i, name in enumerate(ORDER):
         mx, my = MCP[name]
         base = 5 + 4 * i
-        folded = shape == "fist" or (shape == "point" and name != "index") or \
+        folded = shape == "fist" or (shape in ("point", "L") and name != "index") or \
             (shape == "vee" and name in ("ring", "pinky"))
         if folded:
             joints = [(mx, my), (mx, my - 0.35), (mx, my - 0.15), (mx, my + 0.08)]
@@ -36,7 +36,14 @@ def hand(cx=0.5, cy=0.5, size=0.12, shape="open", depth=None, side="Right"):
     elif shape == "pinch-middle":
         tip = pts[12]
         thumb = [(-0.35, -0.25), (-0.50, -0.55), (-0.45, -0.95), (tip[0] + 0.03, tip[1] + 0.03)]
-    elif shape in ("fist", "vee"):
+    elif shape == "L":
+        # Thumb out to the side; its tip `gap` hand-sizes from the index tip.
+        tip, out = pts[8], (-1.0, -0.6)
+        span = ((out[0] - tip[0]) ** 2 + (out[1] - tip[1]) ** 2) ** 0.5
+        f = min(1.0, gap / span)
+        thumb = [(-0.35, -0.25), (-0.65, -0.40), (-0.85, -0.52),
+                 (tip[0] + (out[0] - tip[0]) * f, tip[1] + (out[1] - tip[1]) * f)]
+    elif shape in ("fist", "vee", "point"):
         thumb = [(-0.35, -0.25), (-0.45, -0.50), (-0.30, -0.70), (-0.08, -0.75)]
     else:
         thumb = [(-0.35, -0.25), (-0.60, -0.45), (-0.78, -0.65), (-0.90, -0.85)]

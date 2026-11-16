@@ -51,6 +51,7 @@ def hold(t0, seconds, fps=30, **kw):
 
 
 def engaged_engine(**config):
+    config.setdefault("box_hands", 3.5)        # 0.42 of the image for these 0.12 hands
     e = gestures.Engine(config)
     run(e, hold(0.0, 0.8, shape="open"))
     assert e.engaged
@@ -70,7 +71,7 @@ def move(t0, seconds, x0, x1, y0=0.5, y1=0.5, fps=30, **kw):
 
 def check_shapes():
     print("Hand shapes")
-    for shape, want in (("open", "open"), ("fist", "fist"), ("point", "point"),
+    for shape, want in (("open", "open"), ("fist", "fist"), ("point", "point"), ("L", "L"),
                         ("pinch", "pinch")):
         lm = hand(shape=shape)["lm"]
         pinching = gestures.pinch_ratio(lm) < gestures.DEFAULTS["pinch_on"] \
@@ -96,7 +97,7 @@ def check_filter():
 
 def check_engage():
     print("Engage and disengage")
-    e = gestures.Engine()
+    e = gestures.Engine({"box_hands": 3.5})
     types, state = run(e, hold(0.0, 0.3, shape="open"))
     check("an open palm held briefly does not engage", not e.engaged and "engage" not in types)
     check("the reticle shows engage progress", 0.2 < state["engage"] < 1.0, state["engage"])
@@ -113,7 +114,7 @@ def check_engage():
     check("a fist does not engage", not e.engaged)
 
     e = gestures.Engine()
-    run(e, hold(0.0, 1.0, shape="open", size=0.03))
+    run(e, hold(0.0, 1.0, shape="open", size=0.01))
     check("a small far-away hand (someone behind you) is ignored", not e.engaged)
 
     e = engaged_engine()
@@ -190,8 +191,33 @@ def check_swipe():
     types, _ = run(e, move(1.0, 0.2, 0.5, 0.75))
     check("a fast open-hand swipe right", types == ["swipe-right"], types)
     e = engaged_engine()
-    types, _ = run(e, move(1.0, 0.2, 0.5, 0.5, 0.6, 0.38))
-    check("a fast swipe up", types == ["swipe-up"], types)
+    types, s = run(e, move(1.0, 0.2, 0.5, 0.5, 0.6, 0.38))
+    ev = [x for x in e.step(1.25, [hand(0.5, 0.38)])["events"]]
+    check("a fast wave up scrolls down a chunk (the page follows the hand)",
+          types == ["scroll"], types)
+    e = engaged_engine()
+    frames = move(1.0, 0.2, 0.5, 0.5, 0.4, 0.62)
+    evs = [x for t, h in frames for x in e.step(t, h)["events"]]
+    check("a fast wave down scrolls up 6 steps",
+          [(x["type"], x["dy"]) for x in evs] == [("scroll", -6)], evs)
+    frames = hold(1.2, 0.1, cy=0.62) + move(1.3, 0.2, 0.5, 0.5, 0.62, 0.4)
+    evs = [x for t, h in frames for x in e.step(t, h)["events"]]
+    check("the hand coming back up after a wave down does not scroll back", evs == [], evs)
+    frames = hold(1.5, 0.6, cy=0.4) + move(2.1, 0.2, 0.5, 0.5, 0.4, 0.62)
+    evs = [x for t, h in frames for x in e.step(t, h)["events"]]
+    check("a second wave down scrolls again", [x["type"] for x in evs] == ["scroll"], evs)
+    e = engaged_engine()
+    before = e.cursor
+    frames = move(1.0, 0.15, 0.5, 0.5, 0.5, 0.7) + move(1.15, 0.4, 0.5, 0.5, 0.7, 0.5) + \
+        hold(1.55, 0.6, cy=0.5)
+    _, st = run(e, frames)
+    check("the hand coming back after a wave does not drag the pointer",
+          abs(st["cursor"]["y"] - before[1]) < 0.06, (before, st["cursor"]))
+    e = engaged_engine()
+    frames = [(1.0 + i / 30, [hand(0.5, 0.5, shape="point", side="Right"),
+                              hand(0.3, 0.4 + 0.035 * i, side="Left")]) for i in range(8)]
+    evs = [x["type"] for t, h in frames for x in e.step(t, h)["events"]]
+    check("the other hand can wave too", "scroll" in evs, evs)
     e = engaged_engine()
     types, _ = run(e, move(1.0, 1.2, 0.5, 0.25))
     check("an ordinary move is not a swipe", types == [], types)
@@ -207,6 +233,52 @@ def check_swipe():
     check("after a swipe the pointer carries on from where it was (clutch)",
           abs(held - 0.5) < 0.08 and abs(s["cursor"]["x"] - (held + 0.05 / w)) < 0.04,
           f"held {held:.2f}, then {s['cursor']['x']:.2f}")
+
+
+def check_lzoom():
+    print("One-hand zoom: the L")
+    e = engaged_engine()
+    before = e.cursor
+    frames = hold(1.0, 0.2, shape="L", gap=0.4) + \
+        [(1.2 + i / 30, [hand(shape="L", gap=0.4 + 0.05 * i)]) for i in range(13)]
+    evs = [x for t, h in frames for x in e.step(t, h)["events"]]
+    zoom = sum(x["steps"] for x in evs if x["type"] == "zoom")
+    check("opening the L zooms in", zoom >= 2, evs)
+    check("the pointer stays put while zooming", e.cursor == before)
+    frames = [(1.65 + i / 30, [hand(shape="L", gap=1.0 - 0.06 * i)]) for i in range(14)] + \
+        hold(2.12, 0.2, shape="pinch")
+    evs = [x for t, h in frames for x in e.step(t, h)["events"]]
+    zoom = sum(x["steps"] for x in evs if x["type"] == "zoom")
+    check("closing it zooms out, and closing it all the way is not a click",
+          zoom <= -3 and not any(x["type"] in ("press", "click") for x in evs), evs)
+    types, st = run(e, hold(2.4, 0.4, shape="open"))
+    check("an open hand leaves the zoom", st["mode"] is None, st["mode"])
+
+
+def check_room():
+    print("Across the room (Kinect on the TV)")
+    e = gestures.Engine()
+    small = 0.035                                     # a hand about 3 m away
+    types, state = run(e, hold(0.0, 0.8, shape="open", size=small))
+    check("a hand 3 m away engages", e.engaged, types)
+    w, _ = e.box()
+    check("the box shrinks with the hand (same arm movement)", abs(w - 0.15) < 1e-6, w)
+    _, state = run(e, move(0.8, 0.5, 0.5, 0.5 + 0.075) + hold(1.3, 0.4, cx=0.575))
+    check("half a box to the right moves the pointer half a screen",
+          abs(state["cursor"]["x"] - 1.0) < 0.03, state["cursor"])
+
+
+def check_edge():
+    print("Carry a window to another desktop")
+    e = engaged_engine()
+    run(e, hold(1.0, 0.2, shape="fist"))
+    types, _ = run(e, move(1.2, 0.3, 0.5, 0.75, shape="fist") + hold(1.5, 0.7, shape="fist", cx=0.75))
+    check("a window held at the right edge goes to the next desktop",
+          types.count("carry-right") == 1, types)
+    types, _ = run(e, hold(2.2, 1.2, shape="fist", cx=0.75))
+    check("held there longer, it goes on to the one after", types.count("carry-right") == 1, types)
+    types, _ = run(e, hold(3.4, 0.3, shape="open", cx=0.75))
+    check("opening the hand drops it there", "drop" in types, types)
 
 
 def check_push():
@@ -366,7 +438,7 @@ def check_protocol():
         check(f"air.js reads '{field}'", f".{field}" in shell)
     for ev in ("right-click", "scroll", "zoom", "resize-start", "resize-end",
                "press", "release", "grab", "drop", "throw-left", "throw-right", "throw-up",
-               "throw-down", "swipe-left", "swipe-right", "swipe-up", "spread", "collapse",
+               "throw-down", "carry-left", "carry-right", "swipe-left", "swipe-right", "spread", "collapse",
                "engage", "disengage", "click"):
         check(f"air.js handles '{ev}'", f"'{ev}'" in shell)
 
@@ -382,14 +454,17 @@ def check_demo():
     for ev in events:
         if not names or names[-1] != ev["type"] or ev["type"] not in ("scroll", "zoom"):
             names.append(ev["type"])
-    want = ["engage", "press", "release", "click", "right-click", "scroll", "zoom", "grab",
+    want = ["engage", "press", "release", "click", "right-click", "scroll", "zoom", "scroll",
+            "zoom", "grab",
             "resize-start", "resize-end", "drop", "throw-right", "swipe-left", "swipe-right",
             "zoom", "spread", "collapse", "disengage"]
     check("the demo plays every gesture, in order", names == want, names)
     zooms = [ev["steps"] for ev in events if ev["type"] == "zoom"]
-    check("its zooms: three in with the V sign, then in and back out with two hands",
-          sum(zooms[:3]) == 3 and sum(z for z in zooms[3:] if z > 0) >= 3
-          and any(z < 0 for z in zooms[3:]), zooms)
+    scrolls = [ev for ev in events if ev["type"] == "scroll"]
+    check("its wave down scrolls up a chunk", scrolls[0].get("wave") == "down" and scrolls[0]["dy"] < 0,
+          scrolls[:2])
+    check("its zooms: the L and the V sign zoom in, two hands zoom in and back out",
+          all(z > 0 for z in zooms[:5]) and any(z < 0 for z in zooms[5:]), zooms)
 
 
 def check_hub():
@@ -547,6 +622,9 @@ def main():
     check_swipe()
     check_push()
     check_right_click()
+    check_lzoom()
+    check_room()
+    check_edge()
     check_scroll()
     check_two_hands()
     check_probe()

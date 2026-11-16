@@ -7,20 +7,23 @@ every action can be seen (and checked: scripts/verify-air-nested.sh) before the 
     1.2  a small circle                             the pointer follows
     2.6  pinch and let go                           click
     3.6  thumb on the middle finger                 right-click
-    4.4  V sign moved up, then pushed forward       scroll, then zoom in
-    6.4  fist; a second fist pulled away            grab, resize (the window grows)
-    8.0  second hand gone, carry, fling right       throw right: the window takes the right half
-    9.8  sweep left, then back right                next desktop, previous desktop
-   12.0  both hands pinch, apart then together      zoom in, zoom out
-   14.0  both open palms apart, then together       every window (overview), back to work
-   17.4  hands drop out of view                     disengage
+    4.6  a wave down                                scroll up
+    6.0  an L, opened                               zoom in
+    6.8  V sign moved up, then pushed forward       scroll, then zoom in
+    8.8  fist; a second fist pulled away            grab, resize (the window grows)
+   10.4  second hand gone, carry, fling right       throw right: the window takes the right half
+   12.2  sweep left, then back right                next desktop, previous desktop
+   14.4  both hands pinch, apart then together      zoom in, zoom out
+   16.4  both open palms apart, then together       every window (overview), back to work
+   19.8  hands drop out of view                     disengage
 """
 
 import math
 
 from synthetic import hand
 
-DURATION = 19.0
+DURATION = 21.4
+INSERT = (4.2, 2.4)       # the wave and the L, played before the rest moves on
 FPS = 30
 
 
@@ -57,6 +60,23 @@ def hands_at(t):
         return one(x, shape="pinch" if 2.6 <= t < 2.9 else "open")
     if t < 4.2:
         return one(x, shape="pinch-middle" if 3.6 <= t < 3.9 else "open")
+    if t < INSERT[0] + INSERT[1]:
+        if t < 4.6:
+            return one(x)
+        if t < 4.75:
+            return one(x, _lerp(y, y + 0.2, (t - 4.6) / 0.15))
+        if t < 4.85:
+            return one(x, y + 0.2)
+        if t < 5.25:
+            return one(x, _lerp(y + 0.2, y, _seg(t, 4.85, 5.25)))    # the hand comes back up
+        if t < 5.8:
+            return one(x, y)
+        if t < 6.0:
+            return [hand(x, y, shape="L", gap=0.6, depth=d)]
+        if t < 6.5:
+            return [hand(x, y, shape="L", gap=_lerp(0.6, 1.4, _seg(t, 6.0, 6.5)), depth=d)]
+        return [hand(x, y, shape="L", gap=1.4, depth=d)]
+    t -= INSERT[1]
     if t < 4.4:
         return one(x, shape="vee")
     if t < 5.0:

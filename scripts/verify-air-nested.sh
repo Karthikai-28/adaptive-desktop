@@ -87,6 +87,7 @@ seen="$(air_until 2 "air._pointerAt && (([x, y]) => Math.abs(x - air._pointerAt[
 
 wait_for 6 grep -qx click "$AIR_CLICKS"; check $? "air: a pinch clicks the button under the pointer"
 wait_for 4 grep -qx right-click "$AIR_CLICKS"; check $? "air: thumb on the middle finger right-clicks"
+wait_for 4 grep -qx scroll-up "$AIR_CLICKS"; check $? "air: a wave down scrolls the window up"
 wait_for 4 grep -qx scroll-down "$AIR_CLICKS"; check $? "air: the V sign moved up scrolls the window down"
 wait_for 4 grep -qx ctrl-scroll-up "$AIR_CLICKS"; check $? "air: the V sign pushed forward zooms in (Ctrl + wheel)"
 seen="$(air_until 6 "air._resizedTo && air._resizedTo.width > 700")"
@@ -112,5 +113,13 @@ check $? "air: hands out of view disengage and the button is up"
 wait "$AIR_DEMO_PID" 2>/dev/null
 [ "$(air_until 6 "!Main.panel.statusArea['adaptive-air'] && !air._layer.visible")" = true ]
 check $? "air: when the service stops, the HUD and the indicator go"
+
+# A held window taken to the screen's side goes to the next desktop, and the view follows it.
+seen="$(air_probe "const air = adaptive.extension._shell._air; const w = $AIR_WIN;
+    global.workspace_manager.get_workspace_by_index(0).activate(global.get_current_time()); await sleep(300);
+    air._grabbed = { win: w, dx: 0, dy: 0 }; air._carryAcross(imports.gi.Meta.MotionDirection.RIGHT); await sleep(400);
+    const ok = w.get_workspace().index() === 1 && global.workspace_manager.get_active_workspace_index() === 1;
+    air._grabbed = null; return ok;")"
+[ "$seen" = true ]; check $? "air: a carried window held at the edge goes to the next desktop, and so do you"
 
 kill "$AIR_WINDOW_PID" 2>/dev/null
