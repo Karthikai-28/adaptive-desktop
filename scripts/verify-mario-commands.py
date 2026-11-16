@@ -96,6 +96,7 @@ NOT_COMMANDS = [
     "what's the weather like", "why is my build failing", "run the tests in loom",
     "go to the gym tomorrow and remind me", "summarise my emails", "how many tasks do i have",
     "is claude at its limit", "write a function that parses dates in loom",
+    "open terminal; delete files", "open files && rm -rf ~", "open $(reboot)", "close firefox | shutdown",
 ]
 
 

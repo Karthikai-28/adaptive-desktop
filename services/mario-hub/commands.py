@@ -176,7 +176,14 @@ RULES = [
 _COMPILED = [(intent, re.compile(pattern), args) for intent, pattern, args in RULES]
 
 
+_JOINED = re.compile(r"[;&|`$<>\n]")
+
+
 def parse(text):
+    # Something that reads like more than one instruction, or like a command line, is never a
+    # command: Mario answers it instead ("open terminal; delete files" opens nothing).
+    if _JOINED.search(str(text or "")):
+        return None
     t = normalise(text)
     if not t:
         return None
