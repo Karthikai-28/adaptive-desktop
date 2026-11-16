@@ -56,3 +56,4 @@ apps/adaptive-link-android/cloud.properties
 # Fingerprint driver sources, isolated builds and visual test artifacts
 .local/fingerprint-research/
 build/fingerprint-*
+.local/fingerprint-driver/

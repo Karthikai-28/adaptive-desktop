@@ -1,5 +1,11 @@
 # VFS7552 driver comparison
 
+> **Superseded (2026-11-16).** Newer official releases could not fix recognition:
+> the cause is libfprint's minutiae matcher on a 6 mm sensor, not the driver
+> version. The fix is the small-sensor pattern matcher described in
+> [FINGERPRINT.md](FINGERPRINT.md). This trial record is kept for history;
+> `scripts/fingerprint-driver-trial.sh` is no longer needed.
+
 The operator reports flawless recognition in Windows. That supports investigating
 the Linux capture/matching stack rather than treating the reader as defective.
 Hardware detection and successful enrollment alone do not establish successful

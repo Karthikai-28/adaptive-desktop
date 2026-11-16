@@ -20,6 +20,19 @@ def available_fingers(reader):
     return [finger for finger in FINGERS if finger not in reader.get("fingers", [])]
 
 
+
+def placement_hint(passed, stages):
+    """Where to put the finger next. Small readers see a few millimetres of
+    the fingertip, so enrollment walks around it: centre, then the tip and
+    upper part, then the sides - the parts later touches will land on."""
+    if passed >= stages:
+        return "All samples accepted. Saving the fingerprint."
+    third = passed * 3 // max(1, stages)
+    where = ("the centre of your fingertip",
+             "the upper part and tip of your finger",
+             "the left and right edges of your fingertip")[min(third, 2)]
+    return f"Sample {passed} of {stages} accepted. Lift, then touch again with {where}, moving it a little each time."
+
 class FingerprintWindow(Gtk.Window):
     def __init__(self, parent, repo, run_async, changed):
         super().__init__(title="Fingerprint unlock", transient_for=parent, modal=True)
@@ -235,7 +248,7 @@ class FingerprintWindow(Gtk.Window):
                 self.visual.update("accepted", self.passed, stages)
                 self.progress.set_fraction(min(self.passed / stages, .95))
                 self.progress.set_text(f"{self.passed} samples accepted")
-                self.message.set_text("Sample accepted. Lift your finger, then place its center on the reader again.")
+                self.message.set_text(placement_hint(self.passed, stages))
             elif value in ("enroll-completed", "verify-match"):
                 self.completed = True
                 self.progress.set_fraction(1)

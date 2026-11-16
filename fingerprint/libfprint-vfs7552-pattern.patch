@@ -1,0 +1,1389 @@
+diff --git a/libfprint/drivers/vfs7552.c b/libfprint/drivers/vfs7552.c
+index 53b4d3f..e186f05 100644
+--- a/libfprint/drivers/vfs7552.c
++++ b/libfprint/drivers/vfs7552.c
+@@ -24,6 +24,7 @@
+ 
+ #include "drivers_api.h"
+ #include "vfs7552_proto.h"
++#include "vfs7552_image.h"
+ 
+ #define VFS7552_CONTROL_PIXELS (8)
+ #define VFS7552_LINE_SIZE (VFS7552_IMAGE_WIDTH + VFS7552_CONTROL_PIXELS)
+@@ -33,6 +34,21 @@
+ #define FINGER_OFF_VARIANCE_THRESHOLD 100
+ #define NOISE_VARIANCE_THRESHOLD 4000
+ 
++/* Frames examined after the finger is first detected (~47 ms each). The first
++ * qualifying frame is often a finger still landing with partial contact; the
++ * sharpest of the next few is used instead. */
++#define SETTLE_FRAMES 4
++
++/* Pattern-matcher acceptance: keypoint correspondences that agree on one
++ * placement of the finger. Chosen from measured genuine/impostor scores on this
++ * sensor (see docs/FINGERPRINT.md in Adaptive Desktop); never lower it to make
++ * a weak enrollment pass - enroll again instead. */
++#define VFS7552_PATTERN_THRESHOLD 15
++
++/* Touches per enrollment: the 6 mm sensor sees a small part of the fingertip,
++ * so the template is assembled from many placements. */
++#define VFS7552_ENROLL_STAGES 12
++
+ /* =================== sync/async USB transfer sequence ==================== */
+ 
+ enum {
+@@ -104,6 +120,10 @@ struct _FpDeviceVfs7552
+   gboolean                background_captured;
+   unsigned char           background[VFS7552_IMAGE_SIZE];
+   unsigned char           image[VFS7552_IMAGE_SIZE];
++  unsigned char           raw[VFS7552_IMAGE_SIZE];  /* last frame before cleaning */
++  unsigned char           best[VFS7552_IMAGE_SIZE]; /* sharpest settled frame */
++  gint                    best_variance;
++  gint                    settle_count;
+   gint                    lines_captured;
+ 
+   gboolean                deactivating;
+@@ -342,6 +362,28 @@ enum {
+   CHUNK_READ_ERROR
+ };
+ 
++/* Research builds only (-DVFS7552_RESEARCH_DUMP): when ADAPTIVE_VFS7552_DUMP
++ * names a directory, every raw frame read during a capture is written there
++ * for offline measurement. Installed builds compile this to nothing. */
++#ifndef VFS7552_RESEARCH_DUMP
++#define research_dump(kind, state, data) ((void) 0)
++#else
++static void
++research_dump (const char *kind, int state, const unsigned char *data)
++{
++  static unsigned int seq = 0;
++  const char *dir = g_getenv ("ADAPTIVE_VFS7552_DUMP");
++  g_autofree char *path = NULL;
++  gint64 now;
++
++  if (!dir || !*dir)
++    return;
++  now = g_get_monotonic_time ();
++  path = g_strdup_printf ("%s/%06u-%s-s%d-%" G_GINT64_FORMAT ".raw", dir, seq++, kind, state, now);
++  g_file_set_contents (path, (const char *) data, VFS7552_IMAGE_SIZE, NULL);
++}
++#endif
++
+ static int
+ clean_image (FpDeviceVfs7552 *self)
+ {
+@@ -475,6 +517,13 @@ reset_state (FpDeviceVfs7552 *self)
+   self->lines_captured = 0;
+ }
+ 
++static void
++reset_settle (FpDeviceVfs7552 *self)
++{
++  self->settle_count = 0;
++  self->best_variance = -1;
++}
++
+ /* ================ Run States ================= */
+ 
+ static void
+@@ -577,17 +626,38 @@ capture_run_state (FpiSsm *ssm, FpDevice *_dev)
+           fp_dbg ("variance_before = %d\n", variance_before);
+           self->background_captured = TRUE;
+           memcpy (self->background, self->image, VFS7552_IMAGE_SIZE);
++          research_dump ("bg", self->dev_state, self->background);
+           fp_dbg ("background stored");
+           fpi_ssm_jump_to_state (ssm, CAPTURE_QUERY_DATA_READY);
+           break;
+         }
+ 
++      research_dump ("frame", self->dev_state, self->image);
++      memcpy (self->raw, self->image, VFS7552_IMAGE_SIZE);
+       clean_image (self);
+       variance_after = fpi_std_sq_dev (self->image, VFS7552_IMAGE_SIZE);
+       fp_dbg ("variance_after = %d\n", variance_after);
+ 
+-      if (self->dev_state == FPI_IMAGE_DEVICE_STATE_CAPTURE ||
+-          self->dev_state == FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_ON)
++      if (self->dev_state == FPI_IMAGE_DEVICE_STATE_CAPTURE)
++        {
++          gboolean usable = variance_after > CAPTURE_VARIANCE_THRESHOLD &&
++                            variance_after < NOISE_VARIANCE_THRESHOLD;
++
++          if (usable && variance_after > self->best_variance)
++            {
++              self->best_variance = variance_after;
++              memcpy (self->best, self->raw, VFS7552_IMAGE_SIZE);
++            }
++          if (usable)
++            self->settle_count += 1;
++
++          /* Done once settled, or if the finger left while settling. */
++          if (self->settle_count >= SETTLE_FRAMES || (!usable && self->settle_count > 0))
++            fpi_ssm_mark_completed (ssm);
++          else
++            fpi_ssm_jump_to_state (ssm, CAPTURE_QUERY_DATA_READY);
++        }
++      else if (self->dev_state == FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_ON)
+         {
+           // If the finger is placed on the sensor, the variance should ideally increase above a certain
+           // threshold. Otherwise request a new image and test again. Additionally we want to ensure
+@@ -772,21 +842,12 @@ capture_complete (FpiSsm *ssm, FpDevice *_dev, GError *error)
+   if (!self->deactivating && !error)
+     {
+       FpImage *img;
+-      img = fp_image_new (2 * VFS7552_IMAGE_WIDTH,
+-                          2 * VFS7552_IMAGE_HEIGHT);
+-      // Scale the image
+-      for (int j = 0; j < VFS7552_IMAGE_HEIGHT; j++)
+-        {
+-          for (int i = 0; i < VFS7552_IMAGE_WIDTH; i++)
+-            {
+-              int ref = j * VFS7552_IMAGE_WIDTH + i;
+-              int ref_new = 4 * j * VFS7552_IMAGE_WIDTH + 2 * i;
+-              img->data[ref_new] = self->image[ref];
+-              img->data[ref_new + 1] = self->image[ref];
+-              img->data[ref_new + 2 * VFS7552_IMAGE_WIDTH] = self->image[ref];
+-              img->data[ref_new + 2 * VFS7552_IMAGE_WIDTH + 1] = self->image[ref];
+-            }
+-        }
++
++      img = fp_image_new (VFS7552_IMAGE_WIDTH, VFS7552_IMAGE_HEIGHT);
++      process_image (self->background,
++                     self->best_variance >= 0 ? self->best : self->raw,
++                     img->data);
++      research_dump ("used", self->best_variance, self->best_variance >= 0 ? self->best : self->raw);
+ 
+       fp_dbg ("Image captured");
+       fpi_image_device_image_captured (dev, img);
+@@ -806,6 +867,7 @@ start_capture (FpDevice *_dev)
+   FpiSsm *ssm;
+ 
+   self->loop_running = TRUE;
++  reset_settle (self);
+   ssm = fpi_ssm_new (_dev, capture_run_state, CAPTURE_NUM_STATES);
+   fpi_ssm_start (ssm, capture_complete);
+ }
+@@ -1066,6 +1128,8 @@ fpi_device_vfs7552_class_init (FpDeviceVfs7552Class *klass)
+   img_class->img_open = dev_open;
+ 
+   img_class->bz3_threshold = 20;
++  img_class->pattern_threshold = VFS7552_PATTERN_THRESHOLD;
++  dev_class->nr_enroll_stages = VFS7552_ENROLL_STAGES;
+ 
+   img_class->img_width = VFS7552_IMAGE_WIDTH;
+   img_class->img_height = VFS7552_IMAGE_HEIGHT;
+diff --git a/libfprint/drivers/vfs7552_image.h b/libfprint/drivers/vfs7552_image.h
+new file mode 100644
+index 0000000..0407bc9
+--- /dev/null
++++ b/libfprint/drivers/vfs7552_image.h
+@@ -0,0 +1,75 @@
++/*
++ * Validity VFS7552 image processing, shared by the driver and offline checks.
++ *
++ * Copyright (C) 2026 Adaptive Desktop
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#pragma once
++
++#include <glib.h>
++#include <stdlib.h>
++#include <string.h>
++
++#ifndef VFS7552_IMAGE_SIZE
++#define VFS7552_IMAGE_HEIGHT 112
++#define VFS7552_IMAGE_WIDTH 112
++#define VFS7552_IMAGE_SIZE (VFS7552_IMAGE_WIDTH * VFS7552_IMAGE_HEIGHT)
++#endif
++
++static inline int
++cmp_float (const void *a, const void *b)
++{
++  float x = *(const float *) a, y = *(const float *) b;
++
++  return (x > y) - (x < y);
++}
++
++static inline float
++median_of (float *v, int n)
++{
++  qsort (v, n, sizeof (float), cmp_float);
++  return (n % 2) ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2]);
++}
++
++/* Turn a raw frame into the matcher image: finger signal relative to the
++ * empty-sensor background (both signs kept), the sensor's per-line and
++ * per-column offsets removed, and contrast stretched to the 1st..99th
++ * percentile. */
++static inline void
++process_image (const unsigned char *background, const unsigned char *raw, guint8 *out)
++{
++  g_autofree float *d = g_new (float, VFS7552_IMAGE_SIZE);
++  g_autofree float *sorted = g_new (float, VFS7552_IMAGE_SIZE);
++  float line[MAX (VFS7552_IMAGE_WIDTH, VFS7552_IMAGE_HEIGHT)];
++  float lo, hi, scale;
++
++  for (int i = 0; i < VFS7552_IMAGE_SIZE; i++)
++    d[i] = (float) background[i] - (float) raw[i];
++
++  for (int y = 0; y < VFS7552_IMAGE_HEIGHT; y++)
++    {
++      float m;
++      memcpy (line, &d[y * VFS7552_IMAGE_WIDTH], VFS7552_IMAGE_WIDTH * sizeof (float));
++      m = median_of (line, VFS7552_IMAGE_WIDTH);
++      for (int x = 0; x < VFS7552_IMAGE_WIDTH; x++)
++        d[y * VFS7552_IMAGE_WIDTH + x] -= m;
++    }
++  for (int x = 0; x < VFS7552_IMAGE_WIDTH; x++)
++    {
++      float m;
++      for (int y = 0; y < VFS7552_IMAGE_HEIGHT; y++)
++        line[y] = d[y * VFS7552_IMAGE_WIDTH + x];
++      m = median_of (line, VFS7552_IMAGE_HEIGHT);
++      for (int y = 0; y < VFS7552_IMAGE_HEIGHT; y++)
++        d[y * VFS7552_IMAGE_WIDTH + x] -= m;
++    }
++
++  memcpy (sorted, d, VFS7552_IMAGE_SIZE * sizeof (float));
++  qsort (sorted, VFS7552_IMAGE_SIZE, sizeof (float), cmp_float);
++  lo = sorted[VFS7552_IMAGE_SIZE / 100];
++  hi = sorted[VFS7552_IMAGE_SIZE - 1 - VFS7552_IMAGE_SIZE / 100];
++  scale = 255.0f / MAX (hi - lo, 1e-3f);
++  for (int i = 0; i < VFS7552_IMAGE_SIZE; i++)
++    out[i] = (guint8) CLAMP ((d[i] - lo) * scale + 0.5f, 0.0f, 255.0f);
++}
++
+diff --git a/libfprint/fp-image-device.c b/libfprint/fp-image-device.c
+index ac88ffd..2236622 100644
+--- a/libfprint/fp-image-device.c
++++ b/libfprint/fp-image-device.c
+@@ -21,6 +21,7 @@
+ #include "fpi-log.h"
+ 
+ #include "fp-image-device-private.h"
++#include "fpi-pattern-print.h"
+ 
+ #define BOZORTH3_DEFAULT_THRESHOLD 40
+ 
+@@ -125,8 +126,16 @@ fp_image_device_start_capture_action (FpDevice *device)
+ 
+       fpi_device_get_enroll_data (device, &enroll_print);
+       g_object_get (enroll_print, "fpi-type", &print_type, NULL);
+-      if (print_type != FPI_PRINT_NBIS)
+-        fpi_print_set_type (enroll_print, FPI_PRINT_NBIS);
++      if (FP_IMAGE_DEVICE_GET_CLASS (self)->pattern_threshold > 0)
++        {
++          if (print_type == FPI_PRINT_UNDEFINED)
++            fpi_print_set_type (enroll_print, FPI_PRINT_RAW);
++          g_object_set (enroll_print, "fpi-data", fpi_pattern_print_data_new (NULL), NULL);
++        }
++      else if (print_type != FPI_PRINT_NBIS)
++        {
++          fpi_print_set_type (enroll_print, FPI_PRINT_NBIS);
++        }
+     }
+ 
+   priv->enroll_stage = 0;
+diff --git a/libfprint/fpi-image-device.c b/libfprint/fpi-image-device.c
+index 87bdc60..fe5d390 100644
+--- a/libfprint/fpi-image-device.c
++++ b/libfprint/fpi-image-device.c
+@@ -22,6 +22,7 @@
+ 
+ #include "fp-image-device-private.h"
+ #include "fp-image-device.h"
++#include "fpi-pattern-print.h"
+ 
+ /**
+  * SECTION: fpi-image-device
+@@ -248,6 +249,7 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
+   FpDevice *device = FP_DEVICE (self);
+   FpImageDevicePrivate *priv;
+   FpiDeviceAction action;
++  gint pattern_threshold = FP_IMAGE_DEVICE_GET_CLASS (self)->pattern_threshold;
+ 
+   /* Note: We rely on the device to not disappear during an operation. */
+   priv = fp_image_device_get_instance_private (FP_IMAGE_DEVICE (device));
+@@ -263,11 +265,19 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
+           return;
+         }
+ 
+-      /* Replace error with a retry condition. */
+-      g_warning ("Failed to detect minutiae: %s", error->message);
+-      g_clear_pointer (&error, g_error_free);
++      if (pattern_threshold > 0)
++        {
++          /* The pattern matcher does not use minutiae. */
++          g_clear_pointer (&error, g_error_free);
++        }
++      else
++        {
++          /* Replace error with a retry condition. */
++          g_warning ("Failed to detect minutiae: %s", error->message);
++          g_clear_pointer (&error, g_error_free);
+ 
+-      error = fpi_device_retry_new_msg (FP_DEVICE_RETRY_GENERAL, "Minutiae detection failed, please retry");
++          error = fpi_device_retry_new_msg (FP_DEVICE_RETRY_GENERAL, "Minutiae detection failed, please retry");
++        }
+     }
+ 
+   action = fpi_device_get_current_action (device);
+@@ -279,7 +289,11 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
+       return;
+     }
+ 
+-  if (!error)
++  if (!error && pattern_threshold > 0)
++    {
++      print = fpi_pattern_print_new_from_image (device, image, &error);
++    }
++  else if (!error)
+     {
+       print = fp_print_new (device);
+       fpi_print_set_type (print, FPI_PRINT_NBIS);
+@@ -302,7 +316,12 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
+       FpPrint *enroll_print;
+       fpi_device_get_enroll_data (device, &enroll_print);
+ 
+-      if (print)
++      if (print && pattern_threshold > 0)
++        {
++          fpi_pattern_print_append (enroll_print, print);
++          priv->enroll_stage += 1;
++        }
++      else if (print)
+         {
+           fpi_print_add_print (enroll_print, print);
+           priv->enroll_stage += 1;
+@@ -333,6 +352,16 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
+         {
+           FpPrint *template = g_ptr_array_index (templates, i);
+ 
++          if (pattern_threshold > 0)
++            {
++              if (print && fpi_pattern_print_match (template, print, pattern_threshold) == FPI_MATCH_SUCCESS)
++                {
++                  result = template;
++                  break;
++                }
++              continue;
++            }
++
+           if (fpi_print_bz3_match (template, print, priv->bz3_threshold, &error) == FPI_MATCH_SUCCESS)
+             {
+               result = template;
+@@ -340,6 +369,10 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
+             }
+         }
+ 
++      /* A pattern probe is never equal to a template, so it is not reported. */
++      if (pattern_threshold > 0)
++        g_clear_object (&print);
++
+       if (!error || error->domain == FP_DEVICE_RETRY)
+         fpi_device_identify_report (device, result, g_steal_pointer (&print), g_steal_pointer (&error));
+ 
+diff --git a/libfprint/fpi-image-device.h b/libfprint/fpi-image-device.h
+index 71472db..7772c81 100644
+--- a/libfprint/fpi-image-device.h
++++ b/libfprint/fpi-image-device.h
+@@ -114,6 +114,10 @@ struct _FpImageDeviceClass
+   void          (*change_state) (FpImageDevice      *dev,
+                                  FpiImageDeviceState state);
+   void          (*deactivate)   (FpImageDevice *dev);
++
++  /* > 0: match with the pattern matcher (fpi-pattern.h) instead of bozorth3,
++   * accepting at this many consistent keypoint correspondences. */
++  gint          pattern_threshold;
+ };
+ 
+ void fpi_image_device_set_bz3_threshold (FpImageDevice *self,
+diff --git a/libfprint/fpi-pattern-print.c b/libfprint/fpi-pattern-print.c
+new file mode 100644
+index 0000000..ca36c3a
+--- /dev/null
++++ b/libfprint/fpi-pattern-print.c
+@@ -0,0 +1,117 @@
++/*
++ * FpPrint storage for the pattern matcher. See fpi-pattern-print.h.
++ *
++ * Copyright (C) 2026 Adaptive Desktop
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#define FP_COMPONENT "pattern"
++
++#include "fpi-log.h"
++#include "fp-print-private.h"
++#include "fpi-pattern.h"
++#include "fpi-pattern-print.h"
++
++GVariant *
++fpi_pattern_print_data_new (GPtrArray *samples)
++{
++  GVariantBuilder arr;
++
++  g_variant_builder_init (&arr, G_VARIANT_TYPE ("aay"));
++  for (guint i = 0; samples && i < samples->len; i++)
++    {
++      GBytes *b = g_ptr_array_index (samples, i);
++      g_variant_builder_add_value (&arr, g_variant_new_from_bytes (G_VARIANT_TYPE_BYTESTRING, b, TRUE));
++    }
++  return g_variant_new ("(u@aay)", FPI_PATTERN_MAGIC, g_variant_builder_end (&arr));
++}
++
++/* Samples of a pattern print, or NULL if @print is not one. */
++static GPtrArray *
++pattern_samples (FpPrint *print)
++{
++  g_autoptr(GVariant) arr = NULL;
++  GPtrArray *out;
++  guint32 magic;
++
++  if (!print || print->type != FPI_PRINT_RAW || !print->data ||
++      !g_variant_is_of_type (print->data, G_VARIANT_TYPE (FPI_PATTERN_VARIANT_TYPE)))
++    return NULL;
++
++  g_variant_get (print->data, "(u@aay)", &magic, &arr);
++  if (magic != FPI_PATTERN_MAGIC)
++    return NULL;
++
++  out = g_ptr_array_new_with_free_func ((GDestroyNotify) g_bytes_unref);
++  for (gsize i = 0; i < g_variant_n_children (arr); i++)
++    {
++      g_autoptr(GVariant) child = g_variant_get_child_value (arr, i);
++      g_ptr_array_add (out, g_variant_get_data_as_bytes (child));
++    }
++  return out;
++}
++
++FpPrint *
++fpi_pattern_print_new_from_image (FpDevice *device, FpImage *image, GError **error)
++{
++  g_autoptr(GPtrArray) samples = g_ptr_array_new_with_free_func ((GDestroyNotify) g_bytes_unref);
++  g_autoptr(GError) local_error = NULL;
++  GBytes *features;
++  FpPrint *print;
++
++  features = fpi_pattern_extract (image->data, image->width, image->height, &local_error);
++  if (!features)
++    {
++      fp_dbg ("Pattern extraction failed: %s", local_error->message);
++      g_propagate_error (error, fpi_device_retry_new_msg (FP_DEVICE_RETRY_CENTER_FINGER,
++                                                          "Not enough of the finger was seen, please retry"));
++      return NULL;
++    }
++  fp_dbg ("Pattern sample with %u keypoints", fpi_pattern_count (features));
++  g_ptr_array_add (samples, features);
++
++  print = fp_print_new (device);
++  fpi_print_set_type (print, FPI_PRINT_RAW);
++  g_object_set (print, "fpi-data", fpi_pattern_print_data_new (samples), NULL);
++  return print;
++}
++
++void
++fpi_pattern_print_append (FpPrint *enroll_print, FpPrint *sample)
++{
++  g_autoptr(GPtrArray) have = pattern_samples (enroll_print);
++  g_autoptr(GPtrArray) add = pattern_samples (sample);
++
++  g_return_if_fail (add != NULL);
++  if (!have)
++    have = g_ptr_array_new_with_free_func ((GDestroyNotify) g_bytes_unref);
++  for (guint i = 0; i < add->len; i++)
++    g_ptr_array_add (have, g_bytes_ref (g_ptr_array_index (add, i)));
++
++  g_object_set (enroll_print, "fpi-data", fpi_pattern_print_data_new (have), NULL);
++}
++
++FpiMatchResult
++fpi_pattern_print_match (FpPrint *template_print, FpPrint *probe, gint threshold)
++{
++  g_autoptr(GPtrArray) gallery = pattern_samples (template_print);
++  g_autoptr(GPtrArray) probes = pattern_samples (probe);
++  gint best = 0;
++
++  /* Templates from another matcher (e.g. old bozorth3 enrollments) never match. */
++  if (!gallery || !probes || probes->len != 1)
++    {
++      fp_dbg ("Template is not a pattern print; enroll this finger again");
++      return FPI_MATCH_FAIL;
++    }
++
++  for (guint i = 0; i < gallery->len; i++)
++    {
++      gint score = fpi_pattern_score (g_ptr_array_index (probes, 0), g_ptr_array_index (gallery, i));
++      best = MAX (best, score);
++      if (score >= threshold)
++        break;
++    }
++  fp_dbg ("pattern score %d/%d over %u samples", best, threshold, gallery->len);
++
++  return best >= threshold ? FPI_MATCH_SUCCESS : FPI_MATCH_FAIL;
++}
+diff --git a/libfprint/fpi-pattern-print.h b/libfprint/fpi-pattern-print.h
+new file mode 100644
+index 0000000..d627871
+--- /dev/null
++++ b/libfprint/fpi-pattern-print.h
+@@ -0,0 +1,32 @@
++/*
++ * FpPrint storage for the pattern matcher (fpi-pattern.h).
++ *
++ * A pattern print is an FPI_PRINT_RAW print whose data is
++ * FPI_PATTERN_VARIANT_TYPE: the format magic and one feature blob per
++ * enrollment touch. A probe print holds a single blob.
++ *
++ * Copyright (C) 2026 Adaptive Desktop
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#pragma once
++
++#include "fpi-device.h"
++#include "fpi-image.h"
++#include "fpi-print.h"
++
++G_BEGIN_DECLS
++
++GVariant       *fpi_pattern_print_data_new (GPtrArray *samples);
++
++FpPrint        *fpi_pattern_print_new_from_image (FpDevice *device,
++                                                  FpImage  *image,
++                                                  GError  **error);
++
++void            fpi_pattern_print_append (FpPrint *enroll_print,
++                                          FpPrint *sample);
++
++FpiMatchResult  fpi_pattern_print_match (FpPrint *template_print,
++                                         FpPrint *probe,
++                                         gint     threshold);
++
++G_END_DECLS
+diff --git a/libfprint/fpi-pattern.cpp b/libfprint/fpi-pattern.cpp
+new file mode 100644
+index 0000000..e467a25
+--- /dev/null
++++ b/libfprint/fpi-pattern.cpp
+@@ -0,0 +1,175 @@
++/*
++ * Pattern matcher for small press sensors. See fpi-pattern.h.
++ *
++ * Copyright (C) 2026 Adaptive Desktop
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#include "fpi-pattern.h"
++
++#include <gio/gio.h>
++
++#include <algorithm>
++#include <cmath>
++#include <cstring>
++#include <vector>
++
++#include <opencv2/calib3d.hpp>
++#include <opencv2/core.hpp>
++#include <opencv2/features2d.hpp>
++#include <opencv2/imgproc.hpp>
++
++namespace {
++
++constexpr int DESC = 128;            /* SIFT descriptor length */
++constexpr int MAX_KEYPOINTS = 600;   /* strongest kept per sample */
++constexpr int MIN_KEYPOINTS = 40;    /* fewer means no usable ridge texture */
++constexpr float RATIO = 0.8f;        /* Lowe ratio test */
++constexpr double REPROJ_PX = 4.0;    /* RANSAC inlier distance */
++
++struct __attribute__((packed)) Header
++{
++  guint32 magic;
++  guint32 count;
++};
++
++struct __attribute__((packed)) Point
++{
++  float  x;
++  float  y;
++  guint8 desc[DESC];
++};
++
++bool
++unpack (GBytes *blob, std::vector<cv::Point2f> &pts, cv::Mat &desc)
++{
++  gsize len = 0;
++  const guint8 *data = blob ? (const guint8 *) g_bytes_get_data (blob, &len) : nullptr;
++  Header h;
++
++  if (!data || len < sizeof (Header))
++    return false;
++  memcpy (&h, data, sizeof (h));
++  if (h.magic != FPI_PATTERN_MAGIC || len != sizeof (Header) + (gsize) h.count * sizeof (Point))
++    return false;
++
++  pts.resize (h.count);
++  desc.create (h.count, DESC, CV_32F);
++  for (guint32 i = 0; i < h.count; i++)
++    {
++      Point p;
++      memcpy (&p, data + sizeof (Header) + i * sizeof (Point), sizeof (p));
++      pts[i] = cv::Point2f (p.x, p.y);
++      float *row = desc.ptr<float> (i);
++      for (int k = 0; k < DESC; k++)
++        row[k] = p.desc[k];
++    }
++  return true;
++}
++
++} // namespace
++
++extern "C" GBytes *
++fpi_pattern_extract (const guint8 *data, gint width, gint height, GError **error)
++{
++  try
++    {
++      cv::Mat img (height, width, CV_8UC1, (void *) data);
++      cv::Mat big, eq, smooth, desc;
++      std::vector<cv::KeyPoint> kps;
++
++      /* Native small-sensor images are enlarged so ridges span enough pixels
++       * for the descriptor scale. */
++      if (width < 160)
++        cv::resize (img, big, cv::Size (width * 2, height * 2), 0, 0, cv::INTER_CUBIC);
++      else
++        big = img;
++      cv::createCLAHE (2.0, cv::Size (4, 4))->apply (big, eq);
++      cv::GaussianBlur (eq, smooth, cv::Size (3, 3), 0);
++      auto sift = cv::SIFT::create (0, 3, 0.02, 10);
++      sift->detect (smooth, kps);
++      cv::KeyPointsFilter::retainBest (kps, MAX_KEYPOINTS);
++      sift->compute (smooth, kps, desc);
++
++      if ((int) kps.size () < MIN_KEYPOINTS || desc.rows != (int) kps.size ())
++        {
++          g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
++                       "Too little ridge texture (%zu keypoints)", kps.size ());
++          return NULL;
++        }
++
++      Header h = { FPI_PATTERN_MAGIC, (guint32) kps.size () };
++      gsize len = sizeof (Header) + kps.size () * sizeof (Point);
++      guint8 *out = (guint8 *) g_malloc (len);
++      memcpy (out, &h, sizeof (h));
++      for (size_t i = 0; i < kps.size (); i++)
++        {
++          Point p;
++          p.x = kps[i].pt.x;
++          p.y = kps[i].pt.y;
++          const float *row = desc.ptr<float> ((int) i);
++          for (int k = 0; k < DESC; k++)
++            p.desc[k] = (guint8) std::min (255.0f, std::max (0.0f, std::round (row[k])));
++          memcpy (out + sizeof (Header) + i * sizeof (Point), &p, sizeof (p));
++        }
++      return g_bytes_new_take (out, len);
++    }
++  catch (const cv::Exception &e)
++    {
++      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Feature extraction failed: %s", e.what ());
++      return NULL;
++    }
++}
++
++extern "C" gint
++fpi_pattern_score (GBytes *probe, GBytes *sample)
++{
++  std::vector<cv::Point2f> pa, pb;
++  cv::Mat da, db;
++
++  if (!unpack (probe, pa, da) || !unpack (sample, pb, db))
++    return 0;
++
++  try
++    {
++      std::vector<std::vector<cv::DMatch>> knn;
++      std::vector<cv::Point2f> src, dst;
++      cv::Mat inliers;
++
++      cv::BFMatcher (cv::NORM_L2).knnMatch (da, db, knn, 2);
++      for (const auto &m : knn)
++        if (m.size () == 2 && m[0].distance < RATIO * m[1].distance)
++          {
++            src.push_back (pa[m[0].queryIdx]);
++            dst.push_back (pb[m[0].trainIdx]);
++          }
++      if (src.size () < 3)
++        return 0;
++
++      /* Deterministic RANSAC: same scans, same score. */
++      cv::theRNG ().state = 0x5eed;
++      cv::Mat M = cv::estimateAffinePartial2D (src, dst, inliers, cv::RANSAC,
++                                               REPROJ_PX, 2000, 0.995);
++      if (M.empty ())
++        return 0;
++
++      /* A finger on the same sensor keeps its scale. */
++      double scale = std::hypot (M.at<double> (0, 0), M.at<double> (1, 0));
++      if (scale < 0.85 || scale > 1.15)
++        return 0;
++
++      return cv::countNonZero (inliers);
++    }
++  catch (const cv::Exception &)
++    {
++      return 0;
++    }
++}
++
++extern "C" guint
++fpi_pattern_count (GBytes *features)
++{
++  std::vector<cv::Point2f> p;
++  cv::Mat d;
++
++  return unpack (features, p, d) ? (guint) p.size () : 0;
++}
+diff --git a/libfprint/fpi-pattern.h b/libfprint/fpi-pattern.h
+new file mode 100644
+index 0000000..cade3b0
+--- /dev/null
++++ b/libfprint/fpi-pattern.h
+@@ -0,0 +1,36 @@
++/*
++ * Pattern matcher for small press sensors.
++ *
++ * Bozorth3 compares minutiae and needs a fingertip-sized image; a 6 mm sensor
++ * yields ~12 minutiae, too few to match. This matcher instead describes the
++ * ridge texture with SIFT keypoints and counts the keypoint correspondences
++ * that agree on one rigid placement of the finger (RANSAC). Different fingers
++ * do not agree on a placement, so their count stays near zero.
++ *
++ * Copyright (C) 2026 Adaptive Desktop
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#pragma once
++
++#include <glib.h>
++
++G_BEGIN_DECLS
++
++/* Feature blob magic and print-data format ("(uaay)": magic, samples). */
++#define FPI_PATTERN_MAGIC 0x41465031u /* "AFP1" */
++#define FPI_PATTERN_VARIANT_TYPE "(uaay)"
++
++/* Extract features from an 8-bit image; NULL + error if the image is unusable. */
++GBytes *fpi_pattern_extract (const guint8 *data,
++                             gint          width,
++                             gint          height,
++                             GError      **error);
++
++/* Number of keypoint correspondences consistent with one finger placement. */
++gint fpi_pattern_score (GBytes *probe,
++                        GBytes *sample);
++
++/* Number of keypoints in a feature blob (0 if invalid). */
++guint fpi_pattern_count (GBytes *features);
++
++G_END_DECLS
+diff --git a/libfprint/meson.build b/libfprint/meson.build
+index f11533c..0879a24 100644
+--- a/libfprint/meson.build
++++ b/libfprint/meson.build
+@@ -23,6 +23,8 @@ libfprint_private_sources = [
+     'fpi-image.c',
+     'fpi-log.c',
+     'fpi-print.c',
++    'fpi-pattern.cpp',
++    'fpi-pattern-print.c',
+     'fpi-ssm.c',
+     'fpi-usb-transfer.c',
+ ] + spi_sources
+@@ -208,7 +210,18 @@ drivers_sources += configure_file(input: 'empty_file',
+         '\n'.join(drivers_type_list + [] + drivers_type_func)
+     ])
+ 
++# Pattern matcher (fpi-pattern.cpp) for small press sensors.
++opencv_dep = declare_dependency(
++    include_directories: include_directories('/usr/include/opencv4'),
++    dependencies: [
++        cpp.find_library('opencv_core'),
++        cpp.find_library('opencv_imgproc'),
++        cpp.find_library('opencv_features2d'),
++        cpp.find_library('opencv_calib3d'),
++    ])
++
+ deps = [
++    opencv_dep,
+     enums_dep,
+     gio_dep,
+     glib_dep,
+diff --git a/tests/vfs7552/capture.png b/tests/vfs7552/capture.png
+index 6a41899745dd87160e18d269dd3afb0707d9ebdd..414e90c65614b9003e1268dc079793c2b712e837 100644
+GIT binary patch
+literal 20006
+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
+zhmOK#Ca9y^gsm%kka%0A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
+
+literal 10504
+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
+Uq3Fo=qm8?6-@Jc=aNYLle{*9qWB>pF
+

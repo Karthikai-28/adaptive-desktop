@@ -48,7 +48,34 @@ def main():
             patch.object(F.subprocess, "call", return_value=126) as run:
         assert F.enable_sudo(result) == 126
         assert run.call_args.args[0] == ["pkexec", "/usr/sbin/pam-auth-update", "--enable", "fprintd"]
-    print("Fingerprint detection, multiple fingers, permission failures and setup guards passed")
+    # Small-sensor matcher: only the VFS7552 needs it; installed means both files.
+    tmp = Path(__import__("tempfile").mkdtemp())
+    dropin, lib = tmp / "dropin.conf", tmp / "libfprint-2.so.2"
+    assert F.matcher_state([{"name": "Fixture reader"}], dropin, lib) == "not-needed"
+    vfs = [{"name": "Validity VFS7552"}]
+    assert F.matcher_state(vfs, dropin, lib) == "missing"
+    dropin.write_text("[Service]\n")
+    assert F.matcher_state(vfs, dropin, lib) == "missing"
+    lib.write_bytes(b"")
+    assert F.matcher_state(vfs, dropin, lib) == "installed"
+
+    # Enrollment hints walk the fingertip: centre, then tip, then edges.
+    ui = importlib.util.spec_from_file_location("fingerprint_ui", ROOT / "apps/adaptive-settings/fingerprint_ui.py")
+    source = (ROOT / "apps/adaptive-settings/fingerprint_ui.py").read_text()
+    hint_src = source[source.index("def placement_hint"):source.index("\nclass ")]
+    space = {}
+    exec(hint_src, space)
+    hint = space["placement_hint"]
+    assert "centre" in hint(1, 12) and "tip" in hint(5, 12) and "edges" in hint(9, 12)
+    assert "Saving" in hint(12, 12) and "1 of 12" in hint(1, 12)
+
+    # The shipped patch keeps the measured threshold and never ships the frame dump.
+    patch_text = (ROOT / "fingerprint/libfprint-vfs7552-pattern.patch").read_text(errors="replace")
+    assert "+#define VFS7552_PATTERN_THRESHOLD 15" in patch_text
+    assert "+#define VFS7552_ENROLL_STAGES 12" in patch_text
+    assert "+#ifndef VFS7552_RESEARCH_DUMP" in patch_text
+    print("Fingerprint detection, multiple fingers, permission failures, setup guards, "
+          "small-sensor matcher state and enrollment hints passed")
 
 
 if __name__ == "__main__":

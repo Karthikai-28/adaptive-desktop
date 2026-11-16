@@ -13,6 +13,11 @@ from pathlib import Path
 BUS = "net.reactivated.Fprint"
 MANAGER = "/net/reactivated/Fprint/Manager"
 DEVICE = BUS + ".Device"
+# Readers whose stock bozorth3 matching cannot work (too few minutiae on a
+# 6 mm sensor); scripts/install-fingerprint-driver.sh fixes them.
+SMALL_SENSOR_READERS = ("Validity VFS7552",)
+MATCHER_DROPIN = Path("/etc/systemd/system/fprintd.service.d/50-adaptive-libfprint.conf")
+MATCHER_LIBRARY = Path("/opt/adaptive-fingerprint/libfprint-2.so.2")
 
 
 class ProbeError(Exception):
@@ -94,6 +99,18 @@ def probe(factory=Fprint):
     return result
 
 
+def matcher_state(readers, dropin=MATCHER_DROPIN, library=MATCHER_LIBRARY):
+    """'not-needed', 'installed' or 'missing' for the small-sensor matcher."""
+    if not any(r["name"] in SMALL_SENSOR_READERS for r in readers):
+        return "not-needed"
+    return "installed" if dropin.is_file() and library.is_file() else "missing"
+
+
+MATCHER_MISSING = ("This reader cannot recognize fingers with Ubuntu's matcher. "
+                   "Install the small-sensor matcher: scripts/install-fingerprint-driver.sh, "
+                   "then register your fingers again.")
+
+
 def login_policy():
     """Current session policy only; the greeter can have its own dconf policy."""
     try:
@@ -109,6 +126,7 @@ def login_policy():
 
 def status():
     result = probe()
+    result["matcher"] = matcher_state(result["readers"])
     settings = login_policy()
     result["session_policy_enabled"] = settings.get_boolean("enable-fingerprint-authentication") if settings else None
     try:
@@ -193,6 +211,8 @@ def main():
     if args.install_status:
         if result["state"] == "no-supported-reader":
             print("skipped: " + result["message"])
+        elif result["matcher"] == "missing":
+            print(MATCHER_MISSING)
         elif result["state"] != "enrolled":
             print(result["message"])
         elif not result["gdm_pam_present"] or not result["session_policy_enabled"]:
@@ -204,6 +224,10 @@ def main():
         print(result["message"])
         for reader in result["readers"]:
             print(f"  {reader['name']}: {reader['enrolled']} finger(s)")
+        if result["matcher"] == "missing":
+            print(MATCHER_MISSING)
+        elif result["matcher"] == "installed":
+            print("Small-sensor matcher installed (12 touches per finger).")
         if result["can_setup"]:
             if not result["gdm_pam_present"]:
                 print("GDM fingerprint PAM service is missing.")

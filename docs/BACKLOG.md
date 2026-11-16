@@ -226,18 +226,24 @@ contains a Command icon. Search lives in the app process, never in the shell.
   Settings → Updates & Recovery, with animated scan/progress feedback and a
   recognition test. Uses fprintd and Ubuntu's PAM profile; password fallback
   stays available. `docs/FINGERPRINT.md`.
-- 🔬 Fingerprint recognition, lock/unlock, and sudo on physical hardware:
-  VFS7552 detected and enrollment succeeds on 2026-11-14; command-line and
-  operator Settings recognition tests failed, including a second finger.
-  sudo fingerprint profile enabled and the local password-fallback test
-  (`sudo -k true`) succeeded. Fingerprint unlock/sudo remain blocked by
-  recognition failure; see the driver references in `docs/FINGERPRINT.md`.
-  Latest official libfprint 1.94.100 + fprintd 1.94.5 were built and passed 12
-  targeted upstream tests, then tested live: the existing right index failed
-  recognition. The operator confirmed a fresh right-middle enrollment used that
-  physical finger; a direct same-slot check also returned `verify-no-match`
-  (exit 1). The trial restored Ubuntu's
-  packaged stack. `docs/FINGERPRINT_DRIVER_TRIAL.md` records the comparison.
+- ✅ Cause of the VFS7552 recognition failure found (2026-11-16): the sensor's
+  images are good, but a 6 mm image holds ~12 minutiae, too few for libfprint's
+  bozorth3 (1/14 of the operator's scans matched, offline, exactly as live).
+  `fingerprint/libfprint-vfs7552-pattern.patch` adds a ridge-pattern matcher
+  for this reader (SIFT + one-placement RANSAC), a settled-frame capture,
+  streak-free images and 12-touch enrollment. On 62 recorded scans of 7 fingers:
+  29/30 genuine single touches accepted, 0/1932 wrong-finger pairs at the
+  threshold (highest 5 against 15). Build + 11 libfprint tests pass from the
+  official tarball (`fingerprint/build-driver.sh`). `docs/FINGERPRINT.md`.
+- ⏳ Install it (`scripts/install-fingerprint-driver.sh`, administrator dialog),
+  re-enroll right index and right middle in Settings (12 touches), then the
+  physical checks: recognition, wrong-finger rejection, lock-screen unlock,
+  login after reboot, `sudo -k true` by finger and by password fallback. Record
+  them with `scripts/record-live-verification.py` (`fingerprint_unlock`,
+  `fingerprint_sudo`). Passed offline/in tests is not verified live.
+- Superseded: the 2026-11-14 trial of the latest official libfprint 1.94.100 +
+  fprintd 1.94.5 (`docs/FINGERPRINT_DRIVER_TRIAL.md`) failed for the same
+  reason - upstream has no matcher for small sensors (issue 373 still open).
 
 Settings is `gnome-control-center` under our skin, not a reimplementation.
 It is GTK3 on Ubuntu 22.04 (41.7), so the session GTK theme is what makes it
