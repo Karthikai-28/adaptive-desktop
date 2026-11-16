@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinect Studio</title>
+<link rel="stylesheet" href="/studio/studio.css">
+</head>
+<body>
+<div class="studio">
+  <header class="top">
+    <div class="brand">
+      <h1>Kinect Studio</h1>
+      <span class="pill" id="state"><i class="dot"></i><span id="state-text">Connecting…</span></span>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Picture">
+        <button data-video="rgb" class="on">Colour</button>
+        <button data-video="ir">Infrared</button>
+      </div>
+      <label class="switch" title="The Kinect's colour camera as a webcam any app can pick">
+        <input type="checkbox" id="webcam"><span class="track"><span class="knob"></span></span>
+        <span>Webcam</span>
+      </label>
+      <a class="button" id="ply" href="/cloud.ply" download>Export point cloud</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel view">
+      <div class="panel-head"><h2 id="video-title">Colour</h2><span class="muted" id="video-meta"></span></div>
+      <canvas id="video" width="640" height="480"></canvas>
+    </section>
+    <section class="panel view">
+      <div class="panel-head"><h2>Depth</h2><span class="muted" id="depth-meta"></span></div>
+      <canvas id="depth" width="640" height="480"></canvas>
+      <div class="scale"><span>0.4 m</span><img src="/depth-scale.png" alt=""><span>4 m</span></div>
+    </section>
+    <section class="panel cloud">
+      <div class="panel-head">
+        <h2>Point cloud</h2>
+        <span class="muted" id="cloud-meta"></span>
+        <div class="cloud-tools">
+          <label>Density <select id="step"><option value="2">Full</option><option value="3">High</option><option value="4" selected>Medium</option><option value="6">Low</option></select></label>
+          <label>Points <input type="range" id="size" min="1" max="6" step="0.5" value="2"></label>
+          <div class="seg small" role="group" aria-label="Colour by">
+            <button data-colour="picture" class="on">Picture</button>
+            <button data-colour="depth">Depth</button>
+          </div>
+          <button class="ghost" id="spin">Orbit</button>
+          <button class="ghost" id="reset">Reset view</button>
+        </div>
+      </div>
+      <canvas id="cloud"></canvas>
+      <p class="hint">Drag to turn · right-drag or Shift-drag to move · scroll to zoom</p>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <div class="panel-head"><h2>Motion sensor</h2><span class="muted" id="g"></span></div>
+        <div class="motion">
+          <canvas id="horizon" width="220" height="220"></canvas>
+          <div class="axes">
+            <div class="axis"><span>X</span><div class="bar"><i id="ax"></i></div><b id="axv">–</b></div>
+            <div class="axis"><span>Y</span><div class="bar"><i id="ay"></i></div><b id="ayv">–</b></div>
+            <div class="axis"><span>Z</span><div class="bar"><i id="az"></i></div><b id="azv">–</b></div>
+            <div class="kv"><span>Pitch</span><b id="pitch">–</b></div>
+            <div class="kv"><span>Roll</span><b id="roll">–</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Tilt motor</h2><span class="muted" id="tilt-status"></span></div>
+        <div class="tilt">
+          <b class="big" id="tilt">–</b>
+          <input type="range" id="tilt-set" min="-27" max="27" step="1" value="0">
+          <div class="row"><button class="ghost" data-tilt="-15">Down</button><button class="ghost" data-tilt="0">Level</button><button class="ghost" data-tilt="15">Up</button></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>LED</h2><span class="muted" id="led-now"></span></div>
+        <div class="leds">
+          <button data-led="green" class="led led-green" title="Green"></button>
+          <button data-led="yellow" class="led led-yellow" title="Yellow"></button>
+          <button data-led="red" class="led led-red" title="Red"></button>
+          <button data-led="blink-green" class="led led-green blink" title="Blinking green"></button>
+          <button data-led="blink-red-yellow" class="led led-red blink" title="Blinking red / yellow"></button>
+          <button data-led="off" class="led led-off" title="Off"></button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Depth</h2><span class="muted" id="valid"></span></div>
+        <div class="stats">
+          <div class="kv"><span>Nearest</span><b id="near">–</b></div>
+          <div class="kv"><span>Median</span><b id="median">–</b></div>
+          <div class="kv"><span>Farthest</span><b id="far">–</b></div>
+        </div>
+        <canvas id="hist" width="320" height="70"></canvas>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Streams</h2><span class="muted" id="fps"></span></div>
+        <canvas id="spark" width="320" height="44"></canvas>
+        <div class="stats">
+          <div class="kv"><span>Frames</span><b id="frames">–</b></div>
+          <div class="kv"><span>Webcam</span><b id="webcam-state">–</b></div>
+          <div class="kv"><span>Air gestures</span><b id="air">–</b></div>
+        </div>
+        <p class="note" id="note" hidden></p>
+      </section>
+    </aside>
+  </main>
+</div>
+<script src="/studio/studio.js"></script>
+</body>
+</html>

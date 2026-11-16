@@ -1,0 +1,124 @@
+/* Kinect Studio: what the Kinect sees and senses. Every colour is a named token from
+   tokens/adaptive.tokens.json (scripts/build-tokens.py writes studio.css). The page's script reads
+   the custom properties below for what it draws itself (the point cloud, gauges, histograms). */
+:root {
+  --ground: $surface.ground; --pane: $surface.window; --card: $surface.pane; --raised: $surface.raised;
+  --line: $line.1; --line-2: $line.2;
+  --text: $text.primary; --soft: $text.secondary; --muted: $text.tertiary;
+  --accent: $accent; --accent-hover: $accent.hover; --cyan: $cyan; --indigo: $indigo;
+  --ok: $ok; --warn: $warn; --danger: $danger; --yellow: $yellow; --white: $white;
+  --r: $radius.large; --r-s: $radius.medium;
+  --feedback: $motion.feedback; --state: $motion.state;
+  font: 400 13px/1.4 Inter, "Cantarell", system-ui, sans-serif; color: var(--text);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ground); }
+[hidden] { display: none !important; }
+button, select, input { font: inherit; color: var(--text); }
+button { cursor: pointer; }
+.muted { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.studio { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; padding: 16px 20px 20px; }
+
+/* -- header ---------------------------------------------------------------------------------- */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;
+  background: $fill.1; border: 1px solid $white/8; color: var(--soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill.live .dot { background: var(--ok); box-shadow: 0 0 0 4px $ok/24; animation: pulse 2s infinite; }
+.pill.warn .dot { background: var(--warn); }
+.pill.bad .dot { background: var(--danger); }
+@keyframes pulse { 50% { box-shadow: 0 0 0 7px $ok/8; } }
+.controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: $fill.1; border: 1px solid $white/8; }
+.seg button { border: 0; background: transparent; padding: 6px 14px; border-radius: 7px; color: var(--soft);
+  transition: background var(--feedback), color var(--feedback); }
+.seg button:hover { color: var(--text); }
+.seg button.on { background: var(--accent); color: $text.on-accent; }
+.seg.small button { padding: 4px 10px; font-size: 12px; }
+
+.button, .ghost { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 9px; text-decoration: none;
+  border: 1px solid $white/12; background: $fill.1; color: var(--text); transition: background var(--feedback), border-color var(--feedback); }
+.button:hover, .ghost:hover { background: $fill.2; border-color: $white/16; }
+.ghost { padding: 5px 11px; font-size: 12px; }
+.ghost.on { border-color: $accent/60; color: var(--accent-hover); }
+
+.switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; color: var(--soft); user-select: none; }
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch .track { width: 38px; height: 22px; border-radius: 999px; background: $fill.3; position: relative; transition: background var(--state); }
+.switch .knob { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--white);
+  transition: transform var(--state); }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track .knob { transform: translateX(16px); }
+.switch input:focus-visible + .track { outline: 2px solid $accent/60; outline-offset: 2px; }
+
+/* -- layout: two camera views and the cloud on the left, the sensors on the right -------------- */
+.grid { min-height: 0; display: grid; gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-areas: "video depth side" "cloud cloud side"; }
+.view:nth-of-type(1) { grid-area: video; }
+.view:nth-of-type(2) { grid-area: depth; }
+.cloud { grid-area: cloud; }
+.side { grid-area: side; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin; }
+
+.panel { position: relative; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  background: var(--card); border: 1px solid $white/8; border-radius: var(--r); }
+.panel-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.panel-head h2 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: .02em; }
+.view canvas, .cloud canvas { flex: 1; min-height: 0; width: 100%; border-radius: var(--r-s); background: $black; object-fit: contain; }
+.cloud canvas { cursor: grab; }
+.cloud canvas:active { cursor: grabbing; }
+.cloud-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--soft); font-size: 12px; }
+.cloud-tools label { display: inline-flex; align-items: center; gap: 6px; }
+.cloud-tools select { background: $fill.1; border: 1px solid $white/12; border-radius: 7px; padding: 3px 6px; }
+.cloud-tools input[type=range] { width: 80px; accent-color: var(--accent); }
+.hint { position: absolute; left: 24px; bottom: 18px; margin: 0; font-size: 11px; color: var(--muted); pointer-events: none; }
+.scale { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.scale img { flex: 1; min-width: 0; height: 6px; border-radius: 3px; }
+
+/* -- sensors ------------------------------------------------------------------------------------ */
+.motion { display: grid; grid-template-columns: 110px 1fr; gap: 12px; align-items: center; }
+.motion canvas { width: 110px; height: 110px; }
+.axes { display: flex; flex-direction: column; gap: 6px; }
+.axis { display: grid; grid-template-columns: 14px 1fr 46px; gap: 8px; align-items: center; font-size: 12px; color: var(--soft); }
+.axis b { text-align: right; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.bar { position: relative; height: 6px; border-radius: 3px; background: $fill.2; overflow: hidden; }
+.bar::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: $white/24; }
+.bar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-radius: 3px; background: var(--accent); transition: left 120ms linear, width 120ms linear; }
+.kv { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--soft); }
+.kv b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats { display: flex; flex-direction: column; gap: 5px; }
+
+.tilt { display: flex; flex-direction: column; gap: 10px; }
+.big { font-size: 28px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.tilt input { width: 100%; accent-color: var(--accent); }
+.row { display: flex; gap: 8px; }
+.row .ghost { flex: 1; justify-content: center; }
+
+.leds { display: flex; gap: 10px; flex-wrap: wrap; }
+.led { width: 30px; height: 30px; border-radius: 50%; border: 2px solid $white/16; transition: transform var(--feedback), border-color var(--feedback); }
+.led:hover { transform: scale(1.08); }
+.led.on { border-color: var(--white); }
+.led-green { background: var(--ok); }
+.led-yellow { background: var(--yellow); }
+.led-red { background: var(--danger); }
+.led-off { background: $fill.3; }
+.led.blink { animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+
+#hist, #spark { width: 100%; }
+.note { margin: 0; padding: 8px 10px; border-radius: var(--r-s); background: $warn/12; border: 1px solid $warn/32; color: $warn.text; font-size: 12px; }
+
+/* Narrow windows: one column, the side panel under the views. */
+@media (max-width: 1100px) {
+  html, body { overflow: auto; }
+  .studio { height: auto; }
+  .grid { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "video" "depth" "cloud" "side"; }
+  .view canvas { aspect-ratio: 4 / 3; }
+  .cloud canvas { height: 60vh; }
+  .side { overflow: visible; }
+}
