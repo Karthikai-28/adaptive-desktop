@@ -42,6 +42,7 @@ for name in [
     "adaptive-screen-text",
     "adaptive-cast",
     "adaptive-mario",
+    "adaptive-air",
     "adaptive-home",
 ]:
     key = f"{base}/{name}/"
