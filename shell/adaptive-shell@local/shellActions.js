@@ -40,6 +40,11 @@ const XML = `
       <arg type="u" name="id" direction="in"/>
       <arg type="b" name="handled" direction="out"/>
     </method>
+    <method name="WindowAction">
+      <arg type="u" name="id" direction="in"/>
+      <arg type="s" name="action" direction="in"/>
+      <arg type="b" name="handled" direction="out"/>
+    </method>
     <method name="ActivateWorkspace">
       <arg type="i" name="index" direction="in"/>
       <arg type="b" name="handled" direction="out"/>
@@ -151,6 +156,61 @@ var ShellActions = class ShellActions {
                 };
             });
         return JSON.stringify(windows);
+    }
+
+    // One of a fixed set of things done to a window: the one with this id (ListWindows), or with
+    // id 0 the window you are working in (the topmost ordinary window on this desktop; Mario's
+    // own layers and the dock are never it). Mario's spoken commands come through here.
+    WindowAction(id, action) {
+        const time = global.get_current_time();
+        const all = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null);
+        const here = global.display.get_tab_list(Meta.TabList.NORMAL, global.workspace_manager.get_active_workspace());
+        const w = id ? all.find(x => x.get_stable_sequence() === id)
+            : here.find(x => !x.is_skip_taskbar() && !x.minimized);
+        if (!w)
+            return false;
+        const area = Main.layoutManager.getWorkAreaForMonitor(w.get_monitor());
+        const half = Math.round(area.width / 2);
+        const across = direction => {
+            const ws = global.workspace_manager.get_active_workspace().get_neighbor(direction);
+            w.change_workspace(ws);
+            ws.activate_with_focus(w, time);
+        };
+        const handler = {
+            'focus': () => {
+                if (w.minimized)
+                    w.unminimize();
+                w.activate(time);
+            },
+            'close': () => w.delete(time),
+            'maximize': () => w.maximize(Meta.MaximizeFlags.BOTH),
+            'minimize': () => w.minimize(),
+            'fullscreen': () => (w.is_fullscreen() ? w.unmake_fullscreen() : w.make_fullscreen()),
+            'tile-left': () => {
+                w.unmaximize(Meta.MaximizeFlags.BOTH);
+                w.move_resize_frame(true, area.x, area.y, half, area.height);
+            },
+            'tile-right': () => {
+                w.unmaximize(Meta.MaximizeFlags.BOTH);
+                w.move_resize_frame(true, area.x + half, area.y, area.width - half, area.height);
+            },
+            'center': () => {
+                const r = w.get_frame_rect();
+                w.move_frame(true, area.x + Math.round((area.width - r.width) / 2),
+                    area.y + Math.round((area.height - r.height) / 2));
+            },
+            'to-workspace-left': () => across(Meta.MotionDirection.LEFT),
+            'to-workspace-right': () => across(Meta.MotionDirection.RIGHT),
+        }[action];
+        if (!handler)
+            return false;
+        try {
+            handler();
+        } catch (e) {
+            logError(e, `[Adaptive Shell] window action ${action}`);
+            return false;
+        }
+        return true;
     }
 
     ActivateWindow(id) {

@@ -122,4 +122,16 @@ seen="$(air_probe "const air = adaptive.extension._shell._air; const w = $AIR_WI
     air._grabbed = null; return ok;")"
 [ "$seen" = true ]; check $? "air: a carried window held at the edge goes to the next desktop, and so do you"
 
+# Mario's window commands (shellActions.js WindowAction): id 0 is the window you are in.
+air_probe "const w = $AIR_WIN; w.get_workspace().activate_with_focus(w, global.get_current_time()); return true;" >/dev/null
+[ "$(call WindowAction 0 tile-left)" = "(true,)" ] &&
+    [ "$(air_until 3 "(w => { const r = w.get_frame_rect(), a = Main.layoutManager.getWorkAreaForMonitor(w.get_monitor());
+        return r.x === a.x && Math.abs(r.width - Math.round(a.width / 2)) <= 2; })($AIR_WIN)")" = true ]
+check $? "mario: 'snap left' tiles the window you are in"
+[ "$(call WindowAction 0 maximize)" = "(true,)" ] && [ "$(air_until 3 "$AIR_WIN.get_maximized() !== 0")" = true ]
+check $? "mario: 'maximise' maximises it"
+[ "$(call WindowAction 0 nonsense)" = "(false,)" ]; check $? "mario: an unknown window action is refused"
+[ "$(call WindowAction 0 close)" = "(true,)" ] && [ "$(air_until 5 "!$AIR_WIN")" = true ]
+check $? "mario: 'close this window' closes it"
+
 kill "$AIR_WINDOW_PID" 2>/dev/null
