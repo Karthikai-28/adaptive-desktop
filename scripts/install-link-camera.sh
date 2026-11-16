@@ -19,16 +19,5 @@ if [ "${1:-}" = "--remove" ]; then
     exit 0
 fi
 
-if ! modinfo v4l2loopback >/dev/null 2>&1; then
-    echo "Installing the v4l2loopback module..."
-    sudo apt-get install -y v4l2loopback-dkms
-fi
-
-echo "v4l2loopback" | sudo tee "$CONF_LOAD" >/dev/null
-# exclusive_caps makes browsers accept it as a camera; video_nr keeps its
-# number steady across boots.
-echo 'options v4l2loopback video_nr=10 card_label="Phone Camera" exclusive_caps=1' |
-    sudo tee "$CONF_OPTS" >/dev/null
-sudo modprobe -r v4l2loopback 2>/dev/null || true
-sudo modprobe v4l2loopback
-echo "Virtual camera: $(cat /sys/devices/virtual/video4linux/video10/name 2>/dev/null || echo 'not found') at /dev/video10"
+# Both virtual cameras (the phone's and the Kinect's) are one module's options.
+exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/install-virtual-cameras.sh"
