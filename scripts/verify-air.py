@@ -594,8 +594,84 @@ def check_hub():
     check("the Studio page, its stylesheet and the depth scale are served",
           out["page"] and out["css"] == 200 and out["scale"] == b"\x89PNG", out)
     page = (HERE_AIR / "studio/studio.js").read_text()
-    for path in ("/frame/", "/cloud.bin", "/api/status", "/api/led", "/api/tilt", "/presence"):
+    for path in ("/frame/", "/cloud.bin", "/api/status", "/api/led", "/api/tilt", "/api/measure", "/presence"):
         check(f"the page uses {path}", path.split("/api/")[-1] in page or path in page)
+
+
+def scene(person_height=1.78, distance=2.8, camera_height=1.92, pitch=12.0, radius=0.2,
+          person=True, floor=True):
+    """A depth frame (mm) of a person (a cylinder) standing on a floor, seen by a Kinect mounted
+    camera_height up and pitched `pitch` degrees down; and its accelerometer reading and the
+    pixel on the person's torso."""
+    import numpy as np
+    th = math.radians(pitch)
+    xc = np.array([1.0, 0.0, 0.0])
+    zc = np.array([0.0, -math.sin(th), math.cos(th)])
+    yc = np.array([0.0, -math.cos(th), -math.sin(th)])
+    v, u = np.mgrid[0:480, 0:640]
+    dx, dy = (u - 319.5) / 525.0, (v - 239.5) / 525.0
+    dw = dx[..., None] * xc + dy[..., None] * yc + zc              # world ray per pixel, z_cam = 1
+    oy = camera_height
+    t = np.full(u.shape, np.inf)
+    if floor:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tf = np.where(dw[..., 1] < -1e-6, -oy / dw[..., 1], np.inf)
+        t = np.minimum(t, tf)
+    if person:
+        a = dw[..., 0] ** 2 + dw[..., 2] ** 2
+        b = -2 * distance * dw[..., 2]
+        c = distance ** 2 - radius ** 2
+        disc = b * b - 4 * a * c
+        with np.errstate(invalid="ignore"):
+            tc = (-b - np.sqrt(np.maximum(disc, 0))) / (2 * a)
+        yh = oy + tc * dw[..., 1]
+        tc = np.where((disc > 0) & (yh >= 0) & (yh <= person_height), tc, np.inf)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tt = (person_height - oy) / dw[..., 1]
+        px, pz = tt * dw[..., 0], tt * dw[..., 2] - distance
+        tt = np.where((tt > 0) & (px ** 2 + pz ** 2 <= radius ** 2), tt, np.inf)
+        t = np.minimum(t, np.minimum(tc, tt))
+    rng = np.random.default_rng(1)
+    depth = np.where(np.isfinite(t), t * 1000 + rng.normal(0, 4, t.shape), 0)
+    depth = np.where((depth > 450) & (depth < 6000), depth, 0).astype(np.uint16)
+    up = np.array([0.0, -math.cos(th), -math.sin(th)])            # up in camera coordinates
+    accel = (-up[0] * 819, -up[1] * 819, up[2] * 819)
+    torso = np.array([0.0, 1.1 - oy, distance - radius])          # world, relative to the camera
+    cam = np.array([torso @ xc, torso @ yc, torso @ zc])
+    seed = (319.5 + 525 * cam[0] / cam[2], 239.5 + 525 * cam[1] / cam[2])
+    return depth, accel, seed
+
+
+def check_height():
+    print("How tall am I (measure.py)")
+    import measure
+    depth, accel, seed = scene()
+    r = measure.measure(depth, accel, seed)
+    check("a 1.78 m person 2.8 m away, Kinect on the TV: measured within 3 cm",
+          r["ok"] and abs(r["height"] - 1.78) < 0.03 and r["floor"] == "seen", r)
+    check("... and the Kinect's own height comes out of the floor",
+          r["ok"] and abs(r["camera_height"] - 1.92) < 0.03, r)
+    check("... and how far away they stand, across the floor", r["ok"] and abs(r["distance"] - 2.68) < 0.1, r)
+    depth, accel, seed = scene(person_height=1.62, distance=3.4, pitch=8)
+    r = measure.measure(depth, accel, seed)
+    check("a 1.62 m person 3.4 m away, less tilt", r["ok"] and abs(r["height"] - 1.62) < 0.03, r)
+    depth, accel, seed = scene(floor=False)
+    r = measure.measure(depth, accel, seed, mount_height=1.92)
+    check("no floor in view: the mount height stands in", r["ok"] and r["floor"] == "mount"
+          and abs(r["height"] - 1.78) < 0.04, r)
+    depth, accel, seed = scene(distance=1.2, camera_height=1.0, pitch=0)
+    r = measure.measure(depth, accel, seed, mount_height=1.0)
+    check("Kinect lower, standing close (head out of view): asks to step back", not r["ok"] and "Step back" in r["error"], r)
+    depth, accel, seed = scene(person=False)
+    r = measure.measure(depth, accel, seed)
+    check("nobody there: says so", not r["ok"], r)
+    runs = [measure.measure(*scene(person_height=1.78 + 0.004 * k)) for k in (-1, 0, 1, 0, 1)]
+    summary = measure.summarise(runs)
+    check("several frames: the median, in metres and feet and inches",
+          summary["ok"] and abs(summary["height"] - 1.78) < 0.03 and
+          (summary["feet"], summary["inches"]) == (5, 10), summary)
+    check("Mario's sentence", measure.say(summary).startswith("You're 1.7") and "5 foot 10" in measure.say(summary),
+          measure.say(summary))
 
 
 def hardware():
@@ -631,6 +707,7 @@ def main():
     check_protocol()
     check_demo()
     check_hub()
+    check_height()
     if "--hardware" in sys.argv:
         hardware()
     print()
