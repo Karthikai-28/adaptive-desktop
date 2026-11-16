@@ -355,6 +355,9 @@ async function poll() {
         if (document.activeElement !== $('webcam')) $('webcam').checked = cam.on;
         $('webcam-state').textContent = cam.streaming ? `on · ${cam.device}` : cam.on ? 'starting…' : 'off';
         $('air').textContent = status.air ? 'reading frames' : 'off';
+        const dark = status.mode === 'rgb' && status.light != null && status.light < 0.04
+            ? 'Too dark for the colour camera (and for finding hands): switch to Infrared, which brings its own light.' : null;
+        $('dark').hidden = !dark;
         const note = cam.error || (status.status !== 'streaming' ? status.error : null);
         $('note').hidden = !note;
         $('note').textContent = note || '';

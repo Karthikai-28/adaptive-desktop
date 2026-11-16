@@ -203,6 +203,7 @@ class Hub:
         self.motor = {"accel": [0, 0, 0], "tilt": None, "status": None}
         self.led = None
         self.stats = None
+        self.light = None        # how bright the picture is, 0..1 (too dark for colour: < 0.04)
         self.status = "starting"
         self.error = None
         self.webcam = None
@@ -337,6 +338,7 @@ class Hub:
                     self.rgb, self.depth, self.seq = rgb, depth, self.writer.seq
                 if now - last_stats >= 0.25:
                     self.stats = depth_stats(depth)
+                    self.light = round(float(rgb[::8, ::8].mean()) / 255, 3)
                     last_stats = now
                 self._sync_webcam(rgb)            # in infrared mode: a night-vision webcam
         finally:
@@ -427,7 +429,7 @@ class Hub:
             "mode": self.mode, "fps": round(self.fps, 1), "seq": self.seq,
             "accel": self.motor["accel"], "g": round(g, 3), "pitch": pitch, "roll": roll,
             "tilt": self.motor["tilt"], "tilt_status": self.motor["status"], "led": self.led,
-            "depth": self.stats,
+            "depth": self.stats, "light": self.light,
             "webcam": {"on": bool(self.settings.get("webcam")), "device": find_webcam(),
                        "streaming": self.webcam is not None, "error": self.webcam_error},
             "air": time.monotonic() - seen < 3.0 if seen else False,
@@ -451,6 +453,8 @@ def make_app(hub):
         response = await handler(request)
         if request.path.startswith(("/frame", "/cloud", "/api")):
             response.headers["Cache-Control"] = "no-store"
+        elif request.path == "/" or request.path.startswith("/studio/"):
+            response.headers["Cache-Control"] = "no-cache"      # a new Studio shows at once
         return response
 
     async def index(_request):

@@ -12,6 +12,7 @@
   --r: 18px; --r-s: 12px;
   --feedback: 120ms; --state: 260ms;
   font: 400 13px/1.4 Inter, "Cantarell", system-ui, sans-serif; color: var(--text);
+  color-scheme: dark;            /* native controls (the density list) drawn dark in WebKitGTK too */
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ground); }
@@ -47,6 +48,7 @@ button { cursor: pointer; }
 .button:hover, .ghost:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.16); }
 .ghost { padding: 5px 11px; font-size: 12px; }
 .ghost.on { border-color: rgba(10, 132, 255, 0.60); color: var(--accent-hover); }
+.dark-hint { margin-left: auto; border-color: rgba(255, 159, 10, 0.45); color: #FFCF85; }
 
 .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; color: var(--soft); user-select: none; }
 .switch input { position: absolute; opacity: 0; pointer-events: none; }
@@ -66,6 +68,7 @@ button { cursor: pointer; }
 .view:nth-of-type(2) { grid-area: depth; }
 .cloud { grid-area: cloud; }
 .side { grid-area: side; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin; }
+.side > .panel { flex: none; }     /* each keeps its own height; the column scrolls instead */
 
 .panel { position: relative; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
   background: var(--card); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--r); }
@@ -76,7 +79,8 @@ button { cursor: pointer; }
 .cloud canvas:active { cursor: grabbing; }
 .cloud-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--soft); font-size: 12px; }
 .cloud-tools label { display: inline-flex; align-items: center; gap: 6px; }
-.cloud-tools select { background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 7px; padding: 3px 6px; }
+.cloud-tools select { background: var(--raised); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 7px; padding: 3px 6px; }
+.cloud-tools select option { background: var(--raised); color: var(--text); }
 .cloud-tools input[type=range] { width: 80px; accent-color: var(--accent); }
 .hint { position: absolute; left: 24px; bottom: 18px; margin: 0; font-size: 11px; color: var(--muted); pointer-events: none; }
 .scale { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
