@@ -320,6 +320,15 @@ The hub is a user service that starts at boot (lingering is on), before anyone l
 
 ## How a request goes
 
+0. **Command**: something to do on the computer, the TV or the Kinect ("open Spotify", "connect to
+   my TV", "how tall am I", "snap left", "volume 40", "night vision on") is carried out at once:
+   `commands.py` says what was meant, `control.py` does it through what is already bounded (the
+   shell's `org.adaptive.Shell` bridge with fixed action names, the Kinect hub on 127.0.0.1:8792,
+   the Cast command line, pactl, MPRIS, the app grid's launcher). A sentence with command-line
+   symbols (`; & | $ < >`) is never a command, nothing spoken is run as a command line, and an
+   "open X" that is not an app falls through to an answer. Every sentence you can say is in
+   docs/MARIO_COMMANDS.md, written from `commands.CHEATSHEET`; "what can I say?" opens it at
+   http://127.0.0.1:8791/commands. Checked by `scripts/verify-mario-commands.py`.
 1. **Instant**: "brief me", "what changed today", "pick a movie for tonight" are answered from the
    cards with no model.
 2. **Answer**: everything else that is a question or chat goes, with a few lines of live context

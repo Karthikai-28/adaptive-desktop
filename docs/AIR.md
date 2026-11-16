@@ -20,13 +20,15 @@ disk: only hand landmarks (21 points per hand) go to the shell over the session 
 | Move the hand | The pointer follows the palm (not the fingertip, so pinching does not move it). |
 | Pinch thumb and index | Press; let go to release. A pinch that hardly moved is a click (twice quickly: double-click); one that moved is a drag. |
 | Thumb on the **middle** fingertip (index stays up) | **Right-click** (a purple ripple). |
+| **Wave** an open hand down / up, either hand | **Scroll** up / down a chunk (6 wheel steps; the page follows the hand). Wave again to keep going; the hand coming back is ignored and does not move the pointer. |
+| Make an **L** (thumb and index out, the rest folded), then open / close it | **Zoom** in / out (Ctrl + wheel). Start with a clear gap: a closed L is a pinch, and a pinch clicks. |
 | **V sign** (index and middle up) and move it | **Scroll** the window under the pointer; the pointer stays put. Up/down and left/right; the page follows the hand (`natural_scroll`). Chevrons on the reticle. |
 | V sign pushed toward / pulled away from the Kinect | **Zoom** in / out, one step per ~4.5 cm (Ctrl + wheel: browsers, Files, editors, image viewers). On the webcam: the hand growing or shrinking in view. |
 | Push the open palm ~7 cm toward the Kinect, quickly | Click (Kinect only: it needs depth). |
 | Make a fist over a window | Grab it; it follows your hand. Open the hand to put it down. |
 | ... and fling it as you open the hand | **Throw**: left/right takes that half of the screen, up maximises, down minimises. |
-| Sweep the open hand fast to the left / right | Next / previous desktop. The pointer stays where it was ("clutch") while your hand comes back. |
-| Sweep it fast upward | Overview. |
+| ... or carry it to the screen's left / right edge and hold ½ s | It goes to the **previous / next desktop**, and so do you; keep holding to go further. |
+| Sweep the open hand fast to the left / right, either hand | Next / previous desktop. The pointer stays where it was ("clutch") while your hand comes back. |
 | Drop your hand out of view | Disengage. Anything held (a pressed button, a carried window) is let go. |
 
 ### Two hands
@@ -75,6 +77,34 @@ Meta window moves, workspace and overview through shellActions.js
 - **The shell side** (`air.js`) never moves the pointer unless the frame says Air is engaged, and
   lets go of everything if frames stop for 3.5 s.
 
+## On top of the TV (across the room)
+
+The Kinect is meant to sit on the TV, about 1.92 m (6.3 ft) up, looking into the room, with you
+2 to 4 m away. Everything is set for that:
+
+- **Hands at a distance.** A hand 3 m away is about 25 pixels wide, too small for MediaPipe
+  Hands in the whole picture, so Air finds you first (MediaPipe Pose) and looks for each hand in
+  a square cut around its wrist, enlarged to 256 pixels (`"tracking": "auto"` in air.json; `near`
+  or `room` to force one).
+- **The same arm movement at any distance.** The area your hand sweeps for the whole screen is
+  4 hand-sizes wide (`box_hands`), so it shrinks in the picture as you step back; engaging and
+  swiping are measured in hand-sizes too.
+- **Tilt it down** a little so it sees from your head to the floor: "Mario, tilt the Kinect down
+  by 10", or Studio's tilt slider. Studio's Depth panel shows how much of the room has a reading.
+- **Its height** is found from the floor when the floor is in view; otherwise `mount_height` in
+  `~/.config/adaptive-desktop/kinect.json` (default 1.92 m) is used.
+- **A dark room**: the colour camera sees nothing, so neither does hand finding. Studio says so;
+  "Mario, night vision on" switches to the infrared camera, which brings its own light.
+
+## How tall you are
+
+"Mario, how tall am I?" (or Studio's *Measure my height*): stand 2 to 4 m in front of the
+Kinect, facing it, all of you in view. `measure.py` takes about a second of frames: the
+accelerometer gives which way is up, MediaPipe Pose finds your torso, the depth region around
+it (with the floor cut away) is you, and your height is its top above the floor. Mario answers
+in metres and feet and inches. Checked on rendered rooms to within 3 cm; the Kinect's own depth
+error at 3 m is 1 to 3 cm.
+
 ## Kinect Studio and the Kinect webcam
 
 libfreenect lets one process open the Kinect, so one does: the **Kinect hub**
@@ -104,6 +134,14 @@ Kinect ──libfreenect──▶ kinect_hub.py ──▶ /dev/shm/adaptive-kine
 - **The hub stops itself** (LED off) 20 s after nothing uses it: no Air, no Studio page open,
   webcam off. Anything that needs it starts it again.
 - Frames in shared memory are private to you (mode 0600). HTTP listens on 127.0.0.1 only.
+
+## Mario drives all of it
+
+Everything here is also a sentence to Mario ("Hey Mario …" or Super+J): how tall am I, how far
+am I, open Kinect Studio, tilt the Kinect, level it, night vision on, use the Kinect as a
+webcam, take a 3D snapshot, start/stop gestures, show the gesture demo, and the light. The full
+list, with the TV, apps, windows, desktops, sound and more, is docs/MARIO_COMMANDS.md (or ask
+Mario "what can I say?").
 
 ## Install, run, check
 
