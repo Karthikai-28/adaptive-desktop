@@ -1250,6 +1250,42 @@ features: ideas go to a Later list and are built only if their absence has stopp
 - ⬜ One line of purpose per feature in `AGENTS.md`, or the feature is removed (list agreed first).
 - ⬜ Close this backlog.
 
+## Milestone 22 — Air: the desktop in your hands (Kinect)
+
+Plan, gestures and gotchas: `docs/AIR.md`.
+
+### Done (sandbox)
+
+- ✅ Kinect v1 (model 1414) found on USB; libfreenect 0.7.5 built checksum-pinned into `.local/`
+  with no root; the motor, LED and accelerometer driven over libusb (works on USB power alone;
+  LED cycled and accelerometer read on the real device, 2026-11-17).
+- ✅ `services/adaptive-air/`: colour + registered depth through ctypes, MediaPipe Hands in a
+  private venv, the webcam as stand-in until the Kinect has power (and back to the Kinect when
+  it does), frames on `org.adaptive.Air`.
+- ✅ Pure gesture engine: engage on a held palm, palm-driven pointer with a One Euro filter,
+  pinch click/drag with hysteresis and a freeze, air push from depth, fist grab and throw,
+  swipes with a clutch, two-hand spread/collapse; 72 checks on synthetic hands, the probe
+  and the frame protocol (`scripts/verify-air.py`, in `verify-all.sh --quick`).
+- ✅ Shell HUD `air.js`: reticle, holographic hands, brackets and scan sweep, status chip,
+  toasts, click ripples, camera indicator with Stop; pointer through Clutter's virtual device.
+  End to end in a nested GNOME Shell (`verify-air-nested.sh`, 13 checks): the pointer moves, a
+  pinch clicks a real GTK button, a throw tiles the window, swipes change desktop, spread and
+  collapse open and close the overview, everything is let go when the service stops.
+- ✅ `scripts/install-air.sh` (`./install.sh --only air`), Super+G, `scripts/adaptive-air.sh`
+  (`--demo` shows every gesture with no camera).
+
+### Live, not yet tried
+
+- 🔬 The Kinect's camera and depth: it needs its 12 V supply (only the motor is on USB now).
+- 🔬 The HUD and pointer in the live X11 session (needs a shell restart after `sync-shell.sh`).
+- 🔬 Tuning on real hands: `box_width`, swipe speed, push distance, pinch thresholds.
+
+### Next
+
+- Voice + hands: "Hey Mario, move this there" with the pointing hand as the target.
+- A Control Center tile and an island activity while engaged; per-app gesture maps.
+- Depth-only hand finding (closest blob) for the dark, when the colour picture is too dim.
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the

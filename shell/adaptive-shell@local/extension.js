@@ -49,6 +49,7 @@ const ShellDockFeatures = Me.imports.shellDockFeatures;
 const ShellDockDnd = Me.imports.shellDockDnd;
 const ShellDockAutohide = Me.imports.shellDockAutohide;
 const ShellDisplays = Me.imports.shellDisplays;
+const Air = Me.imports.air;
 
 // `var`, so the nested-shell check's probe can reach the running shell object
 // (a GJS module exports `var`, not `let`). Nothing else reads it.
@@ -92,6 +93,7 @@ class AdaptiveShellV16 {
         // Adaptive USB panel: plugged-in devices and serial ports, top right.
         this._usbPanel = null;
         this._shellActions = null;
+        this._air = null;
         // Palette bridge services and the top-bar project hub.
         this._clipboardHistory = null;
         this._snapshots = null;
@@ -310,6 +312,7 @@ class AdaptiveShellV16 {
         this._installSystemPanel();
         this._installPaletteServices();
         this._installShellActions();
+        this._installAir();
         this._installProjectIndicator();
         this._installDynamicIsland();
         this._installRail();
@@ -581,6 +584,11 @@ class AdaptiveShellV16 {
         if (this._projectIndicator) {
             this._projectIndicator.detach();
             this._projectIndicator = null;
+        }
+
+        if (this._air) {
+            this._air.detach();
+            this._air = null;
         }
 
         if (this._shellActions) {
@@ -1010,6 +1018,20 @@ class AdaptiveShellV16 {
         } catch (e) {
             logError(e, '[Adaptive Shell] exporting gesture actions');
             this._shellActions = null;
+        }
+    }
+
+    // Air: hand-gesture control through the Kinect. The service (services/adaptive-air) sees
+    // and decides; air.js draws the HUD and moves the pointer and windows. docs/AIR.md.
+    _installAir() {
+        try {
+            this._air = new Air.Air({
+                runAction: name => this._shellActions && this._shellActions.Run(name),
+            });
+            this._air.attach();
+        } catch (e) {
+            logError(e, '[Adaptive Shell] installing Air');
+            this._air = null;
         }
     }
 

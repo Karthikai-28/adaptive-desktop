@@ -59,6 +59,7 @@ PARTS=(
     "power|Power profile follows the charger (only if you turned it on)|status_power|install_power"
     "link|Adaptive Link: this computer from your paired phone|status_unit adaptive-link.service|$S/install-link.sh"
     "agent-office|Agent Office: Gemini agents managed by Claude (127.0.0.1:8790)|status_agent_office|$S/install-agent-office.sh"
+    "air|Air: control the desktop with your hands through the Kinect (Super+G)|status_air|$S/install-air.sh"
     "mario|Mario: Home on Super+H, the orb over your work on Super+J, Mario Hub (127.0.0.1:8791)|status_mario|$S/install-mario.sh"
 )
 
@@ -158,6 +159,10 @@ status_agent_office() {
     # Starting at login is optional here (--autostart), so installed and running is enough.
     [ -f "$UNITS/adaptive-agent-office.service" ] || { echo "not installed"; return; }
     systemctl --user is-active --quiet adaptive-agent-office.service || echo "installed but not running"
+}
+
+status_air() {
+    "$S/install-air.sh" --status | sed -n 's/^  needed   //p' | paste -sd ';' -
 }
 
 status_mario() {

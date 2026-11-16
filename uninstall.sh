@@ -37,7 +37,7 @@ run() { [ "$DRY" = 1 ] || "$@"; }
 
 echo "Timers and services"
 for unit in adaptive-wallpaper.timer adaptive-index.timer adaptive-power-auto.service adaptive-link.service \
-    adaptive-agent-office.service adaptive-mario-hub.service; do
+    adaptive-agent-office.service adaptive-mario-hub.service adaptive-air.service; do
     if [ -f "$UNITS/$unit" ]; then
         run systemctl --user disable --now "$unit" 2>/dev/null || true
         say "disable $unit"
@@ -45,7 +45,7 @@ for unit in adaptive-wallpaper.timer adaptive-index.timer adaptive-power-auto.se
 done
 for file in adaptive-wallpaper.service adaptive-wallpaper.timer adaptive-index.service \
     adaptive-index.timer adaptive-power-auto.service adaptive-link.service adaptive-agent-office.service \
-    adaptive-mario-hub.service; do
+    adaptive-mario-hub.service adaptive-air.service; do
     if [ -f "$UNITS/$file" ]; then
         run rm -f "$UNITS/$file"
         say "remove $UNITS/$file"

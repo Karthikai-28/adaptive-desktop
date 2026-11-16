@@ -85,6 +85,8 @@ set_binding "adaptive-annotate" "Adaptive Annotate Screenshot" "${REPO}/apps/ada
 set_binding "adaptive-screen-text" "Adaptive Copy Text from Screen" "gdbus call --session -d org.gnome.Shell -o /org/adaptive/Shell -m org.adaptive.Shell.CopyScreenText" "<Super><Shift>t"
 # Cast to the last TV, or stop casting (apps/adaptive-cast).
 set_binding "adaptive-cast" "Adaptive Cast to TV" "${REPO}/scripts/adaptive-cast-launch.sh --toggle" "<Super>k"
+# Air: hand-gesture control through the Kinect; the camera is on only while Air runs.
+set_binding "adaptive-air" "Air (hand gestures)" "${REPO}/scripts/adaptive-air.sh --toggle" "<Super>g"
 set_binding "adaptive-mario" "Mario" "${REPO}/apps/mario-home/host.py --panel" "<Super>j"
 # Home: your day, mail and calendar over whatever you are doing; the same key sends it away.
 set_binding "adaptive-home" "Home" "${REPO}/scripts/adaptive-home.sh" "<Super>h"
@@ -212,4 +214,5 @@ Installed Adaptive Desktop shortcuts:
   Super+Shift+S      Annotate a screenshot
   Super+Shift+T      Select and copy text from screen
   Super+J            Mario (again or Esc closes it)
+  Super+G            Air: hand-gesture control on / off
 EOF

@@ -1,0 +1,18 @@
+[Unit]
+Description=Air: control the desktop with your hands through the Kinect (Super+G starts and stops it)
+
+[Service]
+# A template: scripts/install-air.sh puts this checkout's path in place of @ADAPTIVE_REPO@.
+# Not started at login: the camera is on only while you have asked for Air (Super+G).
+WorkingDirectory=@ADAPTIVE_REPO@/services/adaptive-air
+ExecStart=@ADAPTIVE_REPO@/.local/air-venv/bin/python @ADAPTIVE_REPO@/services/adaptive-air/air.py
+Environment=PYTHONUNBUFFERED=1
+Environment=ADAPTIVE_REPO=@ADAPTIVE_REPO@
+Environment=GLOG_minloglevel=2
+Environment=TF_CPP_MIN_LOG_LEVEL=2
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=5
