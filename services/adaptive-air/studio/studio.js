@@ -240,6 +240,20 @@ document.querySelectorAll('[data-tilt]').forEach(b => b.addEventListener('click'
 $('tilt-set').addEventListener('change', e => post('tilt', Number(e.target.value)));
 $('webcam').addEventListener('change', e => post('webcam', e.target.checked));
 
+$('measure').addEventListener('click', async () => {
+    $('measure').disabled = true;
+    $('you-text').textContent = 'Hold still…';
+    try {
+        const r = await (await fetch('/api/measure', { cache: 'no-store' })).json();
+        $('you-height').textContent = r.ok ? `${r.height.toFixed(2)} m · ${r.feet}′${r.inches}″` : '–';
+        $('you-meta').textContent = r.ok ? `${r.distance.toFixed(1)} m away · floor ${r.floor === 'seen' ? 'seen' : 'assumed'}` : '';
+        $('you-text').textContent = r.sentence || r.error || '';
+    } catch (e) {
+        $('you-text').textContent = 'The Kinect hub did not answer.';
+    }
+    $('measure').disabled = false;
+});
+
 // ------------------------------------------------------------------ sensors
 
 function horizon(pitch, roll) {

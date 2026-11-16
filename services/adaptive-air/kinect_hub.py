@@ -15,7 +15,8 @@ libfreenect lets one process at a time open the Kinect, so this one does and sha
 
 It stops itself (LED off) when nothing has used it for IDLE_EXIT seconds and the webcam is off,
 so the camera is never left on by accident. Settings in ~/.config/adaptive-desktop/kinect.json:
-{"webcam": false, "video": "rgb", "tilt": null}. HTTP is bound to 127.0.0.1 only. docs/AIR.md.
+{"webcam": false, "video": "rgb", "tilt": null, "mount_height": 1.92} (mount_height: metres from
+the floor to the Kinect, for measuring people when the floor is out of view; 1.92 = on the TV). HTTP is bound to 127.0.0.1 only. docs/AIR.md.
 """
 
 import argparse
@@ -350,6 +351,42 @@ class Hub:
             self.writer.close()
             self.stop.set()
 
+    # -- measuring someone (measure.py): "Mario, how tall am I?"
+
+    def measure_height(self, seconds=1.2):
+        import mediapipe as mp
+
+        import measure
+        for _ in range(50):                         # the hub may have only just started
+            if self.latest()[0] is not None:
+                break
+            time.sleep(0.1)
+        if self.latest()[0] is None:
+            return {"ok": False, "error": self.error or "The Kinect isn't streaming."}
+        self.last_use = time.monotonic()
+        mount = float(self.settings.get("mount_height", 1.92))
+        results, last = [], 0
+        with mp.solutions.pose.Pose(model_complexity=0, static_image_mode=False) as pose:
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                rgb, depth, seq = self.latest()
+                if seq == last:
+                    time.sleep(0.01)
+                    continue
+                last = seq
+                found = pose.process(rgb).pose_landmarks
+                torso = [found.landmark[i] for i in (11, 12, 23, 24)] if found else []
+                torso = [p for p in torso if p.visibility > 0.4]
+                if len(torso) < 2:
+                    results.append({"ok": False, "error": "I can't see anyone in front of the Kinect."})
+                    continue
+                seed = (sum(p.x for p in torso) / len(torso) * frames.W,
+                        sum(p.y for p in torso) / len(torso) * frames.H)
+                results.append(measure.measure(depth, self.motor["accel"], seed, mount))
+        summary = measure.summarise(results)
+        summary["sentence"] = measure.say(summary)
+        return summary
+
     # -- what the page reads
 
     def latest(self):
@@ -467,6 +504,9 @@ def make_app(hub):
     async def status(_request):
         return web.json_response(hub.info())
 
+    async def measure_height(_request):
+        return web.json_response(await in_thread(hub.measure_height))
+
     async def api(request):
         name = request.match_info["name"]
         if name not in ("led", "tilt", "video", "webcam"):
@@ -498,6 +538,7 @@ def make_app(hub):
     app.router.add_get("/cloud.ply", ply)
     app.router.add_get("/depth-scale.png", scale)
     app.router.add_get("/api/status", status)
+    app.router.add_get("/api/measure", measure_height)
     app.router.add_post("/api/{name}", api)
     app.router.add_get("/presence", presence)
     loop_box["app"] = app
