@@ -16,26 +16,32 @@ Output: a dict the shell draws and acts on (shell/adaptive-shell@local/air.js):
     grab              {"x", "y", "vx", "vy"} while a fist holds a window
     events            what happened this frame: engage, disengage, press, release, click, push,
                       right-click, scroll {dx, dy}, zoom {steps}, grab, drop,
-                      throw-{left,right,up,down}, resize-start, resize-end,
-                      swipe-{left,right,up}, spread, collapse
-    mode              None | scroll | zoom | resize | palms (two open hands) | grab
+                      throw-{left,right,up,down}, carry-{left,right}, resize-start,
+                      resize-end, swipe-{left,right}, spread, collapse
+    mode              None | scroll | lzoom | zoom | resize | palms (two open hands) | grab
     resize            how much the held window has grown (1.0 = as it was) while resizing
 
 The vocabulary, in order of how often it is used:
 
     raise an open palm and hold it still   engage (the reticle fills, then locks on)
     move the hand                          the pointer follows the palm (not the fingertip,
-                                           so pinching does not move it)
+                                           so pinching does not move it); the area your hand
+                                           sweeps scales with how big it looks, so the same
+                                           gestures work at the desk and across the room
     pinch thumb and index                  press; let go to release: click, or drag while held
     pinch thumb and middle finger          right-click
+    wave an open hand down / up (either)   scroll up / down a chunk (the page follows the hand);
+                                           wave again to keep going
+    L (thumb and index out), open/close it zoom in / out (start with a clear gap: a closed
+                                           L is a pinch, and a pinch clicks)
     V sign (index and middle up), move it  scroll the window under the pointer (the pointer stays)
     ... push it toward / pull it back      zoom in / out (Ctrl + wheel)
     push the open palm toward the Kinect   click (Kinect only: needs depth)
     make a fist over a window              grab it and carry it; open the hand to drop it
+    ... carry it to the screen's edge      it goes to the next desktop that side (hold to go on)
     ... and fling it while letting go      throw: left/right = tile that half, up = maximise,
                                            down = minimise
     swipe the open hand fast left/right    previous / next workspace
-    swipe it fast up                       overview
     both hands pinch, pull apart/together  zoom in / out, step by step (Ctrl + wheel)
     holding a window, make a second fist   resize it: pull the fists apart to grow it, together
                                            to shrink it; open the second hand to carry on
@@ -57,13 +63,18 @@ FINGERS = ((INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP
            (PINKY_TIP, PINKY_PIP))
 
 DEFAULTS = {
-    # Part of the camera image that maps onto the whole screen, as a fraction of the image's
-    # width, centred where the hand engaged. Smaller = less arm movement per screen.
-    "box_width": 0.42,
+    # Part of the camera image that maps onto the whole screen, centred where the hand engaged:
+    # box_hands hand-sizes wide (a hand looks smaller across the room, so the box shrinks with
+    # it and the arm movement stays the same), kept within box_min..box_max of the image width.
+    # box_width, when set, fixes it instead. Smaller = less arm movement per screen.
+    "box_width": None,
+    "box_hands": 4.0,
+    "box_min": 0.15,
+    "box_max": 0.6,
     "box_aspect": 1.6,           # screen width / height (1920x1200)
     "engage_hold": 0.55,         # s an open palm must be held still
-    "engage_still": 0.35,        # max palm speed (image widths/s) while engaging
-    "min_hand": 0.06,            # smallest hand (wrist to middle knuckle, image heights) to use
+    "engage_still": 3.0,         # max palm speed (hand sizes/s) while engaging
+    "min_hand": 0.015,           # smallest hand (wrist to middle knuckle, image heights) to use
     "lost_after": 0.7,           # s without the primary hand before disengaging
     "pinch_on": 0.30,            # thumb-index distance / hand size
     "pinch_off": 0.42,
@@ -74,9 +85,15 @@ DEFAULTS = {
     "swipe_distance": 0.30,      # screen widths travelled within swipe_window
     "swipe_window": 0.30,        # s
     "cooldown": 0.8,             # s after a swipe, throw, push, spread or collapse
+    "wave_steps": 6,             # wheel steps one wave scrolls
+    "wave_again": 0.3,           # s before another wave the same way counts
+    "wave_return": 0.7,          # s in which a wave the other way is the hand coming back
+    "lzoom_gap": 0.2,            # thumb-index gap change (hand sizes) per zoom step in the L
+    "edge": 0.015,               # a carried window this near the screen's side...
+    "edge_hold": 0.5,            # ...for this long goes to the next desktop
     "push_mm": 70,               # palm moves this much closer to the Kinect...
     "push_window": 0.30,         # ...within this many seconds
-    "throw_speed": 1.4,          # screen fractions/s when a fist opens
+    "throw_speed": 1.2,          # screen fractions/s when a fist opens
     "scroll_step": 0.035,        # screen fractions of V-sign movement per wheel step
     "natural_scroll": True,      # the page follows the hand (hand up = wheel down)
     "zoom_mm": 45,               # V sign moved this much closer to the Kinect = one zoom step
@@ -139,7 +156,10 @@ def classify(lm, pinching, middle=False):
     if n >= 4 or (n == 3 and not ext[3]):
         return "open"
     if ext[0] and n == 1:
-        return "point"
+        # Thumb out too: the L, for zooming. Tucked: pointing.
+        # (a tucked thumb rests by the middle knuckle; an L's never comes near it)
+        thumb_out = dist(lm[THUMB_TIP], lm[MIDDLE_MCP]) / hand_size(lm) > 0.55
+        return "L" if thumb_out else "point"
     return "relaxed"
 
 
@@ -260,6 +280,10 @@ class Engine:
         self.grab = None           # {"t", "x", "y"} cursor-space position history while a fist holds
         self.cooldown_until = 0.0
         self.clutch_until = None
+        self.box_w = 0.42
+        self.last_wave = None      # (direction, t) of the last swipe or wave
+        self.edge_since = None
+        self.lzoom_from = None
         self.two_hand = None       # (mode, starting distance) while two hands act together
         self.mode = None           # scroll | zoom | resize | palms
         self.scroll_from = None    # (x, y, depth, size) the V sign is measured from
@@ -270,7 +294,7 @@ class Engine:
     # ------------------------------------------------------------ geometry
 
     def box(self):
-        w = self.cfg["box_width"]
+        w = self.cfg["box_width"] or self.box_w
         h = w / self.cfg["box_aspect"] * (640 / 480)   # image is 4:3, screen 16:10
         return w, h
 
@@ -317,7 +341,7 @@ class Engine:
         best = None
         for track in live.values():
             vx, vy = track.velocity()
-            if track.pose == "open" and math.hypot(vx, vy) < cfg["engage_still"]:
+            if track.pose == "open" and math.hypot(vx, vy) / track.size < cfg["engage_still"]:
                 best = track
                 break
         if best is None:
@@ -328,6 +352,7 @@ class Engine:
         if t - self.engage_since >= cfg["engage_hold"]:
             self.engaged = True
             self.primary = best.side
+            self.box_w = min(cfg["box_max"], max(cfg["box_min"], cfg["box_hands"] * best.size))
             _, cx, cy, _ = best.history[-1]
             w, h = self.box()
             # Centre the box on the palm, kept inside the image.
@@ -357,6 +382,8 @@ class Engine:
         self.mode = None
         self.resize = None
         self.scroll_from = None
+        self.lzoom_from = None
+        self.edge_since = None
         self.right_latched = False
         events.append({"type": "disengage"})
 
@@ -379,6 +406,24 @@ class Engine:
         if others and self._two_hands(t, primary, others[0], events):
             return
         self._end_two_hands(t, events)
+
+        # The L (thumb and index out): open it to zoom in, close it to zoom out. A pinch that
+        # closes the L is part of the zoom, not a click.
+        if self.mode == "lzoom":
+            if primary.pose in ("L", "pinch", "point"):
+                gap = pinch_ratio(primary.lm)
+                steps = int((gap - self.lzoom_from) / cfg["lzoom_gap"])
+                if steps:
+                    events.append({"type": "zoom", "steps": max(-5, min(5, steps))})
+                    self.lzoom_from += steps * cfg["lzoom_gap"]
+                return
+            self.mode, self.lzoom_from = None, None
+            self.clutch_until = t + 0.1
+        elif primary.pose == "L" and not self.pressed and not self.grab:
+            self.mode = "lzoom"
+            self.lzoom_from = pinch_ratio(primary.lm)
+            self.clutch_until = math.inf
+            return
 
         # Thumb on the middle fingertip: right-click, once per touch
         if primary.middle and not self.right_latched and not self.pressed and not self.grab:
@@ -415,6 +460,17 @@ class Engine:
             self.grab = [(t, self.cursor[0], self.cursor[1])]
             events.append({"type": "grab", "x": self.cursor[0], "y": self.cursor[1]})
         elif self.grab:
+            at_edge = self.cursor[0] <= cfg["edge"] and "left" or \
+                self.cursor[0] >= 1 - cfg["edge"] and "right" or None
+            if at_edge and primary.pose == "fist":
+                if self.edge_since is None:
+                    self.edge_since = t
+                elif t - self.edge_since >= cfg["edge_hold"] and t >= self.cooldown_until:
+                    events.append({"type": "carry-" + at_edge})
+                    self.cooldown_until = t + 1.0
+                    self.edge_since = None
+            else:
+                self.edge_since = None
             self.grab.append((t, self.cursor[0], self.cursor[1]))
             self.grab = [g for g in self.grab if t - g[0] <= 0.25] or self.grab[-1:]
             if primary.pose in ("open", "relaxed", "point"):
@@ -442,18 +498,42 @@ class Engine:
                     self.cooldown_until = t + cfg["cooldown"]
                     return
 
-        # Swipe: an open hand moving fast and far, mostly along one axis
-        if primary.pose == "open":
-            swipe = self._swipe(t, primary)
-            if swipe:
+        # Swipes and waves, by either hand: an open hand moving fast and far along one axis.
+        # Sideways changes desktop; down or up scrolls (the page follows the hand).
+        for hand in [primary] + [tr for s_, tr in live.items() if s_ != primary.side]:
+            if hand.pose != "open":
+                continue
+            swipe = self._swipe(t, hand)
+            if not swipe or self._is_return(swipe, t):
+                continue
+            self.last_wave = (swipe, t)
+            if swipe in ("left", "right"):
                 events.append({"type": "swipe-" + swipe})
                 self.cooldown_until = t + cfg["cooldown"]
-                # The swipe dragged the pointer along; put it back where it was and hold it
-                # there while the hand comes back (the clutch), then carry on from there.
-                back = self._cursor_before(t - cfg["swipe_window"], primary)
-                if back:
-                    self.cursor = back
-                self.clutch_until = t + cfg["cooldown"]
+                hold = cfg["cooldown"]
+            else:
+                sign = 1 if cfg["natural_scroll"] else -1
+                steps = cfg["wave_steps"] * (1 if swipe == "up" else -1) * sign
+                events.append({"type": "scroll", "dx": 0, "dy": steps, "wave": swipe})
+                self.cooldown_until = t + cfg["wave_again"]
+                # Hold the pointer while the hand comes back, so the return stroke does not
+                # drag it away; another wave the same way still counts after wave_again.
+                hold = cfg["wave_return"]
+            # The swipe dragged the pointer along; put it back where it was and hold it there
+            # while the hand comes back (the clutch), then carry on from there.
+            back = self._cursor_before(t - cfg["swipe_window"], primary)
+            if back:
+                self.cursor = back
+            self.clutch_until = t + hold
+            break
+
+    def _is_return(self, swipe, t):
+        """A swipe the other way soon after one is the hand coming back, not a new gesture."""
+        if not self.last_wave:
+            return False
+        last, when = self.last_wave
+        opposite = {"left": "right", "right": "left", "up": "down", "down": "up"}[last]
+        return swipe == opposite and t - when < self.cfg["wave_return"]
 
     def _grab_velocity(self, span=0.1):
         """The fastest the held window moved over any `span` seconds of the last quarter second.
@@ -487,8 +567,8 @@ class Engine:
             return None
         if abs(dx) >= cfg["swipe_distance"] and abs(dx) > 2 * abs(dy):
             return "right" if dx > 0 else "left"
-        if dy <= -cfg["swipe_distance"] and abs(dy) > 2 * abs(dx):
-            return "up"
+        if abs(dy) >= cfg["swipe_distance"] and abs(dy) > 2 * abs(dx):
+            return "down" if dy > 0 else "up"
         return None
 
     def _cursor_before(self, t0, track):
