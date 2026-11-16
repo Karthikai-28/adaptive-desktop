@@ -236,6 +236,12 @@ var Air = class Air {
             break;
         case 'scroll':
             this._scroll(ev.dx || 0, ev.dy || 0);
+            if (ev.wave)
+                this._showToast(ev.dy > 0 ? '\u2193  Scroll' : '\u2191  Scroll', 500);
+            break;
+        case 'carry-left':
+        case 'carry-right':
+            this._carryAcross(ev.type === 'carry-left' ? Meta.MotionDirection.LEFT : Meta.MotionDirection.RIGHT);
             break;
         case 'zoom':
             this._zoom(ev.steps || 0);
@@ -433,6 +439,23 @@ var Air = class Air {
         g.base = null;
     }
 
+    // A held window taken to the screen's side goes to the desktop that side, and so do you.
+    _carryAcross(direction) {
+        const g = this._grabbed;
+        if (!g || !g.win.get_compositor_private())
+            return;
+        const here = global.workspace_manager.get_active_workspace();
+        const there = here.get_neighbor(direction);
+        if (!there || there === here) {
+            this._showToast('No desktop that way', 800);
+            return;
+        }
+        g.win.change_workspace(there);
+        there.activate_with_focus(g.win, global.get_current_time());
+        this._showToast(direction === Meta.MotionDirection.LEFT ? '\u2190  Window to the previous desktop'
+            : 'Window to the next desktop  \u2192', 900);
+    }
+
     _drop() {
         this._grabbed = null;
     }
@@ -545,7 +568,7 @@ var Air = class Air {
         this._readout.visible = f.engaged && !!primary;
         if (this._readout.visible) {
             const depth = primary.depth ? `${(primary.depth / 1000).toFixed(2)} m` : '';
-            const pose = { scroll: 'scroll', zoom: 'zoom', resize: 'resize', palms: 'two palms' }[f.mode] ||
+            const pose = { scroll: 'scroll', zoom: 'zoom', lzoom: 'zoom', resize: 'resize', palms: 'two palms' }[f.mode] ||
                 (this._grabbed ? 'holding' : primary.pose);
             this._readout.text = [depth, pose.toUpperCase()].filter(Boolean).join('  ·  ');
             this._readout.set_position(Math.round(rx + RETICLE * 0.36), Math.round(ry + RETICLE * 0.22));
@@ -735,7 +758,7 @@ var Air = class Air {
                     }
                 }
                 cr.stroke();
-            } else if (f.mode === 'zoom') {
+            } else if (f.mode === 'zoom' || f.mode === 'lzoom') {
                 // A magnifier's plus at the centre.
                 cr.setLineWidth(3);
                 source(cr, 'cyan', 0.95);
