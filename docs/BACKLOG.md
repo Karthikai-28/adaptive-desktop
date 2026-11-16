@@ -1276,9 +1276,16 @@ Plan, gestures and gotchas: `docs/AIR.md`.
 - ✅ `scripts/install-air.sh` (`./install.sh --only air`), Super+G, `scripts/adaptive-air.sh`
   (`--demo` shows every gesture with no camera).
 
+- ✅ Kinect hub (`kinect_hub.py`, `adaptive-kinect.service`): the one owner of the Kinect, frames
+  in shared memory for Air, stops itself when unused. Live on the real Kinect 1414 (2026-11-17):
+  30 fps colour + registered depth, infrared, accelerometer and tilt; Air reads through it.
+- ✅ Kinect Studio (`apps/kinect-studio`, page `services/adaptive-air/studio/`): colour/IR, depth,
+  WebGL point cloud, motion sensor, tilt, LED, depth stats, PLY export; seen live with the
+  real Kinect in headless Chrome.
+
 ### Live, not yet tried
 
-- 🔬 The Kinect's camera and depth: it needs its 12 V supply (only the motor is on USB now).
+- 🔬 The "Kinect Camera" webcam in a meeting app: needs `scripts/install-virtual-cameras.sh` (sudo).
 - 🔬 The HUD and pointer in the live X11 session (needs a shell restart after `sync-shell.sh`).
 - 🔬 Tuning on real hands: `box_width`, swipe speed, push distance, pinch thresholds.
 

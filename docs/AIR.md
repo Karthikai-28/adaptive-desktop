@@ -75,6 +75,36 @@ Meta window moves, workspace and overview through shellActions.js
 - **The shell side** (`air.js`) never moves the pointer unless the frame says Air is engaged, and
   lets go of everything if frames stop for 3.5 s.
 
+## Kinect Studio and the Kinect webcam
+
+libfreenect lets one process open the Kinect, so one does: the **Kinect hub**
+(`services/adaptive-air/kinect_hub.py`, user service `adaptive-kinect.service`). Air, Kinect
+Studio and the webcam all go through it, at the same time:
+
+```
+Kinect ──libfreenect──▶ kinect_hub.py ──▶ /dev/shm/adaptive-kinect-<uid>  (frames.py) ──▶ Air
+                              ├──────────▶ http://127.0.0.1:8792  Kinect Studio (page in studio/)
+                              └──────────▶ GStreamer ▶ /dev/video11 "Kinect Camera" (v4l2loopback)
+```
+
+- **Kinect Studio** (app grid, or `scripts/adaptive-air.sh --studio`, or any browser at
+  http://127.0.0.1:8792): the colour or infrared picture, depth (near warm, far cool, black =
+  no reading), the coloured **point cloud** in 3D (drag to turn, right-drag to move, scroll to
+  zoom; density, point size, colour by picture or depth, orbit), the **accelerometer** with an
+  artificial horizon, pitch and roll, the **tilt motor** (slider, Down/Level/Up), the **LED**,
+  depth statistics with a histogram, the stream rate, and **Export point cloud** (binary PLY for
+  MeshLab, CloudCompare, Blender, Open3D).
+- **Infrared** switches the Kinect's picture to its IR camera: it sees in the dark and shows the
+  projector's dot pattern. Air, Studio and the webcam all get it.
+- **The webcam**: switch *Webcam* on in Studio (or `scripts/adaptive-air.sh --webcam on`) and pick
+  **Kinect Camera** in Meet, Zoom, OBS, Cheese or the browser. It needs a second v4l2loopback
+  device, made once with `scripts/install-virtual-cameras.sh` (sudo; it keeps the phone's
+  "Phone Camera" at /dev/video10 and adds "Kinect Camera" at /dev/video11). The switch is kept
+  in `~/.config/adaptive-desktop/kinect.json`; while it is on, the hub keeps the camera running.
+- **The hub stops itself** (LED off) 20 s after nothing uses it: no Air, no Studio page open,
+  webcam off. Anything that needs it starts it again.
+- Frames in shared memory are private to you (mode 0600). HTTP listens on 127.0.0.1 only.
+
 ## Install, run, check
 
 ```sh
@@ -84,6 +114,8 @@ scripts/adaptive-air.sh --status   # running? which camera? what of the Kinect i
 scripts/adaptive-air.sh --demo     # the scripted hands, no camera
 services/adaptive-air/air.py --print --preview   # events in the terminal + a camera window (tuning)
 scripts/adaptive-air.sh --led green | --tilt 10  # the Kinect's LED and motor
+scripts/adaptive-air.sh --studio | --webcam on   # Kinect Studio; the Kinect as a webcam
+scripts/install-virtual-cameras.sh               # once, sudo: the "Kinect Camera" device
 scripts/verify-air.py [--hardware]  # engine, probe, protocol, demo (in verify-all.sh --quick)
 scripts/verify-shell-nested.sh --extra scripts/verify-air-nested.sh   # end to end in a nested shell
 ```
@@ -113,6 +145,7 @@ movement).
   (`crw-rw-rw-` from an existing udev rule). Elsewhere, install libfreenect's
   `51-kinect.rules` (it gives the `plugdev` group access) and replug.
 - Depth needs 0.5 to 4 m. A hand closer than about 50 cm reads no depth, and push is then off.
+  Sit 1 to 2 m away for gestures: Studio's Depth panel shows how much of the picture has a reading.
 - The webcam on this laptop drops to ~10 fps in a dim room (auto exposure). The Kinect runs at a
   steady 30.
 - MediaPipe's handedness can flip when a hand turns over. The engine follows hands by side but
