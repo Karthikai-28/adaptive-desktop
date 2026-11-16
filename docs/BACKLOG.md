@@ -1283,8 +1283,20 @@ Plan, gestures and gotchas: `docs/AIR.md`.
   WebGL point cloud, motion sensor, tilt, LED, depth stats, PLY export; seen live with the
   real Kinect in headless Chrome.
 
+- ✅ For the Kinect on the TV (~1.92 m, you 2-4 m away): hands found through the body first
+  (Pose, then wrist crops), gestures scaled to hand size; wave up/down to scroll (either hand),
+  an L to zoom, a carried window to the screen edge moves desktop; nested-shell checked.
+- ✅ "How tall am I": `measure.py` (accelerometer up, floor from depth or the mount height,
+  person region from the Pose torso); within 3 cm on rendered rooms; live endpoint answers.
+- ✅ Mario commands (`commands.py`, `control.py`): apps, windows, desktops, TV (cast and remote),
+  Kinect, Air, sound, media, web; cheat sheet at `/commands` and docs/MARIO_COMMANDS.md;
+  `verify-mario-commands.py`; window commands nested-shell checked.
+
 ### Live, not yet tried
 
+- 🔬 Room-distance hand finding and height with a person actually standing 2-4 m away.
+- 🔬 The Kinect mounted on the TV: tilt and `mount_height` set, gestures tuned from the sofa.
+- 🔬 Mario's TV commands against the real LG TV (`--tv on/off/volume`).
 - 🔬 The "Kinect Camera" webcam in a meeting app: needs `scripts/install-virtual-cameras.sh` (sudo).
 - 🔬 The HUD and pointer in the live X11 session (needs a shell restart after `sync-shell.sh`).
 - 🔬 Tuning on real hands: `box_width`, swipe speed, push distance, pinch thresholds.
