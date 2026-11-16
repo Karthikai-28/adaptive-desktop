@@ -158,8 +158,23 @@ def parse_state(raw):
             "status": {0: "stopped", 1: "at-limit", 4: "moving"}.get(raw[9], raw[9])}
 
 
+class TiltState(ctypes.Structure):
+    """libfreenect's freenect_raw_tilt_state."""
+    _fields_ = [("accelerometer_x", ctypes.c_int16), ("accelerometer_y", ctypes.c_int16),
+                ("accelerometer_z", ctypes.c_int16), ("tilt_angle", ctypes.c_int8),
+                ("tilt_status", ctypes.c_int)]
+
+
+VIDEO_IR_8BIT = 2
+IR_HEIGHT = 488               # the IR picture is 640x488; the bottom 8 rows are dropped
+COUNTS_PER_G = 819
+
+
 class Camera:
-    """Colour + registered depth frames through libfreenect's sync API (numpy arrays, copied)."""
+    """Colour (or infrared) + registered depth through libfreenect's sync API (numpy, copied).
+
+    Every call must come from one thread: the hub's capture loop.
+    """
 
     def __init__(self, index=0):
         import numpy as np
@@ -172,23 +187,46 @@ class Camera:
                            ctypes.c_int, ctypes.c_int]
         lib.freenect_sync_set_led.argtypes = [ctypes.c_int, ctypes.c_int]
         lib.freenect_sync_set_tilt_degs.argtypes = [ctypes.c_int, ctypes.c_int]
+        lib.freenect_sync_get_tilt_state.argtypes = [ctypes.POINTER(ctypes.POINTER(TiltState)),
+                                                     ctypes.c_int]
         self.index = index
 
-    def read(self):
-        """(rgb HxWx3 uint8, depth_mm HxW uint16) or raises OSError."""
+    def read(self, mode="rgb"):
+        """(picture HxWx3 uint8, depth_mm HxW uint16) or raises OSError.
+
+        mode "ir" gives the infrared camera (it sees in the dark, and shows the projector's dot
+        pattern) as a grey picture in the same three channels.
+        """
         np = self._np
         ptr, ts = ctypes.c_void_p(), ctypes.c_uint32()
+        fmt = VIDEO_IR_8BIT if mode == "ir" else VIDEO_RGB
         if self._lib.freenect_sync_get_video(ctypes.byref(ptr), ctypes.byref(ts), self.index,
-                                             VIDEO_RGB) < 0:
-            raise OSError("no Kinect colour frame")
-        rgb = np.ctypeslib.as_array((ctypes.c_uint8 * (WIDTH * HEIGHT * 3)).from_address(
-            ptr.value)).reshape(HEIGHT, WIDTH, 3).copy()
+                                             fmt) < 0:
+            raise OSError("no Kinect picture")
+        if mode == "ir":
+            ir = np.ctypeslib.as_array((ctypes.c_uint8 * (WIDTH * IR_HEIGHT)).from_address(
+                ptr.value)).reshape(IR_HEIGHT, WIDTH)[:HEIGHT]
+            rgb = np.repeat(ir[:, :, None], 3, axis=2)
+        else:
+            rgb = np.ctypeslib.as_array((ctypes.c_uint8 * (WIDTH * HEIGHT * 3)).from_address(
+                ptr.value)).reshape(HEIGHT, WIDTH, 3).copy()
         if self._lib.freenect_sync_get_depth(ctypes.byref(ptr), ctypes.byref(ts), self.index,
                                              DEPTH_REGISTERED) < 0:
             raise OSError("no Kinect depth frame")
         depth = np.ctypeslib.as_array((ctypes.c_uint16 * (WIDTH * HEIGHT)).from_address(
             ptr.value)).reshape(HEIGHT, WIDTH).copy()
         return rgb, depth
+
+    def state(self):
+        """Accelerometer, tilt angle and motor status, as Motor.state() gives them."""
+        ptr = ctypes.POINTER(TiltState)()
+        if self._lib.freenect_sync_get_tilt_state(ctypes.byref(ptr), self.index) < 0 or not ptr:
+            raise OSError("no tilt state")
+        s = ptr.contents
+        return {"accel": [s.accelerometer_x, s.accelerometer_y, s.accelerometer_z],
+                "tilt": None if s.tilt_angle == -128 else s.tilt_angle / 2.0,
+                "status": {0: "stopped", 1: "at-limit", 4: "moving"}.get(s.tilt_status,
+                                                                         s.tilt_status)}
 
     def led(self, colour):
         return self._lib.freenect_sync_set_led(LED[colour], self.index) >= 0
