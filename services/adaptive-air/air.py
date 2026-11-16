@@ -11,7 +11,10 @@
     air.py --source kinect|webcam|auto   override the settings file
 
 Settings: ~/.config/adaptive-desktop/air.json (all optional)
-    {"source": "auto", "webcam": 0, "tilt": null, "gestures": {...gestures.DEFAULTS...}}
+    {"source": "auto", "webcam": 0, "tilt": null, "tracking": "auto",
+     "gestures": {...gestures.DEFAULTS...}}
+    tracking: auto (whole picture, then you and your wrists when it finds nothing: across the
+    room), near (the desk), room (always through your body first)
 
 Privacy: camera pictures stay in this process's memory and are dropped after each frame. Nothing
 is written to disk and nothing but hand landmarks (21 points per hand) leaves the process. The
@@ -183,39 +186,112 @@ def open_source(choice, settings):
 # ------------------------------------------------------------------ tracking
 
 class Tracker:
-    """MediaPipe Hands on the mirrored colour picture, plus the palm's depth when there is one."""
+    """Hands in the (mirrored) colour picture, plus each palm's depth when there is one.
 
-    def __init__(self):
+    Near the Kinect (the desk) MediaPipe Hands finds hands in the whole picture. Across the room
+    (the Kinect on the TV, you 2 to 4 m away) a hand is only ~25 pixels wide and Hands misses it,
+    so MediaPipe Pose finds you first, and Hands looks again in a square cut around each wrist,
+    sized from your shoulders and enlarged to CROP pixels. "tracking" in air.json: auto (whole
+    picture first, the crops when it finds nothing), near, or room.
+    """
+
+    CROP = 256
+    RECHECK = 15          # in room mode, try the whole picture again every this many frames
+
+    def __init__(self, mode="auto"):
         import cv2
         import mediapipe as mp
         import numpy as np
-        self.cv2, self.np = cv2, np
+        self.cv2, self.np, self.mp = cv2, np, mp
+        self.mode = mode if mode in ("auto", "near", "room") else "auto"
         self.hands = mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2,
                                               model_complexity=0, min_detection_confidence=0.6,
                                               min_tracking_confidence=0.5)
+        self.crop_hands = None
+        self.pose = None
+        self.room = self.mode == "room"
+        self.n = 0
+        self.person = None        # the last pose: {"shoulders": px, "depth": mm} for the HUD
 
     def __call__(self, rgb, depth):
-        cv2, np = self.cv2, self.np
+        cv2 = self.cv2
         rgb = cv2.flip(rgb, 1)                    # mirror: your right hand moves right
         if depth is not None:
             depth = cv2.flip(depth, 1)
+        self.n += 1
+        out = []
+        if self.mode != "room" and (not self.room or self.n % self.RECHECK == 0):
+            out = self._whole(rgb, depth)
+            if out:
+                self.room = False
+        if not out and self.mode != "near":
+            out = self._crops(rgb, depth)
+            self.room = bool(out) or self.room
+        return out, rgb
+
+    def _palm_depth(self, lm, depth, w, h):
+        if depth is None:
+            return None
+        cx, cy = gestures.palm_centre(lm)
+        px, py = int(cx * w), int(cy * h)
+        patch = depth[max(0, py - 6):py + 7, max(0, px - 6):px + 7]
+        valid = patch[(patch > 300) & (patch < 4500)]
+        return int(self.np.median(valid)) if valid.size else None
+
+    def _whole(self, rgb, depth):
         result = self.hands.process(rgb)
         out = []
         if not result.multi_hand_landmarks:
-            return out, rgb
+            return out
         h, w = rgb.shape[:2]
         for marks, handed in zip(result.multi_hand_landmarks, result.multi_handedness or []):
             lm = [[p.x, p.y, p.z] for p in marks.landmark]
-            mm = None
-            if depth is not None:
-                cx, cy = gestures.palm_centre(lm)
-                px, py = int(cx * w), int(cy * h)
-                patch = depth[max(0, py - 6):py + 7, max(0, px - 6):px + 7]
-                valid = patch[(patch > 300) & (patch < 4000)]
-                if valid.size:
-                    mm = int(np.median(valid))
-            out.append({"side": handed.classification[0].label, "lm": lm, "depth": mm})
-        return out, rgb
+            out.append({"side": handed.classification[0].label, "lm": lm,
+                        "depth": self._palm_depth(lm, depth, w, h)})
+        return out
+
+    def _crops(self, rgb, depth):
+        mp, cv2 = self.mp, self.cv2
+        if self.pose is None:
+            self.pose = mp.solutions.pose.Pose(model_complexity=0, static_image_mode=False,
+                                               min_detection_confidence=0.5)
+            self.crop_hands = mp.solutions.hands.Hands(static_image_mode=True, max_num_hands=1,
+                                                       model_complexity=0,
+                                                       min_detection_confidence=0.5)
+        result = self.pose.process(rgb)
+        if not result.pose_landmarks:
+            self.person = None
+            return []
+        h, w = rgb.shape[:2]
+        P = result.pose_landmarks.landmark
+        L = mp.solutions.pose.PoseLandmark
+        shoulders = abs(P[L.LEFT_SHOULDER].x - P[L.RIGHT_SHOULDER].x) * w
+        self.person = {"shoulders": round(shoulders)}
+        side_px = int(max(64, 1.15 * shoulders))
+        out = []
+        for side, wrist, index in (("Left", L.LEFT_WRIST, L.LEFT_INDEX),
+                                   ("Right", L.RIGHT_WRIST, L.RIGHT_INDEX)):
+            if P[wrist].visibility < 0.5:
+                continue
+            # Centre the square a little past the wrist, toward the fingers.
+            cx = (P[wrist].x + 0.6 * (P[index].x - P[wrist].x)) * w
+            cy = (P[wrist].y + 0.6 * (P[index].y - P[wrist].y)) * h
+            x0, y0 = int(cx - side_px / 2), int(cy - side_px / 2)
+            box = rgb[max(0, y0):max(0, y0 + side_px), max(0, x0):max(0, x0 + side_px)]
+            if box.shape[0] < 16 or box.shape[1] < 16:
+                continue
+            # Pad to a square when the cut runs off the picture, so the scale stays right.
+            pad = self.np.zeros((side_px, side_px, 3), self.np.uint8)
+            oy, ox = max(0, -y0), max(0, -x0)
+            pad[oy:oy + box.shape[0], ox:ox + box.shape[1]] = box
+            big = cv2.resize(pad, (self.CROP, self.CROP), interpolation=cv2.INTER_LINEAR)
+            found = self.crop_hands.process(big)
+            if not found.multi_hand_landmarks:
+                continue
+            lm = [[(x0 + p.x * side_px) / w, (y0 + p.y * side_px) / h, p.z]
+                  for p in found.multi_hand_landmarks[0].landmark]
+            out.append({"side": side, "lm": lm, "depth": self._palm_depth(lm, depth, w, h)})
+        return out
 
 
 def draw_preview(cv2, rgb, hands, state):
@@ -286,7 +362,7 @@ class Air:
                 self.stop.wait(REPROBE_SECONDS)
                 continue
             if tracker is None:
-                tracker = Tracker()
+                tracker = Tracker(self.settings.get("tracking", "auto"))
 
             try:
                 rgb, depth = source.read()
