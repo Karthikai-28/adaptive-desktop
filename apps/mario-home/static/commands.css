@@ -1,0 +1,20 @@
+/* GENERATED from commands.src.css by scripts/build-tokens.py. Edit commands.src.css, then run the script.
+   Colours come from tokens/adaptive.tokens.json. */
+/* Mario's cheat sheet (/commands). Colours are tokens (scripts/build-tokens.py writes commands.css). */
+:root { font: 400 14px/1.45 Inter, "Cantarell", system-ui, sans-serif; color: #F5F5F8; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #151517; }
+.sheet { max-width: 1280px; margin: 0 auto; padding: 32px 24px 40px; }
+header h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; }
+header p, footer { margin: 0; color: #CACACD; }
+kbd { padding: 1px 6px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.04); font: 600 12px Inter, system-ui, sans-serif; }
+.grid { margin: 24px 0; columns: 3 340px; column-gap: 16px; }
+.card { break-inside: avoid; margin: 0 0 16px; padding: 14px 16px; border-radius: 18px;
+  background: #242426; border: 1px solid rgba(255, 255, 255, 0.08); }
+.card h2 { margin: 0 0 10px; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: #9CCBFF; }
+.row { padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.row:first-of-type { border-top: 0; }
+.say { display: flex; flex-wrap: wrap; gap: 6px; }
+q { quotes: "“" "”"; padding: 2px 9px; border-radius: 999px; background: rgba(10, 132, 255, 0.16); color: #F5F5F8; font-weight: 600; }
+.does { margin-top: 4px; color: #A4A4A7; font-size: 12.5px; }
+footer { padding-top: 8px; font-size: 13px; }

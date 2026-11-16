@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mario Commands</title>
+<link rel="stylesheet" href="/static/commands.css">
+</head>
+<body>
+<main class="sheet">
+  <header>
+    <h1>What you can say to Mario</h1>
+    <p>Say <b>“Hey Mario”</b> or press <kbd>Super</kbd>+<kbd>J</kbd>, then any of these. Other wordings usually work too; anything that isn't a command, Mario answers.</p>
+  </header>
+  <div class="grid" id="grid"></div>
+  <footer>Gestures (with Air on, <kbd>Super</kbd>+<kbd>G</kbd>): open palm to take control · pinch to click · wave up or down to scroll · an L opened or closed to zoom · fist to grab a window · swipe for the next desktop · two open palms apart for every window.</footer>
+</main>
+<script>
+fetch('/api/commands').then(r => r.json()).then(sections => {
+  const grid = document.getElementById('grid');
+  for (const section of sections) {
+    const card = document.createElement('section');
+    card.className = 'card';
+    const h = document.createElement('h2');
+    h.textContent = section.title;
+    card.appendChild(h);
+    for (const item of section.items) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const say = document.createElement('div');
+      say.className = 'say';
+      for (const part of item.say.split(' / ')) {
+        const q = document.createElement('q');
+        q.textContent = part;
+        say.appendChild(q);
+      }
+      row.appendChild(say);
+      if (item.does) {
+        const does = document.createElement('div');
+        does.className = 'does';
+        does.textContent = item.does;
+        row.appendChild(does);
+      }
+      card.appendChild(row);
+    }
+    grid.appendChild(card);
+  }
+});
+</script>
+</body>
+</html>
