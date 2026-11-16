@@ -55,28 +55,65 @@ def load_settings():
 
 # ------------------------------------------------------------------ sources
 
+HUB = "http://127.0.0.1:8792"
+
+
+def hub_post(name, value):
+    """Ask the Kinect hub for something (LED, tilt); quietly nothing when it is not there."""
+    import urllib.request
+    req = urllib.request.Request(f"{HUB}/api/{name}", data=json.dumps({"value": value}).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=0.5).read()
+    except OSError:
+        pass
+
+
+def ensure_hub():
+    """Start the Kinect hub (adaptive-kinect.service, or the script itself) if it is not running."""
+    import subprocess
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"{HUB}/api/status", timeout=0.5).read()
+        return
+    except OSError:
+        pass
+    if subprocess.run(["systemctl", "--user", "start", "adaptive-kinect.service"],
+                      capture_output=True).returncode != 0:
+        subprocess.Popen([sys.executable, str(HERE / "kinect_hub.py")], start_new_session=True)
+
+
 class KinectSource:
+    """The Kinect, through the hub (kinect_hub.py), which shares it with Studio and the webcam."""
     name = "kinect"
     has_depth = True
 
     def __init__(self, tilt=None):
-        self.cam = kinect.Camera()
-        self.cam.read()          # fails here, not later, when the camera is not there
+        import frames
+        ensure_hub()
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                self.reader = frames.Reader()
+                self.reader.read(timeout=2.0)
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise OSError("the Kinect hub gave no frames")
+                time.sleep(0.3)
         if tilt is not None:
-            self.cam.tilt(tilt)
+            hub_post("tilt", tilt)
 
     def read(self):
-        return self.cam.read()
+        rgb, depth, _ = self.reader.read(timeout=2.0)
+        return rgb, depth
 
     def led(self, colour):
-        try:
-            self.cam.led(colour)
-        except OSError:
-            pass
+        hub_post("led", colour)
 
     def close(self):
         self.led("blink-green")
-        self.cam.close()
+        self.reader.close()
 
 
 class WebcamSource:
