@@ -61,7 +61,10 @@ def main():
     win.set_icon_name("camera-web")
     settings = WebKit2.Settings(enable_webgl=True, enable_developer_extras=bool(os.environ.get("STUDIO_DEVTOOLS")),
                                 hardware_acceleration_policy=WebKit2.HardwareAccelerationPolicy.ALWAYS)
-    view = WebKit2.WebView(settings=settings)
+    # Nothing kept between runs: the page is local and always current, and no cache can show an
+    # old one.
+    context = WebKit2.WebContext.new_with_website_data_manager(WebKit2.WebsiteDataManager.new_ephemeral())
+    view = WebKit2.WebView(settings=settings, web_context=context)
     ground = Gdk.RGBA()
     ground.parse(adaptive_tokens.load().hex("surface.ground"))
     view.set_background_color(ground)
