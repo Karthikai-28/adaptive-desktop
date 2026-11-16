@@ -12,19 +12,33 @@ disk: only hand landmarks (21 points per hand) go to the shell over the session 
 
 ## Gestures
 
+### One hand
+
 | Do this | It does |
 | --- | --- |
 | Raise an open palm and hold it still (~½ s) | **Engage**: the ring fills, brackets slide in, a scan line sweeps the screen. Where your palm was becomes the middle of the screen. |
 | Move the hand | The pointer follows the palm (not the fingertip, so pinching does not move it). |
-| Pinch thumb and index | Press; let go to release. A pinch that hardly moved is a click; one that moved is a drag (select text, move a slider, drag a file). |
+| Pinch thumb and index | Press; let go to release. A pinch that hardly moved is a click (twice quickly: double-click); one that moved is a drag. |
+| Thumb on the **middle** fingertip (index stays up) | **Right-click** (a purple ripple). |
+| **V sign** (index and middle up) and move it | **Scroll** the window under the pointer; the pointer stays put. Up/down and left/right; the page follows the hand (`natural_scroll`). Chevrons on the reticle. |
+| V sign pushed toward / pulled away from the Kinect | **Zoom** in / out, one step per ~4.5 cm (Ctrl + wheel: browsers, Files, editors, image viewers). On the webcam: the hand growing or shrinking in view. |
 | Push the open palm ~7 cm toward the Kinect, quickly | Click (Kinect only: it needs depth). |
 | Make a fist over a window | Grab it; it follows your hand. Open the hand to put it down. |
 | ... and fling it as you open the hand | **Throw**: left/right takes that half of the screen, up maximises, down minimises. |
 | Sweep the open hand fast to the left / right | Next / previous desktop. The pointer stays where it was ("clutch") while your hand comes back. |
 | Sweep it fast upward | Overview. |
-| Pinch with both hands and pull them apart | Every window (overview). |
-| ... or push them together | Back to work. |
 | Drop your hand out of view | Disengage. Anything held (a pressed button, a carried window) is let go. |
+
+### Two hands
+
+The hand that engaged drives the pointer; the second hand only counts in these combinations.
+
+| Do this | It does |
+| --- | --- |
+| Both hands pinch, pull apart / push together | **Zoom** in / out, a step for every 15% change in distance. |
+| Hold a window with a fist, make a fist with the other hand, pull apart / together | **Resize** the window around its centre (the reticle turns orange with corner arrows). Open the second hand to go back to carrying it. |
+| Both **open palms** pulled apart | Every window (overview). Two open hands never swipe. |
+| ... pushed together | Back to work. |
 
 Try every gesture with no camera at all: `scripts/adaptive-air.sh --demo` plays a scripted pair
 of hands through the real engine and the real HUD.
@@ -78,7 +92,8 @@ Settings, all optional, in `~/.config/adaptive-desktop/air.json`:
 
 ```json
 {"source": "auto", "webcam": 0, "tilt": null,
- "gestures": {"box_width": 0.42, "engage_hold": 0.55, "swipe_speed": 2.2, "push_mm": 70}}
+ "gestures": {"box_width": 0.42, "engage_hold": 0.55, "swipe_speed": 2.2, "push_mm": 70,
+              "scroll_step": 0.035, "natural_scroll": true, "zoom_mm": 45, "zoom_ratio": 1.15}}
 ```
 
 `source` is `auto` (the Kinect when its camera is on USB, else the webcam, and back to the Kinect

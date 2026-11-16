@@ -3581,4 +3581,9 @@
     border: 2px solid #64D2FF;
     background-color: rgba(10, 132, 255, 0.16);
 }
+.adaptive-air-ripple-secondary {
+    border-radius: 999px;
+    border: 2px solid #BF5AF2;
+    background-color: rgba(191, 90, 242, 0.16);
+}
 .adaptive-air-indicator.adaptive-air-engaged { color: #0A84FF; }

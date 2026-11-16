@@ -15,8 +15,11 @@ Output: a dict the shell draws and acts on (shell/adaptive-shell@local/air.js):
     hands             per hand: screen-space landmarks, pose, pinch strength, depth
     grab              {"x", "y", "vx", "vy"} while a fist holds a window
     events            what happened this frame: engage, disengage, press, release, click, push,
-                      grab, drop, throw-{left,right,up,down}, swipe-{left,right,up},
-                      spread, collapse
+                      right-click, scroll {dx, dy}, zoom {steps}, grab, drop,
+                      throw-{left,right,up,down}, resize-start, resize-end,
+                      swipe-{left,right,up}, spread, collapse
+    mode              None | scroll | zoom | resize | palms (two open hands) | grab
+    resize            how much the held window has grown (1.0 = as it was) while resizing
 
 The vocabulary, in order of how often it is used:
 
@@ -24,14 +27,20 @@ The vocabulary, in order of how often it is used:
     move the hand                          the pointer follows the palm (not the fingertip,
                                            so pinching does not move it)
     pinch thumb and index                  press; let go to release: click, or drag while held
+    pinch thumb and middle finger          right-click
+    V sign (index and middle up), move it  scroll the window under the pointer (the pointer stays)
+    ... push it toward / pull it back      zoom in / out (Ctrl + wheel)
     push the open palm toward the Kinect   click (Kinect only: needs depth)
     make a fist over a window              grab it and carry it; open the hand to drop it
     ... and fling it while letting go      throw: left/right = tile that half, up = maximise,
                                            down = minimise
     swipe the open hand fast left/right    previous / next workspace
     swipe it fast up                       overview
-    both hands pinch, pull apart           spread: overview with every window laid out
-    ... or push together                   collapse: back to the desktop
+    both hands pinch, pull apart/together  zoom in / out, step by step (Ctrl + wheel)
+    holding a window, make a second fist   resize it: pull the fists apart to grow it, together
+                                           to shrink it; open the second hand to carry on
+    both open palms pulled apart           spread: overview with every window laid out
+    ... or pushed together                 collapse: back to the desktop
     drop the hand out of view              disengage
 """
 
@@ -68,6 +77,11 @@ DEFAULTS = {
     "push_mm": 70,               # palm moves this much closer to the Kinect...
     "push_window": 0.30,         # ...within this many seconds
     "throw_speed": 1.4,          # screen fractions/s when a fist opens
+    "scroll_step": 0.035,        # screen fractions of V-sign movement per wheel step
+    "natural_scroll": True,      # the page follows the hand (hand up = wheel down)
+    "zoom_mm": 45,               # V sign moved this much closer to the Kinect = one zoom step
+    "zoom_size": 0.12,           # ... or, with no depth (webcam), the hand this much bigger
+    "zoom_ratio": 1.15,          # two pinching hands this much farther apart = one zoom step
     "spread_ratio": 1.6,         # two-hand distance grows / shrinks by this much
     "collapse_ratio": 0.6,
     "one_euro": {"min_cutoff": 1.4, "beta": 4.0, "d_cutoff": 1.0},
@@ -106,14 +120,22 @@ def curled(lm):
     return all(dist(w, lm[tip]) < dist(w, lm[pip]) * 0.98 for tip, pip in FINGERS)
 
 
-def classify(lm, pinching):
-    """open | fist | point | pinch | relaxed for one hand's landmarks."""
+def middle_ratio(lm):
+    return dist(lm[THUMB_TIP], lm[MIDDLE_TIP]) / hand_size(lm)
+
+
+def classify(lm, pinching, middle=False):
+    """open | fist | point | vee | pinch | pinch-middle | relaxed for one hand's landmarks."""
     if curled(lm):
         return "fist"
     if pinching:
         return "pinch"
+    if middle:
+        return "pinch-middle"
     ext = extended(lm)
     n = sum(ext)
+    if ext[0] and ext[1] and not ext[2] and not ext[3]:
+        return "vee"
     if n >= 4 or (n == 3 and not ext[3]):
         return "open"
     if ext[0] and n == 1:
@@ -159,6 +181,7 @@ class Track:
         self.pose = "relaxed"
         self._candidate, self._candidate_n = None, 0
         self.pinching = False
+        self.middle = False        # thumb on the middle fingertip (right-click)
         self.history = []          # (t, image x, image y, depth)
         self.lm = None
         self.depth = None
@@ -175,8 +198,17 @@ class Track:
             self.pinching = ratio < cfg["pinch_off"]
         else:
             self.pinching = ratio < cfg["pinch_on"]
-        pose = classify(lm, self.pinching)
-        if pose == "pinch" or pose == self.pose:
+        m = middle_ratio(lm)
+        if curled(lm) or self.pinching:
+            self.middle = False
+        elif self.middle:
+            self.middle = m < cfg["pinch_off"]
+        else:
+            # Only with the index clearly away from the thumb: fingers held together while
+            # pinching the index would otherwise read as both.
+            self.middle = m < cfg["pinch_on"] and ratio > cfg["pinch_off"]
+        pose = classify(lm, self.pinching, self.middle)
+        if pose in ("pinch", "pinch-middle") or pose == self.pose:
             # A pinch counts at once (it is a click); others must last a few frames.
             self.pose, self._candidate, self._candidate_n = pose, None, 0
         elif pose == self._candidate:
@@ -186,6 +218,7 @@ class Track:
         else:
             self._candidate, self._candidate_n = pose, 1
         cx, cy = palm_centre(lm)
+        self.size = hand_size(lm)
         self.history.append((t, cx, cy, self.depth))
         cutoff = t - 1.0
         while self.history and self.history[0][0] < cutoff:
@@ -227,7 +260,11 @@ class Engine:
         self.grab = None           # {"t", "x", "y"} cursor-space position history while a fist holds
         self.cooldown_until = 0.0
         self.clutch_until = None
-        self.two_hand_start = None
+        self.two_hand = None       # (mode, starting distance) while two hands act together
+        self.mode = None           # scroll | zoom | resize | palms
+        self.scroll_from = None    # (x, y, depth, size) the V sign is measured from
+        self.right_latched = False
+        self.resize = None
         self.last_seen = None
 
     # ------------------------------------------------------------ geometry
@@ -313,8 +350,14 @@ class Engine:
         self.clutch_until = None
         self.pressed = False
         self.press_by = None
+        if self.resize is not None:
+            events.append({"type": "resize-end"})
         self.grab = None
-        self.two_hand_start = None
+        self.two_hand = None
+        self.mode = None
+        self.resize = None
+        self.scroll_from = None
+        self.right_latched = False
         events.append({"type": "disengage"})
 
     def _drive(self, t, primary, live, events):
@@ -335,7 +378,24 @@ class Engine:
         others = [tr for s, tr in live.items() if s != primary.side]
         if others and self._two_hands(t, primary, others[0], events):
             return
-        self.two_hand_start = None
+        self._end_two_hands(t, events)
+
+        # Thumb on the middle fingertip: right-click, once per touch
+        if primary.middle and not self.right_latched and not self.pressed and not self.grab:
+            self.right_latched = True
+            self.freeze_until = t + cfg["pinch_freeze"]
+            events.append({"type": "right-click", "x": self.cursor[0], "y": self.cursor[1]})
+            return
+        if not primary.middle:
+            self.right_latched = False
+
+        # V sign: scroll by moving it, zoom by pushing/pulling it; the pointer stays put
+        if primary.pose == "vee" and not self.pressed and not self.grab:
+            self._scroll(t, primary, cx, cy, depth, events)
+            return
+        if self.mode == "scroll":
+            self.mode, self.scroll_from = None, None
+            self.clutch_until = t + 0.1
 
         # Pinch: press / release / click
         if primary.pinching and not self.pressed and not self.grab:
@@ -438,31 +498,101 @@ class Engine:
                 return (min(max(sx, 0.0), 1.0), min(max(sy, 0.0), 1.0))
         return None
 
-    def _two_hands(self, t, a, b, events):
-        """Both hands pinching: track their distance; spread or collapse past a ratio."""
+    def _scroll(self, t, track, cx, cy, depth, events):
         cfg = self.cfg
-        if not (a.pinching and b.pinching):
-            return False
-        if self.pressed and self.press_by == "pinch":
-            # The primary pinch began first: that press is cancelled, not clicked.
-            self.pressed, self.press_by = False, None
-            events.append({"type": "release", "x": self.cursor[0], "y": self.cursor[1],
-                           "cancel": True})
+        w, h = self.box()
+        if self.mode != "scroll":
+            self.mode = "scroll"
+            self.scroll_from = (cx, cy, depth, track.size)
+            self.clutch_until = math.inf          # hold the pointer while scrolling
+            return
+        x0, y0, d0, s0 = self.scroll_from
+        step = cfg["scroll_step"]
+        sx = int((cx - x0) / w / step)
+        sy = int((cy - y0) / h / step)
+        if sx or sy:
+            sign = -1 if cfg["natural_scroll"] else 1
+            events.append({"type": "scroll", "dx": max(-5, min(5, sign * sx)),
+                           "dy": max(-5, min(5, sign * sy))})
+            x0 += sx * step * w
+            y0 += sy * step * h
+        zoom = 0
+        if depth and d0:
+            zoom = int((d0 - depth) / cfg["zoom_mm"])
+            if zoom:
+                d0 -= zoom * cfg["zoom_mm"]
+        elif not depth:
+            zoom = int(math.log(track.size / s0) / math.log(1 + cfg["zoom_size"]))
+            if zoom:
+                s0 *= (1 + cfg["zoom_size"]) ** zoom
+        if zoom:
+            events.append({"type": "zoom", "steps": max(-5, min(5, zoom))})
+        self.scroll_from = (x0, y0, d0 if depth else None, s0)
+
+    def _two_hands(self, t, a, b, events):
+        """Two hands acting together. a is the primary hand. True when they took the frame.
+
+            both pinching             zoom: a step for every zoom_ratio of change in distance
+            a holds a window, b fist  resize: the window scales with the distance
+            both open palms           spread / collapse past a ratio (overview)
+        """
+        cfg = self.cfg
         d = dist(palm_centre(a.lm), palm_centre(b.lm))
-        if self.two_hand_start is None:
-            self.two_hand_start = d
+        if a.pinching and b.pinching:
+            mode = "zoom"
+        elif self.grab and a.pose == "fist" and b.pose == "fist":
+            mode = "resize"
+        elif a.pose == "open" and b.pose == "open" and not self.grab and not self.pressed:
+            mode = "palms"
+        else:
+            return False
+        if self.two_hand is None or self.two_hand[0] != mode:
+            self._end_two_hands(t, events)
+            if self.mode == "scroll":
+                self.scroll_from = None
+                self.clutch_until = t + 0.1       # the pointer was held for the scroll
+            if self.pressed and self.press_by == "pinch":
+                # The primary pinch began first: that press is cancelled, not clicked.
+                self.pressed, self.press_by = False, None
+                events.append({"type": "release", "x": self.cursor[0], "y": self.cursor[1],
+                               "cancel": True})
+            self.two_hand = (mode, d)
+            self.mode = mode
+            if mode == "resize":
+                self.resize = 1.0
+                events.append({"type": "resize-start"})
             return True
-        ratio = d / max(self.two_hand_start, 1e-6)
-        if t >= self.cooldown_until:
+        d0 = self.two_hand[1]
+        ratio = d / max(d0, 1e-6)
+        if mode == "zoom":
+            steps = int(math.log(ratio) / math.log(cfg["zoom_ratio"]))
+            if steps:
+                events.append({"type": "zoom", "steps": max(-5, min(5, steps))})
+                self.two_hand = (mode, d0 * cfg["zoom_ratio"] ** steps)
+        elif mode == "resize":
+            self.resize = round(max(0.3, min(4.0, ratio)), 3)
+        elif t >= self.cooldown_until:
             if ratio >= cfg["spread_ratio"]:
                 events.append({"type": "spread"})
                 self.cooldown_until = t + cfg["cooldown"]
-                self.two_hand_start = d
+                self.two_hand = (mode, d)
             elif ratio <= cfg["collapse_ratio"]:
                 events.append({"type": "collapse"})
                 self.cooldown_until = t + cfg["cooldown"]
-                self.two_hand_start = d
+                self.two_hand = (mode, d)
         return True
+
+    def _end_two_hands(self, t, events):
+        if self.two_hand is None:
+            return
+        if self.two_hand[0] == "resize":
+            events.append({"type": "resize-end", "scale": self.resize})
+            self.resize = None
+            if self.grab:
+                # A fresh start, so the resize is not read as a fling when the fist opens.
+                self.grab = [(t, self.cursor[0], self.cursor[1])]
+        self.two_hand = None
+        self.mode = None
 
     # ------------------------------------------------------------ output
 
@@ -488,4 +618,5 @@ class Engine:
             "t": t, "engaged": self.engaged, "engage": round(engage, 3),
             "cursor": {"x": round(self.cursor[0], 4), "y": round(self.cursor[1], 4)},
             "pressed": self.pressed, "grab": grab, "hands": hands, "events": events,
+            "mode": self.mode or ("grab" if self.grab else None), "resize": self.resize,
         }

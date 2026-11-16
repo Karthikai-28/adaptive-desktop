@@ -225,21 +225,103 @@ def check_push():
     check("drifting slowly closer is not a push", "push" not in types, types)
 
 
+def check_right_click():
+    print("Right-click (thumb on the middle finger)")
+    e = engaged_engine()
+    types, _ = run(e, hold(1.0, 0.3, shape="pinch-middle") + hold(1.3, 0.2, shape="open"))
+    check("thumb on the middle fingertip right-clicks once", types == ["right-click"], types)
+    types, _ = run(e, hold(1.5, 0.3, shape="pinch-middle"))
+    check("a second touch right-clicks again", types == ["right-click"], types)
+    e = engaged_engine()
+    types, _ = run(e, hold(1.0, 0.3, shape="pinch"))
+    check("an index pinch is not a right-click", "right-click" not in types, types)
+
+
+def check_scroll():
+    print("Scroll and zoom with the V sign")
+    e = engaged_engine()
+    before = e.cursor
+    frames = hold(1.0, 0.2, shape="vee") + move(1.2, 0.5, 0.5, 0.5, 0.5, 0.42, shape="vee")
+    types, state = run(e, frames)
+    evs = [ev for f in [] for ev in f]
+    e2 = engaged_engine()
+    total = 0
+    for t, hands in frames:
+        for ev in e2.step(t, hands)["events"]:
+            if ev["type"] == "scroll":
+                total += ev["dy"]
+    check("moving the V sign up scrolls down (the page follows the hand)", total >= 4, total)
+    check("the pointer stays put while scrolling", e2.cursor == before, (e2.cursor, before))
+    check("the V sign is reported as scroll mode", state["mode"] == "scroll", state["mode"])
+    e3 = engaged_engine(natural_scroll=False)
+    total = sum(ev["dy"] for t, hands in frames for ev in e3.step(t, hands)["events"]
+                if ev["type"] == "scroll")
+    check("natural_scroll off: hand up scrolls up", total <= -4, total)
+    types, s2 = run(e2, hold(1.8, 0.3, shape="open") + move(2.1, 0.3, 0.5, 0.55))
+    w, _ = e2.box()
+    check("after scrolling the pointer carries on from where it was",
+          s2["mode"] is None and abs(s2["cursor"]["x"] - (0.5 + 0.05 / w)) < 0.05, s2["cursor"])
+
+    e = gestures.Engine()
+    run(e, hold(0.0, 0.8, shape="open", depth=900))
+    frames = hold(0.8, 0.2, shape="vee", depth=900) + \
+        [(1.0 + i / 30, [hand(shape="vee", depth=900 - 8 * i)]) for i in range(20)]
+    zoom = sum(ev["steps"] for t, hands in frames for ev in e.step(t, hands)["events"]
+               if ev["type"] == "zoom")
+    check("the V sign pushed 15 cm toward the Kinect zooms in 3 steps", zoom == 3, zoom)
+    check("pushing a V sign is not an air click", "push" not in types)
+    e = engaged_engine()
+    frames = hold(1.0, 0.2, shape="vee") + \
+        [(1.2 + i / 30, [hand(shape="vee", size=0.12 * (1 - 0.012 * i))]) for i in range(25)]
+    zoom = sum(ev["steps"] for t, hands in frames for ev in e.step(t, hands)["events"]
+               if ev["type"] == "zoom")
+    check("without depth, the V sign drawn back (hand smaller) zooms out", zoom <= -1, zoom)
+
+
+def pair(t, gap, shape="pinch", depth=None, shape_left=None):
+    return (t, [hand(cx=0.5 + gap / 2, shape=shape, side="Right", depth=depth),
+                hand(cx=0.5 - gap / 2, shape=shape_left or shape, side="Left", depth=depth)])
+
+
 def check_two_hands():
     print("Two hands")
     e = engaged_engine()
+    frames = [pair(1.0 + i / 30, 0.15 + 0.008 * i) for i in range(25)]
+    evs = [ev for t, hands in frames for ev in e.step(t, hands)["events"]]
+    zoom = sum(ev["steps"] for ev in evs if ev["type"] == "zoom")
+    check("both hands pinching and pulling apart zoom in step by step", zoom == 5,
+          [ev["type"] for ev in evs])
+    check("a two-hand pinch is not a click", not any(ev["type"] == "click" for ev in evs))
+    frames = [pair(1.9 + i / 30, 0.342 - 0.008 * i) for i in range(20)]
+    zoom = sum(ev["steps"] for t, hands in frames for ev in e.step(t, hands)["events"]
+               if ev["type"] == "zoom")
+    check("... and pushing together zoom out", zoom <= -3, zoom)
 
-    def pair(t, gap, shape="pinch"):
-        return (t, [hand(cx=0.5 + gap / 2, shape=shape, side="Right"),
-                    hand(cx=0.5 - gap / 2, shape=shape, side="Left")])
-    frames = [pair(1.0 + i / 30, 0.15 + 0.01 * i) for i in range(20)]
-    types, _ = run(e, frames)
-    check("both hands pinching and pulling apart: spread", "spread" in types, types)
-    check("a two-hand pinch is not a click", "click" not in types, types)
     e = engaged_engine()
-    frames = [pair(1.0 + i / 30, 0.40 - 0.012 * i) for i in range(20)]
+    frames = [pair(1.0 + i / 30, 0.15 + 0.01 * i, shape="open") for i in range(20)]
     types, _ = run(e, frames)
-    check("both hands pinching and pushing together: collapse", "collapse" in types, types)
+    check("both open palms pulled apart: spread (overview)", "spread" in types, types)
+    e = engaged_engine()
+    frames = [pair(1.0 + i / 30, 0.40 - 0.012 * i, shape="open") for i in range(20)]
+    types, _ = run(e, frames)
+    check("both open palms pushed together: collapse", "collapse" in types, types)
+    check("two open hands never swipe", not any(t.startswith("swipe") for t in types), types)
+
+    e = engaged_engine()
+    run(e, hold(1.0, 0.2, shape="fist"))
+    frames = [(1.2 + i / 30, [hand(cx=0.55, shape="fist", side="Right"),
+                              hand(cx=0.40, shape="fist", side="Left")]) for i in range(5)]
+    frames += [(1.4 + i / 30, [hand(cx=0.55 + 0.004 * i, shape="fist", side="Right"),
+                               hand(cx=0.40 - 0.004 * i, shape="fist", side="Left")])
+               for i in range(15)]
+    types, state = run(e, frames)
+    check("holding a window, a second fist starts a resize", "resize-start" in types, types)
+    check("pulling the fists apart grows the window", state["resize"] and state["resize"] > 1.5,
+          state["resize"])
+    types, state = run(e, [(2.0 + i / 30, [hand(cx=0.6, shape="fist")]) for i in range(10)]
+                       + hold(2.4, 0.3, shape="open", cx=0.6))
+    check("letting the second hand go ends the resize, opening drops without a throw",
+          types == ["resize-end", "drop"], types)
 
 
 def check_probe():
@@ -278,9 +360,11 @@ def check_protocol():
           <= set(data) and len(msg) < 4000, len(msg))
     check("depth reaches the shell in millimetres", data["hands"][0]["depth"] == 850)
     shell = (REPO / "shell/adaptive-shell@local/air.js").read_text()
-    for field in ("engaged", "engage", "cursor", "pressed", "hands", "events", "grab", "status"):
+    for field in ("engaged", "engage", "cursor", "pressed", "hands", "events", "grab", "status",
+                  "mode", "resize"):
         check(f"air.js reads '{field}'", f".{field}" in shell)
-    for ev in ("press", "release", "grab", "drop", "throw-left", "throw-right", "throw-up",
+    for ev in ("right-click", "scroll", "zoom", "resize-start", "resize-end",
+               "press", "release", "grab", "drop", "throw-left", "throw-right", "throw-up",
                "throw-down", "swipe-left", "swipe-right", "swipe-up", "spread", "collapse",
                "engage", "disengage", "click"):
         check(f"air.js handles '{ev}'", f"'{ev}'" in shell)
@@ -292,11 +376,19 @@ def check_demo():
     events = []
     for i in range(int(demo.DURATION * demo.FPS)):
         t = i / demo.FPS
-        events += [(round(t, 2), ev["type"]) for ev in e.step(t, demo.hands_at(t))["events"]]
-    names = [n for _, n in events]
-    want = ["engage", "press", "release", "click", "grab", "drop", "throw-right", "swipe-left",
-            "swipe-right", "spread", "collapse", "disengage"]
-    check("the demo plays every gesture once, in order", names == want, events)
+        events += e.step(t, demo.hands_at(t))["events"]
+    names = []
+    for ev in events:
+        if not names or names[-1] != ev["type"] or ev["type"] not in ("scroll", "zoom"):
+            names.append(ev["type"])
+    want = ["engage", "press", "release", "click", "right-click", "scroll", "zoom", "grab",
+            "resize-start", "resize-end", "drop", "throw-right", "swipe-left", "swipe-right",
+            "zoom", "spread", "collapse", "disengage"]
+    check("the demo plays every gesture, in order", names == want, names)
+    zooms = [ev["steps"] for ev in events if ev["type"] == "zoom"]
+    check("its zooms: three in with the V sign, then in and back out with two hands",
+          sum(zooms[:3]) == 3 and sum(z for z in zooms[3:] if z > 0) >= 3
+          and any(z < 0 for z in zooms[3:]), zooms)
 
 
 def hardware():
@@ -322,6 +414,8 @@ def main():
     check_grab()
     check_swipe()
     check_push()
+    check_right_click()
+    check_scroll()
     check_two_hands()
     check_probe()
     check_protocol()

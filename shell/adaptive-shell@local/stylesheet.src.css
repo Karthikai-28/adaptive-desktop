@@ -3579,4 +3579,9 @@
     border: 2px solid $cyan;
     background-color: $accent/16;
 }
+.adaptive-air-ripple-secondary {
+    border-radius: 999px;
+    border: 2px solid $purple;
+    background-color: $purple/16;
+}
 .adaptive-air-indicator.adaptive-air-engaged { color: $accent; }

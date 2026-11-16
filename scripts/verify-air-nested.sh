@@ -5,7 +5,7 @@
 # the sandbox's bus and plays its scripted hands through the real gesture engine. A stand-in
 # window with one big button counts clicks. Checked from inside the shell: the HUD and the camera
 # indicator appear, the real pointer follows the hand, the pinch clicks the button, the fist
-# carries the window and the throw gives it the right half, the swipes change desktop and come
+# carries the window, a second fist grows it, the throw gives it the right half, the swipes change desktop and come
 # back, the two-hand spread opens the overview and the collapse closes it, the drop of the hands
 # disengages, and when the service stops everything is let go and the indicator leaves.
 # AIR_SHOT_DIR=<dir> keeps a screenshot of the HUD there.
@@ -26,8 +26,28 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
 win = Gtk.Window(title="Air test window")
 win.set_default_size(640, 420)
+from gi.repository import Gdk
+def note(text):
+    with open(sys.argv[1], "a") as f:
+        f.write(text + "\n")
+def on_press(_w, ev):
+    if ev.button == 3:
+        note("right-click")
+    return False
+def on_scroll(_w, ev):
+    ctrl = "ctrl-" if ev.state & Gdk.ModifierType.CONTROL_MASK else ""
+    if ev.direction == Gdk.ScrollDirection.SMOOTH:
+        ok, dx, dy = ev.get_scroll_deltas()
+        note(ctrl + ("scroll-down" if dy > 0 else "scroll-up"))
+    else:
+        note(ctrl + {Gdk.ScrollDirection.UP: "scroll-up", Gdk.ScrollDirection.DOWN: "scroll-down"}
+             .get(ev.direction, "scroll-side"))
+    return True
 button = Gtk.Button(label="Pinch me")
-button.connect("clicked", lambda *_: open(sys.argv[1], "a").write("click\n"))
+button.connect("clicked", lambda *_: note("click"))
+button.connect("button-press-event", on_press)
+button.add_events(Gdk.EventMask.SCROLL_MASK | Gdk.EventMask.SMOOTH_SCROLL_MASK)
+button.connect("scroll-event", on_scroll)
 win.add(button)
 win.connect("destroy", Gtk.main_quit)
 win.show_all()
@@ -65,7 +85,12 @@ fi
 seen="$(air_until 2 "air._pointerAt && (([x, y]) => Math.abs(x - air._pointerAt[0]) <= 2 && Math.abs(y - air._pointerAt[1]) <= 2)(global.get_pointer())")"
 [ "$seen" = true ]; check $? "air: the real pointer follows the hand ($seen)"
 
-wait_for 6 grep -q click "$AIR_CLICKS"; check $? "air: a pinch clicks the button under the pointer"
+wait_for 6 grep -qx click "$AIR_CLICKS"; check $? "air: a pinch clicks the button under the pointer"
+wait_for 4 grep -qx right-click "$AIR_CLICKS"; check $? "air: thumb on the middle finger right-clicks"
+wait_for 4 grep -qx scroll-down "$AIR_CLICKS"; check $? "air: the V sign moved up scrolls the window down"
+wait_for 4 grep -qx ctrl-scroll-up "$AIR_CLICKS"; check $? "air: the V sign pushed forward zooms in (Ctrl + wheel)"
+seen="$(air_until 6 "air._resizedTo && air._resizedTo.width > 700")"
+[ "$seen" = true ]; check $? "air: a second fist pulled away grows the held window ($seen)"
 
 seen="$(air_until 6 "(w => { const r = w.get_frame_rect(); const a = Main.layoutManager.getWorkAreaForMonitor(w.get_monitor());
     return Math.abs(r.x - (a.x + Math.round(a.width / 2))) <= 2 && Math.abs(r.width - Math.round(a.width / 2)) <= 2; })($AIR_WIN)")"
@@ -76,7 +101,9 @@ check $? "air: a swipe left goes to the next desktop"
 [ "$(air_until 3 "global.workspace_manager.get_active_workspace_index() === 0")" = true ]
 check $? "air: a swipe right comes back"
 
-[ "$(air_until 5 "Main.overview.visible")" = true ]; check $? "air: both hands pulled apart open the overview"
+seen="$(air_until 5 "air._history.filter(e => e === 'zoom').length >= 4")"
+[ "$seen" = true ]; check $? "air: both hands pinching, pulled apart and back, zoom in and out ($seen)"
+[ "$(air_until 5 "Main.overview.visible")" = true ]; check $? "air: both open palms pulled apart open the overview"
 [ "$(air_until 4 "!Main.overview.visible")" = true ]; check $? "air: pushed together they close it"
 
 [ "$(air_until 4 "!air._engaged && !air._buttonDown")" = true ]

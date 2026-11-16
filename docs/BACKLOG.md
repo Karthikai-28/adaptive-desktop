@@ -1263,13 +1263,15 @@ Plan, gestures and gotchas: `docs/AIR.md`.
   private venv, the webcam as stand-in until the Kinect has power (and back to the Kinect when
   it does), frames on `org.adaptive.Air`.
 - ✅ Pure gesture engine: engage on a held palm, palm-driven pointer with a One Euro filter,
-  pinch click/drag with hysteresis and a freeze, air push from depth, fist grab and throw,
-  swipes with a clutch, two-hand spread/collapse; 72 checks on synthetic hands, the probe
+  pinch click/drag with hysteresis and a freeze, right-click (thumb on the middle finger),
+  V-sign scroll and push/pull zoom, air push from depth, fist grab and throw, swipes with a
+  clutch; two hands: pinch zoom, two-fist resize, open-palm spread/collapse; checks on synthetic hands, the probe
   and the frame protocol (`scripts/verify-air.py`, in `verify-all.sh --quick`).
 - ✅ Shell HUD `air.js`: reticle, holographic hands, brackets and scan sweep, status chip,
   toasts, click ripples, camera indicator with Stop; pointer through Clutter's virtual device.
-  End to end in a nested GNOME Shell (`verify-air-nested.sh`, 13 checks): the pointer moves, a
-  pinch clicks a real GTK button, a throw tiles the window, swipes change desktop, spread and
+  End to end in a nested GNOME Shell (`verify-air-nested.sh`, 19 checks): the pointer moves, a
+  pinch clicks and a middle pinch right-clicks a real GTK button, the V sign scrolls and zooms
+  it (Ctrl + wheel), a second fist grows the held window, a throw tiles it, swipes change desktop, spread and
   collapse open and close the overview, everything is let go when the service stops.
 - ✅ `scripts/install-air.sh` (`./install.sh --only air`), Super+G, `scripts/adaptive-air.sh`
   (`--demo` shows every gesture with no camera).

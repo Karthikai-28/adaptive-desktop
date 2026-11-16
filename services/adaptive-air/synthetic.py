@@ -1,7 +1,7 @@
 """Hands drawn joint by joint, the way MediaPipe reports them: for the checks and the demo.
 
 hand(cx, cy, size, shape) gives 21 landmarks of an upright hand whose palm centre is at (cx, cy)
-in image fractions; shape is open | fist | point | pinch.
+in image fractions; shape is open | fist | point | pinch | pinch-middle | vee.
 """
 
 import gestures
@@ -16,9 +16,13 @@ def hand(cx=0.5, cy=0.5, size=0.12, shape="open", depth=None, side="Right"):
     for i, name in enumerate(ORDER):
         mx, my = MCP[name]
         base = 5 + 4 * i
-        folded = shape == "fist" or (shape == "point" and name != "index")
+        folded = shape == "fist" or (shape == "point" and name != "index") or \
+            (shape == "vee" and name in ("ring", "pinky"))
         if folded:
             joints = [(mx, my), (mx, my - 0.35), (mx, my - 0.15), (mx, my + 0.08)]
+        elif shape == "pinch-middle" and name == "middle":
+            joints = [(mx, my), (mx - 0.05, my - 0.35), (mx - 0.15, my - 0.50),
+                      (mx - 0.20, my - 0.45)]
         elif shape == "pinch" and name == "index":
             joints = [(mx, my), (mx - 0.10, my - 0.40), (mx - 0.25, my - 0.55),
                       (mx - 0.38, my - 0.60)]
@@ -29,7 +33,10 @@ def hand(cx=0.5, cy=0.5, size=0.12, shape="open", depth=None, side="Right"):
     if shape == "pinch":
         tip = pts[8]
         thumb = [(-0.35, -0.25), (-0.55, -0.55), (-0.62, -0.95), (tip[0] + 0.03, tip[1] + 0.03)]
-    elif shape == "fist":
+    elif shape == "pinch-middle":
+        tip = pts[12]
+        thumb = [(-0.35, -0.25), (-0.50, -0.55), (-0.45, -0.95), (tip[0] + 0.03, tip[1] + 0.03)]
+    elif shape in ("fist", "vee"):
         thumb = [(-0.35, -0.25), (-0.45, -0.50), (-0.30, -0.70), (-0.08, -0.75)]
     else:
         thumb = [(-0.35, -0.25), (-0.60, -0.45), (-0.78, -0.65), (-0.90, -0.85)]

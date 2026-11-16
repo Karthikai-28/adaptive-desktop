@@ -11,10 +11,12 @@
 //            floating over the screen, corner brackets and a scan sweep while engaged, a status
 //            chip (source, hand, distance, frame rate), toasts for what a gesture did, a ripple
 //            on every click, and a camera indicator in the top bar (with Stop) whenever Air runs
-//   acts     moves the real pointer and presses its button through Clutter's virtual input
-//            device (no xdotool), carries the window under a fist, throws it (left/right: tile
-//            that half, up: maximise, down: minimise), switches workspace on a swipe and opens
-//            or closes the overview on a two-hand spread or collapse
+//   acts     moves the real pointer and presses its buttons through Clutter's virtual input
+//            devices (no xdotool): click, right-click (thumb on the middle finger), the wheel
+//            (V sign), Ctrl + wheel to zoom (V sign pushed forward, or two pinching hands);
+//            carries the window under a fist, resizes it with a second fist, throws it
+//            (left/right: tile that half, up: maximise, down: minimise), switches workspace on a
+//            swipe and opens or closes the overview with two open palms
 //
 // Nothing here moves the pointer unless the service says Air is engaged, and everything held
 // (a pressed button, a carried window) is let go when frames stop. docs/AIR.md.
@@ -66,6 +68,9 @@ var Air = class Air {
         this._note = null;
         this._pointerAt = null;
         this._vptr = null;
+        this._vkbd = null;
+        this._history = [];
+        this._resizedTo = null;     // the last events acted on, newest last (for checks and debugging)
         this._indicator = null;
         this._toastId = 0;
         this._skelHands = null;
@@ -109,6 +114,7 @@ var Air = class Air {
             this._layer = null;
         }
         this._vptr = null;
+        this._vkbd = null;
     }
 
     // ---------------------------------------------------------------- building
@@ -180,7 +186,9 @@ var Air = class Air {
             this._onEvent({ type: 'disengage' }, px, py, f);
 
         if (f.engaged) {
-            if (this._grabbed && f.grab)
+            if (this._grabbed && f.resize)
+                this._resize(f.resize);
+            else if (this._grabbed && f.grab)
                 this._carry(px, py);
             else
                 this._movePointer(px, py);
@@ -192,6 +200,9 @@ var Air = class Air {
     }
 
     _onEvent(ev, px, py, f) {
+        this._history.push(ev.type);
+        if (this._history.length > 60)
+            this._history.shift();
         switch (ev.type) {
         case 'engage':
             this._engaged = true;
@@ -218,8 +229,25 @@ var Air = class Air {
             this._button(true);
             this._button(false);
             break;
+        case 'right-click':
+            this._movePointer(px, py);
+            this._secondaryClick();
+            this._ripple(px, py, 'adaptive-air-ripple-secondary');
+            break;
+        case 'scroll':
+            this._scroll(ev.dx || 0, ev.dy || 0);
+            break;
+        case 'zoom':
+            this._zoom(ev.steps || 0);
+            break;
         case 'grab':
             this._grab(px, py);
+            break;
+        case 'resize-start':
+            this._resizeStart();
+            break;
+        case 'resize-end':
+            this._resizeEnd(px, py);
             break;
         case 'drop':
             this._drop();
@@ -264,6 +292,43 @@ var Air = class Air {
             this._vptr = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
         }
         return this._vptr;
+    }
+
+    _keyboard() {
+        if (!this._vkbd) {
+            const seat = Clutter.get_default_backend().get_default_seat();
+            this._vkbd = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+        }
+        return this._vkbd;
+    }
+
+    _secondaryClick() {
+        const dev = this._device();
+        for (const state of [Clutter.ButtonState.PRESSED, Clutter.ButtonState.RELEASED])
+            dev.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, state);
+    }
+
+    // Wheel steps: dy > 0 is the wheel turned down (the page moves up), dx > 0 is to the right.
+    _scroll(dx, dy) {
+        const dev = this._device();
+        const send = (n, plus, minus) => {
+            for (let i = 0; i < Math.min(Math.abs(n), 5); i++) {
+                dev.notify_discrete_scroll(GLib.get_monotonic_time(), n > 0 ? plus : minus,
+                    Clutter.ScrollSource.WHEEL);
+            }
+        };
+        send(dy, Clutter.ScrollDirection.DOWN, Clutter.ScrollDirection.UP);
+        send(dx, Clutter.ScrollDirection.RIGHT, Clutter.ScrollDirection.LEFT);
+    }
+
+    // Zoom is Ctrl + wheel, which browsers, Files, editors and image viewers all understand.
+    _zoom(steps) {
+        if (!steps)
+            return;
+        const kbd = this._keyboard();
+        kbd.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
+        this._scroll(0, -steps);    // wheel up zooms in
+        kbd.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
     }
 
     _movePointer(x, y) {
@@ -332,6 +397,40 @@ var Air = class Air {
             return;
         }
         g.win.move_frame(true, Math.round(px + g.dx), Math.round(py + g.dy));
+    }
+
+    _resizeStart() {
+        const g = this._grabbed;
+        if (!g)
+            return;
+        const r = g.win.get_frame_rect();
+        g.base = { x: r.x, y: r.y, width: r.width, height: r.height,
+            cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+        this._showToast('Resize', 700);
+    }
+
+    _resize(scale) {
+        const g = this._grabbed;
+        if (!g || !g.base || !g.win.get_compositor_private())
+            return;
+        const area = Main.layoutManager.getWorkAreaForMonitor(g.win.get_monitor());
+        const w = Math.round(Math.max(320, Math.min(area.width, g.base.width * scale)));
+        const h = Math.round(Math.max(220, Math.min(area.height, g.base.height * scale)));
+        const x = Math.round(Math.max(area.x, Math.min(area.x + area.width - w, g.base.cx - w / 2)));
+        const y = Math.round(Math.max(area.y, Math.min(area.y + area.height - h, g.base.cy - h / 2)));
+        g.win.move_resize_frame(true, x, y, w, h);
+        this._resizedTo = { width: w, height: h };
+    }
+
+    _resizeEnd(px, py) {
+        const g = this._grabbed;
+        if (!g)
+            return;
+        // Carry on holding it from wherever the hand now is over it.
+        const r = g.win.get_frame_rect();
+        g.dx = Math.max(-r.width + 20, Math.min(-20, r.x - px));
+        g.dy = Math.max(-r.height + 20, Math.min(-10, r.y - py));
+        g.base = null;
     }
 
     _drop() {
@@ -446,7 +545,8 @@ var Air = class Air {
         this._readout.visible = f.engaged && !!primary;
         if (this._readout.visible) {
             const depth = primary.depth ? `${(primary.depth / 1000).toFixed(2)} m` : '';
-            const pose = this._grabbed ? 'holding' : primary.pose;
+            const pose = { scroll: 'scroll', zoom: 'zoom', resize: 'resize', palms: 'two palms' }[f.mode] ||
+                (this._grabbed ? 'holding' : primary.pose);
             this._readout.text = [depth, pose.toUpperCase()].filter(Boolean).join('  ·  ');
             this._readout.set_position(Math.round(rx + RETICLE * 0.36), Math.round(ry + RETICLE * 0.22));
         }
@@ -460,6 +560,8 @@ var Air = class Air {
                 parts.push(`${(primary.depth / 1000).toFixed(2)} M`);
             if (f.hands && f.hands.length > 1)
                 parts.push('TWO HANDS');
+            if (f.mode && f.mode !== 'grab')
+                parts.push(f.mode.toUpperCase());
             parts.push(`${Math.round(f.fps || 0)} FPS`);
             this._chip.text = parts.join('   ·   ');
             const [, natural] = this._chip.get_preferred_width(-1);
@@ -553,7 +655,7 @@ var Air = class Air {
             const t = this._phase;
             const primary = (f.hands || []).find(h => h.primary);
             const pinch = primary ? primary.pinch : 0;
-            const tone = this._grabbed ? 'warn' : 'accent';
+            const tone = this._grabbed || f.mode === 'resize' ? 'warn' : 'accent';
             const tau = 2 * Math.PI;
 
             if (!f.engaged) {
@@ -620,6 +722,37 @@ var Air = class Air {
                 cr.lineTo(c + dx * (r + 16), c + dy * (r + 16));
             }
             cr.stroke();
+            if (f.mode === 'scroll') {
+                // Chevrons above and below: the wheel is under your hand.
+                cr.setLineWidth(3);
+                source(cr, 'cyan', 0.95);
+                for (const dir of [-1, 1]) {
+                    for (const k of [0, 1]) {
+                        const yy = c + dir * (r + 26 + k * 9);
+                        cr.moveTo(c - 9, yy - dir * 6);
+                        cr.lineTo(c, yy);
+                        cr.lineTo(c + 9, yy - dir * 6);
+                    }
+                }
+                cr.stroke();
+            } else if (f.mode === 'zoom') {
+                // A magnifier's plus at the centre.
+                cr.setLineWidth(3);
+                source(cr, 'cyan', 0.95);
+                cr.moveTo(c - 12, c); cr.lineTo(c + 12, c);
+                cr.moveTo(c, c - 12); cr.lineTo(c, c + 12);
+                cr.stroke();
+            } else if (f.mode === 'resize') {
+                cr.setLineWidth(3);
+                source(cr, 'warn', 0.95);
+                for (const [dx, dy] of [[1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+                    const ex = c + dx * (r + 30), ey = c + dy * (r + 30);
+                    cr.moveTo(c + dx * (r + 14), c + dy * (r + 14));
+                    cr.lineTo(ex, ey);
+                    cr.moveTo(ex - dx * 9, ey); cr.lineTo(ex, ey); cr.lineTo(ex, ey - dy * 9);
+                }
+                cr.stroke();
+            }
             source(cr, tone, 1);
             cr.arc(c, c, 3, 0, tau);
             cr.fill();
@@ -721,11 +854,11 @@ var Air = class Air {
         });
     }
 
-    _ripple(x, y) {
+    _ripple(x, y, styleClass = 'adaptive-air-ripple') {
         if (!this._layer)
             return;
         const size = 44;
-        const ring = new St.Widget({ style_class: 'adaptive-air-ripple', reactive: false,
+        const ring = new St.Widget({ style_class: styleClass, reactive: false,
             width: size, height: size, x: x - size / 2, y: y - size / 2 });
         ring.set_pivot_point(0.5, 0.5);
         this._layer.add_child(ring);
