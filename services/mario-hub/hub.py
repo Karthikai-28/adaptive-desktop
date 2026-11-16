@@ -815,7 +815,9 @@ def make_app(hub, port):
     async def photos(request):
         result = await asyncio.to_thread(tiles.set_album, hub.cfg_file, (await read(request)).get("album"))
         if result.get("ok"):
-            await hub.reload_config("photos")
+            await hub.reload_config()
+            # the first batch of pictures takes a while: answer now, the tile fills in when they land
+            hub.tasks.append(asyncio.create_task(hub.collect_once("photos")))
         return web.json_response(result)
 
     async def photo(request):

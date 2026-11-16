@@ -868,10 +868,38 @@ def test_tiles(cfg, work):
 
     long = tiles.expand_album_link("https://photos.app.goo.gl/short", location=location,
                                    lookup=lambda name: {"Answer": [{"type": 5, "data": "x"}, {"type": 1, "data": "142.250.0.1"}]})
-    check("photos: a short link that does not load is looked up once more and kept as the long link",
-          long == "https://photos.google.com/share/long?key=k" and hops == [None, "142.250.0.1"])
+    check("photos: a short link that does not load is looked up through Google and kept as the long link",
+          long == "https://photos.google.com/share/long?key=k" and sorted(hops, key=str) == ["142.250.0.1", None])
+
+    def slow_plain(host, path, address=None, timeout=10):
+        if address is None:
+            time.sleep(3)                        # the provider's dead address: a long wait for nothing
+            raise OSError("timed out")
+        return "https://photos.google.com/share/long?key=k"
+
+    began = time.monotonic()
+    long = tiles.expand_album_link("https://photos.app.goo.gl/short", location=slow_plain,
+                                   lookup=lambda name: {"Answer": [{"type": 1, "data": "142.250.0.1"}]})
+    check("photos: the lookup through Google does not wait for the dead address to time out",
+          long.endswith("key=k") and time.monotonic() - began < 1.5)
+    check("photos: a resolver that cannot be reached is not a crash",
+          tiles.expand_album_link("https://photos.app.goo.gl/short", location=location,
+                                  lookup=lambda name: (_ for _ in ()).throw(OSError("no route"))) == "")
     check("photos: a short link that leads nowhere is refused with what to paste instead",
           "long address" in tiles.set_album(cfg_file, "https://photos.app.goo.gl/short", expand=lambda u: "")["error"])
+    check("photos: the link is found in text pasted around it, without https:// or with a signed-in /u/1/",
+          tiles.album_link("Check out my album: https://photos.app.goo.gl/AbC12_x shared via Photos") == "https://photos.app.goo.gl/AbC12_x"
+          and tiles.album_link("photos.app.goo.gl/AbC12") == "https://photos.app.goo.gl/AbC12"
+          and tiles.album_link("https://photos.google.com/u/1/share/AF1Q?key=k") == "https://photos.google.com/share/AF1Q?key=k"
+          and tiles.album_link("https://photos.google.com/album/AF1Q") == "")
+    check("photos: the album's own address (no share key) is refused with how to make a link",
+          "Create link" in tiles.set_album(cfg_file, "https://photos.google.com/share/AF1Q")["error"])
+
+    class Gone(Exception):
+        code = 404
+    gone = tiles.photos({"photos": {"album": album}}, folder=folder, fetch=lambda *a, **k: (_ for _ in ()).throw(Gone()))
+    check("photos: an album that is no longer shared asks for a new link instead of 'can't reach'",
+          gone.get("fix") is True and "no longer opens" in gone["error"])
 
     # ---- sticky note
     sticky = work / "sticky.md"

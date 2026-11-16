@@ -350,6 +350,9 @@ def photos(cfg, folder=None, fetch=None, per_run=24):
         _, _kind, body = fetch(album, 6_000_000, {"User-Agent": collectors.NEWS_UA}, timeout=20)
         title, found = parse_album(body.decode(errors="replace"))
     except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "code", None) in (404, 410):     # Google answered: the link itself is gone
+            return {"album": album, "items": [], "fix": True,
+                    "error": "That album link no longer opens. It may have been unshared; paste a new link."}
         kept = sorted(p.name for p in folder.glob("*.jpg"))
         return {"album": album, "items": [{"name": n} for n in kept], "waiting": True,
                 "error": f"Can't reach Google Photos right now ({str(exc)[:60]})."}
@@ -622,39 +625,70 @@ def expand_album_link(url, location=_location, lookup=None):
 
     Some providers answer the name goo.gl with an address of their own, where nothing listens (seen
     on this laptop's connection), so the short link never loads although Google Photos itself does.
-    When the plain way fails, the name is looked up once through Google's public DNS over HTTPS and
-    the redirect is read from that address. Only the long link is kept."""
+    The plain way and a lookup through Google's public DNS over HTTPS run side by side, and the
+    first long link either one finds is kept: waiting for the plain way to time out first cost ~20 s
+    (one dead IPv6 and one dead IPv4 address), long enough for the save to look broken."""
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
     from urllib.parse import urlsplit
     parts = urlsplit(url)
     if parts.hostname != "photos.app.goo.gl":
         return url
-    try:
-        found = location(parts.hostname, parts.path)
-    except OSError:
-        found = ""
-    if not found.startswith(ALBUM_PREFIXES[1]):
-        lookup = lookup or (lambda name: collectors._http_json(f"https://dns.google/resolve?name={name}&type=A", timeout=8)[0])
-        answer = lookup(parts.hostname) or {}
-        for record in answer.get("Answer") or []:
+    lookup = lookup or (lambda name: collectors._http_json(f"https://dns.google/resolve?name={name}&type=A", timeout=8)[0])
+
+    def plain():
+        return location(parts.hostname, parts.path)
+
+    def through_google():
+        for record in (lookup(parts.hostname) or {}).get("Answer") or []:
             if record.get("type") == 1:
                 try:
                     found = location(parts.hostname, parts.path, record.get("data"))
                 except OSError:
                     continue
                 if found.startswith(ALBUM_PREFIXES[1]):
-                    break
-    return found if found.startswith(ALBUM_PREFIXES[1]) else ""
+                    return found
+        return ""
+
+    pool = ThreadPoolExecutor(max_workers=2)
+    pending = {pool.submit(plain), pool.submit(through_google)}
+    try:
+        while pending:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for job in done:
+                try:
+                    found = job.result() or ""
+                except Exception:  # noqa: BLE001 - a dead address or an unreachable resolver
+                    continue
+                if found.startswith(ALBUM_PREFIXES[1]):
+                    return found
+        return ""
+    finally:
+        pool.shutdown(wait=False)               # the slower way finishes on its own; nobody waits for it
+
+
+ALBUM_IN_TEXT = re.compile(r"(?:https?://)?(photos\.app\.goo\.gl/[A-Za-z0-9_\-]+|photos\.google\.com/(?:u/\d+/)?share/[^\s\"'<>]+)")
+
+
+def album_link(text):
+    """What was pasted -> the album link in it: text around the link (a phone's share sheet), a
+    missing https:// and a signed-in /u/1/ are all fine. '' when there is no album link."""
+    found = ALBUM_IN_TEXT.search(str(text or ""))
+    return "https://" + re.sub(r"^photos\.google\.com/u/\d+/", "photos.google.com/", found.group(1)) if found else ""
 
 
 def set_album(cfg_file, album, expand=expand_album_link):
-    album = str(album or "").strip()
-    if album and not album.startswith(ALBUM_PREFIXES):
+    pasted = str(album or "").strip()
+    album = album_link(pasted)
+    if pasted and not album:
         return {"ok": False, "error": "Paste a Google Photos shared album link (photos.app.goo.gl/… )."}
     if album:
         album = expand(album)
         if not album:
             return {"ok": False, "error": "That short link could not be opened from this network. Open the album in "
                                           "a browser and paste the long address (photos.google.com/share/…)."}
+        if "key=" not in album:
+            return {"ok": False, "error": "That is the album's own address, which only you can open. In Google Photos "
+                                          "choose Share, then Create link, and paste that link."}
     raw = _read_json(cfg_file, {})
     photos_cfg = raw.get("photos") if isinstance(raw.get("photos"), dict) else {}
     photos_cfg["album"] = album
