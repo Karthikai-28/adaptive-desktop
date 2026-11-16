@@ -39,6 +39,8 @@ from aiohttp import web, WSMsgType
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import brain  # noqa: E402
 import collectors  # noqa: E402
+import commands  # noqa: E402
+import control  # noqa: E402
 import config as config_mod  # noqa: E402
 import engines  # noqa: E402
 import tiles  # noqa: E402
@@ -109,6 +111,9 @@ class Hub:
         self.clients = set()
         self.presence = {"state": "ready", "detail": ""}
         self.handoffs = {}
+        self.control = control.Control(sh=self._sh, http=self._http,
+                                       launch=lambda name: self.action("launch", name),
+                                       open_url=self._open_url)
         self.loom_session = None
         self.sessions = {"claude": None, "gemini": None}   # one conversation per engine per hub run
         self.limited = {}                                   # engine -> when its limit lifts
@@ -335,6 +340,42 @@ class Hub:
         # route: "instant" (from Home's own data), "answer" (engine says who), or "handoff" (a plan)
         return {"route": "answer", **result}
 
+    # ------------------------------------------------------ what spoken commands use (control.py)
+    def _sh(self, argv, wait=True, timeout=10):
+        env = launch_env()
+        if not wait:
+            try:
+                subprocess.Popen(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+                return 0, ""
+            except OSError:
+                return 1, ""
+        try:
+            done = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=timeout)
+            return done.returncode, done.stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return 1, ""
+
+    @staticmethod
+    def _http(method, url, body=None, timeout=5):
+        if not url.startswith("http://127.0.0.1:"):
+            return None
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(url, data=data, method=method,
+                                     headers={"Content-Type": "application/json"} if data else {})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as res:
+                raw = res.read()
+                if res.headers.get_content_type() == "application/json":
+                    return json.loads(raw)
+                return raw
+        except (OSError, ValueError):
+            return None
+
+    def _open_url(self, url):
+        if str(url).startswith(("https://", "http://127.0.0.1:")):
+            self._sh(["xdg-open", str(url)], wait=False)
+
     async def direct_command(self, text):
         """Small explicit commands execute through the same bounded actions as the tiles."""
         text = re.sub(r"^(?:hey\s+)?mario[,\s:]+", "", text.strip(), flags=re.I)
@@ -348,17 +389,17 @@ class Hub:
             result = await self.tidy_sticky()
             return {"route": "command", "via": "Mario", **result,
                     "answer": f"Tidied and filed in Mario Notes.\n\n{result['text']}" if result.get("ok") else ""}
-        launch = re.fullmatch(r"(?:please\s+)?open (?:the\s+)?(.+?)[.!]?", text, re.I)
-        if launch:
-            name = launch[1].strip().lower()
-            alias = {"system monitor": "monitor", "file manager": "files", "editor": "code"}
-            name = alias.get(name, name)
-            urls = {"mail": "https://mail.google.com/", "gmail": "https://mail.google.com/",
-                    "calendar": "https://calendar.google.com/"}
-            if name in LAUNCH or name in urls:
-                result = await asyncio.to_thread(self.action, "url" if name in urls else "launch", urls.get(name, name))
-                return {"route": "command", "via": "Mario", **result,
-                        "answer": f"Opening {name}." if result.get("ok") else ""}
+        # Everything else Mario can do on the computer, the TV and the Kinect (commands.py says
+        # what was meant, control.py does it); what is not a command is answered as usual.
+        command = commands.parse(text)
+        if command:
+            await self.set_presence("thinking", "On it")
+            try:
+                result = await asyncio.to_thread(self.control.run, command)
+            finally:
+                await self.set_presence("ready")
+            if not result.pop("fallthrough", False):
+                return {"route": "command", "via": "Mario", "intent": command["intent"], **result}
         return None
 
     # ------------------------------------------------------ "Hey Mario"
@@ -856,6 +897,10 @@ def make_app(hub, port):
     app.router.add_post("/api/task/done", task_done)
     app.router.add_post("/api/note", note)
     app.router.add_get("/", page)
+    app.router.add_get("/commands", lambda _r: web.FileResponse(STATIC / "commands.html"))
+    app.router.add_get("/api/commands", lambda _r: web.json_response(
+        [{"title": t, "items": [{"say": say, "does": what} for say, _i, what in items]}
+         for t, items in commands.CHEATSHEET]))
     app.router.add_get("/panel", page)
     app.router.add_get("/api/state", state)
     app.router.add_get("/ws", ws)
