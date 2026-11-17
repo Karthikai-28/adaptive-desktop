@@ -19,10 +19,10 @@ reads what is already on the machine. Actions are added on top, one confirmed st
 | Collectors | `services/mario-hub/collectors.py` | Mail (IMAP, read-only), calendar (private iCal, every account's merged), tasks (Quick Note inboxes), builds (git), agents (terminal tmux sessions, Agent Office), Thinking Space boards, recent files, notes, weather (Open-Meteo), AI usage (`quotaSnapshot.py`, Claude and Gemini), phone (Adaptive Link socket), health (updates, disk, battery, failed services), LOOM and system for Mario's own status; Saved Reels, downloads, processes and ports stay available to Mario's answers |
 | Tiles | `services/mario-hub/tiles.py` | The tiles that do more than read: Watch next (the Sheet's mirror plus your watched marks), Storage (sizes, and emptying the places Home may empty), Spotify (MPRIS on the session bus), Photos (a shared Google Photos album copied here), the sticky note and Mario Notes, and the accounts (`mario.json` and the keyring) |
 | Decisions | `services/mario-hub/brain.py` (pure) | Instant answers from state, answer vs hand-off, the hand-off's limits, the Next step list |
-| Who answers | `services/mario-hub/engines.py` | Claude, then Gemini, then the laptop: the command lines, reading each CLI's reply, recognising a usage limit, the live context sent with a question |
+| Who answers | `services/mario-hub/engines.py` | Claude, then Gemini, then the laptop, with the model and effort a question needs (`tier()`: quick or deep): the command lines, reading each CLI's reply, recognising a usage limit, the live context sent with a question |
 | Settings | `services/mario-hub/config.py`, `~/.config/adaptive-desktop/mario.json` | Repos, Thinking Space checkout, mail accounts, `brain` order and models, LOOM/Ollama/Office URLs, backup time |
 | Home and Mario's layer | `apps/mario-home/static/` (`index.html`, `home.css`, `home.js`, `tiles.js`, `layer.js`) | One page: `/` is Home, `/panel` Mario over your work. `home.js` is the frame (connection, tabs, slides, the voice session), `tiles.js` the newer tiles, the accounts sheet, the photo viewer and the orb, `layer.js` the layer: words as you speak, the answer, typing instead, leaving by itself, Hey Mario's switch and training. DOM only, no framework, no `innerHTML` |
-| Voice | `services/mario-hub/voice.py`, `voice_worker.py`, `wake.py`, `voice_rules.py` (pure) | The microphone session and the words while you speak; the recogniser, in the voice environment; the “Hey Mario” listener and the training; what counts as the phrase and as your voice |
+| Voice | `services/mario-hub/voice.py`, `voice_worker.py`, `wake.py`, `voice_rules.py` (pure), `speech.py`, `tts_worker.py` | The microphone session and the words while you speak; the recogniser, in the voice environment; the “Hey Mario” listener and the training; what counts as the phrase and as your voice; Mario's own voice (Kokoro, on this laptop) |
 | Host | `apps/mario-home/host.py` (GTK 3 + WebKitGTK), `scripts/adaptive-home.sh` | Home as a layer over the work area: loaded hidden at login (`--background`), shown and hidden by Super+H (a D-Bus message, about 20 ms), with one view per tab; `--panel` is Mario's layer at the centre of the screen (`--wake`, `--train`, `--quiet`, `--hide`) |
 | Unit and login entry | `services/adaptive-mario-hub.service`, `apps/mario-home/adaptive-mario-home.desktop` | Templates filled with the checkout's path |
 
@@ -211,7 +211,7 @@ listening as soon as it appears.
 | --- | --- |
 | Super+J | The orb appears at the centre and listens. Again, or Escape: it goes |
 | Speak | The orb's ring takes the shape of your voice, and **your words appear under it as you say them** (recognised again about every half second of new speech) |
-| Pause for about two seconds | The request is sent; **Space** or a click on the orb sends it sooner. The words stay under the orb, the answer comes in below them and is read aloud; the orb grows smaller and glides up to make room |
+| Pause for a second | The request is sent (after 0.6 s for a whole command such as “open Spotify”, which then needs no second recognition pass); **Space** or a click on the orb sends it sooner. The words stay under the orb, the answer comes in below them and is read aloud; the orb grows smaller and glides up to make room |
 | Space, or click the orb | Talk again |
 | Any letter, or **Type** under the orb | A box to type the request instead |
 | Move to another window | Mario stays while it is working, then leaves by itself |
@@ -283,12 +283,28 @@ thump). Recognition runs in a separate process that is killed on cancel or timeo
 (`voice_worker.py`, faster-whisper base.en on CPU with int8 and speech filtering): it is asked for
 the words so far while you speak and once, carefully, for the whole request. Audio never goes to a
 cloud service or a recording file. Only the resulting request enters Mario's normal answer path.
-Replies are spoken locally through Speech Dispatcher (`spd-say`) when installed, and remain visible.
+The recogniser is given the installed apps' names (faster-whisper `hotwords`, from `control.vocabulary`),
+so it writes “Spotify”, not “spot if I”; tested with Indian, British and American voices, this
+turned “Lunch Firefox” into “Launch Firefox” and “Switch the ground” into “Switch the Chrome”.
 `wake.py` is the “Hey Mario” listener and the training.
+
+**Mario's voice.** Replies are read in a natural neural voice, Kokoro v1.0 (`speech.py`,
+`tts_worker.py`, through sherpa-onnx in the voice environment), on this laptop: the model stays
+loaded for the hub's life, and a reply is made and played a sentence at a time, so the first words
+come about 0.6 s after the answer (the rest is made while it plays, about 1.2x real time on this
+CPU). Short replies such as “Opening Spotify.” are kept as sound in
+`~/.cache/adaptive-desktop/mario-voice` and play at once the next time. What is read is cleaned
+for the ear (`for_speech`: no Markdown, links, paths or code). A newer reply cuts the last one off.
+Without the model, or with `"voice": {"engine": "espeak"}`, Speech Dispatcher (`spd-say`) speaks.
+The voice is `"voice": {"speaker": "am_michael", "speed": 1.0}` in `mario.json`; others include
+`am_fenrir`, `am_puck`, `bm_george`, `af_heart` (the most natural of all), `af_bella`, `bf_emma`, and
+`hm_omega` / `hf_alpha` (Indian English); every name is in the model's `names.txt`. The full-precision
+model is used: the int8 one runs at a third of real time on CPUs without VNNI.
 
 ```sh
 scripts/install-mario-voice.sh    # dedicated .local/mario-voice environment; public models only:
-                                  # Whisper base.en, and for Hey Mario the speech detector and the speaker model
+                                  # Whisper base.en, Kokoro v1.0 (the voice), and for Hey Mario the
+                                  # speech detector and the speaker model
 ```
 
 The desktop host is WebKitGTK, so this does not depend on Chrome-only browser speech recognition.
@@ -326,21 +342,45 @@ The hub is a user service that starts at boot (lingering is on), before anyone l
    shell's `org.adaptive.Shell` bridge with fixed action names, the Kinect hub on 127.0.0.1:8792,
    the Cast command line, pactl, MPRIS, the app grid's launcher). A sentence with command-line
    symbols (`; & | $ < >`) is never a command, nothing spoken is run as a command line, and an
-   "open X" that is not an app falls through to an answer. Every sentence you can say is in
+   "open X" that is not an app falls through to an answer. Names are matched the way they are
+   heard: exactly first, then run together (“fire fox”), then by spelling and by sound
+   (`control.sounds`: “spotifai”, “spotty fy”, “sportify” are Spotify; “open sesame” is nothing).
+   Misheard verbs count too (“often”, “oven”, “opening” for open; “lunch” for launch; “switch
+   the” for switch to), and an app's name said on its own (“Spotify”) opens it when the name is
+   clear. Every sentence you can say is in
    docs/MARIO_COMMANDS.md, written from `commands.CHEATSHEET`; "what can I say?" opens it at
    http://127.0.0.1:8791/commands. Checked by `scripts/verify-mario-commands.py`.
 1. **Instant**: "brief me", "what changed today", "pick a movie for tonight" are answered from the
    cards with no model.
 2. **Answer**: everything else that is a question or chat goes, with a few lines of live context
    (time, weather, today's events, unread mail per account, open tasks, repo state), to the first of
-   `brain` (default `["claude", "gemini", "local"]`) that can answer:
-   - **Claude**: `claude -p` (`claude_model`, `claude-sonnet-5-5` by default; the ask bar names it) with Mario's own system prompt and
-     no tools but web search and web fetch, so it can look things up but never run or change
-     anything; one conversation per hub run (`--resume`). It runs in `~/.local/share/adaptive-desktop/mario/brain`.
+   `brain` (default `["claude", "gemini", "local"]`) that can answer. **The router** (`engines.tier`,
+   from the words alone, so deciding costs nothing) calls a question *quick* (a fact, a chat, a
+   short how-to) or *deep* (explain, why, compare, plan, write, code, an error, more than 28 words or
+   more than one question), and each engine answers with that tier's set-up (`models` and `effort`
+   in `mario.json`):
+
+   | | Claude | Gemini (at Claude's limit) |
+   | --- | --- | --- |
+   | quick | Sonnet 5.5, `--effort low` | Gemini 3.8 Flash Low |
+   | deep | Sonnet 5.5, `--effort high` | Gemini 3.8 Flash Medium |
+
+   Measured here on 2026-11-17, each CLI run exactly as Mario runs it, over 11 spoken questions:
+   Sonnet 5.5 took a median 2.7-3.0 s from asking to the whole answer and Haiku 5.5 3.7-3.9 s (slower
+   in every pair, so Haiku is not the quick model; `"models": {"quick": {"claude": "claude-haiku-5-5"}}`
+   puts it back), and Gemini through `agy` 11-14 s, most of it agy's own start-up. A question asked
+   by voice also asks for a short, talking reply (`engines.SPOKEN`).
+   - **Claude**: `claude -p` with Mario's own system prompt and no tools but web search and web
+     fetch, so it can look things up but never run or change anything. It runs lean
+     (`engines.LEAN`): no MCP servers, skills or settings files, which also keeps CLAUDE.md and
+     memory out (about 2,600 tokens a question instead of 7,500), still on the subscription's own
+     login (`--bare` is not used: it needs an API key). A conversation carries on (`--resume`) while
+     it was used in the last `conversation_s` (10 minutes); after that a question starts afresh.
+     It runs in `~/.local/share/adaptive-desktop/mario/brain`.
    - **Gemini**: when Claude is at its usage limit (the AI usage tile at 100 % in a window that has
-     not reset, or Claude itself says so), or does not answer: `agy -p` in plan mode, sandboxed,
-     `gemini_model` (Gemini 3.8 Flash low by default; answers in a few seconds). A limit Claude reports
-     is remembered until the time it names (else 15 minutes), so later questions go straight to Gemini.
+     not reset, or Claude itself says so), or does not answer: `agy -p` in plan mode, sandboxed, the
+     tier's Gemini model. A limit Claude reports is remembered until the time it names (else 15
+     minutes), so later questions go straight to Gemini.
    - **The laptop**: LOOM (`POST /api/chat`, one session per hub run), else Ollama, only when neither
      cloud answers.
    The answer says who answered and, under it, why the ones before were skipped. No API key reaches
@@ -394,8 +434,8 @@ swing), `thinking` (a shuttle runs along them), `speaking` (while a reply is rea
 colours: slow concentric rings and orbiting arcs at rest; while it listens the inner ring swells
 and roughens with the microphone's real level and ripples run outward; while it thinks the arcs
 spin up; while it speaks, waves travel round the ring and pulse outward for as long as the reply is
-being read (`spd-say -w`; Speech Dispatcher gives no sound level, so the talk-back waves are drawn,
-not measured). Clicking the orb is Talk to Mario. It stops drawing while the layer is hidden.
+being read (until the voice worker says the sound has ended; the talk-back waves are drawn, not
+measured). Clicking the orb is Talk to Mario. It stops drawing while the layer is hidden.
 
 ## Next
 

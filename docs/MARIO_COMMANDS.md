@@ -53,6 +53,7 @@ http://127.0.0.1:8791/commands, and "What can I say?" opens it.
 | Open Spotify / Open Files / Launch Firefox | Any app in the app grid, by its name. |
 | Open YouTube / Open Gmail | Common sites open in the browser. |
 | Switch to Chrome / Bring up Terminal | Brings that app's window to the front. |
+| Spotify (an app's name on its own) | Opens it. A name misheard or said with an accent still finds its app. |
 | Close this window / Close Spotify | The window you are in, or an app by name. |
 | Maximise / Minimise | The window you are in. |
 | Snap left / Put this window to the right | That half of the screen. |
