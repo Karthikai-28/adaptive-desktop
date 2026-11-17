@@ -6,6 +6,7 @@
 #   .local/mario-voice/venv            faster-whisper (the words) and sherpa-onnx (speech detector, voiceprint)
 #   .local/mario-voice/model           Whisper base.en
 #   .local/mario-voice/wake            silero_vad.onnx (is somebody speaking), speaker.onnx (whose voice)
+#   .local/mario-voice/tts             Kokoro v1.0: the voice Mario answers in (services/mario-hub/speech.py)
 #
 # "Hey Mario" stays off until you teach Mario your voice: Super+J, then Hey Mario under the orb.
 set -Eeuo pipefail
@@ -38,6 +39,24 @@ mkdir -p "$voice_dir/wake"
 fetch silero_vad.onnx "$releases/asr-models/silero_vad.onnx" 9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6
 # ("recongition" is how the release is spelled upstream)
 fetch speaker.onnx "$releases/speaker-recongition-models/nemo_en_titanet_small.onnx" ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e
+# Mario's voice: Kokoro v1.0 (natural speech, about 1.2x real time on four cores), unpacked into
+# tts/. The full-precision model: the int8 one is three times slower on CPUs without VNNI.
+tts="$voice_dir/tts/kokoro-multi-lang-v1_0"
+if [ ! -f "$tts/model.onnx" ]; then
+    mkdir -p "$voice_dir/tts"
+    part="$voice_dir/tts/kokoro.tar.bz2.part"
+    curl --fail --location --silent --show-error --max-time 1800 --output "$part" "$releases/tts-models/kokoro-multi-lang-v1_0.tar.bz2"
+    echo "60703707bc05ccd48d60e1eb723f38b07d6e474795a0b6a588d7220400e0f7a4  $part" | sha256sum --check --status \
+        || { rm -f "$part"; echo 'kokoro: the download is not the file expected.'; exit 1; }
+    tar -xjf "$part" -C "$voice_dir/tts" && rm -f "$part"
+fi
+# the speakers' names, in model order, for "voice": {"speaker": ...} in mario.json
+"$voice_dir/venv/bin/python" -I - "$tts" <<'PY'
+import sys
+import onnxruntime
+meta = onnxruntime.InferenceSession(sys.argv[1] + "/model.onnx", providers=["CPUExecutionProvider"]).get_modelmeta()
+open(sys.argv[1] + "/names.txt", "w").write(meta.custom_metadata_map["speaker_names"] + "\n")
+PY
 "$voice_dir/venv/bin/python" - "$voice_dir/wake" <<'PY'
 import sys
 import sherpa_onnx

@@ -11,6 +11,7 @@ line, on stdout.
 
     P <audio so far>   -> {"partial": text}       quick pass while you are still speaking
     F <whole audio>    -> {"final": text}         careful pass once you have stopped
+    H <names>          -> (nothing)               words to listen for: the installed apps' names
     V <profile JSON>   -> (nothing)               whose voice to listen for: {"centre": [...], "bar": x}
     A <100 ms audio>   -> now and then {"wake": {"start": sample, "score": x}} or {"heard": {...}}
     R                  -> (nothing)               forget the stream so far (after a pause in it)
@@ -49,13 +50,14 @@ class Words:
     def __init__(self):
         self.model = WhisperModel(str(VOICE_DIR / "model"), device="cpu", compute_type="int8", cpu_threads=4,
                                   local_files_only=True)
+        self.hotwords = None
 
     def text(self, audio, careful=False):
         if len(audio) < RATE // 5:
             return ""
         segments, _ = self.model.transcribe(audio[-LONGEST:], language="en", beam_size=3 if careful else 1,
                                             vad_filter=True, condition_on_previous_text=False,
-                                            without_timestamps=not careful)
+                                            without_timestamps=not careful, hotwords=self.hotwords)
         return " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.6).strip()
 
 
@@ -188,7 +190,9 @@ def main():
     ear = Ear(words) if mode == "wake" else None
     say({"ready": mode})
     for kind, body in frames(sys.stdin.buffer):
-        if kind == b"P":
+        if kind == b"H":
+            words.hotwords = body.decode("utf-8", "replace").strip() or None
+        elif kind == b"P":
             say({"partial": words.text(samples(body))})
         elif kind == b"F":
             say({"final": words.text(samples(body), careful=True)})

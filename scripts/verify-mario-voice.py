@@ -53,14 +53,14 @@ async def main():
     assert gate.feed(silence)
     gate = voice.Silence()
     assert not any(gate.feed(speech) for _ in range(5))
-    assert not any(gate.feed(silence) for _ in range(17))
+    assert not any(gate.feed(silence) for _ in range(voice.Silence.PAUSE - 1))     # 1.2 s of quiet ends it
     assert gate.feed(silence)
     # a room with a fan: the hum is not speech, your voice over it is, and a pause still ends it
     hum, over = struct.pack('<1600h', *([700] * 1600)), struct.pack('<1600h', *([4000] * 1600))
     gate = voice.Silence()
     assert not any(gate.feed(hum) for _ in range(30)) and gate.spoken == 0 and gate.room.bar() > 1400
     assert not any(gate.feed(over) for _ in range(8)) and gate.spoken == 8
-    assert not any(gate.feed(hum) for _ in range(17)) and gate.feed(hum)
+    assert not any(gate.feed(hum) for _ in range(voice.Silence.PAUSE - 1)) and gate.feed(hum)
     assert gate.room.level() == 0
     # a microphone that thumps as it opens has not said anything
     gate = voice.Silence(voice.Silence.SETTLE)
@@ -93,10 +93,25 @@ async def main():
         assert status['text'] == 'Add a task review the build' and status['state'] == 'done'
         # the words so far were recognised while it listened, then the whole request once, carefully
         worker = next(p for p in processes if not p.recording)
-        assert status['partial'] == 'Add a task' and worker.stdin.seen[0] == (b'P', 7 * 3200)
-        assert worker.stdin.seen[-1] == (b'F', 29 * 3200)
+        assert worker.stdin.seen[0] == (b'H', 0)        # the app names to listen for (none here)
+        assert status['partial'] == 'Add a task' and worker.stdin.seen[1] == (b'P', 7 * 3200)
+        # once you stop it looks again at once, and the request ends 1.2 s after your last word
+        assert worker.stdin.seen[2:] == [(b'P', 12 * 3200), (b'P', 14 * 3200), (b'F', 23 * 3200)], worker.stdin.seen
         assert all(p.killed for p in processes) and v.proc is None and v.worker is None
         assert events == ['listening', 'thinking', 'ready']
+        # A complete command ("Open Spotify") ends after 0.6 s of quiet with the words already
+        # heard: no second, careful pass, and the recogniser was told the apps' names.
+        quick = voice.Voice(presence, lambda: {}, complete=lambda t: t == 'Open Spotify', vocabulary=lambda: 'Mario, Spotify')
+        quick.available = lambda: True
+        words.update({b'P': {'partial': 'Open Spotify'}})
+        processes.clear()
+        await quick.start()
+        await quick.task
+        worker = next(p for p in processes if not p.recording)
+        assert quick.state == 'done' and quick.text == 'Open Spotify', (quick.state, quick.text, quick.error)
+        assert worker.stdin.seen[0] == (b'H', len('Mario, Spotify')) and b'F' not in [k for k, _ in worker.stdin.seen], worker.stdin.seen
+        assert worker.stdin.seen[-1] == (b'P', 14 * 3200), worker.stdin.seen
+        words.update({b'P': {'partial': 'Add a task'}})
         # A disappeared page cancels before it can transcribe or act.
         await v.start(); v.touched = time.monotonic() - 10
         await v.task
@@ -148,7 +163,7 @@ async def main():
             assert calls == [('launch', 'terminal')]
             assert await h.direct_command('Open terminal; delete files') is None
             assert await h.direct_command('Can you add a task?') is None
-    print('PASS: silence/no-speech boundaries, a noisy room and an opening thump, busy/ownership guards, words while listening, disconnect, cancellation, process cleanup, '
+    print('PASS: silence/no-speech boundaries, a complete command ending sooner without a second pass, a noisy room and an opening thump, busy/ownership guards, words while listening, disconnect, cancellation, process cleanup, '
           'a session begun by "Hey Mario" (hand-over, the phrase left out, nothing said), task/note writes and bounded launch commands')
 
 

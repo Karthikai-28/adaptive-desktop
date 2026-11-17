@@ -47,6 +47,13 @@ def normalise(text):
     t = re.sub(r"\bplease\b", "", t, flags=re.I)
     t = re.sub(r"[.!?,]+$", "", t).strip().lower()
     t = re.sub(r"\s+", " ", t.replace("’", "'"))
+    # Whisper writes pauses as commas ("Open, Spotify."); a dot inside an address stays
+    t = re.sub(r"(?<=\w)[,.!?;:]+(?=\s|$)", "", t).strip()
+    # the verbs as they are often heard, said with an accent or in a hurry
+    t = re.sub(r"^(?:often|oven|opened|opens|opening|hopen|o pen|ope?n it|open the app)\b", "open", t)
+    t = re.sub(r"^(?:lunch|launched|launches|launching)\b", "launch", t)
+    t = re.sub(r"^(switch|change|go) (?:the|too|two|tu)\b(?! (?:kinect|night|infra|ir|tv|light|led|window|volume|sound))",
+               r"\1 to", t)
     t = t.replace("work space", "workspace").replace("tele vision", "tv").replace("t.v.", "tv")
     t = re.sub(r"\b(?:television|telly)\b", "tv", t)
     # Speech recognition hears "Kinect" as kinnect, kinetic, or connect; "connect" is only taken
@@ -179,6 +186,22 @@ _COMPILED = [(intent, re.compile(pattern), args) for intent, pattern, args in RU
 
 
 _JOINED = re.compile(r"[;&|`$<>\n]")
+# a word or two that is not an app's name however it sounds: these are answered, never launched
+_NOT_A_NAME = re.compile(r"(?:what|who|how|why|when|where|which|is|are|am|can|could|would|do|does|did|tell|"
+                         r"the|a|an|i|i'm|my|me|you|your|it|this|that|hi|hello|hey|thanks|thank|ok|okay|yes|"
+                         r"yeah|yep|no|nope|good|great|nice|cool|sorry|bye|stop|wait|today|tomorrow|status|"
+                         r"agenda|mail|email|emails|inbox|weather|news|time|help)\b")
+
+
+def bare_name(text):
+    """An app said on its own ("Spotify", "Firefox please"): the name, or None. Pure; the hub
+    opens it only when the words clearly name an installed app, else answers as usual."""
+    if _JOINED.search(str(text or "")):
+        return None
+    t = normalise(text)
+    if re.fullmatch(r"[a-z][\w.+-]*(?: [a-z][\w.+-]*)?", t) and not _NOT_A_NAME.match(t):
+        return t
+    return None
 
 
 def parse(text):
@@ -232,6 +255,7 @@ CHEATSHEET = [
         ("Open Spotify / Open Files / Launch Firefox", "app.open", "Any app in the app grid, by its name."),
         ("Open YouTube / Open Gmail", "app.open", "Common sites open in the browser."),
         ("Switch to Chrome / Bring up Terminal", "app.focus", "Brings that app's window to the front."),
+        ("Spotify (an app's name on its own)", None, "Opens it. A name misheard or said with an accent still finds its app."),
         ("Close this window / Close Spotify", "app.close", "The window you are in, or an app by name."),
         ("Maximise / Minimise", "window.maximize", "The window you are in."),
         ("Snap left / Put this window to the right", "window.tile", "That half of the screen."),

@@ -1,4 +1,16 @@
-"""Who answers Mario: Claude first, Gemini when Claude is at its limit, the laptop when both are out.
+"""Who answers Mario: Claude first, Gemini when Claude is at its limit, the laptop when both are out,
+and which model, by how hard the question is (tier()):
+
+  quick    a short question, a fact, a chat: Sonnet 5.5 at low effort (little thinking); Gemini 3.8
+           Flash Low at Claude's limit
+  deep     reasoning, explaining, comparing, planning, writing, code: Sonnet 5.5 at high effort;
+           Gemini 3.8 Flash Medium at Claude's limit
+
+Measured on this laptop (2026-11-17, `claude -p` and `agy -p` exactly as run here, 11 spoken
+questions each): Sonnet 5.5 median 2.7-3.0 s from asking to the whole answer, Haiku 5.5 3.7-3.9 s
+(slower in every pair, so it is not the quick model), Gemini 3.8 Flash through agy 11-14 s (agy's own
+start-up is most of that), so Gemini is the fallback, not the fast path. "models" and "effort" in
+mario.json change any of these.
 
   claude   the Claude subscription, through Claude Code's headless mode (`claude -p`). No tools but
            web search and web fetch: an answer can look something up, never run or change anything.
@@ -33,6 +45,47 @@ SYSTEM = (
     "when the question is about Karthi's day or work, and never invent items that are not in it. "
     "You cannot run commands or change files from here. For a change to code, say: ask Mario to do it "
     "in that repo, and it will hand the work to Claude Code after Karthi confirms.")
+# added to a question asked by voice: the answer is heard, not read
+SPOKEN = ("[Karthi said this out loud and will hear your reply in a voice. Talk like a warm, quick "
+          "friend: one to three short sentences, contractions welcome, no lists, symbols, links or "
+          "Markdown. Longer only if asked.]")
+
+
+TIERS = ("quick", "deep")
+MODELS = {"quick": {"claude": "claude-sonnet-5-5", "gemini": "gemini-3.8-flash-low"},
+          "deep": {"claude": "claude-sonnet-5-5", "gemini": "gemini-3.8-flash-medium"}}
+# Claude Code's --effort: how much the model thinks before it answers (agy's Flash Low / Medium
+# are the same idea for Gemini)
+EFFORT = {"quick": "low", "deep": "high"}
+# what makes a question worth the stronger model
+_DEEP = re.compile(
+    r"\b(?:explain|why|compare|comparison|versus|vs|difference between|differences|analy[sz]e|analysis|plan|"
+    r"design|architect|strategy|pros and cons|trade-?offs?|step by step|in detail|detailed|thorough|"
+    r"write|draft|rewrite|essay|email|letter|cover letter|story|poem|code|program|script|function|algorithm|"
+    r"regex|sql|debug|error|bug|stack trace|prove|derive|calculate|solve|equation|summari[sz]e|review|"
+    r"research|recommend|should i|help me (?:decide|choose|understand|think)|how does|how do .{1,40} work|"
+    r"teach me|walk me through|brainstorm|ideas for|itinerary|translate)\b", re.I)
+
+
+def tier(text):
+    """quick or deep, from the words alone: no model is asked to decide (that would cost the time
+    it saves). Long or many-part questions, code, and the verbs above are deep."""
+    t = str(text or "").strip()
+    words = len(t.split())
+    if words > 28 or t.count("?") > 1 or "\n" in t or re.search(r"[{}`]|=>|\bdef |\breturn\b", t) or _DEEP.search(t):
+        return "deep"
+    return "quick"
+
+
+def model_for(cfg, engine, level):
+    """The model `engine` answers a `level` question with: "models" in mario.json, else the defaults."""
+    chosen = ((cfg.get("models") or {}).get(level) or {}).get(engine)
+    return chosen or MODELS.get(level, MODELS["quick"]).get(engine) or cfg.get(f"{engine}_model") or ""
+
+
+def effort_for(cfg, level):
+    chosen = (cfg.get("effort") or {}).get(level)
+    return chosen if chosen in ("low", "medium", "high", "xhigh", "max") else EFFORT.get(level)
 
 
 def model_name(model):
@@ -56,20 +109,30 @@ def clean_env(base=None):
     return {k: v for k, v in (base if base is not None else os.environ).items() if k not in DROP_ENV}
 
 
-def claude_argv(cfg, prompt, session=None):
+# Claude Code without what an answer does not need: no MCP servers, skills, settings files (they
+# bring CLAUDE.md and memory: about 5,000 tokens a question) or per-machine prompt sections. Still
+# the subscription's own login; --bare is not used because it needs an API key.
+LEAN = ["--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "",
+        "--exclude-dynamic-system-prompt-sections"]
+
+
+def claude_argv(cfg, prompt, session=None, model=None, effort=None):
     argv = [cfg.get("claude_cmd") or "claude", "-p", prompt, "--output-format", "json",
             "--system-prompt", SYSTEM,
-            "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch"]
-    if cfg.get("claude_model"):
-        argv += ["--model", cfg["claude_model"]]
+            "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", *LEAN]
+    model = model or cfg.get("claude_model")
+    if model:
+        argv += ["--model", model]
+    if effort:
+        argv += ["--effort", effort]
     if session:
         argv += ["--resume", session]
     return argv
 
 
-def gemini_argv(cfg, prompt, conversation=None):
+def gemini_argv(cfg, prompt, conversation=None, model=None):
     argv = [cfg.get("gemini_cmd") or "agy", "-p", f"{SYSTEM}\n\n{prompt}", "--output-format", "json",
-            "--mode", "plan", "--sandbox", "--model", cfg.get("gemini_model") or "gemini-3.8-flash-low"]
+            "--mode", "plan", "--sandbox", "--model", model or cfg.get("gemini_model") or "gemini-3.8-flash-low"]
     if conversation:
         argv += ["--conversation", conversation]
     return argv

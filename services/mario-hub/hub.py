@@ -43,6 +43,7 @@ import commands  # noqa: E402
 import control  # noqa: E402
 import config as config_mod  # noqa: E402
 import engines  # noqa: E402
+import speech  # noqa: E402
 import tiles  # noqa: E402
 from voice import Voice  # noqa: E402
 from wake import Wake, screen_locked  # noqa: E402
@@ -113,7 +114,7 @@ class Hub:
         self.handoffs = {}
         self.control = control.Control(sh=self._sh, http=self._http,
                                        launch=lambda name: self.action("launch", name),
-                                       open_url=self._open_url)
+                                       open_url=self._open_url, launchers=LAUNCH)
         self.loom_session = None
         self.sessions = {"claude": None, "gemini": None}   # one conversation per engine per hub run
         self.limited = {}                                   # engine -> when its limit lifts
@@ -121,7 +122,13 @@ class Hub:
         self.last_brain = None
         self.tasks = []
         self.notes_file = config_mod.DATA_DIR / "notes.md"
-        self.voice = Voice(self.set_presence, launch_env)
+        self.apps = control.CachedApps()                    # the app grid, read once a minute at most
+        self.control.apps = self.apps
+        self.voice = Voice(self.set_presence, launch_env, complete=self.complete_command,
+                           vocabulary=lambda: control.vocabulary(self.apps()))
+        self.speaker = None                                 # the natural voice, started with the hub
+        self.spoken_n = 0
+        self.session_at = {}                                # engine -> when its conversation was last used
         # "Hey Mario": only the running hub is given a file, so a check never opens a microphone
         self.wake = Wake(launch_env, Path(voice_file) if voice_file else None, self.wake_fired, self.push_wake,
                          lambda: self.presence.get("state") == "speaking")
@@ -169,8 +176,9 @@ class Hub:
         names = engines.order(self.cfg)
         why = {n: self.engine_ready(n) for n in names}
         first = next(n for n in names if why[n] is None)
-        model = {"claude": self.cfg.get("claude_model"), "gemini": self.cfg.get("gemini_model")}.get(first)
-        return {"engine": first, "label": engines.LABEL[first], "model": engines.model_name(model), "order": names,
+        models = {t: engines.model_name(engines.model_for(self.cfg, first, t)) if first != "local" else ""
+                  for t in engines.TIERS}
+        return {"engine": first, "label": engines.LABEL[first], "model": models["quick"], "models": models, "order": names,
                 "skipped": {n: w for n, w in why.items() if w and names.index(n) < names.index(first)}}
 
     async def push_brain(self):
@@ -179,9 +187,12 @@ class Hub:
             self.last_brain = status
             await self.broadcast({"type": "brain", **status})
 
-    def answer(self, text):
-        """Claude, then Gemini, then the laptop: the first that answers. Runs in a thread."""
-        prompt = f"[Live desktop context]\n{engines.context(self.snapshot())}\n\n[Karthi asks]\n{text}"
+    def answer(self, text, spoken=False):
+        """Claude, then Gemini, then the laptop: the first that answers, each with the model the
+        question needs (engines.tier: quick or deep). Runs in a thread."""
+        level = engines.tier(text)
+        prompt = (f"[Live desktop context]\n{engines.context(self.snapshot())}\n\n[Karthi asks]\n{text}"
+                  + (f"\n\n{engines.SPOKEN}" if spoken else ""))
         self.brain_dir.mkdir(parents=True, exist_ok=True)
         notes = []
         for name in engines.order(self.cfg):
@@ -196,19 +207,24 @@ class Hub:
                     res["note"] = "; ".join(notes + ([res["note"]] if res.get("note") else [])) + "."
                 return res
             started = time.time()
+            model = engines.model_for(self.cfg, name, level)
+            # a conversation carries on while it is fresh; an old one only costs tokens and time
+            if time.time() - self.session_at.get(name, 0) > float(self.cfg.get("conversation_s", 600)):
+                self.sessions[name] = None
             for attempt in (1, 2):
-                build = engines.claude_argv if name == "claude" else engines.gemini_argv
-                code, out, err = engines.run(build(self.cfg, prompt, self.sessions[name]), str(self.brain_dir),
-                                             int(self.cfg.get("answer_timeout_s", 150)))
+                argv = (engines.claude_argv(self.cfg, prompt, self.sessions[name], model, engines.effort_for(self.cfg, level))
+                        if name == "claude" else engines.gemini_argv(self.cfg, prompt, self.sessions[name], model))
+                code, out, err = engines.run(argv, str(self.brain_dir), int(self.cfg.get("answer_timeout_s", 150)))
                 res = (engines.parse_claude if name == "claude" else engines.parse_gemini)(code, out, err)
                 if res.get("answer") or res.get("limited") or not self.sessions[name]:
                     break
                 self.sessions[name] = None    # a conversation that cannot be resumed: start a new one once
             if res.get("answer"):
                 self.sessions[name] = res.get("session") or self.sessions[name]
-                model = res.get("model") or self.cfg.get(f"{name}_model") or ""
+                self.session_at[name] = time.time()
+                model = res.get("model") or model
                 return {"answer": res["answer"], "via": engines.LABEL[name], "engine": name, "model": model,
-                        "ms": int((time.time() - started) * 1000),
+                        "tier": level, "ms": int((time.time() - started) * 1000),
                         **({"note": "; ".join(notes) + f", so {engines.LABEL[name]} answered."} if notes else {})}
             if res.get("limited"):
                 self.limited[name] = res.get("until") or time.time() + 15 * 60
@@ -267,10 +283,16 @@ class Hub:
         for name in self.schedule:
             self.tasks.append(asyncio.create_task(self.run_collector(name)))
         await self.wake.start()
+        # the voice and the app list load now, so the first reply and the first "open ..." wait for nothing
+        self.speaker = speech.Speaker(self.cfg, launch_env)
+        self.tasks.append(asyncio.create_task(self.speaker.start()))
+        self.tasks.append(asyncio.create_task(asyncio.to_thread(self.apps)))
 
     async def stop(self, _app=None):
         await self.wake.close()
         await self.voice.close()
+        if self.speaker:
+            await self.speaker.close()
         for t in self.tasks:
             t.cancel()
         for ws in list(self.clients):
@@ -308,7 +330,7 @@ class Hub:
                         f"Neither LOOM ({str(loom_err)[:60]}) nor Ollama ({str(ollama_err)[:60]}) answered. "
                         "Start LOOM's backend or Ollama and ask again."}
 
-    async def ask(self, text):
+    async def ask(self, text, spoken=False):
         text = str(text or "").strip()[:4000]
         if not text:
             return {"error": "Ask something."}
@@ -331,9 +353,11 @@ class Hub:
             self.handoffs[plan["id"]] = plan
             await self.set_presence("needs_you", f"{plan['agent']} in {plan['repo']}?")
             return {"route": "handoff", "handoff": {k: v for k, v in plan.items() if k != "argv"}}
-        await self.set_presence("thinking", self.brain_status()["label"])
+        status = self.brain_status()
+        await self.set_presence("thinking", " · ".join(filter(None, [
+            status["label"], status.get("models", {}).get(engines.tier(text))])))
         try:
-            result = await asyncio.to_thread(self.answer, text)
+            result = await asyncio.to_thread(self.answer, text, spoken)
         finally:
             await self.set_presence("ready")
             await self.push_brain()
@@ -376,6 +400,22 @@ class Hub:
         if str(url).startswith(("https://", "http://127.0.0.1:")):
             self._sh(["xdg-open", str(url)], wait=False)
 
+    def complete_command(self, text):
+        """While you speak: are these words already a whole command? Then Mario stops listening
+        sooner. Only commands that are clear on their own count: "open" with an app that exists,
+        not "open the" while you think of the name."""
+        if re.search(r"\b(?:the|a|an|my|to|and|on|in|of|for|with|me)$", str(text or "").strip(" .!?,").lower()):
+            return False
+        cmd = commands.parse(text)
+        if not cmd:
+            name = commands.bare_name(text)
+            return bool(name) and self.control.knows(name, strict=True)
+        if len(str(text).split()) < 2:
+            return False                   # "play", "next": a pause may still bring more
+        if cmd["intent"] in ("app.open", "app.focus"):
+            return self.control.knows(cmd["args"].get("name") or "")
+        return cmd["intent"] not in ("web.search", "app.close", "help")
+
     async def direct_command(self, text):
         """Small explicit commands execute through the same bounded actions as the tiles."""
         text = re.sub(r"^(?:hey\s+)?mario[,\s:]+", "", text.strip(), flags=re.I)
@@ -392,6 +432,8 @@ class Hub:
         # Everything else Mario can do on the computer, the TV and the Kinect (commands.py says
         # what was meant, control.py does it); what is not a command is answered as usual.
         command = commands.parse(text)
+        if not command and commands.bare_name(text):
+            command = {"intent": "app.maybe", "args": {"name": commands.bare_name(text)}, "text": text}
         if command:
             await self.set_presence("thinking", "On it")
             try:
@@ -425,13 +467,20 @@ class Hub:
             self.show_mario("--wake")
 
     async def speak(self, text):
-        """Say it aloud. Presence is "speaking" until the voice has finished, so the orb
-        moves for exactly as long as Mario talks."""
-        if not text or not shutil.which("spd-say"):
+        """Say it aloud: the natural voice (speech.py), spd-say when it is not installed. Presence is
+        "speaking" until the voice has finished, so the orb moves for exactly as long as Mario talks;
+        a newer reply cuts this one off."""
+        text = speech.for_speech(text)
+        if not text:
             return
-        text = str(text)[:1200]
+        self.spoken_n += 1
+        mine = self.spoken_n
         await self.set_presence("speaking")
         try:
+            if self.speaker and await self.speaker.say(text):
+                return
+            if not shutil.which("spd-say"):
+                return
             # Argument vector only: dictated content is never a shell command. -w waits for the end.
             proc = await asyncio.create_subprocess_exec("spd-say", "-w", "--", text,
                                                        env=launch_env(), stdout=asyncio.subprocess.DEVNULL,
@@ -443,7 +492,7 @@ class Hub:
         except OSError:
             pass
         finally:
-            if self.presence.get("state") == "speaking":
+            if self.presence.get("state") == "speaking" and mine == self.spoken_n:
                 await self.set_presence("ready")
 
     async def run_handoff(self, plan):
@@ -742,7 +791,7 @@ def make_app(hub, port):
 
     async def ask(request):
         data = await read(request)
-        result = await hub.ask(data.get("text"))
+        result = await hub.ask(data.get("text"), spoken=data.get("spoken") is True)
         if data.get("spoken") is True:
             # the answer goes to the page now; the voice carries on by itself
             hub.speaking = asyncio.create_task(

@@ -93,6 +93,14 @@ PHRASES = {
     "silence notifications": "sys.dnd",
     "google best biryani near me": "web.search",
     "what can you do": "help",
+    # misheard, or said with an accent: these are what speech recognition writes down
+    "Open, Spotify, please.": "app.open",
+    "Often Spotify": "app.open",
+    "oven spotify": "app.open",
+    "Opening Spotify": "app.open",
+    "Lunch Firefox": "app.open",
+    "Switch the Chrome": "app.focus",
+    "switch the kinect to colour": "kinect.ir",
 }
 NOT_COMMANDS = [
     "what's the weather like", "why is my build failing", "run the tests in loom",
@@ -130,9 +138,27 @@ def check_matching():
     check("\"vscode\" by a keyword", control.match_app("vscode", apps)["id"] == "code.desktop")
     check("\"studio code\" inside its name", control.match_app("studio code", apps)["id"] == "code.desktop")
     check("an app that is not there", control.match_app("pod bay doors", apps) is None)
+    for heard in ("spotifai", "spot if i", "spotty fy", "sportify", "potify", "espotify", "spoti fy"):
+        got = control.match_app(heard, apps)
+        check(f"misheard \"{heard}\" is still Spotify", got and got["id"] == "spotify.desktop", got)
+    check("\"fire fox\" (the words run together) is Firefox", control.match_app("fire fox", apps)["id"] == "firefox.desktop")
+    check("\"firefocks\" by how it sounds", control.match_app("firefocks", apps)["id"] == "firefox.desktop")
+    more = apps + [{"id": "monitor.desktop", "name": "System Monitor", "keywords": [], "exec": "gnome-system-monitor"},
+                   {"id": "todo.desktop", "name": "To Do", "keywords": [], "exec": "todo"},
+                   {"id": "backup.desktop", "name": "Backups", "keywords": [], "exec": "deja-dup"}]
+    for wrong in ("sesame", "door", "up", "mind", "rocket"):
+        check(f"\"open {wrong}\" opens nothing", control.match_app(wrong, more) is None, control.match_app(wrong, more))
+    check("said on its own, only a clear name counts", control.match_app("spotifai", apps, strict=True)["name"] == "Spotify"
+          and control.match_app("spot a fly", apps, strict=True) is None)
+    check("the recogniser is told the apps' names", control.vocabulary(apps).startswith("Mario, Files")
+          and "Spotify" in control.vocabulary(apps) and "Visual Studio Code" not in control.vocabulary(apps))
+    for text, want in {"Spotify": "spotify", "spotify please": "spotify", "what time": None, "mail": None,
+                       "hello there": None, "brief me": "brief me", "open; rm": None}.items():
+        check(f"\"{text}\" on its own: {want or 'not a name'}", commands.bare_name(text) == want, commands.bare_name(text))
     wins = [{"id": 7, "appName": "Firefox", "title": "GitHub - Mozilla Firefox"},
             {"id": 9, "appName": "Terminal", "title": "kai@planetStormer: ~"}]
     check("a window by its app", control.match_window("terminal", wins)["id"] == 9)
+    check("a window by a misheard name", control.match_window("terminel", wins)["id"] == 9)
     check("no such window", control.match_window("spotify", wins) is None)
 
 
@@ -213,6 +239,16 @@ def check_control():
     check("desktop 3 is workspace index 2", w.ran[-1][-2:] == ["org.adaptive.Shell.ActivateWorkspace", "2"], w.ran[-1])
     say(w, "open spotify")
     check("open Spotify: through the app grid's launcher", w.ran[-1] == ["gtk-launch", "spotify"], w.ran[-1])
+    say(w, "often spotty fy")
+    check("\"often spotty fy\" (misheard): Spotify all the same", w.ran[-1] == ["gtk-launch", "spotify"], w.ran[-1])
+    r = w.control().run({"intent": "app.maybe", "args": {"name": "spotifai"}})
+    check("an app said on its own opens", w.ran[-1] == ["gtk-launch", "spotify"] and r["ok"], r)
+    r = w.control().run({"intent": "app.maybe", "args": {"name": "brief me"}})
+    check("words on their own that name no app: Mario answers", r.get("fallthrough") is True, r)
+    c = w.control()
+    c.launchers = {"terminal"}
+    check("knows(): what would open, without opening it", c.knows("spotify") and c.knows("terminal") and c.knows("youtube")
+          and not c.knows("the door") and not c.knows("terminal", strict=True) and len(w.ran) == len(w.ran))
     r = say(w, "open the pod bay doors")
     check("open something that is not an app: Mario answers instead", r.get("fallthrough") is True, r)
     say(w, "open youtube")

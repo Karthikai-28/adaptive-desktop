@@ -8,6 +8,11 @@ opaque session id; closing it releases the microphone. Recognition runs in a sep
 
 While you speak, the audio so far is recognised again and again (about every half second of new
 speech), and the page shows those words as they come: `partial` in the status.
+
+Quick by design: a request ends 1.2 s after you stop speaking, and a complete command ("open
+Spotify": the hub's `complete` says so) after 0.6 s, with the words already recognised, so no
+second pass is needed. The recogniser is told the names of the installed apps (`vocabulary`), so it
+hears "Spotify" rather than "spot if I".
 """
 import asyncio
 import audioop
@@ -61,9 +66,11 @@ class Room:
 
 
 class Silence:
-    """When a request is over: 1.8 s of quiet after speech, 8 s without any, or 30 s in all.
+    """When a request is over: 1.2 s of quiet after speech, 8 s without any, or 30 s in all.
     A microphone that was just opened is not judged for its first 0.6 s: many start with a thump."""
     SETTLE = 6
+    PAUSE = 12              # frames of quiet that end a request
+    COMMAND_PAUSE = 6       # ... that end one already heard as a complete command
 
     def __init__(self, settle=0):
         self.room = Room(settle)
@@ -75,7 +82,7 @@ class Silence:
         loud = self.room.loud()
         self.spoken = sum(loud)
         self.quiet = next((i for i, was in enumerate(reversed(loud)) if was), len(loud))
-        return self.frames >= 300 or (self.spoken >= 3 and self.quiet >= 18) or (not self.spoken and self.frames >= 80)
+        return self.frames >= 300 or (self.spoken >= 3 and self.quiet >= self.PAUSE) or (not self.spoken and self.frames >= 80)
 
 
 class Worker:
@@ -120,8 +127,12 @@ class Worker:
 
 
 class Voice:
-    def __init__(self, presence, env):
+    def __init__(self, presence, env, complete=None, vocabulary=None):
+        """complete(text): is this already a whole command (then the session ends sooner)?
+        vocabulary(): names for the recogniser to listen for."""
         self.presence, self.env = presence, env
+        self.complete = complete or (lambda text: False)
+        self.vocabulary = vocabulary or (lambda: "")
         self.id = None
         self.state = "idle"
         self.text = self.error = self.partial = ""
@@ -211,10 +222,16 @@ class Voice:
             env = self.env()
             # the recogniser loads while you begin to speak
             self.worker = await Worker("transcribe", env).start()
+            try:
+                self.worker.send(b"H", str(self.vocabulary() or "")[:600].encode())
+            except Exception:  # noqa: BLE001  no names: it still hears everything else
+                pass
             if mic is None:
                 self.proc = await asyncio.create_subprocess_exec(
                     *mic_argv(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env)
             asked = 0
+            heard_upto = -1          # how much of the audio the words in self.partial cover
+            whole = False            # the partial is a complete command covering all the speech
             while not self.finish:
                 self.alive("Microphone stopped")
                 chunk = await asyncio.wait_for(mic.get() if mic else self.proc.stdout.readexactly(FRAME), timeout=3)
@@ -224,12 +241,22 @@ class Voice:
                 if looking and looking.done():
                     words, looking = looking.result(), None
                     self.partial = (rules.strip_wake(words) if wake else words)[:4000]
-                if not looking and (gate.spoken or prefill) and len(pcm) - asked >= PARTIAL_EVERY:
+                    heard_upto = asked
+                # what was said ends where the quiet began; words heard past that point cover it all
+                spoke_until = len(pcm) - gate.quiet * FRAME
+                covered = gate.spoken >= 3 and heard_upto >= spoke_until + 2 * FRAME
+                if covered and gate.quiet >= Silence.COMMAND_PAUSE and self.partial and self.complete(self.partial):
+                    whole = True
+                    break
+                # look again only when there is speech the last look did not cover, and once the
+                # speaking stops, at once rather than half a second later
+                due = asked < spoke_until + 2 * FRAME and (len(pcm) - asked >= PARTIAL_EVERY or gate.quiet >= 3)
+                if not looking and (gate.spoken or prefill) and due:
                     asked = len(pcm)
                     looking = asyncio.create_task(self.worker.ask(b"P", bytes(pcm), "partial"))
                 # "Hey Mario, what's the weather" in one breath: the request was over before the
                 # session began, so there is no new speech to wait for
-                if done or (wake and not gate.spoken and gate.quiet >= 18 and self.partial):
+                if done or (wake and not gate.spoken and gate.quiet >= Silence.PAUSE and self.partial):
                     break
             await self.release_mic()
             if gate.spoken < 3 and not (wake and prefill):
@@ -237,12 +264,17 @@ class Voice:
             self.state = "transcribing"
             await self.presence("thinking", "Recognizing speech locally")
             deadline = time.monotonic() + 90
-            if looking:
+            if whole:
+                # a complete command, already recognised to the end: no second pass
+                words = self.partial
+            else:
+                if looking:
+                    await self.wait_for(looking, deadline)
+                looking = asyncio.create_task(self.worker.ask(b"F", bytes(pcm), "final"))
                 await self.wait_for(looking, deadline)
-            looking = asyncio.create_task(self.worker.ask(b"F", bytes(pcm), "final"))
-            await self.wait_for(looking, deadline)
-            words, looking = looking.result(), None
-            self.text = (rules.strip_wake(words) if wake else words).strip()[:4000]
+                words, looking = looking.result(), None
+                words = rules.strip_wake(words) if wake else words
+            self.text = words.strip()[:4000]
             if self.text:
                 self.state = "done"
             elif wake:

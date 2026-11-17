@@ -354,6 +354,28 @@ def test_brain(cfg, work):
 def test_engines(cfg):
     print("Who answers")
     check("Claude first, then Gemini, the laptop last", engines.order({}) == ["claude", "gemini", "local"])
+    for text in ("hi mario", "what is the capital of australia", "tell me a joke", "convert 5 miles to km", "who won the match yesterday"):
+        check(f"quick: \"{text}\"", engines.tier(text) == "quick")
+    for text in ("explain transformers to me", "write an email to my landlord about the leak", "compare rust and go",
+                 "should I buy a new laptop or upgrade the ram", "what does this error mean: KeyError foo",
+                 "what is it? and why? ", " ".join(["word"] * 40)):
+        check(f"deep: \"{text[:40]}\"", engines.tier(text) == "deep")
+    check("Sonnet 5.5 (measured fastest here): low effort for quick questions, high for deep; Gemini Flash Low / Medium at Claude's limit",
+          engines.model_for({}, "claude", "quick") == "claude-sonnet-5-5" and engines.model_for({}, "claude", "deep") == "claude-sonnet-5-5"
+          and engines.effort_for({}, "quick") == "low" and engines.effort_for({}, "deep") == "high"
+          and engines.effort_for({"effort": {"quick": "medium"}}, "quick") == "medium" and engines.effort_for({"effort": {"quick": "silly"}}, "quick") == "low"
+          and engines.model_for({}, "gemini", "quick") == "gemini-3.8-flash-low" and engines.model_for({}, "gemini", "deep") == "gemini-3.8-flash-medium")
+    picked = {"models": {"quick": {"claude": "claude-haiku-5-5"}}}
+    check("mario.json \"models\" changes one tier, the rest keep their defaults",
+          engines.model_for(picked, "claude", "quick") == "claude-haiku-5-5"
+          and engines.model_for(picked, "claude", "deep") == "claude-sonnet-5-5"
+          and engines.model_for(picked, "gemini", "quick") == "gemini-3.8-flash-low")
+    lean = engines.claude_argv(cfg, "hi", model="claude-haiku-5-5", effort="low")
+    check("Claude answers lean: no MCP servers, skills or settings files (CLAUDE.md, memory), the model asked for",
+          "--strict-mcp-config" in lean and lean[lean.index("--setting-sources") + 1] == "" and "--disable-slash-commands" in lean
+          and lean[lean.index("--model") + 1] == "claude-haiku-5-5" and lean[lean.index("--effort") + 1] == "low"
+          and "--bare" not in lean, str(lean))
+    check("a spoken question asks for a short, talking reply", "out loud" in engines.SPOKEN and "Markdown" in engines.SPOKEN)
     check("the laptop stays the last resort whatever the order says", engines.order({"brain": ["gemini", "bogus"]}) == ["gemini", "local"])
     argv = engines.claude_argv(cfg, "hi", session="s1")
     tools = argv[argv.index("--tools") + 1]
@@ -406,7 +428,20 @@ async def test_answer(cfg):
     hub.ask_local = lambda text: {"answer": "from the laptop", "via": "LOOM", "model": "", "ms": 1}
     try:
         replies["claude"] = (0, json.dumps({"is_error": False, "result": "Hello from Claude", "session_id": "s1"}), "")
+        seen = []
+        hub_mod.engines.run = lambda argv, cwd, timeout: seen.append(argv) or fake_run(argv, cwd, timeout)
+        deep = hub.answer("explain how transformers work", spoken=True)
+        check("a deep question: Sonnet 5.5 at high effort, and a spoken one asks for a talking reply",
+              deep["tier"] == "deep" and seen[-1][seen[-1].index("--model") + 1] == "claude-sonnet-5-5"
+              and seen[-1][seen[-1].index("--effort") + 1] == "high"
+              and engines.SPOKEN in seen[-1][2], str(seen[-1][:3]))
+        hub.session_at["claude"] = time.time() - 3600
+        ran.clear()
         first = hub.answer("hello")
+        check("a quick one: low effort; an hour-old conversation is not carried on",
+              first["tier"] == "quick" and seen[-1][seen[-1].index("--effort") + 1] == "low"
+              and "--resume" not in seen[-1] and engines.SPOKEN not in seen[-1][2], str(seen[-1]))
+        hub_mod.engines.run = fake_run
         check("Claude answers by default", first["engine"] == "claude" and first["answer"] == "Hello from Claude"
               and ran == ["claude"] and hub.brain_status()["engine"] == "claude", str(first))
         check("and keeps one conversation", hub.sessions["claude"] == "s1")
@@ -1075,6 +1110,8 @@ async def test_tile_endpoints(cfg, work):
 
     real_exec, real_which = asyncio.create_subprocess_exec, hub_mod.shutil.which
     asyncio.create_subprocess_exec, hub_mod.shutil.which = fake_exec, lambda name: "/usr/bin/" + name
+    # the espeak voice: the natural one is checked by itself (test_speech)
+    hub.speaker = hub_mod.speech.Speaker({"voice": {"engine": "espeak"}}, hub_mod.launch_env)
     states = []
     real_presence = hub.set_presence
 
@@ -1086,8 +1123,26 @@ async def test_tile_endpoints(cfg, work):
         await hub.speak("Hello there")
     finally:
         asyncio.create_subprocess_exec, hub_mod.shutil.which = real_exec, real_which
-    check("while Mario talks back the presence is \"speaking\", then ready; the words are one argument",
-          states == ["speaking", "ready"] and spoke and spoke[0][:3] == ("spd-say", "-w", "--") and spoke[0][3] == "Hello there", f"{states} {spoke}")
+    check("while Mario talks back the presence is \"speaking\", then ready; the words are one argument (spd-say without the natural voice)",
+          states == ["speaking", "ready"] and spoke and spoke[0][:3] == ("spd-say", "-w", "--") and spoke[0][3] == "Hello there.", f"{states} {spoke}")
+
+
+def test_speech():
+    print("How Mario talks back")
+    import speech
+    f = speech.for_speech
+    check("Markdown is not read out", f("**Two** meetings:\n- 10:00 Stand-up\n- 3 pm *Review*") == "Two meetings: 10:00 Stand-up. 3 pm Review.",
+          f("**Two** meetings:\n- 10:00 Stand-up\n- 3 pm *Review*"))
+    check("nor links, paths or code", f("See https://x.io/a?b=1 and ~/notes/plans/today.md then ```rm -rf x```")
+          == "See the link and that folder then (the code is on screen).", f("See https://x.io/a?b=1 and ~/notes/plans/today.md then ```rm -rf x```"))
+    long = " ".join(f"Sentence number {i} is here." for i in range(80))
+    check("a long answer stops on a whole sentence", len(f(long)) <= 900 and f(long).endswith("is here."), f(long)[-40:])
+    check("a question keeps its mark", f("Want me to open it?") == "Want me to open it?")
+    check("the voice: Kokoro's am_michael by default, speed kept sane",
+          speech.settings({}) == {"engine": "kokoro", "speaker": "am_michael", "speed": 1.0}
+          and speech.settings({"voice": {"speaker": "af_heart", "speed": 9}})["speed"] == 1.6
+          and speech.settings({"voice": {"speaker": "af_heart"}})["speaker"] == "af_heart")
+    check("espeak in mario.json keeps the old voice", not speech.Speaker({"voice": {"engine": "espeak"}}, dict).wanted())
 
 
 def main():
@@ -1098,6 +1153,7 @@ def main():
         test_usage(cfg)
         test_brain(cfg, work)
         test_engines(cfg)
+        test_speech()
         try:
             import aiohttp  # noqa: F401
             asyncio.run(test_answer(cfg))

@@ -10,6 +10,7 @@ The outside world comes in as two functions, so the checks can stand in for it:
     http(method, url, body=None, timeout=5) -> parsed JSON, bytes, or None
 """
 
+import difflib
 import json
 import os
 import re
@@ -32,14 +33,45 @@ def _words(text):
     return re.findall(r"[a-z0-9]+", (text or "").lower())
 
 
-def match_app(name, apps):
+def sounds(text):
+    """A rough key for how a word sounds, so a name heard with a different accent (or spelled the
+    way speech recognition heard it) still meets the app: spotifai, spotty fy -> spotify."""
+    t = re.sub(r"[^a-z]", "", (text or "").lower())
+    for a, b in (("ph", "f"), ("ck", "k"), ("ch", "k"), ("sh", "s"), ("th", "t"), ("q", "k"), ("x", "ks"),
+                 ("z", "s"), ("w", "v"), ("ai", "i"), ("ay", "i"), ("ie", "i"), ("ee", "i"), ("ea", "i"),
+                 ("oo", "u"), ("ou", "u")):
+        t = t.replace(a, b)
+    t = re.sub(r"c(?=[eiy])", "s", t).replace("c", "k")
+    t = t.replace("y", "i")
+    t = re.sub(r"(?<=.)h", "", t)              # a soft h after another sound
+    t = re.sub(r"(.)\1+", r"\1", t)            # doubled letters
+    return t[:1] + re.sub(r"[aeiou]+", "a", t[1:])   # vowels are where accents differ most
+
+
+def _close(a, b):
+    """How alike two spellings are, 0..1."""
+    return difflib.SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
+def _names(app):
+    """What an app can be called: its name, the first words of it, its command."""
+    words = _words(app.get("name"))
+    out = {"".join(words[:n]) for n in range(1, len(words) + 1)}
+    out |= {w for w in _words(app.get("exec")) if len(w) > 3}
+    return {n for n in out if len(n) >= 3}
+
+
+def match_app(name, apps, strict=False):
     """The installed app a spoken name means, or None.
 
     apps: [{"id", "name", "keywords": [...], "exec"}]. Exact name first, then the name starting
-    with what was said, then every spoken word in its name, keywords or command.
+    with what was said, then every spoken word in its name, keywords or command; then, for a name
+    that was misheard or said with another accent, the closest name by spelling and by sound.
+    strict: only an app the words clearly name (an app said on its own, with no "open").
     """
     said = " ".join(_words(name))
-    if not said:
+    joined = said.replace(" ", "")
+    if len(joined) < 3:                  # "open up" names nothing
         return None
     best, best_score = None, 0
     for app in apps:
@@ -48,18 +80,57 @@ def match_app(name, apps):
                                 " " + (app.get("id") or "")))
         if title == said:
             score = 100
-        elif title.startswith(said):
+        elif title.replace(" ", "") == joined or joined in _names(app):
+            score = 90                     # "fire fox", "spot ify": the words run together
+        elif title.startswith(said) and not strict:
             score = 80
-        elif said in title:
+        elif said in title and not strict:
             score = 60
-        elif all(w in (title + " " + extra).split() for w in said.split()):
+        elif all(w in (title + " " + extra).split() for w in said.split()) and not strict:
             score = 40
         else:
-            continue
+            # Misheard: the closest of its names, by spelling, or by sound when the spelling is not
+            # far off either ("firefocks"). Short names must be very close: "open sesame" is not
+            # System Monitor, "open the door" is not To Do.
+            bar = 0.9 if strict else (0.86 if len(joined) <= 5 else 0.78)
+            close = 0.0
+            for n in _names(app):
+                spelt, sound = _close(joined, n), _close(sounds(joined), sounds(n))
+                if spelt >= bar or (sound >= (0.95 if strict else 0.9) and spelt >= 0.7):
+                    close = max(close, spelt, sound - 0.04)
+            if not close:
+                continue
+            score = 20 + close * 10
         score -= len(title) / 100          # the shorter of two matches: "Files" over "Files Backup"
         if score > best_score:
             best, best_score = app, score
     return best
+
+
+class CachedApps:
+    """installed_apps(), read again only when a minute has passed: launching waits for nothing."""
+
+    def __init__(self, read=None, every=60):
+        self.read, self.every = read or installed_apps, every
+        self.apps, self.at = None, 0.0
+
+    def __call__(self):
+        if self.apps is None or time.monotonic() - self.at > self.every:
+            try:
+                self.apps, self.at = self.read(), time.monotonic()
+            except Exception:  # noqa: BLE001  no app grid (no session): nothing to match
+                self.apps, self.at = self.apps or [], time.monotonic()
+        return self.apps
+
+
+def vocabulary(apps, most=40):
+    """App names for the recogniser to listen for (it then hears "Spotify", not "spot if I")."""
+    names = []
+    for app in apps:
+        words = (app.get("name") or "").split()
+        if 0 < len(words) <= 2 and len(app["name"]) <= 24 and app["name"] not in names:
+            names.append(app["name"])
+    return ", ".join(["Mario"] + names[:most])
 
 
 def installed_apps():
@@ -81,15 +152,28 @@ def match_window(name, windows):
     for w in windows:
         if said and (said in " ".join(_words(w.get("appName"))) or said in " ".join(_words(w.get("title")))):
             return w
-    return None
+    # a misheard name meets its window the way it meets its app
+    app = match_app(said, [{"id": str(i), "name": w.get("appName") or ""} for i, w in enumerate(windows)])
+    return windows[int(app["id"])] if app else None
 
 
 class Control:
-    def __init__(self, sh, http, launch=None, open_url=None, apps=installed_apps):
+    def __init__(self, sh, http, launch=None, open_url=None, apps=installed_apps, launchers=()):
         self.sh, self.http = sh, http
         self.launch = launch or (lambda name: {"ok": False})
+        self.launchers = set(launchers)    # the names launch() knows, for knows()
         self.open_url = open_url or (lambda url: self.sh(["xdg-open", url], wait=False))
         self.apps = apps
+
+    def knows(self, name, strict=False):
+        """Would "open <name>" open something? Pure: nothing is launched (the voice asks this to
+        stop listening as soon as a command is complete)."""
+        key = " ".join(_words(name))
+        if not key:
+            return False
+        if not strict and (key in self.launchers or key in ("kinect", "kinect studio")):
+            return True
+        return bool(commands.SITES.get(key)) or match_app(key, self.apps(), strict=strict) is not None
 
     def run(self, cmd):
         intent = cmd["intent"]
@@ -323,6 +407,19 @@ class Control:
             self._window("focus", w["id"])
             return self.said(f"Here's {w.get('appName') or name}.")
         return self.do_app_open(name)        # not open yet: open it (or answer as usual)
+
+    def do_app_maybe(self, name):
+        """A few words that might be an app said on its own ("Spotify"): open it only when the words
+        clearly name one; anything else is answered as usual."""
+        key = " ".join(_words(name))
+        if commands.SITES.get(key):
+            self.open_url(commands.SITES[key])
+            return self.said(f"Opening {name}.")
+        app = match_app(key, self.apps(), strict=True)
+        if not app:
+            return {"ok": False, "answer": "", "fallthrough": True}
+        self.sh(["gtk-launch", re.sub(r"\.desktop$", "", app["id"])], wait=False)
+        return self.said(f"Opening {app['name']}.")
 
     def do_app_open(self, name):
         key = " ".join(_words(name))

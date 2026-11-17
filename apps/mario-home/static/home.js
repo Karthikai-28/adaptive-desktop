@@ -466,7 +466,10 @@ function brainLine() {
   const b = state.brain || {};
   if (!b.engine) return "Claude answers";
   const why = Object.entries(b.skipped || {}).map(([n, w]) => `${ENGINE[n] || n} is ${w}`);
-  const who = b.engine === "claude" && b.model ? `Claude ${b.model}` : ENGINE[b.engine] || b.engine;
+  const m = b.models || {};
+  // the router: quick questions get the fast model, harder ones the stronger one
+  const who = m.quick && m.deep && m.quick !== m.deep ? `${ENGINE[b.engine] || b.engine} (${m.quick} for quick questions, ${m.deep} for harder ones)`
+    : b.engine === "claude" && b.model ? `Claude ${b.model}` : ENGINE[b.engine] || b.engine;
   return `${who} answers${why.length ? ` · ${why.join("; ")}` : ""}`;
 }
 
@@ -664,7 +667,7 @@ async function toggleVoice() {
       voiceStatus(listening ? "Listening… speak now; a pause sends your command." : "Recognizing your words on this laptop…", true,
         listening ? "listening" : "working", result.level || 0, result.partial || "");
       // while you speak the level is read often enough for the picture to follow your voice
-      await new Promise((resolve) => setTimeout(resolve, listening ? 110 : 300));
+      await new Promise((resolve) => setTimeout(resolve, listening ? 110 : 120));
     }
   } catch (e) {
     if (generation === voiceGeneration) {

@@ -45,6 +45,17 @@ DEFAULTS = {
     "gemini_work_model": "gemini-3.8-flash-high",
     # how long one answer may take before the next engine is asked
     "answer_timeout_s": 150,
+    # The router (engines.tier): a quick question gets the fastest set-up, a deep one (explain,
+    # compare, plan, write, code, long questions) more thinking. Any engine or tier left out keeps
+    # engines.MODELS / EFFORT: quick Sonnet 5.5 at low effort / Gemini 3.8 Flash Low, deep Sonnet 5.5
+    # at high effort / Gemini 3.8 Flash Medium. e.g. "models": {"quick": {"claude": "claude-haiku-5-5"}}
+    "models": {},
+    "effort": {},
+    # a conversation is carried on (its earlier turns sent again) only if it was used this recently
+    "conversation_s": 600,
+    # Mario's voice (speech.py): "kokoro", a natural voice on this laptop, or "espeak" (spd-say).
+    # Speakers: am_michael, am_fenrir, am_puck, bm_george, af_heart, af_bella, bf_emma, hm_omega, ...
+    "voice": {"engine": "kokoro", "speaker": "am_michael", "speed": 1.0},
     # AI plans shown on the usage tile (quotaSnapshot.py keys): the subscriptions you have
     "usage_providers": ["claude", "gemini"],
     # the weather tile (Open-Meteo, no key); "cards_off": ["weather"] keeps the hub offline
