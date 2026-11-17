@@ -429,6 +429,7 @@ class Hub:
         self.lock = threading.Lock()
         self.rgb = self.depth = None
         self.seq = 0
+        self.captured = 0.0      # wall-clock time of the newest frame, for end-to-end latency
         self.fps = 0.0
         self.motor = {"accel": [0, 0, 0], "tilt": None, "status": None}
         self.led = None
@@ -581,6 +582,7 @@ class Hub:
                                   self.motor["tilt"], self.fps)
                 with self.lock:
                     self.rgb, self.depth, self.seq = rgb, depth, self.writer.seq
+                    self.captured = time.time()
                 if self.mode == "rgb":
                     self.light = round(fusion.light_level(rgb), 3)
                 if now - last_stats >= 0.25:
@@ -638,12 +640,15 @@ class Hub:
                     time.sleep(0.01)
                     continue
                 last = seq
+                captured = self.captured
                 poses = source.detect(rgb)
                 state = tracker.step(poses, depth, measure.up_vector(self.motor["accel"]),
                                      float(self.settings.get("mount_height", 1.92)),
                                      kinect.intrinsics(self.mode), time.monotonic())
+                # When the frame was taken and when its skeletons were ready: the latency budget.
                 state.update(running=True, frame=seq, source=source.kind, mode=self.mode,
-                             size=[frames.W, frames.H])
+                             size=[frames.W, frames.H], captured=round(captured, 4),
+                             ready=round(time.time(), 4))
                 self._publish(state)
         except Exception as err:                    # noqa: BLE001
             log(f"people tracker stopped: {err}")

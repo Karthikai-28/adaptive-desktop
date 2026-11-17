@@ -303,6 +303,89 @@ def point_at(lm_xy, mask, x, y, z, shape, step=STEP, r=3):
     return np.array([np.median(x[sl][ok]), np.median(y[sl][ok]), np.median(z[sl][ok])])
 
 
+# ------------------------------------------------------------------ 3D joints (depth + model)
+
+# Depth sees the skin; the joint centre is further in. Pushed back along the view ray by about
+# the limb's radius (Shotton et al. 2011 push their depth proposals back the same way).
+JOINT_DEPTH = {0: 0.06, 11: 0.05, 12: 0.05, 13: 0.035, 14: 0.035, 15: 0.025, 16: 0.025,
+               23: 0.08, 24: 0.08, 25: 0.05, 26: 0.05, 27: 0.035, 28: 0.035}
+AGREE = 0.20                  # m: depth and the model must agree this well for "tracked"
+TRACKED, INFERRED, MISSING = 2, 1, 0
+TORSO = (L_SH, R_SH, L_HIP, R_HIP)
+# Limb ends: the nearest skin under them is the limb, not the body behind it.
+ENDS = {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28, 29, 30, 31, 32}
+
+
+def room_axes(floor):
+    """The room's axes in camera coordinates: x along the floor to the picture's right, y up,
+    z along the floor away from the Kinect. Origin: the floor under the Kinect."""
+    up = floor.up / np.linalg.norm(floor.up)
+    fwd = np.array([0.0, 0.0, 1.0]) - up[2] * up       # the camera's forward, laid on the floor
+    fwd /= max(np.linalg.norm(fwd), 1e-9)
+    right = np.cross(fwd, up)                           # camera x for a level Kinect
+    return right, up, fwd
+
+
+def to_room(p, floor, axes=None):
+    """Camera-frame point(s) (m) -> room frame (m): [x right, y height above floor, z forward]."""
+    right, up, fwd = axes or room_axes(floor)
+    q = np.asarray(p, dtype=np.float64) + floor.camera_height * up    # from the floor origin
+    return np.stack([q @ right, q @ up, q @ fwd], axis=-1)
+
+
+def surface_at(lm_xy, mask, x, y, z, shape, end, step=STEP, r=3):
+    """Camera point of the skin under a landmark: limb ends take the near quarter of the person's
+    depth there (the forearm, not the chest behind it), the rest the median."""
+    H, W = shape
+    gh, gw = mask.shape
+    u, v = int(lm_xy[0] * W / step), int(lm_xy[1] * H / step)
+    if not (0 <= u < gw and 0 <= v < gh):
+        return None
+    sl = (slice(max(0, v - r), v + r + 1), slice(max(0, u - r), u + r + 1))
+    ok = mask[sl]
+    if ok.sum() < 3:
+        return None
+    zs = z[sl][ok]
+    pick = np.argsort(zs)[int(0.25 * (len(zs) - 1))] if end else np.argsort(zs)[len(zs) // 2]
+    return np.array([x[sl][ok][pick], y[sl][ok][pick], zs[pick]], dtype=np.float64)
+
+
+def joints3d(pose, floor, mask, x, y, z, shape, step=STEP):
+    """All 33 joints in the room frame with a state each, like the Kinect SDK's
+    Tracked / Inferred / NotTracked: (33, 3) metres and (33,) states.
+
+    tracked   the depth under the landmark, pushed in by the limb's radius, agrees with the model
+    inferred  hidden or disagreeing: MediaPipe's metric skeleton, anchored on the torso's depth
+    missing   neither"""
+    lm = pose.image
+    seen = (lm[:, 2] > 0.5) & (lm[:, 0] > 0.0) & (lm[:, 0] < 1.0) & (lm[:, 1] > 0.0) & (lm[:, 1] < 1.0)
+    cam = np.full((33, 3), np.nan)
+    for i in np.nonzero(seen)[0]:
+        p = surface_at(lm[i, :2], mask, x, y, z, shape, i in ENDS, step)
+        if p is not None:
+            # Push the skin point back along its view ray to the joint's centre.
+            cam[i] = p + JOINT_DEPTH.get(int(i), 0.03) * p / np.linalg.norm(p)
+    model = None
+    if pose.world is not None:
+        w = np.asarray(pose.world, dtype=np.float64)
+        # One shift puts the model where depth says the torso is (the median is robust to an arm).
+        both = [i for i in TORSO if not np.isnan(cam[i]).any()]
+        if len(both) >= 2:
+            model = w + np.median(cam[both] - w[both], axis=0)
+    state = np.full(33, MISSING, dtype=np.int8)
+    out = np.full((33, 3), np.nan)
+    for i in range(33):
+        have_d = not np.isnan(cam[i]).any()
+        if have_d and (model is None or np.linalg.norm(cam[i] - model[i]) < AGREE):
+            out[i], state[i] = cam[i], TRACKED
+        elif model is not None:
+            out[i], state[i] = model[i], INFERRED
+    good = state > MISSING
+    if good.any():
+        out[good] = to_room(out[good], floor)
+    return out, state
+
+
 # ------------------------------------------------------------------ posture
 
 def features(pose, floor, mask, x, y, z, heights, shape, step=STEP):
@@ -514,8 +597,10 @@ def observe(poses, depth, accel_up, mount_height, intr, floor_prev=None, step=ST
         hp = hp + (top - float(floor.height(*hp))) * floor.up
         foot = hp - top * floor.up
         lm = pose.image
+        joints, jstate = joints3d(pose, floor, mask, x, y, z, (H, W), step)
         seen.append({
-            "pos": centre3, "top": top, "posture": posture, "straight": straight, "hint": hint,
+            "pos": centre3, "joints": joints, "jstate": jstate,
+            "top": top, "posture": posture, "straight": straight, "hint": hint,
             "features": f, "distance": f["distance"],
             "outline": outline(mask, step), "box": [int(cols.min()) * step, int(rows.min()) * step,
                                                     int(cols.max()) * step + step, int(rows.max()) * step + step],
@@ -600,6 +685,10 @@ class Track:
                        "thigh": r(f.get("thigh"), 1), "hip_cm": None if f.get("hip_h") is None
                        else int(round(f["hip_h"] * 100))},
             "x": round(o["centre_x"], 3),
+            # 33 joints in the room frame (m): [x, y up, z away, 2 tracked / 1 inferred / 0 missing]
+            "joints": [None if s == MISSING else
+                       [round(float(j[0]), 3), round(float(j[1]), 3), round(float(j[2]), 3), int(s)]
+                       for j, s in zip(o["joints"], o["jstate"])],
         }
 
 
@@ -646,6 +735,7 @@ class People:
                          if any(p["posture"] == k for p in people)},
             "floor": self.floor.to_dict() if self.floor else None,
             "people": people,
+            "frame": "room: x right in the picture, y up from the floor, z away from the Kinect",
         }
 
 
