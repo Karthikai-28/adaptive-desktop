@@ -1328,6 +1328,41 @@ Plan, gestures and gotchas: `docs/AIR.md`.
 - A Control Center tile and an island activity while engaged; per-app gesture maps.
 - A gesture trainer: record your own examples of each gesture and choose what each one does.
 
+## Milestone 23 — Kinect Motion: fitness, body games, room events (2026-11-18)
+
+From the research in `kinect/` (checked first: docs/KINECT_RESEARCH_VERIFICATION.md). Guide:
+docs/KINECT_MOTION.md.
+
+### Done
+
+- ✅ Depth-fused 3D joints in the hub (`people.py` `joints3d`): 33 joints per person in a floor
+  room frame, each tracked / inferred / missing; capture timestamps for latency.
+- ✅ Kinect Motion service (`services/kinect-motion`, :8793): 14 exercises with form cues and an
+  "insufficient evidence" state, whole-body gestures, players 1-4 with re-identification and a
+  play area, MET calories (estimate), trusted load, volume, progression, workouts, the fitness
+  check, SQLite history (results only), room events + webhook/MQTT, Kinect Pad (uinput).
+- ✅ Kinect Fitness, Kinect Arcade (Wall Dodge, Pose Match, Body Racer), Kinect Room (floor map,
+  zones, coverage map, events) in the app grid; `./install.sh --only motion`.
+- ✅ `scripts/verify-kinect-motion.py` (89 checks, in `verify-all.sh --quick`).
+- ✅ The research's Ubuntu scanner runs from the checkout (`scripts/kinect-scan.sh`), through the
+  hub or `.local/libfreenect`; its Open3D 0.20 reconstruction failure fixed (39/39 tests); live
+  snapshot measured on the Kinect.
+
+### Live, not yet tried
+
+- 🔬 Repetition counts and cues against real people, every exercise (hand count vs app count).
+- 🔬 Two to four people: pose-follower frame rate, identity swaps when crossing.
+- 🔬 Coverage map and floor exercises at the final TV mount (Kinect was 0.79 m up on 2026-11-18).
+- 🔬 Kinect Pad in a real game and through chiaki-ng to the PS5.
+- 🔬 Latency with people in view (with nobody: median 86 ms, p95 292 ms camera to engine).
+- 🔬 Scanner: a known reference object for accuracy; rotation and turntable scans; self-scan.
+
+### Next
+
+- Mario: "start a squat workout", "how many reps did I do this week".
+- The 582-line fitness chapter and v0.2.0 code from ChatGPT never arrived (sandbox links): compare
+  once downloaded.
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the
