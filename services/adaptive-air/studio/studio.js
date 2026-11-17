@@ -240,13 +240,426 @@ document.querySelectorAll('[data-tilt]').forEach(b => b.addEventListener('click'
 $('tilt-set').addEventListener('change', e => post('tilt', Number(e.target.value)));
 $('webcam').addEventListener('change', e => post('webcam', e.target.checked));
 
+// ------------------------------------------------------------------ people (over the camera view)
+//
+// /api/people (long poll, ?after=seq) is everyone in view, from the hub's people.py: posture,
+// whether they stand straight, their height in cm once it has held for a second, a silhouette
+// (64 points from the top of the head round), the skeleton, the head and the floor point under it
+// (the ruler) and a ring on the floor. Each person glides from one answer to the next here at
+// the screen's rate; nothing is drawn from a guess.
+
+const SKELETON = [[11, 12], [11, 23], [12, 24], [23, 24], [11, 13], [13, 15], [12, 14], [14, 16],
+    [23, 25], [25, 27], [24, 26], [26, 28], [27, 31], [28, 32], [0, 11], [0, 12]];
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const easeOut = t => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const people = (() => {
+    const video = $('video'), canvas = $('overlay'), ctx = canvas.getContext('2d');
+    const palette = [1, 2, 3, 4, 5, 6].map(i => css(`--p${i}`));
+    const warn = css('--warn'), warnText = css('--warn-text'), okC = css('--ok'), white = css('--white');
+    const black = css('--black'), pane = css('--pane'), text = css('--text'), muted = css('--muted');
+    let on = true;
+    try { on = localStorage.getItem('studio.people') !== 'off'; } catch (e) { /* private window */ }
+    let seq = 0, state = null, lastCount = -1, lastT = performance.now();
+    const shown = new Map();            // id -> what is on screen now, gliding towards the latest
+    const colour = p => palette[p.colour % palette.length];
+
+    // ---- following the hub
+    async function poll() {
+        while (true) {
+            if (!on || !visible) { await sleep(300); continue; }
+            try {
+                const res = await fetch(`/api/people?after=${seq}`, { cache: 'no-store' });
+                const s = await res.json();
+                seq = s.seq || seq;
+                take(s);
+            } catch (e) {
+                await sleep(1000);
+            }
+        }
+    }
+
+    const copy = v => JSON.parse(JSON.stringify(v));
+    function take(s) {
+        state = s;
+        const now = performance.now(), ids = new Set();
+        for (const p of s.people || []) {
+            ids.add(p.id);
+            let d = shown.get(p.id);
+            if (!d) {
+                d = { born: now, gone: null, cur: copy(p), grow: 0, measuring: 0, lockedAt: null, from: 0 };
+                shown.set(p.id, d);
+            }
+            d.gone = null;
+            if (p.height_cm != null && (d.p == null || d.p.height_cm == null)) {
+                d.lockedAt = now;
+                d.from = d.p ? Math.min(d.p.live_cm, p.height_cm) * 0.6 : 0;
+            }
+            if (p.height_cm == null) d.lockedAt = null;
+            d.p = p;
+        }
+        for (const d of shown.values()) if (!ids.has(d.p.id) && d.gone == null) d.gone = now;
+        sidebar(s);
+    }
+
+    // ---- the words around the picture
+    function sidebar(s) {
+        const crowd = s.people || [];
+        const n = crowd.length, standing = s.standing || 0;
+        const measured = crowd.filter(p => p.height_cm != null).length;
+        $('people-count').hidden = !on;
+        if (n !== lastCount) {
+            const b = $('count-n');
+            b.textContent = n;
+            b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump');
+            lastCount = n;
+        }
+        $('count-text').textContent = `${n === 1 ? 'person' : 'people'} · ${standing} standing` +
+            (measured ? ` · ${measured} measured` : '');
+        const banner = $('banner');
+        let msg = null, kind = '';
+        if (s.error) { msg = s.error; kind = 'ask'; }
+        else if (s.running === false) msg = null;
+        else if (!n) msg = 'Step in front of the Kinect: 2 to 4 m away, all of you in view';
+        else if (measured === n) { msg = n === 1 ? 'Measured' : `Everyone measured`; kind = 'done'; }
+        else {
+            const waiting = crowd.filter(p => p.height_cm == null);
+            const one = waiting.length === 1 ? waiting[0] : null;
+            if (n === 1) msg = one.posture === 'standing' ? `${one.hint}, facing the Kinect`
+                : 'Please stand up straight, facing the Kinect, arms down';
+            else if (one) msg = `Person ${one.id}: ${one.posture === 'standing' ? one.hint.toLowerCase() : 'please stand up straight'}, facing the Kinect`;
+            else if (waiting.length === n) msg = 'Everyone: stand up straight, facing the Kinect, arms down';
+            else msg = `People ${waiting.map(p => p.id).join(', ').replace(/, (\d+)$/, ' and $1')}: stand up straight, facing the Kinect`;
+            kind = 'ask';
+        }
+        if (banner.textContent !== (msg || '') || banner.className !== `banner ${kind}`) {
+            banner.textContent = msg || '';
+            banner.className = `banner ${kind}`;
+        }
+        banner.hidden = !msg || !on;
+        // The list: one row per person, kept (and only its words changed) while they stay in view.
+        const list = $('people-list');
+        const rows = new Map([...list.querySelectorAll('li[data-id]')].map(li => [Number(li.dataset.id), li]));
+        list.querySelectorAll('li.empty').forEach(li => li.remove());
+        for (const p of crowd) {
+            let li = rows.get(p.id);
+            if (!li) {
+                li = document.createElement('li');
+                li.dataset.id = p.id;
+                li.innerHTML = '<span class="tag"></span><div class="what"><strong></strong><span></span></div><b></b>';
+                list.append(li);
+            }
+            rows.delete(p.id);
+            const tag = li.querySelector('.tag');
+            tag.style.background = colour(p); tag.textContent = p.id;
+            li.querySelector('strong').textContent = p.label;
+            const sub = li.querySelector('.what span');
+            sub.textContent = p.height_cm != null ? (p.distance != null ? `${p.distance.toFixed(1)} m away` : '') : p.hint;
+            sub.className = p.height_cm != null ? '' : 'ask';
+            const h = li.querySelector('b');
+            const want = p.height_cm != null ? `${p.height_cm}` : '–';
+            if (h.dataset.v !== want) {
+                h.dataset.v = want;
+                h.textContent = want;
+                if (p.height_cm != null) { const u = document.createElement('small'); u.textContent = 'cm'; h.append(u); }
+            }
+        }
+        for (const li of rows.values()) li.remove();
+        if (!n) {
+            const li = document.createElement('li');
+            li.className = 'empty';
+            li.textContent = on ? 'Nobody in view.' : 'People is off.';
+            list.append(li);
+        }
+        $('you-meta').textContent = s.floor ? `floor ${s.floor.seen ? 'seen' : 'assumed'} · Kinect ${s.floor.camera_height.toFixed(2)} m up` : '';
+    }
+
+    // ---- gliding
+    const lerp = (a, b, k) => a + (b - a) * k;
+    function glidePts(cur, tgt, k) {
+        if (!tgt || !tgt.length) return tgt;
+        if (!cur || cur.length !== tgt.length) return copy(tgt);
+        return cur.map((c, i) => c.map((v, j) => lerp(v, tgt[i][j], k)));
+    }
+    function glide(d, dt) {
+        const k = 1 - Math.exp(-dt * 14), c = d.cur, t = d.p;
+        c.outline = glidePts(c.outline, t.outline, k);
+        c.skeleton = glidePts(c.skeleton, t.skeleton, k);
+        c.ring = glidePts(c.ring, t.ring, k);
+        c.box = glidePts([c.box], [t.box], k)[0];
+        c.head = t.head && c.head ? glidePts([c.head], [t.head], k)[0] : t.head;
+        c.foot = t.foot && c.foot ? glidePts([c.foot], [t.foot], k)[0] : t.foot;
+        d.measuring = lerp(d.measuring, t.measuring || 0, 1 - Math.exp(-dt * 6));
+    }
+
+    // ---- drawing
+    function fit() {
+        const dpr = window.devicePixelRatio || 1;
+        const w = video.clientWidth, h = video.clientHeight;
+        if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+            canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+        }
+        const size = (state && state.size) || [640, 480];
+        const s = Math.min(w / size[0], h / size[1]);           // the picture is letterboxed (contain)
+        return { dpr, s, ox: (w - size[0] * s) / 2, oy: (h - size[1] * s) / 2, w, h };
+    }
+
+    function path(points, r) {
+        ctx.beginPath();
+        points.forEach(([x, y], i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, r.ox + x * r.s, r.oy + y * r.s));
+        ctx.closePath();
+    }
+
+    const FONT_BIG = '700 20px Inter, Cantarell, system-ui, sans-serif';
+    const FONT_SMALL = '600 11px Inter, Cantarell, system-ui, sans-serif';
+    function pillSize(lines) {
+        ctx.font = FONT_BIG;
+        const w1 = ctx.measureText(lines[0]).width;
+        ctx.font = FONT_SMALL;
+        const w2 = lines[1] ? ctx.measureText(lines[1]).width : 0;
+        return [Math.max(w1, w2) + 52, lines[1] ? 46 : 32];
+    }
+
+    // Labels never cover each other: each sits over its person's head, and one that would land
+    // on another is lifted above it (or put under it at the top of the picture).
+    function layout(labels, r, dt) {
+        const placed = [];
+        const top = r.oy + 4, right = r.ox + 640 * r.s - 4;
+        labels.sort((a, b) => a.ay - b.ay || a.ax - b.ax);
+        for (const L of labels) {
+            const [w, h] = pillSize(L.lines);
+            const x = Math.min(Math.max(L.ax - w / 2, r.ox + 4), right - w);
+            let y = Math.max(L.ay - h - 16, top);
+            for (let pass = 0; pass < placed.length + 1; pass++) {
+                const hit = placed.find(P => x < P.x + P.w + 6 && P.x < x + w + 6 && y < P.y + P.h + 6 && P.y < y + h + 6);
+                if (!hit) break;
+                y = hit.y - h - 6 >= top ? hit.y - h - 6 : hit.y + hit.h + 6;
+            }
+            placed.push({ x, y, w, h });
+            const d = L.d, k = 1 - Math.exp(-dt * 10);
+            d.lx = d.lx == null ? x : d.lx + (x - d.lx) * k;
+            d.ly = d.ly == null ? y : d.ly + (y - d.ly) * k;
+            pill(d.lx, d.ly, w, h, L);
+        }
+    }
+
+    function pill(px, py, w, h, { lines, c, ask, scale, alpha, ax, ay }) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // a thin lead from the label down to the head, when the label had to move away
+        if (Math.abs(py + h - (ay - 16)) > 8) {
+            ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.globalAlpha = alpha * 0.7;
+            ctx.beginPath(); ctx.moveTo(Math.min(Math.max(ax, px + 14), px + w - 14), py + h); ctx.lineTo(ax, ay - 4); ctx.stroke();
+            ctx.globalAlpha = alpha;
+        }
+        ctx.translate(px + w / 2, py + h / 2);
+        ctx.scale(scale, scale);
+        ctx.translate(-w / 2, -h / 2);
+        ctx.shadowColor = black; ctx.shadowBlur = 18;
+        ctx.fillStyle = pane; ctx.globalAlpha = alpha * 0.88;
+        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(0, 0, w, h, 14); else ctx.rect(0, 0, w, h); ctx.fill();
+        ctx.shadowBlur = 0; ctx.globalAlpha = alpha;
+        ctx.lineWidth = 1.5; ctx.strokeStyle = ask ? warn : c; ctx.stroke();
+        // the person's number in their colour
+        ctx.fillStyle = c; ctx.beginPath(); ctx.arc(19, h / 2, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = black; ctx.font = '700 11px Inter, Cantarell, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lines[2], 19, h / 2 + 0.5);
+        ctx.textAlign = 'left';
+        ctx.font = FONT_BIG;
+        ctx.fillStyle = ask ? warnText : text;
+        ctx.fillText(lines[0], 38, lines[1] ? 17 : h / 2 + 1);
+        if (lines[1]) {
+            ctx.font = FONT_SMALL;
+            ctx.fillStyle = ask ? warnText : muted;
+            ctx.fillText(lines[1], 38, 35);
+        }
+        ctx.restore();
+    }
+
+    function ruler(d, c, alpha, now, r) {
+        const { head, foot, box } = d.cur, p = d.p;
+        if (!head || !foot) return;
+        const cm = p.height_cm != null ? p.height_cm : p.live_cm;
+        let g = p.height_cm != null ? easeOut((now - (d.lockedAt || 0)) / 800) : d.measuring;
+        if (g <= 0.01) return;
+        const right = r.ox + (box[2] + 14) * r.s, left = r.ox + (box[0] - 14) * r.s;
+        const x = right + 40 < r.ox + 640 * r.s ? right : left;
+        const hx = r.ox + head[0] * r.s, hy = r.oy + head[1] * r.s;
+        const fy = r.oy + foot[1] * r.s, fx = r.ox + foot[0] * r.s;
+        const topY = fy + (hy - fy) * g;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = c; ctx.fillStyle = c; ctx.lineWidth = 2;
+        ctx.shadowColor = c; ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.moveTo(x, fy); ctx.lineTo(x, topY); ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.font = '600 10px Inter, Cantarell, system-ui, sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = x === right ? 'left' : 'right';
+        for (let k = 10; k < cm; k += 10) {
+            const y = fy + (hy - fy) * (k / cm);
+            if (y < topY) break;
+            const big = k % 50 === 0;
+            ctx.globalAlpha = alpha * (big ? 1 : 0.7);
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + (x === right ? 1 : -1) * (big ? 9 : 5), y); ctx.stroke();
+            if (big && r.s > 0.8) ctx.fillText(k, x + (x === right ? 12 : -12), y);
+        }
+        ctx.globalAlpha = alpha;
+        // the foot of the ruler on the floor, the top level with the head
+        ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(x, fy); ctx.setLineDash([3, 4]); ctx.stroke();
+        if (g > 0.98) { ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(x, hy); ctx.stroke(); }
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(x - 6, topY); ctx.lineTo(x + 6, topY); ctx.lineWidth = 3; ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawPerson(d, now, r) {
+        const p = d.p, c = colour(p), cur = d.cur;
+        const appear = easeOut((now - d.born) / 550);
+        const alpha = d.gone != null ? 1 - (now - d.gone) / 450 : 1;
+        if (alpha <= 0) return null;
+        const ask = p.height_cm == null && !p.straight;
+        const measuring = p.straight && p.height_cm == null;
+        const locked = d.lockedAt != null ? (now - d.lockedAt) : null;
+
+        // the ring on the floor, turning
+        if (cur.ring && cur.ring.length > 2) {
+            ctx.save();
+            ctx.globalAlpha = alpha * appear;
+            path(cur.ring, r);
+            ctx.fillStyle = c; ctx.globalAlpha = alpha * appear * 0.14; ctx.fill();
+            ctx.globalAlpha = alpha * appear * 0.9;
+            ctx.strokeStyle = ask ? warn : c; ctx.lineWidth = 2;
+            ctx.setLineDash([10, 7]);
+            ctx.lineDashOffset = reduceMotion ? 0 : -now / 45;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // the silhouette: tinted, its outline drawn on as they appear, glowing
+        if (cur.outline && cur.outline.length > 3) {
+            ctx.save();
+            path(cur.outline, r);
+            ctx.globalAlpha = alpha * appear * (ask ? 0.12 : 0.18);
+            ctx.fillStyle = c; ctx.fill();
+            ctx.globalAlpha = alpha;
+            ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+            ctx.strokeStyle = c; ctx.shadowColor = c; ctx.shadowBlur = 14;
+            if (appear < 1) { ctx.setLineDash([appear * 4000, 4000]); }
+            else if (ask && !reduceMotion) { ctx.globalAlpha = alpha * (0.65 + 0.35 * Math.sin(now / 260)); }
+            ctx.stroke();
+            ctx.restore();
+
+            // the scan: a band sweeping from the feet to the head while measuring
+            if (measuring && cur.head && cur.foot && !reduceMotion) {
+                const fy = r.oy + cur.foot[1] * r.s, hy = r.oy + cur.head[1] * r.s;
+                const phase = (now / 1100) % 1, y = fy + (hy - fy) * phase;
+                ctx.save();
+                path(cur.outline, r); ctx.clip();
+                const band = ctx.createLinearGradient(0, y - 22, 0, y + 22);
+                band.addColorStop(0, 'transparent'); band.addColorStop(0.5, c); band.addColorStop(1, 'transparent');
+                ctx.globalAlpha = alpha * 0.55; ctx.fillStyle = band;
+                ctx.fillRect(r.ox, y - 22, 640 * r.s, 44);
+                ctx.globalAlpha = alpha; ctx.fillStyle = white;
+                ctx.fillRect(r.ox, y - 0.75, 640 * r.s, 1.5);
+                ctx.restore();
+            }
+        }
+
+        // the skeleton
+        if (cur.skeleton) {
+            ctx.save();
+            ctx.globalAlpha = alpha * appear * 0.75;
+            ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.lineCap = 'round';
+            const pt = i => [r.ox + cur.skeleton[i][0] * 640 * r.s, r.oy + cur.skeleton[i][1] * 480 * r.s];
+            ctx.beginPath();
+            for (const [a, b] of SKELETON) {
+                if (cur.skeleton[a][2] < 0.5 || cur.skeleton[b][2] < 0.5) continue;
+                const A = pt(a), B = pt(b);
+                ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]);
+            }
+            ctx.stroke();
+            ctx.fillStyle = white;
+            for (const i of [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) {
+                if (cur.skeleton[i][2] < 0.5) continue;
+                const A = pt(i);
+                ctx.beginPath(); ctx.arc(A[0], A[1], 2.6, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        ruler(d, c, alpha * appear, now, r);
+
+        // the moment a height locks: rings from the head, and the label pops
+        if (locked != null && locked < 1000 && cur.head) {
+            const hx = r.ox + cur.head[0] * r.s, hy = r.oy + cur.head[1] * r.s;
+            ctx.save();
+            for (const lag of [0, 180]) {
+                const t = (locked - lag) / 800;
+                if (t <= 0 || t >= 1) continue;
+                ctx.globalAlpha = alpha * (1 - t);
+                ctx.strokeStyle = okC; ctx.lineWidth = 3 * (1 - t) + 1;
+                ctx.beginPath(); ctx.arc(hx, hy, 8 + easeOut(t) * 70, 0, Math.PI * 2); ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // the label over the head
+        const anchor = cur.head || [cur.box[0] / 2 + cur.box[2] / 2, cur.box[1]];
+        const ax = r.ox + anchor[0] * r.s, ay = r.oy + Math.min(anchor[1], cur.box[1]) * r.s;
+        let lines;
+        if (p.height_cm != null) {
+            const t = locked != null ? easeOut(locked / 900) : 1;
+            const shown = Math.round(d.from + (p.height_cm - d.from) * t);
+            lines = [`${shown} cm`, p.posture === 'standing' ? (p.straight ? 'Standing straight ✓' : p.hint)
+                : `${p.label} · measured standing`];
+        } else if (measuring) {
+            lines = [`Measuring ${Math.round(d.measuring * 100)}%`, 'Hold still'];
+        } else {
+            lines = [p.label, p.hint];
+        }
+        lines.push(String(p.id));
+        const pop = locked != null && locked < 500 ? 1 + 0.14 * Math.sin(Math.PI * locked / 500) : 1;
+        return { d, ax, ay, lines, c, ask, scale: pop * (0.85 + 0.15 * appear), alpha: alpha * appear };
+    }
+
+    function frame() {
+        requestAnimationFrame(frame);
+        const now = performance.now(), dt = Math.min(0.1, (now - lastT) / 1000);
+        lastT = now;
+        const r = fit();
+        ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+        ctx.clearRect(0, 0, r.w, r.h);
+        if (!on) return;
+        const labels = [];
+        for (const [id, d] of shown) {
+            glide(d, dt);
+            const label = drawPerson(d, now, r);
+            if (label) labels.push(label); else shown.delete(id);
+        }
+        layout(labels, r, dt);              // labels last, over every silhouette
+    }
+
+    function toggle(v) {
+        on = v;
+        try { localStorage.setItem('studio.people', on ? 'on' : 'off'); } catch (e) { /* private window */ }
+        $('people-toggle').classList.toggle('on', on);
+        if (!on) { shown.clear(); lastCount = -1; }
+        sidebar(on && state ? state : { people: [], standing: 0, running: false });
+    }
+    $('people-toggle').addEventListener('click', () => toggle(!on));
+    toggle(on);
+    requestAnimationFrame(frame);
+    poll();
+    return { take };
+})();
+
 $('measure').addEventListener('click', async () => {
     $('measure').disabled = true;
-    $('you-text').textContent = 'Hold still…';
+    $('you-text').textContent = 'Stand up straight, facing the Kinect, arms down… measuring';
     try {
         const r = await (await fetch('/api/measure', { cache: 'no-store' })).json();
-        $('you-height').textContent = r.ok ? `${r.height.toFixed(2)} m · ${r.feet}′${r.inches}″` : '–';
-        $('you-meta').textContent = r.ok ? `${r.distance.toFixed(1)} m away · floor ${r.floor === 'seen' ? 'seen' : 'assumed'}` : '';
         $('you-text').textContent = r.sentence || r.error || '';
     } catch (e) {
         $('you-text').textContent = 'The Kinect hub did not answer.';

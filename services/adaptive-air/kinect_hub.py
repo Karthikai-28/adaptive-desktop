@@ -9,6 +9,8 @@ libfreenect lets one process at a time open the Kinect, so this one does and sha
                 v4l2loopback device: scripts/install-virtual-cameras.sh makes it)
     studio      Kinect Studio at http://127.0.0.1:8792: the picture, depth, the point cloud,
                 the accelerometer, tilt motor and LED, stream rates, a PLY export
+    people      everyone in view (people.py): how many, their posture, their height in cm; for
+                Studio's overlay (/api/people) and Mario (/api/measure). Runs only while asked.
 
     kinect_hub.py            run (the user service adaptive-kinect.service)
     kinect_hub.py --port N   another port
@@ -44,6 +46,11 @@ import kinect  # noqa: E402
 PORT = 8792
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "adaptive-desktop/kinect.json"
 STUDIO = HERE / "studio"
+MODELS = HERE.parent.parent / ".local/air-models"
+POSE_MODEL = MODELS / "pose_landmarker_full.task"
+DETECTOR_MODEL = MODELS / "efficientdet_lite0.tflite"
+MAX_PEOPLE = 6
+PEOPLE_LINGER = 3.0    # s the people tracker keeps running after the last request
 IDLE_EXIT = 20.0
 REPROBE = 3.0
 WEBCAM_NAME = "Kinect Camera"
@@ -194,6 +201,219 @@ class Webcam:
         self.pipeline.set_state(self.Gst.State.NULL)
 
 
+# ------------------------------------------------------------------ everyone's pose
+
+class PoseSource:
+    """Every person's landmarks, metric world landmarks and own mask in a picture.
+
+    Top-down, as multi-person pose systems do it: a person detector (EfficientDet, COCO
+    "person") finds everyone, then each person gets their own Pose Landmarker that follows them
+    from frame to frame on a square crop around them (as air.py follows each hand). MediaPipe's
+    one-shot multi-person mode misses most people in a group; this way each person is the only
+    subject of their own model. The detector runs every DETECT_EVERY frames to find newcomers.
+    Models: .local/air-models (scripts/install-air.sh). Without the detector: the multi-person
+    landmarker on the whole picture; without that either: the one-person Pose in MediaPipe."""
+
+    DETECT_EVERY = 6
+    MISSES = 3              # frames a follower may lose its person before it is let go
+
+    def __init__(self, model=POSE_MODEL, detector=DETECTOR_MODEL, max_people=MAX_PEOPLE):
+        import mediapipe as mp
+        from mediapipe.tasks.python import BaseOptions, vision
+        self.mp, self.vision, self.BaseOptions = mp, vision, BaseOptions
+        self.model, self.max_people = str(model), max_people
+        self.task = self.legacy = self.detector = None
+        self.followers = []
+        self.pool = None
+        self.n = 0
+        self.last_ts = 0
+        if Path(model).is_file() and Path(detector).is_file():
+            self.detector = vision.ObjectDetector.create_from_options(vision.ObjectDetectorOptions(
+                base_options=BaseOptions(model_asset_path=str(detector)),
+                running_mode=vision.RunningMode.IMAGE, score_threshold=0.4,
+                category_allowlist=["person"], max_results=max_people))
+            self.kind = "top-down"
+        elif Path(model).is_file():
+            self.task = vision.PoseLandmarker.create_from_options(self._options(max_people))
+            self.kind = "multi"
+        else:
+            self.legacy = mp.solutions.pose.Pose(model_complexity=1, enable_segmentation=True)
+            self.kind = "single"
+
+    def _options(self, num_poses=1):
+        return self.vision.PoseLandmarkerOptions(
+            base_options=self.BaseOptions(model_asset_path=self.model),
+            running_mode=self.vision.RunningMode.VIDEO, num_poses=num_poses,
+            min_pose_detection_confidence=0.3, min_pose_presence_confidence=0.5,
+            min_tracking_confidence=0.5, output_segmentation_masks=True)
+
+    def _ts(self):
+        self.last_ts = max(self.last_ts + 1, int(time.monotonic() * 1000))     # must always increase
+        return self.last_ts
+
+    def _image(self, rgb):
+        return self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=rgb)
+
+    @staticmethod
+    def _poses(result, place):
+        """people.Pose list from a landmarker result; place maps crop (x, y, mask) to the frame."""
+        import numpy as np
+
+        import people
+        out = []
+        for i, lms in enumerate(result.pose_landmarks):
+            world = result.pose_world_landmarks[i] if i < len(result.pose_world_landmarks or []) else None
+            mask = None
+            if result.segmentation_masks and i < len(result.segmentation_masks):
+                mask = np.squeeze(result.segmentation_masks[i].numpy_view())
+            image = np.array([(p.x, p.y, p.visibility or 0.0) for p in lms], np.float32)
+            image, mask = place(image, mask)
+            out.append(people.Pose(image, None if world is None else [(p.x, p.y, p.z) for p in world], mask))
+        return out
+
+    def detect(self, rgb):
+        import numpy as np
+        rgb = np.ascontiguousarray(rgb)
+        H, W = rgb.shape[:2]
+        if self.detector is None:
+            if self.task is not None:
+                r = self.task.detect_for_video(self._image(rgb), self._ts())
+                return self._poses(r, lambda image, mask: (image, mask))
+            r = self.legacy.process(rgb)
+            if not r.pose_landmarks:
+                return []
+            import people
+            world = r.pose_world_landmarks.landmark if r.pose_world_landmarks else None
+            return [people.Pose([(p.x, p.y, p.visibility) for p in r.pose_landmarks.landmark],
+                                None if world is None else [(p.x, p.y, p.z) for p in world],
+                                r.segmentation_mask)]
+
+        self.n += 1
+        if self.n % (self.DETECT_EVERY if self.followers else 3) == 1:   # newcomers
+            found = self.detector.detect(self._image(rgb)).detections
+            for d in sorted(found, key=lambda d: -d.categories[0].score):
+                b = d.bounding_box
+                box = (b.origin_x, b.origin_y, b.origin_x + b.width, b.origin_y + b.height)
+                if len(self.followers) >= self.max_people:
+                    break
+                if all(iou(box, f["box"]) < 0.3 and not inside(centre(box), f["box"]) for f in self.followers):
+                    lm = self.vision.PoseLandmarker.create_from_options(self._options())
+                    self.followers.append({"lm": lm, "box": box, "miss": 0, "ts": 0})
+
+        # Each follower on its own square crop, all at once (MediaPipe lets go of the GIL).
+        jobs = []
+        for f in list(self.followers):
+            job = self._crop(f, rgb, W, H)
+            if job is None:
+                self._drop(f)
+            else:
+                jobs.append(job)
+        if self.pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self.pool = ThreadPoolExecutor(self.max_people, thread_name_prefix="pose")
+        results = list(self.pool.map(
+            lambda j: self._poses(j["f"]["lm"].detect_for_video(self._image(j["crop"]), j["ts"]), j["place"]),
+            jobs))
+
+        out, torsos = [], []
+        for job, poses in zip(jobs, results):
+            f = job["f"]
+            x0, y0, x1, y1 = f["box"]
+            bw, bh = x1 - x0, y1 - y0
+            pose = poses[0] if poses else None
+            seen = pose.image[:, 2] > 0.5 if pose is not None else None
+            body = [i for i in (11, 12, 23, 24) if seen[i]] if pose is not None else []
+            torso = (float(pose.image[body, 0].mean() * W), float(pose.image[body, 1].mean() * H)) \
+                if len(body) >= 2 else None
+            grown = (x0 - 0.2 * bw, y0 - 0.1 * bh, x1 + 0.2 * bw, y1 + 0.1 * bh)
+            if torso is None or not inside(torso, grown):    # lost, or wandered off to someone else
+                f["miss"] += 1
+                if f["miss"] > self.MISSES:
+                    self._drop(f)
+                continue
+            if any(abs(torso[0] - t[0]) < 0.04 * W and abs(torso[1] - t[1]) < 0.04 * H for t in torsos):
+                self._drop(f)                                # two followers on one person
+                continue
+            torsos.append(torso)
+            f["miss"] = 0
+            # Follow them: the next crop is around their mask (it includes the top of the head).
+            if pose.mask is not None and (pose.mask > 0.5).sum() > 50:
+                ys, xs = np.nonzero(pose.mask > 0.5)
+                f["box"] = (float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))
+            else:
+                xs, ys = pose.image[seen, 0] * W, pose.image[seen, 1] * H
+                h = ys.max() - ys.min()
+                f["box"] = (float(xs.min()), float(ys.min() - 0.15 * h), float(xs.max()), float(ys.max()))
+            out.append(pose)
+        return out
+
+    def _crop(self, f, rgb, W, H):
+        """The square crop a follower looks at (only its person in it), and how to map back."""
+        import cv2
+        import numpy as np
+        x0, y0, x1, y1 = f["box"]
+        side = max(x1 - x0, y1 - y0) * 1.25 + 16
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        sx, sy, S = int(cx - side / 2), int(cy - side / 2), int(side)
+        ax0, ay0, ax1, ay1 = max(sx, 0), max(sy, 0), min(sx + S, W), min(sy + S, H)
+        if ax1 <= ax0 or ay1 <= ay0:
+            return None
+        crop = np.zeros((S, S, 3), np.uint8)                  # square, padded at the edges
+        crop[ay0 - sy:ay1 - sy, ax0 - sx:ax1 - sx] = rgb[ay0:ay1, ax0:ax1]
+        # Grey out the crop beyond their box, so a neighbour standing close is not who the
+        # model sees.
+        bw, bh = x1 - x0, y1 - y0
+        kx0, kx1 = int(x0 - 0.18 * bw - 6) - sx, int(x1 + 0.18 * bw + 6) - sx
+        ky0, ky1 = int(y0 - 0.10 * bh - 6) - sy, int(y1 + 0.10 * bh + 6) - sy
+        keep = np.zeros((S, S), bool)
+        keep[max(ky0, 0):max(ky1, 0), max(kx0, 0):max(kx1, 0)] = True
+        crop[~keep] = 128
+        f["ts"] = max(f["ts"] + 1, self._ts())
+
+        def place(image, mask):
+            image = image.copy()
+            image[:, 0] = (sx + image[:, 0] * S) / W
+            image[:, 1] = (sy + image[:, 1] * S) / H
+            full = None
+            if mask is not None:
+                full = np.zeros((H, W), np.float32)
+                m = mask if mask.shape[:2] == (S, S) else cv2.resize(mask, (S, S))
+                full[ay0:ay1, ax0:ax1] = m[ay0 - sy:ay1 - sy, ax0 - sx:ax1 - sx]
+            return image, full
+
+        return {"f": f, "crop": crop, "ts": f["ts"], "place": place}
+
+    def _drop(self, f):
+        self.followers.remove(f)
+        # A landmarker in VIDEO mode remembers who it followed; a fresh one is cleaner than reuse.
+        f["lm"].close()
+
+    def close(self):
+        if self.pool is not None:
+            self.pool.shutdown(wait=True)
+        for f in list(self.followers):
+            self._drop(f)
+        for x in (self.task, self.legacy, self.detector):
+            if x is not None:
+                x.close()
+
+
+def iou(a, b):
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def centre(box):
+    return ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+
+
+def inside(p, box):
+    return box[0] <= p[0] <= box[2] and box[1] <= p[1] <= box[3]
+
+
 # ------------------------------------------------------------------ the hub
 
 class Hub:
@@ -223,6 +443,10 @@ class Hub:
         self.writer = None
         self._jpeg = {}
         self._cloud = {}
+        self.people_state = {"count": 0, "standing": 0, "people": [], "running": False}
+        self.people_seq = 0
+        self.people_until = 0.0
+        self.people_thread = None
 
     # -- commands from the page / Air, carried out on the capture thread
 
@@ -378,42 +602,104 @@ class Hub:
             self.writer.close()
             self.stop.set()
 
-    # -- measuring someone (measure.py): "Mario, how tall am I?"
+    # -- everyone in front of the Kinect (people.py): the page's overlay, "Mario, how tall am I?"
 
-    def measure_height(self, seconds=1.2):
-        import mediapipe as mp
+    def people_watch(self, seconds=PEOPLE_LINGER):
+        """Keep the people tracker running for `seconds` more; it starts on the first call."""
+        now = time.monotonic()
+        self.last_use = now
+        self.people_until = max(self.people_until, now + seconds)
+        with self.lock:
+            if self.people_thread is None or not self.people_thread.is_alive():
+                self.people_thread = threading.Thread(target=self._people_loop, name="people",
+                                                      daemon=True)
+                self.people_thread.start()
 
+    def _publish(self, state):
+        self.people_state = state
+        self.people_seq += 1
+
+    def _people_loop(self):
         import measure
+        import people
+        try:
+            source = PoseSource()
+        except Exception as err:                    # noqa: BLE001 (MediaPipe missing or broken)
+            self._publish({"count": 0, "standing": 0, "people": [], "running": False,
+                           "error": f"Pose model would not load: {err}"})
+            return
+        log(f"people tracker on ({source.kind} pose)")
+        tracker = people.People()
+        last = 0
+        try:
+            while not self.stop.is_set() and time.monotonic() < self.people_until:
+                rgb, depth, seq = self.latest()
+                if rgb is None or seq == last:
+                    time.sleep(0.01)
+                    continue
+                last = seq
+                poses = source.detect(rgb)
+                state = tracker.step(poses, depth, measure.up_vector(self.motor["accel"]),
+                                     float(self.settings.get("mount_height", 1.92)),
+                                     kinect.intrinsics(self.mode), time.monotonic())
+                state.update(running=True, frame=seq, source=source.kind, mode=self.mode,
+                             size=[frames.W, frames.H])
+                self._publish(state)
+        except Exception as err:                    # noqa: BLE001
+            log(f"people tracker stopped: {err}")
+            self._publish({**self.people_state, "running": False, "error": str(err)})
+        finally:
+            source.close()
+            if self.people_state.get("running"):
+                self._publish({**self.people_state, "running": False})
+            log("people tracker off")
+
+    def measure_people(self, seconds=6.0):
+        """Watch for up to `seconds`: done early once everyone in view has been measured
+        (standing straight and still for a second). The answer for Mario and the Studio."""
+        import people
         for _ in range(50):                         # the hub may have only just started
             if self.latest()[0] is not None:
                 break
             time.sleep(0.1)
         if self.latest()[0] is None:
-            return {"ok": False, "error": self.error or "The Kinect isn't streaming."}
-        self.last_use = time.monotonic()
-        mount = float(self.settings.get("mount_height", 1.92))
-        intr = kinect.intrinsics(self.mode)
-        results, last = [], 0
-        with mp.solutions.pose.Pose(model_complexity=0, static_image_mode=False) as pose:
-            deadline = time.monotonic() + seconds
-            while time.monotonic() < deadline:
-                rgb, depth, seq = self.latest()
-                if seq == last:
-                    time.sleep(0.01)
-                    continue
-                last = seq
-                found = pose.process(rgb).pose_landmarks
-                torso = [found.landmark[i] for i in (11, 12, 23, 24)] if found else []
-                torso = [p for p in torso if p.visibility > 0.4]
-                if len(torso) < 2:
-                    results.append({"ok": False, "error": "I can't see anyone in front of the Kinect."})
-                    continue
-                seed = (sum(p.x for p in torso) / len(torso) * frames.W,
-                        sum(p.y for p in torso) / len(torso) * frames.H)
-                results.append(measure.measure(depth, self.motor["accel"], seed, mount, intr=intr))
-        summary = measure.summarise(results)
-        summary["sentence"] = measure.say(summary)
-        return summary
+            return {"ok": False, "count": 0, "people": [],
+                    "error": self.error or "The Kinect isn't streaming."}
+        start = time.monotonic()
+        seq0 = self.people_seq
+        while True:
+            self.people_watch(PEOPLE_LINGER)
+            time.sleep(0.1)
+            now = time.monotonic()
+            state = self.people_state
+            if self.people_seq == seq0 and now - start < 8:
+                continue                            # the pose model is still loading
+            crowd = state.get("people") or []
+            if state.get("error") and not state.get("running"):
+                break
+            if crowd and all(p["height_cm"] is not None for p in crowd) and now - start > 1.2:
+                break
+            if not crowd and now - start > 3.0:     # nobody there
+                break
+            if now - start > seconds:
+                break
+        crowd = state.get("people") or []
+        out = {"ok": any(p["height_cm"] is not None for p in crowd), "count": len(crowd),
+               "standing": state.get("standing", 0), "floor": state.get("floor"),
+               "people": [{k: p[k] for k in ("id", "posture", "label", "straight", "hint",
+                                             "height_cm", "distance")} for p in crowd],
+               "sentence": people.say(state), "count_sentence": people.count(state)}
+        if state.get("error"):
+            out["error"] = state["error"]
+        elif not crowd:
+            out["error"] = out["sentence"]
+        if crowd:                                   # the one nearest the middle, for "how far am I"
+            main = min(crowd, key=lambda p: abs(p["x"] - 0.5))
+            out["distance"] = main["distance"]
+            if main["height_cm"] is not None:
+                out["height"] = main["height_cm"] / 100
+                out["feet"], out["inches"] = people.feet_inches(main["height_cm"])
+        return out
 
     # -- what the page reads
 
@@ -537,8 +823,23 @@ def make_app(hub):
     async def status(_request):
         return web.json_response(hub.info())
 
-    async def measure_height(_request):
-        return web.json_response(await in_thread(hub.measure_height))
+    async def measure(request):
+        # ?seconds=N: how long to wait for everyone to stand straight (2 for a quick count).
+        try:
+            seconds = min(10.0, max(1.0, float(request.query.get("seconds", "6"))))
+        except ValueError:
+            seconds = 6.0
+        return web.json_response(await in_thread(hub.measure_people, seconds))
+
+    async def people(request):
+        # Long poll: the state after the one the page has (?after=N), within about a second.
+        after = int(request.query.get("after", "0") or 0)
+        hub.people_watch()
+        for _ in range(100):
+            if hub.people_seq != after:
+                break
+            await asyncio.sleep(0.01)
+        return web.json_response({**hub.people_state, "seq": hub.people_seq})
 
     async def api(request):
         name = request.match_info["name"]
@@ -571,7 +872,8 @@ def make_app(hub):
     app.router.add_get("/cloud.ply", ply)
     app.router.add_get("/depth-scale.png", scale)
     app.router.add_get("/api/status", status)
-    app.router.add_get("/api/measure", measure_height)
+    app.router.add_get("/api/measure", measure)
+    app.router.add_get("/api/people", people)
     app.router.add_post("/api/{name}", api)
     app.router.add_get("/presence", presence)
     loop_box["app"] = app

@@ -9,6 +9,9 @@
   --text: #F5F5F8; --soft: #CACACD; --muted: #A4A4A7;
   --accent: #0A84FF; --accent-hover: #409CFF; --cyan: #64D2FF; --indigo: #5E5CE6;
   --ok: #30D158; --warn: #FF9F0A; --danger: #FF453A; --yellow: #FFD60A; --white: #FFFFFF;
+  --warn-text: #FFCF85; --black: #000000;
+  /* one colour per person on the camera view: bright hues that stand out on any picture */
+  --p1: #64D2FF; --p2: #30D158; --p3: #BF5AF2; --p4: #FFD60A; --p5: #0A84FF; --p6: #5E5CE6;
   --r: 18px; --r-s: 12px;
   --feedback: 120ms; --state: 260ms;
   font: 400 13px/1.4 Inter, "Cantarell", system-ui, sans-serif; color: var(--text);
@@ -74,6 +77,36 @@ button { cursor: pointer; }
   background: var(--card); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--r); }
 .panel-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .panel-head h2 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: .02em; }
+/* the camera view and the people drawn over it */
+.stage { position: relative; flex: 1; min-height: 0; }
+.stage canvas { position: absolute; inset: 0; height: 100%; }
+#overlay { background: transparent; pointer-events: none; }
+.banner { position: absolute; left: 50%; bottom: 14px; margin: 0; max-width: calc(100% - 28px); transform: translateX(-50%);
+  padding: 8px 16px; border-radius: 999px; background: rgba(28, 28, 30, 0.80); border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text); font-size: 13px; font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); animation: rise var(--state) both; }
+.banner.ask { border-color: rgba(255, 159, 10, 0.60); color: var(--warn-text); }
+.banner.done { border-color: rgba(48, 209, 88, 0.60); color: #9FF0B5; }
+@keyframes rise { from { opacity: 0; transform: translate(-50%, 8px); } }
+.count { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 10px; border-radius: 999px;
+  background: rgba(10, 132, 255, 0.16); border: 1px solid rgba(10, 132, 255, 0.45); color: var(--accent-hover); font-size: 12px; font-variant-numeric: tabular-nums; }
+.count b { font-size: 14px; display: inline-block; }
+.count b.bump { animation: bump 420ms cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes bump { 40% { transform: scale(1.45); } }
+.people-toggle { margin-left: auto; }
+.dark-hint + .people-toggle { margin-left: 0; }
+.people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.people li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 10px; padding: 7px 9px;
+  border-radius: var(--r-s); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); animation: slide var(--state) both; }
+.people li .tag { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--black); }
+.people li .what { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
+.people li .what span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.people li .what span.ask { color: var(--warn-text); }
+.people li b { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.people li b small { font-size: 11px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+.people li.empty { display: block; color: var(--muted); font-size: 12px; }
+@keyframes slide { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .banner, .people li, .count b.bump { animation: none; } }
 .view canvas, .cloud canvas { flex: 1; min-height: 0; width: 100%; border-radius: var(--r-s); background: #000000; object-fit: contain; }
 .cloud canvas { cursor: grab; }
 .cloud canvas:active { cursor: grabbing; }
@@ -124,7 +157,7 @@ button { cursor: pointer; }
   html, body { overflow: auto; }
   .studio { height: auto; }
   .grid { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "video" "depth" "cloud" "side"; }
-  .view canvas { aspect-ratio: 4 / 3; }
+  .stage { flex: none; aspect-ratio: 4 / 3; }
   .cloud canvas { height: 60vh; }
   .side { overflow: visible; }
 }

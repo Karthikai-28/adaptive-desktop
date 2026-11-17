@@ -58,5 +58,6 @@ apps/adaptive-link-android/cloud.properties
 build/fingerprint-*
 .local/fingerprint-driver/
 .local/air-venv/
+.local/air-models/
 .local/libfreenect/
 .local/libfreenect-build/

@@ -78,7 +78,12 @@ RULES = [
 
     # -- the Kinect
     ("kinect.height", r"(?:how tall am i|what(?:'s| is) my height|measure (?:my height|me|how tall i am)|"
-                      r"how tall is (?:this|that|the) (?:person|guy|man|woman)|tell me my height)", lambda m: {}),
+                      r"how tall is (?:this|that|the) (?:person|guy|man|woman)|tell me my height|"
+                      r"how tall (?:are we|is everyone|is everybody|are (?:they|these people|all of us))|"
+                      r"measure (?:us|everyone|everybody|all of us|our heights?|their heights?))", lambda m: {}),
+    ("kinect.people", r"how many (?:people|persons|of us)(?: are(?: there| here| in (?:the )?(?:room|front)| standing)?"
+                      r"| (?:can|do) you see)?|who(?:'s| is) (?:in front of (?:the )?(?:kinect|tv|camera)|here)|"
+                      r"(?:count|find) (?:the )?people", lambda m: {}),
     ("kinect.distance", r"how far (?:away )?am i(?: from (?:the |my )?(?:tv|kinect|screen))?", lambda m: {}),
     ("kinect.studio", r"(?:open|show|launch|start)(?: me)? (?:the )?(?:kinect(?: studio| viewer| app| view)?|"
                       r"point cloud|depth (?:view|camera))", lambda m: {}),
@@ -226,7 +231,9 @@ CHEATSHEET = [
         ("What can I say?", "help", "This list."),
     ]),
     ("Kinect and you", [
-        ("How tall am I?", "kinect.height", "Measures you with the Kinect: stand 2-4 m away, all of you in view."),
+        ("How tall am I? / How tall are we?", "kinect.height",
+         "Measures everyone in view with the Kinect, in cm: stand up straight 2-4 m away, facing it, all of you in view."),
+        ("How many people are there?", "kinect.people", "Counts everyone in view and says who is standing, sitting or crouching."),
         ("How far am I from the TV?", "kinect.distance", "Your distance from the Kinect, across the floor."),
         ("Open Kinect Studio", "kinect.studio", "The camera, depth, 3D point cloud and sensors."),
         ("Tilt the Kinect down by 10", "kinect.tilt", "Up or down, by any number of degrees (10 if you don't say)."),

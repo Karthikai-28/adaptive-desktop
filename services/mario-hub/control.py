@@ -231,10 +231,19 @@ class Control:
         _, problem = self._kinect_ready()
         if problem:
             return problem
-        r = self.http("GET", HUB + "/api/measure", timeout=20)
-        if not isinstance(r, dict) or not r.get("ok"):
+        r = self.http("GET", HUB + "/api/measure?seconds=2", timeout=20)
+        if not isinstance(r, dict) or r.get("distance") is None:
             return self.said((r or {}).get("error") or "I can't see you.", False)
         return self.said(f"You're {r['distance']:.1f} metres from the Kinect.")
+
+    def do_kinect_people(self):
+        _, problem = self._kinect_ready()
+        if problem:
+            return problem
+        r = self.http("GET", HUB + "/api/measure?seconds=2", timeout=20)
+        if not isinstance(r, dict):
+            return self.said("The Kinect didn't answer.", False)
+        return self.said(r.get("count_sentence") or r.get("error") or "I can't see anyone.", True)
 
     def do_kinect_studio(self):
         self.sh(["python3", STUDIO], wait=False)

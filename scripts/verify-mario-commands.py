@@ -48,6 +48,11 @@ PHRASES = {
     "Mario, what's my height?": "kinect.height",
     "can you measure me": "kinect.height",
     "how far away am I from the screen": "kinect.distance",
+    "how tall are we": "kinect.height",
+    "mario measure everyone": "kinect.height",
+    "how many people are there": "kinect.people",
+    "how many people can you see": "kinect.people",
+    "who's in front of the kinect": "kinect.people",
     "open the kinect": "kinect.studio",
     "show me the point cloud": "kinect.studio",
     "open connect studio": "kinect.studio",
@@ -183,9 +188,10 @@ class World:
         if url.endswith("/api/status"):
             return {"status": self.kinect, "tilt": -5.0, "error": "no power",
                     "webcam": {"device": self.webcam_device}}
-        if url.endswith("/api/measure"):
-            return {"ok": True, "height": 1.78, "distance": 2.6,
-                    "sentence": "You're 1.78 metres tall, about 5 foot 10."}
+        if "/api/measure" in url:
+            return {"ok": True, "height": 1.78, "distance": 2.6, "count": 2,
+                    "sentence": "You're 1.78 metres tall, about 5 foot 10.",
+                    "count_sentence": "I can see 2 people: 1 standing and 1 sitting."}
         if url.endswith("/cloud.ply"):
             return b"ply\nformat binary_little_endian 1.0\n"
         if method == "POST":
@@ -210,6 +216,9 @@ def check_control():
     check("how tall am I: the Kinect hub measures, Mario says it", r["ok"] and "1.78" in r["answer"], r)
     r = say(w, "how far am I from the TV")
     check("how far am I: the distance", "2.6 metres" in r["answer"], r)
+    r = say(w, "how many people are there")
+    check("how many people: the count and who stands or sits", "2 people" in r["answer"]
+          and "sitting" in r["answer"], r)
     say(w, "tilt the kinect down by 10")
     check("tilt down by 10 from -5 goes to -15", w.posted[-1] == ("tilt", -15), w.posted)
     say(w, "tilt the kinect to 40")

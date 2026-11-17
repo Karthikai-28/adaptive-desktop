@@ -30,8 +30,14 @@
   <main class="grid">
     <section class="panel view">
       <div class="panel-head"><h2 id="video-title">Colour</h2><span class="muted" id="video-meta"></span>
-        <button class="ghost dark-hint" id="dark" data-video="auto" hidden>Too dark: switch to Auto</button></div>
-      <canvas id="video" width="640" height="480"></canvas>
+        <span class="count" id="people-count" hidden><b id="count-n">0</b><span id="count-text">people</span></span>
+        <button class="ghost dark-hint" id="dark" data-video="auto" hidden>Too dark: switch to Auto</button>
+        <button class="ghost on people-toggle" id="people-toggle" title="Find everyone in view: posture and height">People</button></div>
+      <div class="stage">
+        <canvas id="video" width="640" height="480"></canvas>
+        <canvas id="overlay" aria-hidden="true"></canvas>
+        <p class="banner" id="banner" hidden></p>
+      </div>
     </section>
     <section class="panel view">
       <div class="panel-head"><h2>Depth</h2><span class="muted" id="depth-meta"></span></div>
@@ -73,10 +79,10 @@
       </section>
 
       <section class="panel">
-        <div class="panel-head"><h2>You</h2><span class="muted" id="you-meta"></span></div>
-        <b class="big" id="you-height">–</b>
-        <p class="muted" id="you-text">Stand 2 to 4 m in front of the Kinect, facing it, all of you in view.</p>
-        <button class="ghost" id="measure">Measure my height</button>
+        <div class="panel-head"><h2>People</h2><span class="muted" id="you-meta"></span></div>
+        <ul class="people" id="people-list"></ul>
+        <p class="muted" id="you-text">Stand 2 to 4 m in front of the Kinect, straight and facing it, all of you in view.</p>
+        <button class="ghost" id="measure">Measure everyone</button>
       </section>
 
       <section class="panel">

@@ -741,6 +741,11 @@ def check_hub():
         def command(self, name, value):
             self.sent.append((name, value))
 
+        def people_watch(self, seconds=3.0):         # no pose model in the check
+            self.watched = seconds
+            if self.people_seq == 0:
+                self._publish({"count": 1, "standing": 1, "running": True, "people": [{"id": 1}]})
+
     stub = Stub()
 
     async def go():
@@ -767,6 +772,9 @@ def check_hub():
             out["reboot"] = res.status
             res = await client.get("/")
             out["page"] = "Kinect Studio" in await res.text()
+            res = await client.get("/api/people?after=0")
+            body = await res.json()
+            out["people"] = (res.status, body.get("count"), body.get("seq"))
             res = await client.get("/studio/studio.css")
             out["css"] = res.status
             res = await client.get("/depth-scale.png")
@@ -785,10 +793,14 @@ def check_hub():
     check("controls reach the hub; unknown ones are refused",
           out["tilt"] == 200 and stub.sent == [("tilt", 12)] and out["reboot"] == 404,
           (out["tilt"], stub.sent, out["reboot"]))
+    check("person boxes: overlap and inside", abs(hub_mod.iou((0, 0, 2, 2), (1, 0, 3, 2)) - 1 / 3) < 1e-9
+          and hub_mod.iou((0, 0, 1, 1), (2, 2, 3, 3)) == 0 and hub_mod.inside((1, 1), (0, 0, 2, 2)))
+    check("/api/people answers everyone in view, with its number, and keeps the tracker running",
+          out["people"] == (200, 1, 1) and getattr(stub, "watched", 0) > 0, out["people"])
     check("the Studio page, its stylesheet and the depth scale are served",
           out["page"] and out["css"] == 200 and out["scale"] == b"\x89PNG", out)
     page = (HERE_AIR / "studio/studio.js").read_text()
-    for path in ("/frame/", "/cloud.bin", "/api/status", "/api/led", "/api/tilt", "/api/measure", "/presence"):
+    for path in ("/frame/", "/cloud.bin", "/api/status", "/api/led", "/api/tilt", "/api/measure", "/api/people", "/presence"):
         check(f"the page uses {path}", path.split("/api/")[-1] in page or path in page)
 
 
@@ -868,6 +880,225 @@ def check_height():
           measure.say(summary))
 
 
+def room(bodies, camera_height=1.92, pitch=12.0, floor=True, seed=1):
+    """A depth frame of several people (cylinders: (x, distance, height, radius)) on a floor, the
+    accelerometer, each person's own mask, and the camera basis (for posing stick figures)."""
+    import numpy as np
+    th = math.radians(pitch)
+    xc = np.array([1.0, 0.0, 0.0])
+    zc = np.array([0.0, -math.sin(th), math.cos(th)])
+    yc = np.array([0.0, -math.cos(th), -math.sin(th)])
+    v, u = np.mgrid[0:480, 0:640]
+    dx, dy = (u - 319.5) / 525.0, (v - 239.5) / 525.0
+    dw = dx[..., None] * xc + dy[..., None] * yc + zc
+    oy = camera_height
+    t = np.full(u.shape, np.inf)
+    who = np.full(u.shape, -1)
+    if floor:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = np.where(dw[..., 1] < -1e-6, -oy / dw[..., 1], np.inf)
+    for k, (bx, dist, height, radius) in enumerate(bodies):
+        ex, ez = dw[..., 0], dw[..., 2]
+        a = ex ** 2 + ez ** 2
+        b = -2 * (bx * ex + dist * ez)
+        c = bx ** 2 + dist ** 2 - radius ** 2
+        disc = b * b - 4 * a * c
+        with np.errstate(invalid="ignore"):
+            tc = (-b - np.sqrt(np.maximum(disc, 0))) / (2 * a)
+        yh = oy + tc * dw[..., 1]
+        tc = np.where((disc > 0) & (yh >= 0) & (yh <= height), tc, np.inf)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tt = (height - oy) / dw[..., 1]
+        px, pz = tt * ex - bx, tt * ez - dist
+        tt = np.where((tt > 0) & (px ** 2 + pz ** 2 <= radius ** 2), tt, np.inf)
+        tk = np.minimum(tc, tt)
+        closer = tk < t
+        who = np.where(closer, k, who)
+        t = np.where(closer, tk, t)
+    rng = np.random.default_rng(seed)
+    depth = np.where(np.isfinite(t), t * 1000 + rng.normal(0, 4, t.shape), 0)
+    depth = np.where((depth > 450) & (depth < 6000), depth, 0).astype(np.uint16)
+    up = np.array([0.0, -math.cos(th), -math.sin(th)])
+    accel = (-up[0] * 819, -up[1] * 819, up[2] * 819)
+    masks = [(who == k).astype(np.float32) for k in range(len(bodies))]
+    return depth, accel, masks, (xc, yc, zc, oy)
+
+
+def figure(basis, bx, dist, height, posture="standing", mask=None):
+    """A people.Pose of a stick figure standing (or sitting, crouching...) at (bx, dist)."""
+    import numpy as np
+    import people
+    xc, yc, zc, oy = basis
+    H = height
+    front = dist - 0.2                               # the front of the body, towards the camera
+    J = {}
+    def put(i, x, y, z=0.0):
+        J[i] = np.array([bx + x, y, front + z])     # world: x right, y up, z away from camera
+    legs = {"standing": (0.53, 0.28, 0, 0), "bending": (0.53, 0.28, 0, 0),
+            "arms-up": (0.53, 0.28, 0, 0), "leaning": (0.53, 0.28, 0, 0)}
+    if posture in legs or posture == "lying":
+        hip, knee = 0.53 * H, 0.28 * H
+        for s, x in ((1, 0.1), (-1, -0.1)):
+            put(23 if s > 0 else 24, x, hip); put(25 if s > 0 else 26, x, knee); put(27 if s > 0 else 28, x, 0.08)
+        tilt = {"bending": 55, "leaning": 20, "lying": 85}.get(posture, 0)
+    elif posture == "sitting":
+        hip = 0.48
+        for s, x in ((1, 0.1), (-1, -0.1)):
+            put(23 if s > 0 else 24, x, hip); put(25 if s > 0 else 26, x, 0.52, -0.42); put(27 if s > 0 else 28, x, 0.08, -0.45)
+        tilt = 5
+    elif posture == "crouching":
+        hip = 0.42
+        for s, x in ((1, 0.12), (-1, -0.12)):
+            put(23 if s > 0 else 24, x, hip); put(25 if s > 0 else 26, x, 0.5, -0.35); put(27 if s > 0 else 28, x, 0.08, -0.15)
+        tilt = 25
+    if posture == "lying":                           # lying along the floor
+        for i in (23, 24, 25, 26, 27, 28):
+            J[i][1] = 0.15
+    r = math.radians(tilt)
+    def torso(i, x, along):
+        J[i] = np.array([bx + x, hip + along * math.cos(r), front - along * math.sin(r)])
+    torso(11, 0.19, 0.29 * H); torso(12, -0.19, 0.29 * H)
+    torso(0, 0, 0.39 * H); torso(2, 0.03, 0.405 * H); torso(5, -0.03, 0.405 * H)
+    torso(7, 0.07, 0.40 * H); torso(8, -0.07, 0.40 * H)
+    torso(1, 0.02, 0.405 * H); torso(3, 0.04, 0.405 * H); torso(4, -0.02, 0.405 * H); torso(6, -0.04, 0.405 * H)
+    torso(9, 0.02, 0.37 * H); torso(10, -0.02, 0.37 * H)
+    if posture == "arms-up":
+        torso(13, 0.22, 0.45 * H); torso(14, -0.22, 0.45 * H); torso(15, 0.2, 0.55 * H); torso(16, -0.2, 0.55 * H)
+    else:
+        torso(13, 0.24, 0.12 * H); torso(14, -0.24, 0.12 * H); torso(15, 0.25, -0.05 * H); torso(16, -0.25, -0.05 * H)
+    for i in range(17, 23):
+        J[i] = J[15 if i % 2 else 16].copy()
+    for i in (29, 31):
+        J[i] = J[27] + np.array([0, -0.05, -0.08])
+    for i in (30, 32):
+        J[i] = J[28] + np.array([0, -0.05, -0.08])
+    image, world = [], []
+    for i in range(33):
+        w = J[i]
+        rel = np.array([w[0], w[1] - oy, w[2]])
+        cam = np.array([rel @ xc, rel @ yc, rel @ zc])
+        image.append((319.5 + 525 * cam[0] / cam[2]) / 640), image.append((239.5 + 525 * cam[1] / cam[2]) / 480)
+        world.append(cam)
+    image = np.array(image).reshape(33, 2)
+    world = np.array(world)
+    world -= (world[23] + world[24]) / 2
+    image = np.hstack([image, np.full((33, 1), 0.95)])
+    return people.Pose(image, world, mask)
+
+
+def check_people():
+    print("Everyone in view (people.py)")
+    import measure
+    import numpy as np
+    import people
+    intr = (525.0, 525.0, 319.5, 239.5)
+
+    def frame(spec, **kw):
+        bodies = [(x, d, h if p in ("standing", "arms-up", "leaning") else
+                   {"sitting": 1.3, "crouching": 1.05, "bending": 1.25, "lying": 0.35}.get(p, h), 0.2)
+                  for x, d, h, p in spec]
+        depth, accel, masks, basis = room(bodies, **kw)
+        poses = [figure(basis, x, d, h, p, masks[k]) for k, (x, d, h, p) in enumerate(spec)]
+        import measure
+        return poses, depth, measure.up_vector(accel)
+
+    poses, depth, up = frame([(-0.7, 2.8, 1.78, "standing"), (0.6, 3.2, 1.62, "standing")])
+    seen, floor = people.observe(poses, depth, up, 1.92, intr)
+    check("the floor plane is fitted: the Kinect's height and tilt come out of it",
+          floor.seen and abs(floor.camera_height - 1.92) < 0.02 and abs(floor.to_dict()["tilt"] - 12) < 1,
+          floor.to_dict())
+    check("two people side by side: two people, each with their own height",
+          len(seen) == 2 and abs(seen[0]["top"] - 1.78) < 0.03 and abs(seen[1]["top"] - 1.62) < 0.03,
+          [round(o["top"], 3) for o in seen])
+    check("... both standing straight",
+          all(o["posture"] == "standing" and o["straight"] for o in seen),
+          [(o["posture"], o["hint"]) for o in seen])
+    check("... with an outline, a head and a floor point for the ruler",
+          all(len(o["outline"]) == people.OUTLINE_POINTS and o["head"] and o["foot"] and o["ring"]
+              for o in seen) and all(o["foot"][1] > o["head"][1] for o in seen))
+
+    # A person on the TV: flat, and far too small for how far away the screen is.
+    depth, accel, masks, basis = room([(0.0, 3.0, 1.78, 0.2)])
+    tv = figure(basis, 0.0, 3.0, 1.78, "standing", masks[0])
+    flat = depth.copy()
+    flat[masks[0] > 0] = 3500                       # the same picture, painted on a wall
+    seen, _ = people.observe([tv], flat, measure.up_vector(accel), 1.92, intr)
+    check("a person on a flat screen is not counted", not seen, len(seen))
+    small = people.Pose(tv.image.copy(), tv.world, tv.mask)
+    small.image[11, 0] = small.image[12, 0] + 0.02   # shoulders 13 px apart at 2.8 m
+    seen, _ = people.observe([small], depth, measure.up_vector(accel), 1.92, intr)
+    check("a person far too small for their distance is not counted", not seen, len(seen))
+
+    # The accelerometer 5 degrees out, and the Kinect moved to a desk (settings still say the TV).
+    bodies = [(0.0, 3.0, 1.74, 0.2)]
+    depth, accel, masks, basis = room(bodies, camera_height=0.8, pitch=4)
+    off = math.radians(5)
+    skew = np.array([[1, 0, 0], [0, math.cos(off), -math.sin(off)], [0, math.sin(off), math.cos(off)]])
+    pose = figure(basis, 0.0, 3.0, 1.74, "standing", masks[0])
+    seen, floor = people.observe([pose], depth, skew @ measure.up_vector(accel), 1.92, intr)
+    check("Kinect moved and its accelerometer 5 degrees out: the floor plane still gives 1.74 m",
+          floor.seen and abs(floor.camera_height - 0.8) < 0.03 and seen and abs(seen[0]["top"] - 1.74) < 0.03,
+          (floor.to_dict(), seen and round(seen[0]["top"], 3)))
+    depth, accel, masks, basis = room(bodies, floor=False)
+    seen, floor = people.observe([figure(basis, 0.0, 3.0, 1.74, "standing", masks[0])], depth,
+                                 measure.up_vector(accel), 1.92, intr)
+    check("no floor in view: the mount height stands in", not floor.seen and seen
+          and abs(seen[0]["top"] - 1.74) < 0.04, (floor.to_dict(), seen and seen[0]["top"]))
+
+    spec = [(-1.1, 3.0, 1.75, "standing"), (-0.2, 2.6, 1.70, "sitting"), (0.6, 3.0, 1.70, "crouching"),
+            (1.4, 3.4, 1.70, "bending")]
+    poses, depth, up = frame(spec)
+    seen, _ = people.observe(poses, depth, up, 1.92, intr)
+    got = sorted([(round(o["centre_x"], 2), o["posture"]) for o in seen])
+    check("four people: standing, sitting, crouching, bending over",
+          [p for _, p in got] == ["standing", "sitting", "crouching", "bending"], got)
+    for posture, hint in (("arms-up", "Lower your arms"), ("leaning", "Stand up straight")):
+        poses, depth, up = frame([(0, 2.8, 1.78, posture)])
+        seen, _ = people.observe(poses, depth, up, 1.92, intr)
+        check(f"standing but {posture}: not straight, and told '{hint}'",
+              seen and seen[0]["posture"] == "standing" and not seen[0]["straight"]
+              and seen[0]["hint"] == hint, seen and (seen[0]["posture"], seen[0]["hint"]))
+    check("lying down", people.classify({"torso": 85, "legs": True, "thigh": 88, "knee": 175}) == "lying")
+    check("legs hidden behind a table, hips high: standing; hips low: sitting",
+          people.classify({"torso": 4, "legs": False, "hip_h": 0.95}) == "standing"
+          and people.classify({"torso": 4, "legs": False, "hip_h": 0.5}) == "sitting")
+    check("kneeling", people.classify({"torso": 5, "legs": True, "thigh": 10, "knee": 95,
+                                       "knee_h": 0.1, "hip_h": 0.6}) == "kneeling")
+
+    # Over time: numbers stay with people, a height only after a second of standing straight.
+    tracker = people.People()
+    spec = [(-0.7, 2.8, 1.78, "standing"), (0.6, 3.0, 1.70, "sitting")]
+    t = 0.0
+    state = None
+    for k in range(20):
+        poses, depth, up = frame(spec, seed=k)
+        state = tracker.step(poses, depth, up, 1.92, intr, t)
+        if k == 2:
+            early = state
+        t += 1 / 15
+    by_x = state["people"]
+    check("the count, and how many stand", state["count"] == 2 and state["standing"] == 1,
+          (state["count"], state["standing"]))
+    check("no height before a second of standing straight",
+          early["people"][0]["height_cm"] is None and 0 < early["people"][0]["measuring"] < 1,
+          early["people"][0]["measuring"])
+    check("after it: 178 cm for the one standing; the one sitting is asked to stand",
+          abs(by_x[0]["height_cm"] - 178) <= 2 and by_x[1]["height_cm"] is None
+          and by_x[1]["posture"] == "sitting" and "Stand up" in by_x[1]["hint"],
+          [(p["height_cm"], p["posture"], p["hint"]) for p in by_x])
+    check("each keeps their number and colour", [p["id"] for p in by_x] == [1, 2]
+          and len({p["colour"] for p in by_x}) == 2)
+    sentence = people.say(state)
+    check("Mario says how many, who stands, the height, and asks the other to stand",
+          "2 people" in sentence and "1 standing" in sentence and "1 sitting" in sentence
+          and str(by_x[0]["height_cm"]) in sentence and "stand up straight" in sentence, sentence)
+    check("one person sitting: asked to stand up straight",
+          "stand up straight" in people.say({"people": [{"height_cm": None, "posture": "sitting",
+                                                         "hint": "x"}]}))
+    check("nobody: says so", "can't see anyone" in people.say({"people": []}))
+    check("feet and inches", people.feet_inches(178) == (5, 10) and people.feet_inches(152) == (5, 0))
+
+
 def hardware():
     print("Hardware")
     p = kinect.probe()
@@ -906,6 +1137,7 @@ def main():
     check_demo()
     check_hub()
     check_height()
+    check_people()
     if "--hardware" in sys.argv:
         hardware()
     print()
