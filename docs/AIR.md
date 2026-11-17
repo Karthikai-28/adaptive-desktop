@@ -6,6 +6,10 @@ click, make a fist to pick up a window and fling it, sweep between desktops, pul
 to see every window. Until the Kinect has power, or on a machine without one, the webcam
 stands in (no depth, so no air push).
 
+The complete references: [KINECT.md](KINECT.md) (the sensor, its three senses, mounting it on
+the TV, troubleshooting) and [GESTURES.md](GESTURES.md) (every gesture: what it is for, how to do
+it, the exact rule in centimetres and seconds, what goes wrong).
+
 Super+G starts and stops it. The camera is never on at login, the top bar shows a camera icon
 whenever Air runs (its menu has Stop), and camera pictures never leave the process or touch the
 disk: only hand landmarks (21 points per hand) go to the shell over the session bus.
