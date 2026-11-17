@@ -107,3 +107,40 @@ environment) successfully read the exported synthetic observed-surface STL:
 `[-195.5, -247.8, 1150.0]` to `[195.5, 149.5, 1200.0]`. This confirms that the
 binary export is readable and uses the requested unit scale. It does not prove
 watertightness, printability, hidden-surface coverage, or physical accuracy.
+
+## Addendum: integration into Adaptive Desktop (November 18, 2026)
+
+Run on the target machine: Ubuntu 22.04, Python 3.10.12, NumPy 1.26.4, SciPy 1.15.3,
+Open3D 0.20.0, OpenCV 4.11.0, libfreenect 0.7.5 built privately into `.local/libfreenect`, and a
+physical Kinect for Xbox 360 (model 1414) with its power supply.
+
+**Tests: 39 passed, 0 skipped.** The Open3D test that was skipped above was run here and first
+**failed**: with Open3D 0.20.0 (pip, x86-64) `ScalableTSDFVolume` returns no surface at all, even
+for a flat wall at 1 m, while `UniformTSDFVolume` works. `reconstruct.py` now falls back to a
+uniform volume sized to the posed observations when the scalable one is empty, and
+`measurements.json` records which was used (`"tsdf_volume"`). The synthetic 400 x 400 x 200 mm
+known-pose session then reconstructs to 425 x 397 x 228 mm extents (the TSDF band adds a few
+millimetres per side; this is the fixture, not a Kinect accuracy figure).
+
+**Live, on the physical sensor:**
+
+| Path | Result |
+| --- | --- |
+| `doctor` | finds `.local/libfreenect/lib/libfreenect_sync.so` and the three Kinect USB functions |
+| Direct libfreenect, factory projection | fx = fy = 575.816 px, cx 320, cy 240: a 58.1 x 45.3 deg pixel field of view |
+| `snapshot` (direct, room at 0.5 to 4 m) | 90,529 observed points, 36,433-triangle observed-surface mesh, PLY/PCD/XYZ/OBJ/STL written |
+| `snapshot` through the Kinect hub | 90,198 points; intrinsics labelled as the hub's nominal values (575.8 px in infrared) |
+
+Not yet done on this machine: a known reference object for dimensional accuracy, a rotating
+subject through `record` + `reconstruct --mode auto`, the indexed turntable, self-scanning.
+
+Changes made for Adaptive Desktop (all in `src/kinectscan/`):
+
+- `capture.py`: the repo's own `.local/libfreenect` build is used first (`KINECTSCAN_FREENECT`
+  overrides); `HubCapture` reads frames from the Kinect hub's shared memory when the hub owns the
+  Kinect (`--source auto|hub|direct`, default auto), and never mixes colour-geometry and
+  infrared-geometry frames in one session.
+- `reconstruct.py`: the uniform-volume fallback above.
+- `cli.py`: `doctor` asks `cv2` for OpenCV's version (any OpenCV package name).
+
+Run it from the checkout with `scripts/kinect-scan.sh <command>`.

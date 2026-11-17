@@ -7,7 +7,11 @@ from __future__ import annotations
 import ctypes as ct
 import ctypes.util
 import multiprocessing as mp
+import os
+import subprocess
+import sys
 import time
+from pathlib import Path
 import numpy as np
 from .geometry import Intrinsics, median_depth
 
@@ -15,7 +19,18 @@ WIDTH, HEIGHT = 640, 480
 FREENECT_DEPTH_MM = 5
 
 
+# This package lives in Adaptive Desktop's kinect/ folder; the repo's own libfreenect build
+# (kinect/build-libfreenect.sh -> .local/libfreenect) is used first, then the system's.
+REPO = Path(__file__).resolve().parents[4]
+LOCAL_SYNC = REPO / ".local/libfreenect/lib/libfreenect_sync.so"
+
+
 def library_path():
+    env = os.environ.get("KINECTSCAN_FREENECT")
+    if env:
+        return env
+    if LOCAL_SYNC.is_file():
+        return str(LOCAL_SYNC)
     return ctypes.util.find_library("freenect_sync")
 
 
@@ -24,6 +39,9 @@ class _Native:
         name = library_path()
         if not name:
             raise RuntimeError("libfreenect_sync not found. Install libfreenect-dev and libfreenect-bin, then run ldconfig if built from source.")
+        core = Path(name).with_name("libfreenect.so")
+        if "/" in name and core.is_file():
+            ct.CDLL(str(core), mode=ct.RTLD_GLOBAL)   # the private build's own core library
         self.lib = ct.CDLL(name)
         self.index = int(index)
         self.lib.freenect_sync_get_depth.argtypes = [ct.POINTER(ct.c_void_p),ct.POINTER(ct.c_uint32),ct.c_int,ct.c_int]
@@ -151,3 +169,108 @@ class KinectCapture:
 
     def __exit__(self,*exc):
         self.close()
+
+
+# -- the Adaptive Desktop Kinect hub ------------------------------------------------------------
+# The hub (services/adaptive-air/kinect_hub.py) is the one process that opens the Kinect; Air,
+# Kinect Studio, Kinect Motion and this scanner all read its frames from shared memory, so a scan
+# works while the others run. Its depth is millimetres: in the infrared camera's geometry when the
+# hub shows infrared, registered to the colour camera when it shows colour.
+
+HUB_UNIT = "adaptive-kinect.service"
+NOMINAL = {"rgb": (525.0, 525.0, 319.5, 239.5), "ir": (575.8, 575.8, 314.5, 235.5)}   # kinect.INTRINSICS
+
+
+def hub_running():
+    """Is the hub's frame store there and fresh?"""
+    try:
+        frames = _hub_frames()
+        r = frames.Reader()
+        try:
+            # The hub stamps frames with the system-wide monotonic clock.
+            return time.monotonic() - r.header()["t"] < 3.0
+        finally:
+            r.close()
+    except (OSError, ImportError):
+        return False
+
+
+def _hub_frames():
+    air = REPO / "services/adaptive-air"
+    if str(air) not in sys.path:
+        sys.path.insert(0, str(air))
+    import frames
+    return frames
+
+
+class HubCapture:
+    """The KinectCapture interface over the hub's shared frames. Every frame of one session is in
+    one camera geometry: frames in the other picture (the hub switches colour/infrared with the
+    room's light) are skipped, never mixed."""
+
+    def __init__(self, timeout=10., intrinsics=None):
+        self.timeout, self.override = timeout, intrinsics
+        self.reader = None
+        self.k = None
+        self.mode = None
+        self.skipped = 0
+        self.last_timestamp = None
+
+    def __enter__(self):
+        frames = _hub_frames()
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                self.reader = frames.Reader()
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("The Kinect hub did not start (systemctl --user status adaptive-kinect)")
+                subprocess.run(["systemctl", "--user", "start", HUB_UNIT], capture_output=True)
+                time.sleep(0.3)
+        _, _, head = self.reader.read(timeout=self.timeout)
+        self.mode = head["mode"]
+        if self.override is not None:
+            self.k = self.override
+        else:
+            fx, fy, cx, cy = NOMINAL[self.mode]
+            self.k = Intrinsics(WIDTH, HEIGHT, fx, fy, cx, cy,
+                source=f"Kinect hub, {self.mode} picture: nominal Kinect v1 lens values, not this device's "
+                       "factory calibration (stop the hub and run `kinectscan probe` for that)")
+        return self
+
+    def read(self):
+        deadline = time.monotonic() + self.timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError(f"No {self.mode} frame from the Kinect hub (it may have switched picture)")
+            _, depth, head = self.reader.read(timeout=left)
+            if head["mode"] != self.mode:
+                self.skipped += 1
+                continue
+            data = depth.copy()
+            data[(data == 0) | (data >= 10000)] = 0
+            self.last_timestamp = head["seq"]
+            return data, int(head["seq"]), time.monotonic()
+
+    def median(self, samples=15, max_std_mm=None):
+        if not 1 <= samples <= 120:
+            raise ValueError("samples must be 1..120")
+        got = [self.read() for _ in range(samples)]
+        return median_depth([d for d, _, _ in got], max_std_mm=max_std_mm), got[-1][1], got[-1][2]
+
+    def close(self):
+        if self.reader is not None:
+            self.reader.close()
+            self.reader = None
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def open_capture(source="auto", index=0, timeout=10., intrinsics=None):
+    """The hub when it runs (or when asked), otherwise libfreenect directly."""
+    if source == "hub" or (source == "auto" and hub_running()):
+        return HubCapture(timeout=timeout, intrinsics=intrinsics)
+    return KinectCapture(index=index, timeout=timeout, intrinsics=intrinsics)

@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 import numpy as np
-from .capture import KinectCapture,library_path
+from .capture import KinectCapture,library_path,open_capture
 from .geometry import (Intrinsics,rectify_depth,segment_depth,depth_to_xyz,grid_mesh,
                         measurement_report,fit_axis_circle,turntable_pose)
 from .storage import (new_directory,save_frame,load_frame,write_json,export_geometry,
@@ -20,7 +20,7 @@ from .storage import (new_directory,save_frame,load_frame,write_json,export_geom
 
 def _sensor(args):
     k=Intrinsics.load(args.intrinsics) if args.intrinsics else None
-    return KinectCapture(index=args.device,timeout=args.timeout,intrinsics=k)
+    return open_capture(getattr(args,"source","auto"),index=args.device,timeout=args.timeout,intrinsics=k)
 
 
 def _processed(depth,k,args):
@@ -45,9 +45,15 @@ def _summary(data):
 
 def doctor(args):
     versions={}
-    for name in ("numpy","scipy","open3d","opencv-python"):
+    for name in ("numpy","scipy","open3d"):
         try: versions[name]=importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError: versions[name]="not installed"
+    # OpenCV ships under several package names (opencv-python, -contrib, -headless): ask cv2 itself.
+    try:
+        import cv2
+        versions["opencv"]=cv2.__version__
+    except ImportError:
+        versions["opencv"]="not installed"
     usb="lsusb not installed"
     if shutil.which("lsusb"):
         result=subprocess.run(["lsusb"],capture_output=True,text=True,timeout=5,check=False)
@@ -287,6 +293,8 @@ def mesh_check(args):
 def _sensor_args(p):
     p.add_argument("--device",type=int,default=0)
     p.add_argument("--timeout",type=float,default=10.)
+    p.add_argument("--source",choices=("auto","hub","direct"),default="auto",
+                   help="auto: the Adaptive Desktop Kinect hub when it runs, else libfreenect directly")
     p.add_argument("--intrinsics",help="Calibrated IR FREENECT_DEPTH_MM JSON; otherwise query device factory ray model")
 
 

@@ -45,6 +45,28 @@ def _quality(result):
             "rotation_deg":angle,"translation_m":float(np.linalg.norm(t[:3,3]))}
 
 
+def _uniform_volume(o3d,frames,k,voxel_m,max_resolution=384):
+    """A UniformTSDFVolume covering every posed observation (plus the truncation band).
+    The resolution is capped for memory; the voxel actually used may then be coarser."""
+    lo,hi=np.full(3,np.inf),np.full(3,-np.inf)
+    for depth,pose in frames:
+        xyz=depth_to_xyz(depth,k).reshape(-1,3)
+        xyz=xyz[np.isfinite(xyz).all(axis=1)]
+        if len(xyz):
+            pts=transform_points(xyz,pose)
+            lo,hi=np.minimum(lo,pts.min(axis=0)),np.maximum(hi,pts.max(axis=0))
+    if not np.isfinite(lo).all():
+        raise RuntimeError("No valid depth to reconstruct")
+    pad=voxel_m*6
+    lo,hi=lo-pad,hi+pad
+    length=float((hi-lo).max())
+    resolution=int(min(max_resolution,max(16,np.ceil(length/voxel_m))))
+    voxel=length/resolution
+    return o3d.pipelines.integration.UniformTSDFVolume(length=length,resolution=resolution,
+        sdf_trunc=max(voxel_m,voxel)*4,color_type=o3d.pipelines.integration.TSDFVolumeColorType.NoColor,
+        origin=lo.reshape(3,1))
+
+
 def reconstruct(session,out,mode,*,voxel_m=0.006,min_fitness=0.6,max_rmse_m=0.02,
                 max_rotation_deg=25.,max_translation_m=0.30,close_loop=False):
     if mode not in ("known","auto","static"): raise ValueError("Invalid reconstruction mode")
@@ -107,18 +129,29 @@ def reconstruct(session,out,mode,*,voxel_m=0.006,min_fitness=0.6,max_rmse_m=0.02
              reg.GlobalOptimizationOption(max_correspondence_distance=voxel_m*3,
                                           edge_prune_threshold=0.25,reference_node=0))
         poses=[validate_transform(node.pose) for node in graph.nodes]; quality.append(q)
-    volume=o3d.pipelines.integration.ScalableTSDFVolume(voxel_length=voxel_m,
-            sdf_trunc=voxel_m*4,color_type=o3d.pipelines.integration.TSDFVolumeColorType.NoColor,
-            depth_sampling_stride=1)
     intrinsic=o3d.camera.PinholeCameraIntrinsic(k0.width,k0.height,k0.fx,k0.fy,k0.cx,k0.cy)
     dummy=o3d.geometry.Image(np.zeros((k0.height,k0.width,3),dtype=np.uint8))
-    for (path,item),pose in zip(records,poses):
-        depth,_,_=load_frame(path)
-        rgbd=o3d.geometry.RGBDImage.create_from_color_and_depth(dummy,o3d.geometry.Image(depth),
-              depth_scale=1000.,depth_trunc=9.9,convert_rgb_to_intensity=False)
-        # Open3D integrates WORLD -> CAMERA, inverse of the stored pose.
-        volume.integrate(rgbd,intrinsic,np.linalg.inv(pose))
+    frames=[(load_frame(path)[0],pose) for (path,_),pose in zip(records,poses)]
+
+    def integrate(volume):
+        for depth,pose in frames:
+            rgbd=o3d.geometry.RGBDImage.create_from_color_and_depth(dummy,o3d.geometry.Image(depth),
+                  depth_scale=1000.,depth_trunc=9.9,convert_rgb_to_intensity=False)
+            # Open3D integrates WORLD -> CAMERA, inverse of the stored pose.
+            volume.integrate(rgbd,intrinsic,np.linalg.inv(pose))
+        return volume
+
+    volume=integrate(o3d.pipelines.integration.ScalableTSDFVolume(voxel_length=voxel_m,
+            sdf_trunc=voxel_m*4,color_type=o3d.pipelines.integration.TSDFVolumeColorType.NoColor,
+            depth_sampling_stride=1))
     mesh=volume.extract_triangle_mesh()
+    volume_kind="scalable"
+    if len(mesh.triangles)==0:
+        # Open3D 0.20 (pip, x86-64) returns no surface from ScalableTSDFVolume even for a flat
+        # wall; UniformTSDFVolume works. Size a uniform volume to the posed observations.
+        volume,volume_kind=_uniform_volume(o3d,frames,k0,voxel_m),"uniform"
+        integrate(volume)
+        mesh=volume.extract_triangle_mesh()
     mesh.remove_degenerate_triangles(); mesh.remove_duplicated_triangles()
     mesh.remove_unreferenced_vertices(); mesh.compute_vertex_normals()
     vertices=np.asarray(mesh.vertices); triangles=np.asarray(mesh.triangles)
@@ -127,7 +160,7 @@ def reconstruct(session,out,mode,*,voxel_m=0.006,min_fitness=0.6,max_rmse_m=0.02
     if len(points)<3: points=vertices
     export_geometry(out,points,vertices,triangles,prefix="fused")
     report=measurement_report(points,"multi_view_observed_surface; coverage_not_certified")
-    report.update({"mode":mode,"frames_integrated":len(poses),"voxel_m":voxel_m,
+    report.update({"mode":mode,"frames_integrated":len(poses),"voxel_m":voxel_m,"tsdf_volume":volume_kind,
                    "closed_surface_check_performed":False,
                    "print_readiness":"Not guaranteed. Inspect holes, self-intersections, units and boundaries before printing.",
                    "color":"geometry_only; no RGB registration or texture atlas"})
