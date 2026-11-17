@@ -7,7 +7,7 @@ import time
 
 import numpy as np
 
-import synthetic
+import sim as synthetic
 
 PLAYLIST = ("squat", "jack", "curl", "press", "raise", "squat-lean", "shallow")
 REPS = 5

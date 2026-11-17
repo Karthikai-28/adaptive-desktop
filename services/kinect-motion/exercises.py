@@ -487,7 +487,8 @@ class Tracker:
         self.last_t = t
         self._learn_standing(b)
         ev = b.evidence(self.ex.joints)
-        if ev < EVIDENCE:
+        # Too unsure: a required joint not seen at all, or too many only estimated.
+        if ev < EVIDENCE or any(b.states[j] == sk.MISSING for j in self.ex.joints):
             was, self.unsure = self.unsure, True
             if self.ex.kind == "hold":
                 self.hold_since = None

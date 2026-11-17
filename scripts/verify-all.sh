@@ -111,6 +111,7 @@ step "Cast: Miracast elements, RTSP framing, format choice" quiet python3 "$REPO
 step "Adaptive Home on the TV: tiles, remote navigation, socket frames" quiet node "$REPO/scripts/verify-tv-home.js"
 step "Agent Office (syntax, roster, API guards; no quota)" quiet "$REPO/scripts/verify-agent-office.sh"
 step "Air: gestures from synthetic hands, Kinect probe, frame protocol" quiet python3 "$REPO/scripts/verify-air.py"
+step "Kinect Motion: exercises, form, gestures, players, history, room, pad, server" quiet python3 "$REPO/scripts/verify-kinect-motion.py"
 step "Mario: spoken commands, what they do, the cheat sheet" quiet python3 "$REPO/scripts/verify-mario-commands.py"
 step "Mario: collectors, decisions, hub guards, page" quiet python3 "$REPO/scripts/verify-mario.py"
 step "Mario: microphone lifecycle and spoken commands" quiet python3 "$REPO/scripts/verify-mario-voice.py"

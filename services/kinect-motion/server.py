@@ -163,8 +163,8 @@ class Service:
         seq, last_start = 0, 0.0
         source = None
         if self.demo:
-            import demo
-            source = demo.Demo()
+            import demoroom
+            source = demoroom.Demo()
         while not self.stop.is_set():
             try:
                 if source is not None:

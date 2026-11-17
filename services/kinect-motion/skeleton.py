@@ -43,10 +43,10 @@ def between(v, direction):
     """Angle (degrees) between a vector and a direction, or None."""
     if v is None:
         return None
-    n = np.linalg.norm(v)
-    if n < 1e-6:
+    n, m = np.linalg.norm(v), np.linalg.norm(direction)
+    if n < 1e-6 or m < 1e-6:
         return None
-    return math.degrees(math.acos(max(-1.0, min(1.0, float(v @ direction / n)))))
+    return math.degrees(math.acos(max(-1.0, min(1.0, float(v @ direction / (n * m))))))
 
 
 class OneEuro3:
@@ -125,12 +125,14 @@ class Body:
         return angle(self.p(sh), self.p(el), self.p(wr))
 
     def abduction(self, side):
-        """Upper arm away from the body (0 = hanging down, 90 = out to the side)."""
-        sh, el, _, hip, _, _ = SIDES[side]
-        s, e, h = self.p(sh), self.p(el), self.p(hip)
-        if s is None or e is None or h is None:
+        """Upper arm away from the body (0 = hanging down, 90 = out to the side), against the
+        torso's own down direction (shoulders' middle to hips' middle), so a lean does not count."""
+        sh = SIDES[side][0]
+        s, e = self.p(sh), self.p(SIDES[side][1])
+        top, bottom = self.mid(L_SH, R_SH), self.mid(L_HIP, R_HIP)
+        if s is None or e is None or top is None or bottom is None:
             return None
-        return angle(e, s, h)
+        return between(e - s, bottom - top)
 
     def arm_drift(self, side):
         """Upper arm against straight down (degrees): elbows "by your sides" is under ~25."""
