@@ -1,0 +1,15 @@
+[Unit]
+Description=Kinect Motion: fitness, body games, room events and the body gamepad (127.0.0.1:8793)
+
+[Service]
+# A template: scripts/install-kinect-motion.sh puts this checkout's path in place of @ADAPTIVE_REPO@.
+# Started on demand by the Kinect Fitness / Arcade / Room windows; it reads skeletons from the
+# Kinect hub (adaptive-kinect.service) and stops itself a minute after the last page closes.
+WorkingDirectory=@ADAPTIVE_REPO@/services/kinect-motion
+ExecStart=@ADAPTIVE_REPO@/.local/air-venv/bin/python @ADAPTIVE_REPO@/services/kinect-motion/server.py
+Environment=PYTHONUNBUFFERED=1
+Environment=ADAPTIVE_REPO=@ADAPTIVE_REPO@
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=5

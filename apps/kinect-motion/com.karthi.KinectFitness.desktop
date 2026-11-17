@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Kinect Fitness
+GenericName=Home Workouts
+Comment=Workouts with the Kinect: counts your reps, coaches your form, rep races and a fitness check, for one to four people
+Keywords=kinect;fitness;workout;exercise;squat;reps;training;gym;
+Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/kinect-motion/motion.py fitness
+Icon=applications-games
+Terminal=false
+Categories=Game;Sports;
+StartupNotify=true
+StartupWMClass=kinect-fitness

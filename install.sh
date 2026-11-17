@@ -60,6 +60,7 @@ PARTS=(
     "link|Adaptive Link: this computer from your paired phone|status_unit adaptive-link.service|$S/install-link.sh"
     "agent-office|Agent Office: Gemini agents managed by Claude (127.0.0.1:8790)|status_agent_office|$S/install-agent-office.sh"
     "air|Air: control the desktop with your hands through the Kinect (Super+G)|status_air|$S/install-air.sh"
+    "motion|Kinect Fitness, Arcade and Room: workouts, body games, room events (127.0.0.1:8793)|status_motion|$S/install-kinect-motion.sh"
     "mario|Mario: Home on Super+H, the orb over your work on Super+J, Mario Hub (127.0.0.1:8791)|status_mario|$S/install-mario.sh"
 )
 
@@ -163,6 +164,10 @@ status_agent_office() {
 
 status_air() {
     "$S/install-air.sh" --status | sed -n 's/^  needed   //p' | paste -sd ';' -
+}
+
+status_motion() {
+    "$S/install-kinect-motion.sh" --status | sed -n 's/^  needed   //p' | paste -sd ';' -
 }
 
 status_mario() {
