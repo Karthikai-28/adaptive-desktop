@@ -213,12 +213,13 @@ camera is never on at login; the top bar shows a camera icon whenever Air runs.
 | File | What |
 | --- | --- |
 | `services/adaptive-air/kinect.py` | libfreenect through ctypes: pictures, depth, motor, LED, accelerometer, lens numbers, USB probe |
-| `services/adaptive-air/kinect_hub.py` | The one owner of the Kinect: shared memory, Studio, webcam, the light switch, height |
+| `services/adaptive-air/kinect_hub.py` | The one owner of the Kinect: shared memory, Studio, webcam, the light switch, `PoseSource` (person detector + one pose follower per person), `/api/people`, `/api/measure` |
 | `services/adaptive-air/frames.py` | The shared-memory frame store |
 | `services/adaptive-air/fusion.py` | Light switch, palm refinement, plausibility, hands from depth alone (pure) |
 | `services/adaptive-air/air.py` | Air: the camera loop and the `Tracker` |
 | `services/adaptive-air/gestures.py` | The gesture engine (pure) |
-| `services/adaptive-air/measure.py` | Height from depth and the accelerometer |
+| `services/adaptive-air/people.py` | Everyone in view: floor plane, each person's depth, posture, straightness, tracking, height in cm, Mario's sentences (pure) |
+| `services/adaptive-air/measure.py` | One-person height from depth and the accelerometer (kept for its helpers) |
 | `services/adaptive-air/studio/` | Kinect Studio's page |
 | `shell/adaptive-shell@local/air.js` | The HUD and what each gesture does on the desktop |
-| `scripts/verify-air.py` | Every check (synthetic hands, a synthetic living room, the hub, height) |
+| `scripts/verify-air.py` | Every check (synthetic hands, a synthetic living room, the hub, height, rooms of posed people) |

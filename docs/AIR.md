@@ -128,14 +128,48 @@ The Kinect is meant to sit on the TV, about 1.92 m (6.3 ft) up, looking into the
   `~/.config/adaptive-desktop/kinect.json` (default 1.92 m) is used.
 - **A dark room**: Auto switches to infrared by itself (above). Studio shows which, and why.
 
-## How tall you are
+## Everyone in view: how many, how they stand, how tall
 
-"Mario, how tall am I?" (or Studio's *Measure my height*): stand 2 to 4 m in front of the
-Kinect, facing it, all of you in view. `measure.py` takes about a second of frames: the
-accelerometer gives which way is up, MediaPipe Pose finds your torso, the depth region around
-it (with the floor cut away) is you, and your height is its top above the floor. Mario answers
-in metres and feet and inches. Checked on rendered rooms to within 3 cm; the Kinect's own depth
-error at 3 m is 1 to 3 cm.
+"Mario, how tall am I?", "how tall are we?", "how many people are there?", or Kinect Studio,
+whose colour view draws everyone live. `people.py` (pure) with the hub's `PoseSource`:
+
+- **Who is there.** Top-down, as multi-person pose systems do it: a person detector
+  (EfficientDet-Lite0, COCO "person") finds everyone every few frames, then each person gets
+  their own MediaPipe Pose Landmarker that follows them on a square crop with the rest of the
+  picture greyed out, all in parallel threads (about 60-95 ms a frame for 3-5 people).
+  MediaPipe's own multi-person mode found 1 of 3-4 people in group photos; this finds 3 of 3-4
+  and 5 of 6. Each person comes with 33 landmarks, metric 3D landmarks and their own mask.
+- **The floor** is a plane fitted to the depth (RANSAC, then least squares on its inliers,
+  refined frame to frame from the last plane: the ground-plane step of the PCL people
+  detector). It does not need the accelerometer to be exact (5 degrees off is 25 cm at 3 m
+  otherwise) or `mount_height` to be current: a moved Kinect finds its new height. With no floor
+  in view the accelerometer and `mount_height` stand in, and Mario says so.
+- **Each person's depth** is their mask (grown a little so the head is never cut) AND depth near
+  their torso AND above the floor, without the flying pixels on depth edges. Two people side by
+  side stay two; the wall behind never joins. Height is the top of that region above the floor;
+  dark hair that leaves a hole on top falls back to eyes + 11.5 cm.
+- **Posture**: standing, sitting, crouching (squatting, ducking), kneeling, bending over, lying
+  down: knee angle (over 160 degrees is straight), thigh and torso against true up, and the hips'
+  height above the floor (a chair or a squat). Legs hidden by a table: hips and head decide.
+- **Straight**: someone standing is measured only while upright (torso within 12 degrees),
+  knees straight, arms down, head level, all of them in view, 1.3-4.6 m away. Otherwise their
+  label says what to fix ("Stand up straight", "Lower your arms", "Step back so I can see your
+  feet"); sitting or crouching people are asked to stand. A height counts after a second of
+  standing still with the frames agreeing within 3 cm, and stays with that person (same number,
+  same colour) when they sit down again.
+- **Studio** draws, over the camera picture, each person's glowing silhouette and skeleton in
+  their own colour, a turning ring on the floor at their feet, a scan sweeping up them while they
+  are measured, a ruler from the floor to the top of their head with 10 cm ticks, and their height
+  in cm counting up when it locks (with rings from the head). The header counts people and how
+  many stand; a banner tells whoever is not yet measured to stand up straight; the side panel
+  lists everyone. *People* switches it off. Everything glides between the hub's answers.
+- **Mario** waits up to 6 s for everyone to straighten, then answers in cm ("I can see 3 people:
+  2 standing and 1 sitting. From the left: 178 and 164 centimetres. Everyone else, please stand
+  up straight facing the Kinect.").
+
+Checked on rendered rooms (`scripts/verify-air.py`): two people side by side within 3 cm, four
+postures, arms up and leaning caught, a moved Kinect with a 5-degree-off accelerometer within
+3 cm, numbers kept over time. Not yet checked with real people in front of the Kinect.
 
 ## Kinect Studio and the Kinect webcam
 

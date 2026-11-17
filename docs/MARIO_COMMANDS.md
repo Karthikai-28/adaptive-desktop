@@ -16,7 +16,8 @@ http://127.0.0.1:8791/commands, and "What can I say?" opens it.
 
 | Say | What happens |
 | --- | --- |
-| How tall am I? | Measures you with the Kinect: stand 2-4 m away, all of you in view. |
+| How tall am I? / How tall are we? | Measures everyone in view with the Kinect, in cm: stand up straight 2-4 m away, facing it, all of you in view. |
+| How many people are there? | Counts everyone in view and says who is standing, sitting or crouching. |
 | How far am I from the TV? | Your distance from the Kinect, across the floor. |
 | Open Kinect Studio | The camera, depth, 3D point cloud and sensors. |
 | Tilt the Kinect down by 10 | Up or down, by any number of degrees (10 if you don't say). |

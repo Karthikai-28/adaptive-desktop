@@ -1288,6 +1288,15 @@ Plan, gestures and gotchas: `docs/AIR.md`.
   an L to zoom, a carried window to the screen edge moves desktop; nested-shell checked.
 - ✅ "How tall am I": `measure.py` (accelerometer up, floor from depth or the mount height,
   person region from the Pose torso); within 3 cm on rendered rooms; live endpoint answers.
+- ✅ Everyone in view (`people.py`, 2026-11-17): how many people, posture (standing, sitting,
+  crouching, kneeling, bending, lying), "stand up straight" checks, height in cm per person once
+  they stand straight and still for a second; floor as a fitted plane (RANSAC; a moved Kinect or
+  a 5-degree-off accelerometer still within 3 cm); people found top-down (EfficientDet person
+  detector + one Pose Landmarker follower per person, pinned models in `.local/air-models`);
+  people on the TV rejected (size for distance, flatness). Studio draws silhouettes, skeletons,
+  floor rings, a measuring scan, rulers and heights live (`/api/people`); Mario: "how tall are
+  we", "how many people are there". Checked on rendered rooms and on group photos (3/3, 3/4, 5/6
+  people found); live hub answers with the room empty.
 - ✅ Mario commands (`commands.py`, `control.py`): apps, windows, desktops, TV (cast and remote),
   Kinect, Air, sound, media, web; cheat sheet at `/commands` and docs/MARIO_COMMANDS.md;
   `verify-mario-commands.py`; window commands nested-shell checked.
@@ -1303,6 +1312,8 @@ Plan, gestures and gotchas: `docs/AIR.md`.
 ### Live, not yet tried
 
 - 🔬 Room-distance hand finding and height with a person actually standing 2-4 m away.
+- 🔬 Several real people in front of the Kinect: count, postures, straightness hints and heights
+  against a tape measure; Studio's overlay frame rate with 3-4 people.
 - 🔬 The Kinect mounted on the TV: tilt and `mount_height` set, gestures tuned from the sofa.
 - 🔬 Mario's TV commands against the real LG TV (`--tv on/off/volume`).
 - 🔬 The "Kinect Camera" webcam in a meeting app: needs `scripts/install-virtual-cameras.sh` (sudo).
