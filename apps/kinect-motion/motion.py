@@ -46,13 +46,15 @@ def start(base, demo):
         return
     python = REPO / ".local/air-venv/bin/python"
     server = REPO / "services/kinect-motion/server.py"
+    # The server outlives this window, so it must not hold the window's output open.
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "start_new_session": True}
     if demo:
         subprocess.Popen([str(python if python.exists() else sys.executable), str(server), "--demo",
-                          "--port", base.rsplit(":", 1)[1], "--db", ":memory:"], start_new_session=True)
+                          "--port", base.rsplit(":", 1)[1], "--db", ":memory:"], **quiet)
     elif subprocess.run(["systemctl", "--user", "cat", UNIT], capture_output=True).returncode == 0:
         subprocess.run(["systemctl", "--user", "start", UNIT], check=False)
     else:
-        subprocess.Popen([str(python if python.exists() else sys.executable), str(server)], start_new_session=True)
+        subprocess.Popen([str(python if python.exists() else sys.executable), str(server)], **quiet)
     for _ in range(60):
         if up(base):
             return
