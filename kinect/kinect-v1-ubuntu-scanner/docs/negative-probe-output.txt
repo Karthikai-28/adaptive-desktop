@@ -1,0 +1,1 @@
+ERROR: RuntimeError: libfreenect_sync not found. Install libfreenect-dev and libfreenect-bin, then run ldconfig if built from source.

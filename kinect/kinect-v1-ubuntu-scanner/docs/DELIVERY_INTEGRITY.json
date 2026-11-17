@@ -1,0 +1,146 @@
+{
+  "date": "2026-11-17",
+  "research_preservation_checks": [
+    {
+      "file": "00_Original_Launch_Response.md",
+      "verbatim_text_present": true
+    },
+    {
+      "file": "02_Kinect_v1_PC_Games_Verbatim.md",
+      "verbatim_text_present": true
+    },
+    {
+      "file": "03_Kinect_v1_Fixed_Scanning_Verbatim.md",
+      "verbatim_text_present": true
+    },
+    {
+      "file": "04_Original_Requests.md",
+      "verbatim_text_present": true
+    },
+    {
+      "file": "01_Living_Room_Productivity_Gaming_PS5_Verbatim.md",
+      "all_narrative_spans_preserved": true,
+      "citation_ui_normalized": true
+    }
+  ],
+  "all_complete_source_files_embedded": true,
+  "source_file_count": 19,
+  "source_lines": 1519,
+  "markdown_fences_balanced": true,
+  "sources": [
+    {
+      "path": "pyproject.toml",
+      "bytes": 674,
+      "sha256": "db6cbddd24479b20321ea098f988399471049e5a5e4e84a2c81716dac6bd28dc",
+      "lines": 26
+    },
+    {
+      "path": "requirements-ubuntu.txt",
+      "bytes": 169,
+      "sha256": "0cdca0f6f4400f509edc687649380d37e947b81881266140148dffa1b5aef58e",
+      "lines": 6
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 87,
+      "sha256": "0d0892acf2fe715fa657a4988f0f59b409baee613a66d1bb5e985d912588089b",
+      "lines": 9
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1112,
+      "sha256": "a6b5cf929b55b8f630a889fbac15e40a784cd9ade9c792e2fc8f1da918180825",
+      "lines": 21
+    },
+    {
+      "path": "config/99-kinectscan.rules",
+      "bytes": 846,
+      "sha256": "d5a28135593d2f9cf40416e252263442c864945180075c2e04c41aba6c66cd22",
+      "lines": 8
+    },
+    {
+      "path": "scripts/install_ubuntu.sh",
+      "bytes": 2182,
+      "sha256": "a9d951f248a5aa1a9edad21a37bffbcce58078c2f9fadd4ac7434c17ce41b553",
+      "lines": 45
+    },
+    {
+      "path": "scripts/smoke_test.sh",
+      "bytes": 596,
+      "sha256": "35449b4210d7cd2957b59991c00de72988467524853a4e79ccd9e7456349e847",
+      "lines": 11
+    },
+    {
+      "path": "src/kinectscan/__init__.py",
+      "bytes": 100,
+      "sha256": "2f7647c53a6cdb12cb6774fda69211be6f4afae5fe9f82202121755db8634cce",
+      "lines": 2
+    },
+    {
+      "path": "src/kinectscan/__main__.py",
+      "bytes": 79,
+      "sha256": "307299fda7b77d22c64cb51430ec75e5f59d78e9c948786afb3b2544fe45e4b7",
+      "lines": 4
+    },
+    {
+      "path": "src/kinectscan/capture.py",
+      "bytes": 6709,
+      "sha256": "b6bf80f377533b82de326f263704b7ad223cac69f22f6b9f4275cf4522c28feb",
+      "lines": 153
+    },
+    {
+      "path": "src/kinectscan/cli.py",
+      "bytes": 21132,
+      "sha256": "f4ebc5393bea0321405dcaadbef12775e683341ad9817b7fca6c59fc362bcd0f",
+      "lines": 380
+    },
+    {
+      "path": "src/kinectscan/geometry.py",
+      "bytes": 12564,
+      "sha256": "40759e90fd37a142f92b777240d11bed6caa934fbdea6b28043a43f6321ae735",
+      "lines": 280
+    },
+    {
+      "path": "src/kinectscan/reconstruct.py",
+      "bytes": 9868,
+      "sha256": "57889997642f3b10ae0806aaf90963c083a1208dac696b85a8e8f9324aace5c7",
+      "lines": 155
+    },
+    {
+      "path": "src/kinectscan/storage.py",
+      "bytes": 5838,
+      "sha256": "2a99a7b59e97ca48bfc73e6182632b75ea0d8a1d19e280172d53e8a87c2e01f4",
+      "lines": 123
+    },
+    {
+      "path": "src/kinectscan/synthetic.py",
+      "bytes": 3025,
+      "sha256": "9360bcd790030276dd3a257a5c47e905f26866ae2e41755079c8797c976e9aeb",
+      "lines": 55
+    },
+    {
+      "path": "tests/test_capture_binding.py",
+      "bytes": 1469,
+      "sha256": "73e52102a7f01d41b245735ac273843ff573bdab26f454bf53dc7ee367fbfb7f",
+      "lines": 41
+    },
+    {
+      "path": "tests/test_geometry.py",
+      "bytes": 4430,
+      "sha256": "4bd79f1e458384158df888112149fba7b8d09b77bc7554c1ed823ac94aa962a9",
+      "lines": 115
+    },
+    {
+      "path": "tests/test_open3d_optional.py",
+      "bytes": 618,
+      "sha256": "da9806cbabac5b0c9afdcc067257c64189d6ccf6cdaf87b61afb0e666dee525f",
+      "lines": 13
+    },
+    {
+      "path": "tests/test_storage_cli.py",
+      "bytes": 3241,
+      "sha256": "1be4f08833bf749f39db83a2c52cf374ffd9c676b99dd5f9534ed4b223f7c256",
+      "lines": 72
+    }
+  ]
+}

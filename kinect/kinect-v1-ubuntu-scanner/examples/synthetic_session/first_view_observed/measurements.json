@@ -1,0 +1,54 @@
+{
+  "units": "meters",
+  "point_count": 2223,
+  "scope": "synthetic_single_view_only",
+  "coordinate_frame": "X right, Y down, Z forward; reference camera at scan start",
+  "aabb_min_m": [
+    -0.1955,
+    -0.24779999999999996,
+    1.15
+  ],
+  "aabb_max_m": [
+    0.1955,
+    0.1495,
+    1.2
+  ],
+  "aabb_extent_mm": [
+    391.0,
+    397.3,
+    50.00000000000004
+  ],
+  "percentile_1_99_extent_mm": [
+    391.0,
+    388.568,
+    30.00000000000003
+  ],
+  "pca_obb_extent_mm": [
+    467.86035574154226,
+    418.2203208989213,
+    50.89271171936674
+  ],
+  "pca_axes_columns": [
+    [
+      -0.9432643213087708,
+      -0.3318624948882117,
+      -0.01094096122266602
+    ],
+    [
+      0.3312508565545582,
+      -0.9427779959426889,
+      0.03798052656505866
+    ],
+    [
+      -0.022919209798240123,
+      0.03220147283680151,
+      0.999218582177776
+    ]
+  ],
+  "warnings": [
+    "These are sampled-surface extents, not certified product dimensions.",
+    "Percentile extents deliberately discard outer samples and can understate size.",
+    "PCA axes are data-dependent; they are not necessarily engineering L/W/H.",
+    "No complete-object volume is inferred from an open or incomplete scan."
+  ]
+}

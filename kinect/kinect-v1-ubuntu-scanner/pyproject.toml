@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinect-v1-ubuntu-scanner"
+version = "0.1.0"
+description = "Fixed Kinect v1 capture, observed-surface measurement, and multi-view reconstruction for Ubuntu"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["numpy>=1.26,<3", "scipy>=1.11,<2"]
+
+[project.optional-dependencies]
+reconstruction = ["open3d==0.19.0"]
+gui = ["opencv-python==4.10.0.84"]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+kinectscan = "kinectscan.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "subject_motion": "known_turntable",
+  "foreground_isolated": true,
+  "intrinsics": {
+    "width": 160,
+    "height": 120,
+    "fx": 150,
+    "fy": 150,
+    "cx": 79.5,
+    "cy": 59.5,
+    "source": "synthetic analytic camera; not a Kinect calibration",
+    "distortion": [],
+    "depth_format": "FREENECT_DEPTH_MM"
+  },
+  "frames": [
+    {
+      "path": "frames/000000.npz",
+      "angle_deg": 0,
+      "sample_index": 0
+    },
+    {
+      "path": "frames/000001.npz",
+      "angle_deg": 10,
+      "sample_index": 1
+    },
+    {
+      "path": "frames/000002.npz",
+      "angle_deg": 20,
+      "sample_index": 2
+    },
+    {
+      "path": "frames/000003.npz",
+      "angle_deg": 30,
+      "sample_index": 3
+    },
+    {
+      "path": "frames/000004.npz",
+      "angle_deg": 40,
+      "sample_index": 4
+    },
+    {
+      "path": "frames/000005.npz",
+      "angle_deg": 50,
+      "sample_index": 5
+    },
+    {
+      "path": "frames/000006.npz",
+      "angle_deg": 60,
+      "sample_index": 6
+    },
+    {
+      "path": "frames/000007.npz",
+      "angle_deg": 70,
+      "sample_index": 7
+    },
+    {
+      "path": "frames/000008.npz",
+      "angle_deg": 80,
+      "sample_index": 8
+    },
+    {
+      "path": "frames/000009.npz",
+      "angle_deg": 90,
+      "sample_index": 9
+    },
+    {
+      "path": "frames/000010.npz",
+      "angle_deg": 100,
+      "sample_index": 10
+    },
+    {
+      "path": "frames/000011.npz",
+      "angle_deg": 110,
+      "sample_index": 11
+    },
+    {
+      "path": "frames/000012.npz",
+      "angle_deg": 120,
+      "sample_index": 12
+    },
+    {
+      "path": "frames/000013.npz",
+      "angle_deg": 130,
+      "sample_index": 13
+    },
+    {
+      "path": "frames/000014.npz",
+      "angle_deg": 140,
+      "sample_index": 14
+    },
+    {
+      "path": "frames/000015.npz",
+      "angle_deg": 150,
+      "sample_index": 15
+    },
+    {
+      "path": "frames/000016.npz",
+      "angle_deg": 160,
+      "sample_index": 16
+    },
+    {
+      "path": "frames/000017.npz",
+      "angle_deg": 170,
+      "sample_index": 17
+    },
+    {
+      "path": "frames/000018.npz",
+      "angle_deg": 180,
+      "sample_index": 18
+    },
+    {
+      "path": "frames/000019.npz",
+      "angle_deg": 190,
+      "sample_index": 19
+    },
+    {
+      "path": "frames/000020.npz",
+      "angle_deg": 200,
+      "sample_index": 20
+    },
+    {
+      "path": "frames/000021.npz",
+      "angle_deg": 210,
+      "sample_index": 21
+    },
+    {
+      "path": "frames/000022.npz",
+      "angle_deg": 220,
+      "sample_index": 22
+    },
+    {
+      "path": "frames/000023.npz",
+      "angle_deg": 230,
+      "sample_index": 23
+    },
+    {
+      "path": "frames/000024.npz",
+      "angle_deg": 240,
+      "sample_index": 24
+    },
+    {
+      "path": "frames/000025.npz",
+      "angle_deg": 250,
+      "sample_index": 25
+    },
+    {
+      "path": "frames/000026.npz",
+      "angle_deg": 260,
+      "sample_index": 26
+    },
+    {
+      "path": "frames/000027.npz",
+      "angle_deg": 270,
+      "sample_index": 27
+    },
+    {
+      "path": "frames/000028.npz",
+      "angle_deg": 280,
+      "sample_index": 28
+    },
+    {
+      "path": "frames/000029.npz",
+      "angle_deg": 290,
+      "sample_index": 29
+    },
+    {
+      "path": "frames/000030.npz",
+      "angle_deg": 300,
+      "sample_index": 30
+    },
+    {
+      "path": "frames/000031.npz",
+      "angle_deg": 310,
+      "sample_index": 31
+    },
+    {
+      "path": "frames/000032.npz",
+      "angle_deg": 320,
+      "sample_index": 32
+    },
+    {
+      "path": "frames/000033.npz",
+      "angle_deg": 330,
+      "sample_index": 33
+    },
+    {
+      "path": "frames/000034.npz",
+      "angle_deg": 340,
+      "sample_index": 34
+    },
+    {
+      "path": "frames/000035.npz",
+      "angle_deg": 350,
+      "sample_index": 35
+    },
+    {
+      "path": "frames/000036.npz",
+      "angle_deg": 360,
+      "sample_index": 36
+    }
+  ],
+  "truth": {
+    "aabb_extent_mm": [
+      400,
+      400,
+      200
+    ],
+    "center_m": [
+      0,
+      0,
+      1.25
+    ],
+    "axis": [
+      0,
+      -1,
+      0
+    ]
+  },
+  "warning": "Synthetic data only. This demonstrates processing, not hardware compatibility or sensor accuracy."
+}

@@ -111,7 +111,7 @@ Icon=kterm-terminal
 Terminal=false
 Categories=System;TerminalEmulator;
 StartupNotify=true
-StartupWMClass=terminator
+StartupWMClass=kterm-terminal
 X-TerminalArgExec=-x
 X-TerminalArgDir=--working-directory
 X-TerminalArgTitle=--title
@@ -124,10 +124,10 @@ Exec="{BIN / 'kterm-terminal'}"
 Icon=kterm-terminal
 '''
     write(DATA / "applications/kterm-terminal.desktop", desktop)
-    write(DATA / "applications/terminal.desktop", desktop)
+    write(DATA / "applications/terminal.desktop", desktop.replace("StartupWMClass=kterm-terminal\n", "StartupWMClass=kterm-terminal\nNoDisplay=true\n"))
     # Keep legacy desktop IDs launchable, but show only one Terminal in the app grid.
     for name in ("org.gnome.Terminal.desktop", "terminator.desktop", "kterm-classic-terminal.desktop"):
-        alias = desktop.replace("StartupWMClass=terminator\n", "NoDisplay=true\n")
+        alias = desktop.replace("StartupWMClass=kterm-terminal\n", "NoDisplay=true\n")
         write(DATA / "applications" / name, alias)
     for name in ("xdg-terminals.list", "gnome-xdg-terminals.list", "ubuntu-xdg-terminals.list"):
         path = CONFIG / name

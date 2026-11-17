@@ -7,6 +7,7 @@ that still use those command names. The system binaries remain available.
 
 import os
 from pathlib import Path
+import runpy
 import shlex
 import shutil
 import sys
@@ -16,12 +17,16 @@ def terminal_args(args, caller="kterm-terminal"):
     result = []
     while args:
         arg, *args = args
-        if arg in ("--", "-x", "--execute") or (caller != "gnome-terminal" and arg == "-e"):
+        if arg in ("--", "-x", "--execute"):
             return [*result, "-x", *args]
-        if caller == "gnome-terminal" and arg in ("-e", "--command"):
+        if arg in ("-e", "--command"):
             if not args:
                 raise ValueError(f"{arg} needs a command")
-            return [*result, "-x", *shlex.split(args[0]), *args[1:]]
+            cmd = args[0]
+            rest = args[1:]
+            if len(rest) == 0 and " " in cmd:
+                return [*result, "-x", *shlex.split(cmd)]
+            return [*result, "-x", cmd, *rest]
         if caller == "gnome-terminal" and arg in ("--wait", "--window", "--tab", "--disable-factory"):
             continue  # --no-dbus opens a dedicated process and waits for it.
         if caller == "gnome-terminal" and (arg == "--profile" or arg.startswith("--profile=")):
@@ -51,8 +56,23 @@ def main():
     env.setdefault("BAT_THEME", "ansi")
     for key in ("KARTHI_MODERN_LOADED", "KARTHI_HUD_SHOWN"):
         env.pop(key, None)
-    os.execve(binary, [binary, "--no-dbus", "--config", str(profile),
-                      "--profile", "modern", "--icon", "kterm-terminal", *args], env)
+    cmd_args = [binary, "--no-dbus", "--config", str(profile),
+                "--profile", "modern", "--icon", "kterm-terminal", *args]
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        import gi
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gdk, GLib
+        GLib.set_prgname("kterm-terminal")
+        Gdk.set_program_class("kterm-terminal")
+        sys.argv = cmd_args
+        runpy.run_path(binary, run_name="__main__")
+    except SystemExit as exc:
+        sys.exit(exc.code)
+    except Exception:
+        os.execve(binary, cmd_args, env)
 
 
 if __name__ == "__main__":

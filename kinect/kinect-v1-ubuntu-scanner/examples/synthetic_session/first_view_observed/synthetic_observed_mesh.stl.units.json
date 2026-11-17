@@ -1,0 +1,5 @@
+{
+  "coordinate_units": "mm",
+  "meters_per_unit": 0.001,
+  "warning": "STL has no standard unit declaration. Select these units in the receiving application."
+}
