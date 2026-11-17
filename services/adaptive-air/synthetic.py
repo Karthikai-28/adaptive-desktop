@@ -55,3 +55,49 @@ def hand(cx=0.5, cy=0.5, size=0.12, shape="open", depth=None, side="Right", gap=
     py = sum(p[1] for p in palm) / 5
     lm = [[cx + (x - px) * size * 0.75, cy + (y - py) * size, 0.0] for x, y in pts]
     return {"side": side, "lm": lm, "depth": depth}
+
+
+def room_depth(hand=(0.15, 0.0, 2.45), lamp=True, table=True, noise=6.0, seed=0, fx=525.0):
+    """A Kinect depth frame (mm, 640x480, mirrored like the tracker's) of a living room seen
+    from on top of the TV: a wall at 3.6 m, a couch at 3 m, someone sitting on it at 2.8 m
+    (head, torso, the other arm down) and, if hand is (x, y, z) metres, that hand held out with
+    its forearm running back to the shoulder; a free-standing lamp and a coffee table nearer.
+    Returns (depth, (u, v) of the hand's centre)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    v, u = np.mgrid[0:480, 0:640]
+    d = np.full((480, 640), 3600.0)
+
+    def px(x, y, z):
+        return 319.5 + fx * x / z, 239.5 + fx * y / z
+
+    def box(x0, x1, y0, y1, z):
+        a0, b0 = px(x0, y0, z)
+        a1, b1 = px(x1, y1, z)
+        m = (u >= a0) & (u <= a1) & (v >= b0) & (v <= b1)
+        d[m] = np.minimum(d[m], z * 1000)
+
+    def disc(x, y, z, r):
+        a, b = px(x, y, z)
+        rp = fx * r / z
+        m = (u - a) ** 2 + (v - b) ** 2 <= rp * rp
+        d[m] = np.minimum(d[m], z * 1000)
+
+    box(-0.9, 0.9, 0.1, 1.2, 3.0)                          # couch
+    box(-0.2, 0.2, -0.2, 0.45, 2.8)                        # torso
+    disc(0.0, -0.33, 2.8, 0.1)                             # head
+    box(-0.3, -0.18, -0.15, 0.3, 2.8)                      # the other arm, down
+    at = None
+    if hand:
+        hx, hy, hz = hand
+        disc(hx, hy, hz, 0.07)                             # palm and fingers
+        for f in np.linspace(0.15, 1, 12):                 # forearm back to the shoulder
+            disc(hx + (0.2 - hx) * f, hy + (-0.15 - hy) * f, hz + (2.75 - hz) * f, 0.035)
+        at = px(hx, hy, hz)
+    if lamp:
+        disc(-0.8, -0.2, 2.2, 0.08)                        # lamp shade
+        box(-0.81, -0.79, -0.12, 1.0, 2.2)                 # its pole
+    if table:
+        box(-0.5, 0.5, 0.6, 0.75, 1.6)                     # coffee table
+    d = d + rng.normal(0, noise, d.shape)
+    return d.astype(np.uint16), at

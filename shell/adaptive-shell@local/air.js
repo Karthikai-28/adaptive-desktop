@@ -520,7 +520,8 @@ var Air = class Air {
         const where = { kinect: 'Kinect', webcam: 'Webcam', none: 'No camera' }[f.source] || f.source;
         const waiting = { 'kinect-unpowered': 'Kinect has no power', 'no-camera': 'no camera',
             starting: 'starting', stopping: 'stopping' }[f.status];
-        this._statusItem.label.text = `Air · ${where}${f.fps ? ` · ${Math.round(f.fps)} fps` : ''}` +
+        const sees = f.video === 'ir' ? ' · infrared (dark)' : '';
+        this._statusItem.label.text = `Air · ${where}${sees}${f.fps ? ` · ${Math.round(f.fps)} fps` : ''}` +
             (waiting ? ` · ${waiting}`
                 : f.engaged ? ' · engaged' : ' · raise an open palm to engage');
         this._noteItem.label.text = f.note || 'Camera pictures never leave the laptop or touch the disk.';
@@ -554,7 +555,11 @@ var Air = class Air {
         // Reticle: at the pointer when engaged, over the palm while engaging.
         let rx = px, ry = py;
         const primary = (f.hands || []).find(h => h.primary) || (f.hands || [])[0];
-        if (!f.engaged && primary) {
+        if (!f.engaged && primary && primary.palm) {
+            // The palm as depth sees it (steadier than the landmarks), or the landmarks' own.
+            rx = mon.x + primary.palm[0] * mon.width;
+            ry = mon.y + primary.palm[1] * mon.height;
+        } else if (!f.engaged && primary && primary.pts.length) {
             rx = mon.x + PALM.reduce((s, i) => s + primary.pts[i][0], 0) / PALM.length * mon.width;
             ry = mon.y + PALM.reduce((s, i) => s + primary.pts[i][1], 0) / PALM.length * mon.height;
         }
@@ -578,7 +583,13 @@ var Air = class Air {
 
         if (f.engaged) {
             const hand = primary ? (primary.side === 'Left' ? 'left hand' : 'right hand') : 'no hand';
-            const parts = ['AIR', (f.source || '').toUpperCase(), hand.toUpperCase()];
+            // Which of the Kinect's senses found the hand: colour or infrared (the dark), each
+            // with depth, or depth alone.
+            const sensor = primary && primary.source === 'depth' ? 'DEPTH ONLY'
+                : f.video === 'ir' ? 'INFRARED + DEPTH'
+                    : primary && primary.depth ? 'COLOUR + DEPTH' : null;
+            const parts = ['AIR', (f.source || '').toUpperCase(), sensor, hand.toUpperCase()]
+                .filter(Boolean);
             if (primary && primary.depth)
                 parts.push(`${(primary.depth / 1000).toFixed(2)} M`);
             if (f.hands && f.hands.length > 1)
@@ -599,20 +610,27 @@ var Air = class Air {
         const hands = f.hands || [];
         const target = HOLO_HAND * mon.height;
         this._skelHands = hands.map(h => {
+            if (!h.pts || !h.pts.length) {
+                // Found by depth alone: no fingers to draw, a glowing palm instead.
+                const p = h.palm || [0.5, 0.5];
+                const c = [mon.x + p[0] * mon.width, mon.y + p[1] * mon.height];
+                const r = 0.3 * target;
+                return { hand: h, pts: [], palm: c, r, box: [[c[0] - r, c[1] - r], [c[0] + r, c[1] + r]] };
+            }
             const raw = h.pts.map(([x, y]) => [mon.x + x * mon.width, mon.y + y * mon.height]);
             const cx = PALM.reduce((s, i) => s + raw[i][0], 0) / PALM.length;
             const cy = PALM.reduce((s, i) => s + raw[i][1], 0) / PALM.length;
             const span = Math.hypot(raw[12][0] - raw[0][0], raw[12][1] - raw[0][1]) || 1;
             const k = Math.min(1, target / span);
-            return { hand: h, pts: raw.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]) };
+            return { hand: h, pts: raw.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]), box: [] };
         });
         if (!hands.length) {
             this._skeleton.visible = false;
             return;
         }
         let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-        for (const { pts } of this._skelHands) {
-            for (const [x, y] of pts) {
+        for (const { pts, box } of this._skelHands) {
+            for (const [x, y] of pts.concat(box)) {
                 x0 = Math.min(x0, x); y0 = Math.min(y0, y);
                 x1 = Math.max(x1, x); y1 = Math.max(y1, y);
             }
@@ -639,10 +657,23 @@ var Air = class Air {
         const box = this._skelBox;
         if (f && box && this._skelHands) {
             const { left, top } = box;
-            for (const { hand: h, pts: abs } of this._skelHands) {
+            for (const { hand: h, pts: abs, palm, r } of this._skelHands) {
                 const strong = f.engaged ? (h.primary ? 0.8 : 0.5) : 0.45;
                 const pts = abs.map(([x, y]) => [x - left, y - top]);
                 const tone = h.pose === 'fist' ? 'warn' : 'cyan';
+                if (!pts.length && palm) {
+                    const [x, y] = [palm[0] - left, palm[1] - top];
+                    for (const [k, alpha] of [[1, 0.10], [0.7, 0.18], [0.4, 0.35]]) {
+                        source(cr, tone, alpha * strong);
+                        cr.arc(x, y, r * k, 0, 2 * Math.PI);
+                        cr.fill();
+                    }
+                    cr.setLineWidth(2);
+                    source(cr, 'white', 0.85 * strong);
+                    cr.arc(x, y, r * 0.4, 0, 2 * Math.PI);
+                    cr.stroke();
+                    continue;
+                }
                 cr.setLineCap(1);   // round
                 for (const [width, alpha] of [[9, 0.10], [5, 0.18], [2, 0.85]]) {
                     cr.setLineWidth(width);

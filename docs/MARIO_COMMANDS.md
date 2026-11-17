@@ -22,7 +22,7 @@ http://127.0.0.1:8791/commands, and "What can I say?" opens it.
 | Tilt the Kinect down by 10 | Up or down, by any number of degrees (10 if you don't say). |
 | Tilt the Kinect to minus 15 | To an angle from level, -27 to 27. |
 | Level the Kinect | Back to straight ahead. |
-| Night vision on / Switch to colour | The infrared camera: it sees in the dark. |
+| Night vision on / Switch to colour / Night vision auto | Infrared (sees in the dark), colour, or auto: colour while lit, infrared in the dark. |
 | Use the Kinect as a webcam / Stop the Kinect webcam | "Kinect Camera" for Meet, Zoom, OBS. |
 | Take a 3D snapshot | Saves the point cloud to Pictures/Kinect (PLY). |
 | Turn the Kinect light red / Turn off the Kinect light | Green, red, yellow, blinking, off. |

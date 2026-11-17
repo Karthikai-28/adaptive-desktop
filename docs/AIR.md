@@ -49,11 +49,13 @@ of hands through the real engine and the real HUD.
 
 ```
 Kinect v1 ──USB──▶ libfreenect 0.7.5 (.local/libfreenect, ctypes)        services/adaptive-air/
-   │  RGB 640x480 + depth registered to it, in mm                          kinect.py
+   │  colour 640x480 + depth registered to it (lit room), or               kinect.py, kinect_hub.py
+   │  infrared + depth in the IR camera's geometry (dark): fusion.LightSwitch picks
    ▼
-MediaPipe Hands (CPU, ~20 ms/frame)  ── 21 landmarks per hand ──┐        air.py (Tracker)
-   + the palm's depth from the registered depth image           │
-   ▼                                                            ▼
+MediaPipe Hands, each hand followed in its own crop (two threads)        air.py (Tracker)
+   + depth: the palm and its distance from the depth pixels on it,       fusion.py
+     size checked against distance, hands held out found by depth alone
+   ▼
 gesture engine (pure): poses, pinch hysteresis, One Euro filter,         gestures.py
 engage/clutch, push, swipe, grab/throw, two-hand spread
    │
@@ -80,21 +82,47 @@ Meta window moves, workspace and overview through shellActions.js
 ## On top of the TV (across the room)
 
 The Kinect is meant to sit on the TV, about 1.92 m (6.3 ft) up, looking into the room, with you
-2 to 4 m away. Everything is set for that:
+2 to 4 m away (a couch at 8 to 9 ft is 2.4 to 2.7 m). Everything is set for that:
 
-- **Hands at a distance.** A hand 3 m away is about 25 pixels wide, too small for MediaPipe
+- **Three senses, combined.** The Kinect v1 has a colour camera, an infrared camera and depth
+  (made by the infrared camera from the projector's dots). Colour and infrared share one USB
+  stream: the Kinect gives one or the other, never both (a switch takes ~0.3 s). Depth comes
+  with either. So with `"video": "auto"` in `kinect.json` (the default) the hub gives **colour +
+  depth while the room is lit and infrared + depth in the dark** (colour darker than 0.04 for
+  2 s; every 20 s, while you are not engaged, it glances at colour to see if the lights came
+  back on, and stays if it is brighter than 0.07). Studio's *Auto / Colour / Infrared* and
+  "Mario, night vision on / off / auto" choose. In infrared the picture is cleaned up for
+  MediaPipe first (dots smoothed away, contrast evened), and depth comes in the infrared
+  camera's own geometry, so a hand's distance is the hand's.
+- **Hands at a distance.** A hand 2.7 m away is about 20 pixels wide, too small for MediaPipe
   Hands in the whole picture, so Air finds you first (MediaPipe Pose) and looks for each hand in
   a square cut around its wrist, enlarged to 256 pixels (`"tracking": "auto"` in air.json; `near`
-  or `room` to force one).
-- **The same arm movement at any distance.** The area your hand sweeps for the whole screen is
-  4 hand-sizes wide (`box_hands`), so it shrinks in the picture as you step back; engaging and
-  swiping are measured in hand-sizes too.
+  or `room` to force one). Once found, each hand is **followed** in a square around where it was
+  in the last frame (the more accurate hand model, two hands at once), so Pose only runs while a
+  hand is still to be found: ~30 ms a frame instead of ~60.
+- **Steady at a distance: the palm from depth.** 21 landmarks regressed from 20 pixels wobble by
+  a pixel or two, about a centimetre at 2.7 m, which the pointer magnifies. The pointer follows
+  the centre of the few hundred depth pixels on the palm instead (`fusion.refine_palm`), and the
+  palm's distance is smoothed too (depth steps by ~2 cm at 3 m). The finger shapes are smoothed
+  around the palm, so poses do not flicker. In the checks a still hand at 2.7 m moves the
+  pointer 2.7 px (one standard deviation) against 15.7 px on landmarks alone.
+- **Only real hands.** A hand or a person MediaPipe finds must be the right size for its
+  distance: a hand on a poster, a person on a screen, or a "person" in a dark corner is not.
+- **The same arm movement at any distance, in metres.** With the hand's distance known, the
+  whole screen width is 45 cm of arm sweep (`box_metres`) at 1 m or at 3.6 m. Without depth (the
+  webcam) it is 4 hand-sizes (`box_hands`). Engaging and swiping are measured in hand-sizes.
+- **Depth alone.** A hand **held out toward the TV**, at least 20 cm ahead of your body, is also
+  found from depth alone (`fusion.DepthHands`): it keeps a hand going for half a second when the
+  cameras lose it, and, when neither picture finds it at all, gives an open hand without fingers:
+  the pointer, the air push to click, swipes and waves (no pinch or fist: depth cannot see
+  fingers at that range). It must have moved (been raised) before it counts, so a lamp or a cup
+  never does. The HUD draws it as a glowing palm, and the chip says `DEPTH ONLY`,
+  `INFRARED + DEPTH` or `COLOUR + DEPTH`.
 - **Tilt it down** a little so it sees from your head to the floor: "Mario, tilt the Kinect down
   by 10", or Studio's tilt slider. Studio's Depth panel shows how much of the room has a reading.
 - **Its height** is found from the floor when the floor is in view; otherwise `mount_height` in
   `~/.config/adaptive-desktop/kinect.json` (default 1.92 m) is used.
-- **A dark room**: the colour camera sees nothing, so neither does hand finding. Studio says so;
-  "Mario, night vision on" switches to the infrared camera, which brings its own light.
+- **A dark room**: Auto switches to infrared by itself (above). Studio shows which, and why.
 
 ## How tall you are
 
@@ -166,6 +194,12 @@ Settings, all optional, in `~/.config/adaptive-desktop/air.json`:
               "scroll_step": 0.035, "natural_scroll": true, "zoom_mm": 45, "zoom_ratio": 1.15}}
 ```
 
+`gestures` also takes `box_metres` (0.45: metres of arm sweep for the screen width when the
+distance is known), `smooth_shape` and `smooth_depth` (One Euro settings), and `"fusion"` takes
+`fusion.DEFAULTS` (how far ahead of the body a depth-only hand must be, its area, ...). The
+Kinect's picture is chosen in `kinect.json`: `"video": "auto" | "rgb" | "ir"`, with
+`"dark_below": 0.04, "light_above": 0.07`.
+
 `source` is `auto` (the Kinect when its camera is on USB, else the webcam, and back to the Kinect
 as soon as it gets power), `kinect` or `webcam`. Every tuning value is in `gestures.DEFAULTS`;
 `box_width` is how much of the camera's view maps onto the whole screen (smaller means less arm
@@ -182,8 +216,12 @@ movement).
 - The Kinect's USB nodes must be readable and writable by you. On this machine they are already
   (`crw-rw-rw-` from an existing udev rule). Elsewhere, install libfreenect's
   `51-kinect.rules` (it gives the `plugdev` group access) and replug.
-- Depth needs 0.5 to 4 m. A hand closer than about 50 cm reads no depth, and push is then off.
-  Sit 1 to 2 m away for gestures: Studio's Depth panel shows how much of the picture has a reading.
+- Depth needs 0.5 to 4.5 m. A hand closer than about 50 cm reads no depth, and push is then off
+  (and the pointer falls back to the landmarks). Studio's Depth panel shows how much of the
+  picture has a reading.
+- The colour and infrared pictures never come together (one USB stream): "combining" them is
+  switching by the light, with depth always on. The glance at colour from infrared drops ~0.5 s
+  of frames, so it never happens while you are engaged or while the Kinect webcam is on.
 - The webcam on this laptop drops to ~10 fps in a dim room (auto exposure). The Kinect runs at a
   steady 30.
 - MediaPipe's handedness can flip when a hand turns over. The engine follows hands by side but

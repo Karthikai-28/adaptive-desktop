@@ -15,7 +15,8 @@
     </div>
     <div class="controls">
       <div class="seg" role="group" aria-label="Picture">
-        <button data-video="rgb" class="on">Colour</button>
+        <button data-video="auto" class="on" title="Colour while the room is lit, infrared in the dark">Auto</button>
+        <button data-video="rgb">Colour</button>
         <button data-video="ir">Infrared</button>
       </div>
       <label class="switch" title="The Kinect's colour camera as a webcam any app can pick">
@@ -29,7 +30,7 @@
   <main class="grid">
     <section class="panel view">
       <div class="panel-head"><h2 id="video-title">Colour</h2><span class="muted" id="video-meta"></span>
-        <button class="ghost dark-hint" id="dark" data-video="ir" hidden>Too dark: switch to Infrared</button></div>
+        <button class="ghost dark-hint" id="dark" data-video="auto" hidden>Too dark: switch to Auto</button></div>
       <canvas id="video" width="640" height="480"></canvas>
     </section>
     <section class="panel view">

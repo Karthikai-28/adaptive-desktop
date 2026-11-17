@@ -94,18 +94,21 @@ def person_mask(depth, seed, cut=None, tolerance=450, step=2):
     return labels == label, centre
 
 
-def measure(depth, accel, seed, mount_height=1.92, step=2):
+def measure(depth, accel, seed, mount_height=1.92, step=2, intr=None):
     """One frame's measurement: {"ok", "height", "distance", "floor", "camera_height", ...}.
 
-    seed: (u, v) pixel on the person's torso in the (unmirrored) depth picture.
+    seed: (u, v) pixel on the person's torso in the (unmirrored) depth picture. intr: the
+    (fx, fy, cx, cy) of the camera the depth is aligned to (colour by default; kinect.intrinsics
+    gives the infrared one).
     """
+    fx, fy, cx, cy = intr or (FX, FY, CX, CY)
     up = up_vector(accel)
     d = depth[::step, ::step].astype(np.float32)
     v, u = np.mgrid[0:depth.shape[0]:step, 0:depth.shape[1]:step]
     valid = (d >= NEAR) & (d <= FAR)
     z = np.where(valid, d / 1000.0, 0.0)
-    x = (u - CX) * z / FX
-    y = (v - CY) * z / FY
+    x = (u - cx) * z / fx
+    y = (v - cy) * z / fy
     h = x * up[0] + y * up[1] + z * up[2]          # height above the camera, per pixel
 
     # The floor first, from every point: it is far bigger than the feet standing on it. A

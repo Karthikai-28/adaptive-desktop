@@ -57,6 +57,8 @@ PHRASES = {
     "reset the kinect": "kinect.level",
     "turn on night vision": "kinect.ir",
     "switch to infrared": "kinect.ir",
+    "night vision auto": "kinect.ir",
+    "set night vision to automatic": "kinect.ir",
     "kinect webcam off": "kinect.webcam",
     "scan the room": "kinect.snapshot",
     "turn on gestures": "air.on",

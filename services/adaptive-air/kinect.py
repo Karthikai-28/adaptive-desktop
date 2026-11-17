@@ -6,7 +6,11 @@ kinect/build-libfreenect.sh into .local/libfreenect and loaded here. Two ways in
     Motor   the tilt motor, the LED and the accelerometer, straight over libusb (libfreenect
             only opens a Kinect whose camera is on USB). Works on USB power alone.
     Camera  colour (640x480 RGB) and depth registered to it (millimetres, aligned pixel for pixel
-            with the colour picture), through the sync API. Needs the Kinect's 12 V supply.
+            with the colour picture), or infrared and depth in the infrared camera's own geometry
+            (the depth camera is the infrared camera), through the sync API. Needs the 12 V supply.
+
+The colour and infrared pictures share one USB stream: the Kinect v1 gives one or the other,
+never both at once (switching takes ~0.3 s). Depth comes alongside either.
 
 probe() reads sysfs only and never opens the device, so it is safe to call any time.
 """
@@ -31,6 +35,16 @@ WIDTH, HEIGHT = 640, 480
 # libfreenect.h enums
 VIDEO_RGB = 0
 DEPTH_REGISTERED = 4          # millimetres, registered to the RGB image; 0 = no reading
+DEPTH_MM = 5                  # millimetres, in the depth (= infrared) camera's own geometry
+# Pinhole intrinsics (fx, fy, cx, cy) of the picture each mode gives, 640x480. Colour: the RGB
+# camera (depth registered to it). Infrared: the IR/depth camera (the usual Kinect v1 values).
+INTRINSICS = {"rgb": (525.0, 525.0, 319.5, 239.5), "ir": (575.8, 575.8, 314.5, 235.5)}
+
+
+def intrinsics(mode="rgb"):
+    return INTRINSICS.get(mode, INTRINSICS["rgb"])
+
+
 LED = {"off": 0, "green": 1, "red": 2, "yellow": 3, "blink-green": 4, "blink-red-yellow": 6}
 
 
@@ -195,7 +209,9 @@ class Camera:
         """(picture HxWx3 uint8, depth_mm HxW uint16) or raises OSError.
 
         mode "ir" gives the infrared camera (it sees in the dark, and shows the projector's dot
-        pattern) as a grey picture in the same three channels.
+        pattern) as a grey picture in the same three channels, and depth in that camera's own
+        geometry (FREENECT_DEPTH_MM): registering it to the colour camera would put every
+        distance a few centimetres beside the infrared picture's hand.
         """
         np = self._np
         ptr, ts = ctypes.c_void_p(), ctypes.c_uint32()
@@ -211,7 +227,7 @@ class Camera:
             rgb = np.ctypeslib.as_array((ctypes.c_uint8 * (WIDTH * HEIGHT * 3)).from_address(
                 ptr.value)).reshape(HEIGHT, WIDTH, 3).copy()
         if self._lib.freenect_sync_get_depth(ctypes.byref(ptr), ctypes.byref(ts), self.index,
-                                             DEPTH_REGISTERED) < 0:
+                                             DEPTH_MM if mode == "ir" else DEPTH_REGISTERED) < 0:
             raise OSError("no Kinect depth frame")
         depth = np.ctypeslib.as_array((ctypes.c_uint16 * (WIDTH * HEIGHT)).from_address(
             ptr.value)).reshape(HEIGHT, WIDTH).copy()

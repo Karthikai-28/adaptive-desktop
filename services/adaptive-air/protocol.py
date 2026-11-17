@@ -7,6 +7,8 @@
 The JSON is the gesture engine's state (gestures.Engine.step) plus where it came from:
 
     source   "kinect" | "webcam" | "none"
+    video    "rgb" | "ir": which picture the Kinect gives (infrared in the dark); each hand also
+             says where it was found: "rgb", "ir" or "depth" (depth alone)
     fps      frames per second actually processed
     status   "starting" | "tracking" | "no-camera" | "kinect-unpowered" | "stopping"
     note     a sentence for the HUD when something needs the user (plug in the 12 V supply ...)
@@ -32,10 +34,12 @@ XML = f"""
 """
 
 
-def frame(state, source, fps, status, note=None):
+def frame(state, source, fps, status, note=None, video=None):
     msg = dict(state)
     msg.pop("t", None)
     msg["source"] = source
+    if video:
+        msg["video"] = video
     msg["fps"] = round(fps, 1)
     msg["status"] = status
     if note:

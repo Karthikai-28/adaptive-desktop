@@ -1291,6 +1291,14 @@ Plan, gestures and gotchas: `docs/AIR.md`.
 - ✅ Mario commands (`commands.py`, `control.py`): apps, windows, desktops, TV (cast and remote),
   Kinect, Air, sound, media, web; cheat sheet at `/commands` and docs/MARIO_COMMANDS.md;
   `verify-mario-commands.py`; window commands nested-shell checked.
+- ✅ Sensor fusion for 8-9 ft (`fusion.py`, 2026-11-17): colour + depth while lit, infrared +
+  depth in the dark (`"video": "auto"`, hub switches by the light; IR depth now in the IR
+  camera's geometry); hands followed in their own crops (two threads, ~30 ms a frame on live
+  frames); the pointer follows the palm from depth (simulated jitter at 2.7 m 15.7 px -> 2.7 px);
+  a 45 cm arm sweep for the screen at any distance; finger shapes and distance smoothed; hands
+  and Pose people checked against their distance (a person on a screen is rejected, seen live);
+  depth-only hands held out toward the TV (pointer, push, swipe, wave). `verify-air.py` checks it
+  against a synthetic living room; the depth finder saw no false hands in the real room.
 
 ### Live, not yet tried
 
@@ -1300,12 +1308,14 @@ Plan, gestures and gotchas: `docs/AIR.md`.
 - 🔬 The "Kinect Camera" webcam in a meeting app: needs `scripts/install-virtual-cameras.sh` (sudo).
 - 🔬 The HUD and pointer in the live X11 session (needs a shell restart after `sync-shell.sh`).
 - 🔬 Tuning on real hands: `box_width`, swipe speed, push distance, pinch thresholds.
+- 🔬 The fusion from the couch (2.4-2.7 m): pointer steadiness, MediaPipe on the cleaned infrared
+  picture with the lights off, the depth-only hand, the light switch's 0.04 / 0.07 levels.
 
 ### Next
 
 - Voice + hands: "Hey Mario, move this there" with the pointing hand as the target.
 - A Control Center tile and an island activity while engaged; per-app gesture maps.
-- Depth-only hand finding (closest blob) for the dark, when the colour picture is too dim.
+- A gesture trainer: record your own examples of each gesture and choose what each one does.
 
 ## Immediate next work
 

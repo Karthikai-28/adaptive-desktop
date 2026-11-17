@@ -183,6 +183,9 @@ class Control:
         _, problem = self._kinect_ready()
         if problem:
             return problem
+        if on is None:
+            self._post("video", "auto")
+            return self.said("Night vision on its own: colour while the room is lit, infrared in the dark.")
         self._post("video", "ir" if on else "rgb")
         return self.said("Night vision on: the infrared camera." if on else "Back to the colour camera.")
 

@@ -327,10 +327,12 @@ async function poll() {
         const live = status.status === 'streaming';
         pill.classList.add(live ? 'live' : status.status === 'starting' ? 'warn' : 'bad');
         $('state-text').textContent = live
-            ? `Kinect ${status.kinect.model} · ${status.fps.toFixed(0)} fps · ${status.mode === 'ir' ? 'infrared' : 'colour'}`
+            ? `Kinect ${status.kinect.model} · ${status.fps.toFixed(0)} fps · ${status.mode === 'ir' ? 'infrared' : 'colour'}${status.video === 'auto' ? ' (auto)' : ''}`
             : ({ unpowered: 'Kinect has no power', 'no-kinect': 'No Kinect on USB', starting: 'Starting…' }[status.status] || 'Kinect error');
-        document.querySelectorAll('[data-video]').forEach(b => b.classList.toggle('on', b.dataset.video === status.mode));
-        $('video-title').textContent = status.mode === 'ir' ? 'Infrared' : 'Colour';
+        const video = status.video || status.mode;
+        document.querySelectorAll('.seg [data-video]').forEach(b => b.classList.toggle('on', b.dataset.video === video));
+        $('video-title').textContent = (status.mode === 'ir' ? 'Infrared' : 'Colour') +
+            (video === 'auto' ? (status.mode === 'ir' ? ' · auto: the room is dark' : ' · auto') : '');
         setAxis('ax', status.accel[0]); setAxis('ay', status.accel[1]); setAxis('az', status.accel[2]);
         $('g').textContent = `${status.g.toFixed(2)} g`;
         $('pitch').textContent = `${status.pitch.toFixed(1)}°`;
@@ -355,8 +357,8 @@ async function poll() {
         if (document.activeElement !== $('webcam')) $('webcam').checked = cam.on;
         $('webcam-state').textContent = cam.streaming ? `on · ${cam.device}` : cam.on ? 'starting…' : 'off';
         $('air').textContent = status.air ? 'reading frames' : 'off';
-        const dark = status.mode === 'rgb' && status.light != null && status.light < 0.04
-            ? 'Too dark for the colour camera (and for finding hands): switch to Infrared, which brings its own light.' : null;
+        const dark = video === 'rgb' && status.light != null && status.light < 0.04
+            ? 'Too dark for the colour camera (and for finding hands): Auto switches to infrared, which brings its own light.' : null;
         $('dark').hidden = !dark;
         const note = cam.error || (status.status !== 'streaming' ? status.error : null);
         $('note').hidden = !note;

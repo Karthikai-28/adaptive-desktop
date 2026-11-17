@@ -15,8 +15,11 @@ libfreenect lets one process at a time open the Kinect, so this one does and sha
 
 It stops itself (LED off) when nothing has used it for IDLE_EXIT seconds and the webcam is off,
 so the camera is never left on by accident. Settings in ~/.config/adaptive-desktop/kinect.json:
-{"webcam": false, "video": "rgb", "tilt": null, "mount_height": 1.92} (mount_height: metres from
-the floor to the Kinect, for measuring people when the floor is out of view; 1.92 = on the TV). HTTP is bound to 127.0.0.1 only. docs/AIR.md.
+{"webcam": false, "video": "auto", "tilt": null, "mount_height": 1.92,
+ "dark_below": 0.04, "light_above": 0.07}
+video: auto (colour while the room is lit, infrared in the dark: fusion.LightSwitch), rgb or ir.
+mount_height: metres from the floor to the Kinect, for measuring people when the floor is out of
+view (1.92 = on the TV). HTTP is bound to 127.0.0.1 only. docs/AIR.md.
 """
 
 import argparse
@@ -35,6 +38,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import frames  # noqa: E402
+import fusion  # noqa: E402
 import kinect  # noqa: E402
 
 PORT = 8792
@@ -43,9 +47,8 @@ STUDIO = HERE / "studio"
 IDLE_EXIT = 20.0
 REPROBE = 3.0
 WEBCAM_NAME = "Kinect Camera"
-# The colour camera's intrinsics; depth is registered to it (Kinect v1, 640x480).
-FX = FY = 525.0
-CX, CY = 319.5, 239.5
+VIDEO = ("auto", "rgb", "ir")
+BUSY_STALE = 3.0       # s: Air saying it is engaged counts only while Air still reads frames
 
 
 def log(msg):
@@ -108,9 +111,12 @@ def colour_depth(depth, near=400, far=4000):
     return img
 
 
-def point_cloud(rgb, depth, step=4, far=4000):
-    """(xyz float32 Nx3 in metres, camera frame: x right, y down, z forward; rgb uint8 Nx3)."""
+def point_cloud(rgb, depth, step=4, far=4000, mode="rgb"):
+    """(xyz float32 Nx3 in metres, camera frame: x right, y down, z forward; rgb uint8 Nx3).
+
+    mode: which camera the depth is aligned to (the colour one, or in infrared the IR one)."""
     import numpy as np
+    FX, FY, CX, CY = kinect.intrinsics(mode)
     d = depth[::step, ::step].astype(np.float32)
     v, u = np.mgrid[0:depth.shape[0]:step, 0:depth.shape[1]:step]
     keep = (d > 0) & (d <= far)
@@ -193,7 +199,11 @@ class Webcam:
 class Hub:
     def __init__(self, settings):
         self.settings = settings
-        self.mode = settings.get("video", "rgb") if settings.get("video") in ("rgb", "ir") else "rgb"
+        self.video = settings.get("video") if settings.get("video") in VIDEO else "auto"
+        self.mode = "ir" if self.video == "ir" else "rgb"
+        self.switch = fusion.LightSwitch(float(settings.get("dark_below", 0.04)),
+                                         float(settings.get("light_above", 0.07)))
+        self.busy = False      # Air is engaged: no colour checks from infrared while it is
         self.commands = queue.Queue()
         self.stop = threading.Event()
         self.lock = threading.Lock()
@@ -221,9 +231,12 @@ class Hub:
         if name == "webcam":
             self.settings["webcam"] = bool(value)
             save_settings(self.settings)
-        elif name == "video" and value in ("rgb", "ir"):
+        elif name == "video" and value in VIDEO:
             self.settings["video"] = value
             save_settings(self.settings)
+        elif name == "busy":
+            self.busy = bool(value)
+            return
         self.commands.put((name, value))
 
     def _apply(self, cam):
@@ -238,8 +251,12 @@ class Hub:
                     self.led = value
                 elif name == "tilt":
                     cam.tilt(float(value))
-                elif name == "video" and value in ("rgb", "ir"):
-                    self.mode = value
+                elif name == "video" and value in VIDEO:
+                    self.video = value
+                    self.switch = fusion.LightSwitch(self.switch.dark_below,
+                                                     self.switch.light_above)
+                    if value != "auto":
+                        self.mode = value
             except (OSError, ValueError) as err:
                 log(f"{name}: {err}")
 
@@ -269,6 +286,10 @@ class Hub:
                 self.webcam_error = str(err)
                 self.webcam.close()
                 self.webcam = None
+
+    def _busy(self, now):
+        seen = self.writer.client_seen() if self.writer else 0.0
+        return self.busy and now - seen < BUSY_STALE
 
     def idle(self, now):
         if self.settings.get("webcam") or self.studio_clients > 0:
@@ -336,10 +357,14 @@ class Hub:
                                   self.motor["tilt"], self.fps)
                 with self.lock:
                     self.rgb, self.depth, self.seq = rgb, depth, self.writer.seq
+                if self.mode == "rgb":
+                    self.light = round(fusion.light_level(rgb), 3)
                 if now - last_stats >= 0.25:
                     self.stats = depth_stats(depth)
-                    self.light = round(float(rgb[::8, ::8].mean()) / 255, 3)
                     last_stats = now
+                if self.video == "auto":
+                    self.mode = self.switch.step(now, self.mode, self.light, busy=self._busy(now),
+                                                 hold=bool(self.settings.get("webcam")))
                 self._sync_webcam(rgb)            # in infrared mode: a night-vision webcam
         finally:
             if self.webcam is not None:
@@ -367,6 +392,7 @@ class Hub:
             return {"ok": False, "error": self.error or "The Kinect isn't streaming."}
         self.last_use = time.monotonic()
         mount = float(self.settings.get("mount_height", 1.92))
+        intr = kinect.intrinsics(self.mode)
         results, last = [], 0
         with mp.solutions.pose.Pose(model_complexity=0, static_image_mode=False) as pose:
             deadline = time.monotonic() + seconds
@@ -384,7 +410,7 @@ class Hub:
                     continue
                 seed = (sum(p.x for p in torso) / len(torso) * frames.W,
                         sum(p.y for p in torso) / len(torso) * frames.H)
-                results.append(measure.measure(depth, self.motor["accel"], seed, mount))
+                results.append(measure.measure(depth, self.motor["accel"], seed, mount, intr=intr))
         summary = measure.summarise(results)
         summary["sentence"] = measure.say(summary)
         return summary
@@ -416,7 +442,7 @@ class Hub:
         cached = self._cloud.get(step)
         if cached and cached[0] == seq:
             return cached[1]
-        data = cloud_bytes(*point_cloud(rgb, depth, step), seq)
+        data = cloud_bytes(*point_cloud(rgb, depth, step, mode=self.mode), seq)
         self._cloud = {step: (seq, data)}
         return data
 
@@ -426,7 +452,9 @@ class Hub:
         g = math.sqrt(sum(float(v) ** 2 for v in self.motor["accel"])) / kinect.COUNTS_PER_G
         return {
             "status": self.status, "error": self.error, "kinect": kinect.probe(),
-            "mode": self.mode, "fps": round(self.fps, 1), "seq": self.seq,
+            "mode": self.mode, "video": self.video,
+            "auto": self.switch.reason if self.video == "auto" else None,
+            "fps": round(self.fps, 1), "seq": self.seq,
             "accel": self.motor["accel"], "g": round(g, 3), "pitch": pitch, "roll": roll,
             "tilt": self.motor["tilt"], "tilt_status": self.motor["status"], "led": self.led,
             "depth": self.stats, "light": self.light,
@@ -492,7 +520,8 @@ def make_app(hub):
         rgb, depth, _ = hub.latest()
         if rgb is None:
             raise web.HTTPServiceUnavailable(text="no Kinect frame yet")
-        data = await in_thread(lambda: ply_bytes(*point_cloud(rgb, depth, 2)))
+        mode = hub.mode
+        data = await in_thread(lambda: ply_bytes(*point_cloud(rgb, depth, 2, mode=mode)))
         name = time.strftime("kinect-%Y%m%d-%H%M%S.ply")
         return web.Response(body=data, content_type="application/octet-stream",
                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -513,7 +542,7 @@ def make_app(hub):
 
     async def api(request):
         name = request.match_info["name"]
-        if name not in ("led", "tilt", "video", "webcam"):
+        if name not in ("led", "tilt", "video", "webcam", "busy"):
             raise web.HTTPNotFound()
         try:
             body = await request.json()

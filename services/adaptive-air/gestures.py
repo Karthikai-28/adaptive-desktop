@@ -3,9 +3,15 @@
 Input, once per camera frame (Engine.step):
 
     t      seconds (monotonic)
-    hands  [{"side": "Left"|"Right", "lm": [[x, y, z] * 21], "depth": mm or None}]
+    hands  [{"side": "Left"|"Right", "lm": [[x, y, z] * 21] or None, "depth": mm or None,
+             "palm": [x, y], "scale": m, "size": s, "pose": p, "source": "rgb"|"ir"|"depth"}]
            lm are MediaPipe hand landmarks, x/y normalised to the (mirrored) camera image; depth
            is the palm's distance from the Kinect in millimetres (None on a plain webcam).
+           Optional, from the depth fusion (fusion.py): palm, the palm's centre as depth sees it
+           (steadier than the landmarks'; the pointer follows it); scale, how many metres the
+           picture's width is at the hand's distance (then the pointer box is box_metres of
+           real arm movement). A hand found by depth alone has no lm: it brings its own size
+           (image heights) and pose ("open"), and does pointer, push, swipe and wave only.
 
 Output: a dict the shell draws and acts on (shell/adaptive-shell@local/air.js):
 
@@ -71,6 +77,11 @@ DEFAULTS = {
     "box_hands": 4.0,
     "box_min": 0.15,
     "box_max": 0.6,
+    # With the hand's distance known (the Kinect), the box is this much real arm movement for
+    # the whole screen width instead, the same at 1 m and at 3 m (and never under box_min_metric
+    # of the picture).
+    "box_metres": 0.45,
+    "box_min_metric": 0.06,
     "box_aspect": 1.6,           # screen width / height (1920x1200)
     "engage_hold": 0.55,         # s an open palm must be held still
     "engage_still": 3.0,         # max palm speed (hand sizes/s) while engaging
@@ -102,6 +113,11 @@ DEFAULTS = {
     "spread_ratio": 1.6,         # two-hand distance grows / shrinks by this much
     "collapse_ratio": 0.6,
     "one_euro": {"min_cutoff": 1.4, "beta": 4.0, "d_cutoff": 1.0},
+    # The hand's shape (each landmark around the palm, in hand sizes): steadies the poses of a
+    # small, far hand without slowing a pinch much.
+    "smooth_shape": {"min_cutoff": 3.0, "beta": 0.5, "d_cutoff": 1.0},
+    # The palm's distance (mm): the Kinect's depth steps by ~2 cm at 3 m.
+    "smooth_depth": {"min_cutoff": 1.5, "beta": 0.02, "d_cutoff": 1.0},
 }
 
 
@@ -207,27 +223,62 @@ class Track:
         self.depth = None
         self.seen = 0.0
         self.strength = 0.0
+        self.palm = (0.5, 0.5)
+        self.size = 0.1
+        self.scale = None
+        self.source = None
+        self._shape = None         # One Euro filters per landmark coordinate
+        self._depth = None
+
+    def _smooth(self, lm, t, cfg):
+        """The landmarks with their shape around the palm smoothed (the palm itself is not)."""
+        px, py = palm_centre(lm)
+        size = hand_size(lm)
+        if self._shape is None:
+            self._shape = [(OneEuro(**cfg["smooth_shape"]), OneEuro(**cfg["smooth_shape"]))
+                           for _ in lm]
+        out = []
+        for (fx, fy), p in zip(self._shape, lm):
+            out.append([px + fx((p[0] - px) / size, t) * size,
+                        py + fy((p[1] - py) / size, t) * size, p[2] if len(p) > 2 else 0.0])
+        return out
 
     def update(self, hand, t, cfg):
-        lm = hand["lm"]
-        self.lm, self.depth, self.seen = lm, hand.get("depth"), t
-        ratio = pinch_ratio(lm)
-        if curled(lm):
-            self.pinching = False
-        elif self.pinching:
-            self.pinching = ratio < cfg["pinch_off"]
+        lm = hand.get("lm")
+        if lm is not None:
+            lm = self._smooth(lm, t, cfg)
+        depth = hand.get("depth")
+        if depth:
+            if self._depth is None:
+                self._depth = OneEuro(**cfg["smooth_depth"])
+            depth = self._depth(float(depth), t)
         else:
-            self.pinching = ratio < cfg["pinch_on"]
-        m = middle_ratio(lm)
-        if curled(lm) or self.pinching:
-            self.middle = False
-        elif self.middle:
-            self.middle = m < cfg["pinch_off"]
+            self._depth, depth = None, None
+        self.lm, self.depth, self.seen = lm, depth, t
+        self.source = hand.get("source")
+        if lm is None:
+            # Found by depth alone: no fingers to read.
+            ratio = 1.0
+            self.pinching = self.middle = False
+            pose = hand.get("pose") or "open"
         else:
-            # Only with the index clearly away from the thumb: fingers held together while
-            # pinching the index would otherwise read as both.
-            self.middle = m < cfg["pinch_on"] and ratio > cfg["pinch_off"]
-        pose = classify(lm, self.pinching, self.middle)
+            ratio = pinch_ratio(lm)
+            if curled(lm):
+                self.pinching = False
+            elif self.pinching:
+                self.pinching = ratio < cfg["pinch_off"]
+            else:
+                self.pinching = ratio < cfg["pinch_on"]
+            m = middle_ratio(lm)
+            if curled(lm) or self.pinching:
+                self.middle = False
+            elif self.middle:
+                self.middle = m < cfg["pinch_off"]
+            else:
+                # Only with the index clearly away from the thumb: fingers held together while
+                # pinching the index would otherwise read as both.
+                self.middle = m < cfg["pinch_on"] and ratio > cfg["pinch_off"]
+            pose = classify(lm, self.pinching, self.middle)
         if pose in ("pinch", "pinch-middle") or pose == self.pose:
             # A pinch counts at once (it is a click); others must last a few frames.
             self.pose, self._candidate, self._candidate_n = pose, None, 0
@@ -237,13 +288,16 @@ class Track:
                 self.pose, self._candidate, self._candidate_n = pose, None, 0
         else:
             self._candidate, self._candidate_n = pose, 1
-        cx, cy = palm_centre(lm)
-        self.size = hand_size(lm)
+        palm = hand.get("palm")
+        cx, cy = palm if palm else palm_centre(lm)
+        self.palm = (cx, cy)
+        self.size = hand.get("size") or hand_size(lm)
+        self.scale = hand.get("scale")
         self.history.append((t, cx, cy, self.depth))
         cutoff = t - 1.0
         while self.history and self.history[0][0] < cutoff:
             self.history.pop(0)
-        self.strength = 0.0 if self.pose == "fist" else max(0.0, min(1.0, (0.55 - ratio) / (0.55 - cfg["pinch_on"])))
+        self.strength = 0.0 if self.pose == "fist" or lm is None else max(0.0, min(1.0, (0.55 - ratio) / (0.55 - cfg["pinch_on"])))
 
     def velocity(self, span=0.12):
         """Image-space palm velocity over the last `span` seconds (widths/s, heights/s)."""
@@ -309,7 +363,8 @@ class Engine:
         events = []
         seen = set()
         for hand in hands or []:
-            if hand_size(hand["lm"]) < cfg["min_hand"]:
+            size = hand.get("size") or (hand_size(hand["lm"]) if hand.get("lm") else 0.0)
+            if size < cfg["min_hand"]:
                 continue        # someone far behind the user
             side = hand.get("side") or "Right"
             if side in seen:
@@ -352,7 +407,12 @@ class Engine:
         if t - self.engage_since >= cfg["engage_hold"]:
             self.engaged = True
             self.primary = best.side
-            self.box_w = min(cfg["box_max"], max(cfg["box_min"], cfg["box_hands"] * best.size))
+            if best.scale and cfg["box_metres"]:
+                # The distance is known: the box is real arm movement (metres).
+                self.box_w = min(cfg["box_max"],
+                                 max(cfg["box_min_metric"], cfg["box_metres"] / best.scale))
+            else:
+                self.box_w = min(cfg["box_max"], max(cfg["box_min"], cfg["box_hands"] * best.size))
             _, cx, cy, _ = best.history[-1]
             w, h = self.box()
             # Centre the box on the palm, kept inside the image.
@@ -617,7 +677,7 @@ class Engine:
             both open palms           spread / collapse past a ratio (overview)
         """
         cfg = self.cfg
-        d = dist(palm_centre(a.lm), palm_centre(b.lm))
+        d = dist(a.palm, b.palm)
         if a.pinching and b.pinching:
             mode = "zoom"
         elif self.grab and a.pose == "fist" and b.pose == "fist":
@@ -683,11 +743,18 @@ class Engine:
             engage = min(1.0, (t - self.engage_since) / cfg["engage_hold"])
         hands = []
         for side, tr in live.items():
-            pts = [self.to_screen(p[0], p[1]) for p in tr.lm] if self.engaged else \
-                [(0.5 + (p[0] - 0.5) * 0.9, 0.5 + (p[1] - 0.5) * 0.9) for p in tr.lm]
+            if self.engaged:
+                place = self.to_screen
+            else:
+                def place(x, y):
+                    return 0.5 + (x - 0.5) * 0.9, 0.5 + (y - 0.5) * 0.9
+            pts = [place(p[0], p[1]) for p in tr.lm] if tr.lm else []
+            palm = place(*tr.palm)
             hands.append({
                 "side": side, "primary": side == self.primary, "pose": tr.pose,
-                "pinch": round(tr.strength, 3), "depth": tr.depth,
+                "pinch": round(tr.strength, 3),
+                "depth": round(tr.depth) if tr.depth else None, "source": tr.source,
+                "palm": [round(palm[0], 4), round(palm[1], 4)],
                 "pts": [[round(x, 4), round(y, 4)] for x, y in pts],
             })
         grab = None

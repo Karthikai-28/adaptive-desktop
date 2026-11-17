@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Checks for Air (Kinect hand-gesture control): the gesture engine against synthetic hands,
-the Kinect probe and motor-state parsing, the frame protocol the shell reads.
+the sensor fusion (colour or infrared by the light, depth refining and finding hands) against a
+synthetic living room, the Kinect probe and motor-state parsing, the frame protocol the shell
+reads.
 
     scripts/verify-air.py              pure checks (no camera, no Kinect, no D-Bus)
     scripts/verify-air.py --hardware   also report the Kinect on USB and the libfreenect build
@@ -19,11 +21,12 @@ REPO = Path(__file__).resolve().parents[1]
 HERE_AIR = REPO / "services/adaptive-air"
 sys.path.insert(0, str(HERE_AIR))
 
+import fusion  # noqa: E402
 import gestures  # noqa: E402
 import kinect  # noqa: E402
 import demo  # noqa: E402
 import protocol  # noqa: E402
-from synthetic import hand  # noqa: E402
+from synthetic import hand, room_depth  # noqa: E402
 
 FAILED = []
 
@@ -397,6 +400,197 @@ def check_two_hands():
           types == ["resize-end", "drop"], types)
 
 
+def check_light():
+    print("Colour or infrared, by the light (fusion.LightSwitch)")
+    sw = fusion.LightSwitch()
+    modes = [sw.step(t / 10, "rgb", 0.3) for t in range(50)]
+    check("a lit room stays in colour", set(modes) == {"rgb"})
+    sw = fusion.LightSwitch()
+    got = [sw.step(t / 10, "rgb", 0.02 if t < 10 else 0.3) for t in range(40)]
+    check("a moment of dark (a shadow) does not switch", set(got) == {"rgb"})
+    sw = fusion.LightSwitch()
+    t, mode = 0.0, "rgb"
+    while mode == "rgb" and t < 10:
+        mode = sw.step(t, "rgb", 0.02)
+        t += 0.1
+    check("dark for 2 s: infrared", mode == "ir" and 1.9 < t < 2.3, t)
+    got = {sw.step(t + k, "ir", None) for k in range(1, 19)}
+    check("in infrared it stays put between checks", got == {"ir"})
+    check("every 20 s it looks at colour", sw.step(t + 20.5, "ir", None) == "rgb")
+    check("... asking until the colour frames come", sw.step(t + 20.7, "ir", None) == "rgb")
+    check("... looks for a moment", sw.step(t + 20.8, "rgb", 0.03) == "rgb")
+    check("... still dark: back to infrared", sw.step(t + 21.3, "rgb", 0.03) == "ir")
+    t2 = t + 42
+    sw.step(t2, "ir", None)
+    sw.step(t2 + 0.3, "rgb", 0.2)
+    check("lights on: stays in colour", sw.step(t2 + 0.8, "rgb", 0.2) == "rgb"
+          and sw.step(t2 + 3, "rgb", 0.2) == "rgb" and sw.reason == "lit")
+    sw = fusion.LightSwitch()
+    sw.step(0, "rgb", 0.01)
+    sw.step(2.1, "rgb", 0.01)
+    got = {sw.step(2.1 + k, "ir", None, busy=True) for k in range(1, 60)}
+    check("never a colour check while someone is using Air", got == {"ir"})
+    got = {sw.step(70 + k, "ir", None, hold=True) for k in range(1, 60)}
+    check("... nor while the webcam is on", got == {"ir"})
+    sw = fusion.LightSwitch()
+    sw.step(0, "rgb", 0.01)
+    sw.step(2.1, "rgb", 0.01)
+    sw.step(23, "ir", None)
+    sw.step(23.3, "rgb", 0.05)
+    check("a dim room (between the two levels) goes back to infrared, no flapping",
+          sw.step(23.8, "rgb", 0.05) == "ir")
+
+
+def check_fusion():
+    print("Depth fusion (fusion.py) in a synthetic living room")
+    import time
+
+    import numpy as np
+    fx = 525.0
+    check("the two cameras' lens numbers", kinect.intrinsics("rgb")[0] == 525.0
+          and kinect.intrinsics("ir")[0] == 575.8 and kinect.intrinsics("x") == kinect.intrinsics("rgb"))
+    check("the picture is 3.29 m wide at 2.7 m",
+          abs(fusion.metres_per_width(2700, fx) - 3.291) < 0.01)
+    check("a hand is ~17 px from wrist to knuckle at 2.7 m", abs(fusion.hand_px(2700, fx) - 17.5) < 0.3)
+
+    depth, (hu, hv) = room_depth()
+    r = 0.75 * fusion.hand_px(2450, fx)
+    got = fusion.refine_palm(depth, hu + 4, hv - 3, r)
+    check("refine_palm: the palm's centre from a seed 5 px off",
+          got and math.hypot(got[0] - hu, got[1] - hv) < 1.5, (got, hu, hv))
+    check("... and its distance", got and abs(got[2] - 2450) < 15, got)
+    rng = np.random.default_rng(3)
+    seeds, out = [], []
+    for i in range(40):
+        d, _ = room_depth(seed=i)
+        su, sv = hu + rng.normal(0, 2), hv + rng.normal(0, 2)
+        seeds.append((su, sv))
+        out.append(fusion.refine_palm(d, su, sv, r)[:2])
+    s_in = float(np.std(np.array(seeds), axis=0).mean())
+    s_out = float(np.std(np.array(out), axis=0).mean())
+    check("... a wobbling seed (landmarks 2 px of noise) gives a palm 2x steadier",
+          s_out < 0.5 * s_in, (round(s_in, 2), round(s_out, 2)))
+    check("refine_palm: nothing there, no palm", fusion.refine_palm(np.zeros_like(depth), hu, hv, r) is None)
+
+    dh = fusion.DepthHands()
+    found, spent = [], []
+    for i in range(30):
+        f = min(1, i / 15)
+        d, at = room_depth((0.15, 0.35 - 0.35 * f, 2.75 - 0.30 * f), seed=i)
+        t0 = time.perf_counter()
+        found = dh.find(d, i / 30, fx)
+        spent.append(time.perf_counter() - t0)
+    check("a hand raised and held out toward the TV is found from depth alone",
+          len(found) == 1 and math.hypot(found[0]["u"] - at[0], found[0]["v"] - at[1]) < 3
+          and abs(found[0]["z"] - 2450) < 20, found)
+    check("... quickly (a few ms a frame)", float(np.median(spent)) < 0.015, round(float(np.median(spent)) * 1000, 1))
+    blobs = dh._blobs(room_depth(hand=None)[0], fx)
+    check("the lamp's pole, the table, the head, the torso and the couch are not hands",
+          all(not (abs(b["z"] - 1600) < 100 or abs(b["z"] - 2800) < 60 or abs(b["z"] - 3000) < 60)
+              for b in blobs) and not any(abs(b["u"] - 128) < 6 and b["v"] > 200 for b in blobs), blobs)
+    dh = fusion.DepthHands()
+    for i in range(30):
+        found = dh.find(room_depth(seed=i)[0], i / 30, fx)
+    check("a hand-shaped thing that never moves (the lamp, a hand held still from the start)"
+          " is never a hand", found == [], found)
+    dh = fusion.DepthHands()
+    d, at = room_depth()
+    found = dh.find(d, 0.0, fx, seeds=[("Left", at[0] + 2, at[1], 2450)])
+    check("a blob where MediaPipe found a hand is that hand (not a second one)", found == [], found)
+    found = dh.find(room_depth(seed=1)[0], 0.033, fx)
+    check("... and when MediaPipe loses it, depth carries it, with its side",
+          len(found) == 1 and found[0]["side"] == "Left", found)
+    found = dh.find(np.zeros_like(d), 1.0, fx)
+    check("... until it is gone", found == [] and dh.tracks == [], dh.tracks)
+
+    check("a hand the right size for its distance is plausible",
+          fusion.plausible(17, 2700, fx, fusion.HAND_M))
+    check("a 'hand' on a poster 3.6 m away, five times too big, is not",
+          not fusion.plausible(65, 3600, fx, fusion.HAND_M))
+    check("a 'person' 100 px wide at 0.55 m (a picture on a screen) is not",
+          not fusion.plausible(100, 557, fx, fusion.SHOULDERS_M, 0.35, 2.5))
+    check("no depth reading: nothing to go on, so plausible", fusion.plausible(40, None, fx, 0.09))
+    check("depth_at: the median around a pixel", fusion.depth_at(depth, at[0], at[1]) and
+          abs(fusion.depth_at(depth, at[0], at[1]) - 2450) < 15)
+
+
+def far_hand(cx, cy, depth=2700.0, **kw):
+    """A hand as the fusion gives it across the room: small, with its distance and scale."""
+    h = hand(cx=cx, cy=cy, size=0.036, **kw)
+    h.update(depth=depth, scale=fusion.metres_per_width(depth, 525.0), source="rgb")
+    return h
+
+
+def check_metres():
+    print("Arm movement in metres (the Kinect knows how far you are)")
+    moved = {}
+    for z in (1000.0, 2700.0, 3600.0):
+        scale = fusion.metres_per_width(z, 525.0)
+        e = gestures.Engine()
+        run(e, [(i / 30, [dict(far_hand(0.5, 0.5, z))]) for i in range(30)])
+        assert e.engaged, z
+        dx = 0.20 / scale                                      # 20 cm to the right, in 1 s
+        state = None
+        for i in range(45):
+            state = e.step(1.0 + i / 30, [far_hand(0.5 + dx * min(1.0, i / 30), 0.5, z)])
+        moved[z] = state["cursor"]["x"] - 0.5
+    check("20 cm of arm movement moves the pointer the same at 1 m, 2.7 m and 3.6 m",
+          max(moved.values()) - min(moved.values()) < 0.01 and 0.4 < moved[2700.0] < 0.5, moved)
+    e = gestures.Engine()
+    run(e, [(i / 30, [far_hand(0.5, 0.5)]) for i in range(30)])
+    check("... the whole screen is box_metres (45 cm) of arm sweep",
+          abs(e.box()[0] * fusion.metres_per_width(2700, 525.0) - 0.45) < 0.01, e.box())
+
+    import random
+    rnd = random.Random(4)
+    spread = {}
+    for fused in (False, True):
+        e = gestures.Engine()
+        xs = []
+        for i in range(120):
+            jx, jy = rnd.gauss(0, 1.5 / 640), rnd.gauss(0, 1.5 / 480)   # the whole hand wobbles
+            h = far_hand(0.5 + jx, 0.5 + jy)
+            for p in h["lm"]:
+                p[0] += rnd.gauss(0, 0.8 / 640)
+                p[1] += rnd.gauss(0, 0.8 / 480)
+            if fused:
+                h["palm"] = [0.5 + rnd.gauss(0, 0.35 / 640), 0.5 + rnd.gauss(0, 0.35 / 480)]
+            state = e.step(i / 30, [h])
+            if state["engaged"] and i > 40:
+                xs.append(state["cursor"]["x"] * 1920)
+        mean = sum(xs) / len(xs)
+        spread[fused] = (sum((x - mean) ** 2 for x in xs) / len(xs)) ** 0.5
+    check("a still hand 2.7 m away: the pointer is steadier on depth's palm than on landmarks",
+          spread[True] < 0.4 * spread[False] and spread[True] < 4,
+          {k: round(v, 1) for k, v in spread.items()})
+
+
+def depth_only(cx, cy, z=2700.0, t=None):
+    return {"side": "Right", "lm": None, "pose": "open", "palm": [cx, cy], "depth": z,
+            "size": fusion.hand_px(z, 525.0) / 480, "scale": fusion.metres_per_width(z, 525.0),
+            "source": "depth"}
+
+
+def check_depth_only():
+    print("A hand found by depth alone (too dark even for infrared)")
+    e = gestures.Engine()
+    events, state = run(e, [(i / 30, [depth_only(0.5, 0.5)]) for i in range(30)])
+    check("held still: engages", e.engaged and "engage" in events, events)
+    check("the shell gets its palm and no skeleton",
+          state["hands"][0]["pts"] == [] and state["hands"][0]["palm"] == [0.5, 0.5]
+          and state["hands"][0]["source"] == "depth", state["hands"])
+    _, state = run(e, [(1 + i / 30, [depth_only(0.5 + 0.004 * i, 0.5)]) for i in range(20)])
+    check("moving it moves the pointer", state["cursor"]["x"] > 0.6, state["cursor"])
+    frames = [(2 + i / 30, [depth_only(0.576, 0.5, 2700 - (40 * i if i < 4 else 160))])
+              for i in range(10)]
+    events, _ = run(e, frames)
+    check("pushing it toward the TV clicks", "push" in events and "click" in events, events)
+    events, _ = run(e, [(4 + i / 30, [depth_only(0.576, 0.5, 2540)]) for i in range(30)])
+    check("no fingers, so never a pinch or a grab", not {"press", "grab"} & set(events), events)
+    events, _ = run(e, [(6 + i / 30, []) for i in range(30)])
+    check("gone: disengages", "disengage" in events and not e.engaged, events)
+
+
 def check_probe():
     print("Kinect on USB (sysfs)")
 
@@ -703,6 +897,10 @@ def main():
     check_edge()
     check_scroll()
     check_two_hands()
+    check_light()
+    check_fusion()
+    check_metres()
+    check_depth_only()
     check_probe()
     check_protocol()
     check_demo()
