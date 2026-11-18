@@ -1,0 +1,29 @@
+[Desktop Entry]
+Type=Application
+Name=Kinect
+GenericName=Motion, Fitness and 3D Scanning
+Comment=Workouts that count your reps, body games, the Kinect's camera and depth, the room, and guided 3D scans
+Keywords=kinect;fitness;workout;exercise;games;arcade;camera;depth;infrared;point cloud;scan;3d;room;studio;
+Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/kinect/kinect.py
+Icon=camera-web
+Terminal=false
+Categories=Game;Sports;Graphics;
+StartupNotify=true
+StartupWMClass=kinect
+Actions=fitness;games;camera;scan;
+
+[Desktop Action fitness]
+Name=Fitness
+Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/kinect/kinect.py fitness
+
+[Desktop Action games]
+Name=Games
+Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/kinect/kinect.py games
+
+[Desktop Action camera]
+Name=Camera
+Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/kinect/kinect.py camera
+
+[Desktop Action scan]
+Name=3D Scan
+Exec=/usr/bin/python3 @ADAPTIVE_REPO@/apps/kinect/kinect.py scan

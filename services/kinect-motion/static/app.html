@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinect</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="mark" id="mark"><i></i>Kinect</div>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#/home" data-s="home">Home</a><a href="#/fitness" data-s="fitness">Fitness</a><a href="#/games" data-s="games">Games</a><a href="#/camera" data-s="camera">Camera</a><a href="#/room" data-s="room">Room</a><a href="#/scan" data-s="scan">Scan</a><a href="#/history" data-s="history">History</a>
+    </nav>
+    <div class="end">
+      <div class="chips" id="chips"></div>
+      <span class="pill" id="status"><span class="dot"></span>Connecting…</span>
+      <button class="iconbtn" id="settings" title="Settings and where things fit" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      <button class="iconbtn" id="full" title="Full screen (F11)" aria-label="Full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </div>
+  </header>
+  <main class="view" id="view"></main>
+</div>
+<div class="toasts" id="toasts"></div>
+<div class="overlay" id="overlay" hidden></div>
+<div class="hand" id="hand" hidden><svg viewBox="0 0 76 76"><circle cx="38" cy="38" r="33" stroke-dasharray="207" stroke-dashoffset="207"/></svg></div>
+<script src="/static/gl.js"></script>
+<script src="/static/core.js"></script>
+<script src="/static/scene.js"></script>
+<script src="/static/home.js"></script>
+<script src="/static/fitness.js"></script>
+<script src="/static/games.js"></script>
+<script src="/static/camera.js"></script>
+<script src="/static/room.js"></script>
+<script src="/static/scan.js"></script>
+<script src="/static/history.js"></script>
+<script>K.start();</script>
+</body>
+</html>
