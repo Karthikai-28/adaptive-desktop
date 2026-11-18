@@ -145,6 +145,32 @@ class Service:
         self.last_client = time.monotonic()
         self.hub_error = None
         self.activity_sent = 0.0
+        import scan as scanlib
+        self.scanner = scanlib.Scanner(self._hub_post, self._scan_event)
+        self.frames = None
+
+    def _scan_event(self, event):
+        if self.loop is not None:
+            snap = self.snapshot
+            try:
+                self.loop.call_soon_threadsafe(self._broadcast, snap, [event], [])
+            except RuntimeError:
+                pass
+
+    def depth_now(self):
+        """The newest depth frame straight from the hub's shared memory, with its own mode and
+        lens: (depth, mode, intrinsics) or None. For the scan's framing view."""
+        sys.path.insert(0, str(HERE.parents[0] / "adaptive-air"))
+        import frames as frameslib
+        import kinect as kinectlib
+        try:
+            if self.frames is None:
+                self.frames = frameslib.Reader()
+            _, depth, head = self.frames.read(timeout=1.0, newer=False)
+        except OSError:
+            self.frames = None
+            return None
+        return depth.copy(), head["mode"], kinectlib.intrinsics(head["mode"])
 
     # -- the hub
 
@@ -230,6 +256,9 @@ class Service:
                     snap = self._snap(self.hub)
                     self.snapshot = snap
                     last_send = now
+            if time.monotonic() - getattr(self, "scan_kept", 0.0) > 2.0:
+                self.scan_kept = time.monotonic()
+                threading.Thread(target=self.scanner.keep_alive, daemon=True).start()
             if live and not self.demo and time.monotonic() - self.activity_sent > 1.0:
                 self.activity_sent = time.monotonic()
                 threading.Thread(target=self._hub_post, args=("activity", ACTIVITY_HOLD), daemon=True).start()
@@ -312,7 +341,8 @@ class Service:
             return None
 
     def idle(self):
-        if self.clients or self.event_clients or self.pad is not None or self.cfg.get("room_always"):
+        scanning = self.scanner.job is not None and self.scanner.job.state in ("background", "capturing", "reconstructing")
+        if self.clients or self.event_clients or self.pad is not None or self.cfg.get("room_always") or scanning:
             self.last_client = time.monotonic()
             return False
         return time.monotonic() - self.last_client > IDLE_EXIT
@@ -504,6 +534,118 @@ def make_app(svc):
             raise web.HTTPBadRequest(text="session, user or all")
         return web.json_response({"ok": True})
 
+    # -- 3D scanning (scan.py, scan_worker.py)
+
+    def scan_colours():
+        sys.path.insert(0, str(HERE.parents[1] / "scripts"))
+        import adaptive_tokens
+        t = adaptive_tokens.load()
+        bgr = lambda name: tuple(int(t.hex(name)[i:i + 2], 16) for i in (5, 3, 1))   # noqa: E731
+        return {"subject": bgr("accent"), "edge": bgr("white")}
+
+    async def scan_job(request):
+        sc = svc.scanner
+        if request.method == "GET":
+            return web.json_response(sc.job.to_dict() if sc.job else None)
+        if request.method == "DELETE":
+            await asyncio.get_running_loop().run_in_executor(None, sc.discard)
+            return web.json_response({"ok": True})
+        b = await body(request)
+        if request.method == "PATCH":
+            try:
+                return web.json_response(sc.update(b.get("segment") or {}).to_dict())
+            except LookupError as err:
+                raise web.HTTPNotFound(text=str(err))
+        # POST: a new scan. A workout or game under way must be paused first, with consent.
+        now = time.time()
+        with svc.lock:
+            live = svc.engine.live()
+            what = svc.engine.activity()
+        if live and not b.get("pause_activity"):
+            return web.json_response({"needs_pause": True, "activity": what,
+                                      "say": "A workout or game is running. Pause it to scan?"}, status=409)
+        if live:
+            with svc.lock:
+                svc.engine.workout.pause(now)
+                svc.engine.stop_game(now)
+        try:
+            job = await asyncio.get_running_loop().run_in_executor(None, sc.create, b.get("kind"), b.get("segment"))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err))
+        return web.json_response(job.to_dict())
+
+    async def scan_preview(_request):
+        sc = svc.scanner
+        if sc.job is None:
+            raise web.HTTPNotFound(text="No scan under way")
+        got = await asyncio.get_running_loop().run_in_executor(None, svc.depth_now)
+        if got is None:
+            return web.json_response({"waiting": "Waiting for the Kinect…"})
+        depth, mode, intr = got
+        if mode != "ir":
+            return web.json_response({"waiting": "Switching the Kinect to infrared depth for scanning…"})
+        import base64
+        import scan as scanlib
+        jpg, stats = await asyncio.get_running_loop().run_in_executor(
+            None, scanlib.preview, depth, intr, sc.job.kind, sc.job.segment, scan_colours())
+        return web.json_response({"jpg": base64.b64encode(jpg).decode() if jpg else None, "stats": stats})
+
+    async def scan_run(request):
+        b = await body(request)
+        what = b.get("what")
+        if what not in ("background", "capture", "reconstruct"):
+            raise web.HTTPBadRequest(text="what: background, capture or reconstruct")
+        try:
+            extra = {k: b[k] for k in ("seconds", "fps") if k in b}
+            job = svc.scanner.run(what, **extra)
+        except (LookupError, RuntimeError) as err:
+            raise web.HTTPConflict(text=str(err))
+        return web.json_response(job.to_dict())
+
+    async def scan_cancel(_request):
+        await asyncio.get_running_loop().run_in_executor(None, svc.scanner.cancel)
+        return web.json_response({"ok": True})
+
+    async def scan_geometry(request):
+        try:
+            path = svc.scanner.result_dir(request.match_info["id"]) / "geometry.bin"
+        except LookupError as err:
+            raise web.HTTPNotFound(text=str(err))
+        return web.FileResponse(path, headers={"Cache-Control": "no-store"})
+
+    async def scan_export(request):
+        try:
+            name, path = await asyncio.get_running_loop().run_in_executor(
+                None, svc.scanner.export, request.match_info["id"], request.query.get("format", "stl"),
+                request.query.get("units", "mm"), request.query.get("what", "mesh"))
+        except LookupError as err:
+            raise web.HTTPNotFound(text=str(err))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err))
+        return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    async def scan_save(request):
+        b = await body(request)
+        try:
+            dest = await asyncio.get_running_loop().run_in_executor(
+                None, svc.scanner.save, request.match_info["id"], b.get("name"), svc.store)
+        except LookupError as err:
+            raise web.HTTPNotFound(text=str(err))
+        return web.json_response({"ok": True, "path": str(dest)})
+
+    async def scans(request):
+        if request.method == "DELETE":
+            sid = int(request.match_info["sid"])
+            row = next((r for r in svc.store.scans() if r["id"] == sid), None)
+            if row and request.query.get("files") == "1":
+                import scan as scanlib
+                path = Path(row["path"]).resolve()
+                if scanlib.SCANS.resolve() in path.parents:
+                    shutil.rmtree(path, ignore_errors=True)
+            svc.store.delete_scan(sid)
+            return web.json_response({"ok": True})
+        return web.json_response(svc.store.scans())
+
     async def game(request):
         b = await body(request)
         now = time.time()
@@ -580,6 +722,15 @@ def make_app(svc):
     app.router.add_get("/api/demo/{key}", demo)
     app.router.add_get("/api/poses", pose_demo)
     app.router.add_get("/api/insight", insight)
+    app.router.add_route("*", "/api/scan", scan_job)
+    app.router.add_get("/api/scan/preview", scan_preview)
+    app.router.add_post("/api/scan/run", scan_run)
+    app.router.add_post("/api/scan/cancel", scan_cancel)
+    app.router.add_get("/api/scan/{id}/geometry.bin", scan_geometry)
+    app.router.add_get("/api/scan/{id}/export", scan_export)
+    app.router.add_post("/api/scan/{id}/save", scan_save)
+    app.router.add_get("/api/scans", scans)
+    app.router.add_delete("/api/scans/{sid}", scans)
     app.router.add_post("/api/forget", forget)
     app.router.add_static("/static/", STATIC)
     app.router.add_get("/ws", ws_state)
@@ -638,6 +789,7 @@ def main():
         asyncio.run(serve(svc, args.port))
     finally:
         svc.stop.set()
+        svc.scanner.discard()                 # unsaved scans do not outlive the service
         if svc.pad is not None:
             svc.pad.close()
         worker.join(timeout=3)
