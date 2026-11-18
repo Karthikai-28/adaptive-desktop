@@ -7,7 +7,8 @@ which it keeps running while it reads) and serves:
     /fitness   Kinect Fitness: workouts, form coaching, rep races, the fitness check, history
     /arcade    Kinect Arcade: body games, and Kinect Pad (your body as a gamepad)
     /room      Kinect Room: who is here, zones, sitting reminders, tracking coverage, events
-    /ws        the live state for those pages (one message per hub frame)
+    /ws        the live state for those pages (one message per hub frame, and from the watchdog
+               between frames while a game runs or tracking is lost)
     /events    semantic events only, for Mario / Home Assistant: {"event": "exercise_rep", ...}
 
 Nothing leaves this computer unless motion.json names a webhook. Pictures never leave the hub;
@@ -44,6 +45,8 @@ CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "ada
 STATIC = HERE / "static"
 IDLE_EXIT = 60.0
 HUB_UNIT = "adaptive-kinect.service"
+TICK = 1 / 30           # s between watchdog ticks
+ACTIVITY_HOLD = 3.0     # s the hub keeps infrared without colour checks after each reminder
 
 
 def log(msg):
@@ -139,6 +142,7 @@ class Service:
         self.pad_error = None
         self.last_client = time.monotonic()
         self.hub_error = None
+        self.activity_sent = 0.0
 
     # -- the hub
 
@@ -185,11 +189,9 @@ class Service:
                 self.stop.wait(1.0)
                 continue
             with self.lock:
+                self.hub = hub
                 events, lines = self.engine.step(hub)
-                snap = self.engine.state(hub)
-                snap["hub_error"] = self.hub_error or hub.get("error")
-                snap["voice"] = self.voice.on
-                snap["pad_error"] = self.pad_error
+                snap = self._snap(hub)
                 self.snapshot = snap
                 if self.pad is not None:
                     try:
@@ -204,6 +206,57 @@ class Service:
                     self.loop.call_soon_threadsafe(self._broadcast, snap, events, semantic)
                 except RuntimeError:                  # shutting down: the loop is closed
                     return
+
+    def watchdog(self):
+        """Between frames: the engine's freshness and game clock, the pad's release, and the
+        reminder that keeps the hub from leaving infrared during a workout or game."""
+        last_send = 0.0
+        while not self.stop.wait(TICK):
+            now = time.time()
+            with self.lock:
+                events = self.engine.tick(now)
+                if self.pad is not None:
+                    try:
+                        self.pad.send(self.engine.pad_outputs())
+                    except OSError as err:
+                        self.pad_error = str(err)
+                live = self.engine.live()
+                moving = (self.engine.game is not None and not self.engine.game.over) or \
+                    any(self.engine.lost.values()) or not self.engine.fresh
+                snap = None
+                if events or (moving and now - last_send > 1 / 15) or now - last_send > 1.0:
+                    snap = self._snap(self.hub)
+                    self.snapshot = snap
+                    last_send = now
+            if live and not self.demo and time.monotonic() - self.activity_sent > 1.0:
+                self.activity_sent = time.monotonic()
+                threading.Thread(target=self._hub_post, args=("activity", ACTIVITY_HOLD), daemon=True).start()
+            if events:
+                semantic = self.outbox.send(events)
+                for line in self.engine._sayings(events, now):
+                    self.voice.say(line)
+            else:
+                semantic = []
+            if snap is not None and self.loop is not None:
+                try:
+                    self.loop.call_soon_threadsafe(self._broadcast, snap, events, semantic)
+                except RuntimeError:
+                    return
+
+    def _hub_post(self, name, value):
+        try:
+            req = urllib.request.Request(f"{HUB}/api/{name}", json.dumps({"value": value}).encode(),
+                                         {"Content-Type": "application/json"})
+            return json.loads(urllib.request.urlopen(req, timeout=1.5).read())
+        except (OSError, ValueError):
+            return None
+
+    def _snap(self, hub):
+        snap = self.engine.state(hub)
+        snap["hub_error"] = self.hub_error or hub.get("error")
+        snap["voice"] = self.voice.on
+        snap["pad_error"] = self.pad_error
+        return snap
 
     def _broadcast(self, snap, events, semantic):
         msg = json.dumps({"state": snap, "events": events})
@@ -242,6 +295,12 @@ class Service:
                     return False, str(err)
                 self.engine.pad_profile = profile
         return True, None
+
+    def _hub_status(self):
+        try:
+            return json.loads(urllib.request.urlopen(HUB + "/api/status", timeout=1.0).read())
+        except (OSError, ValueError):
+            return None
 
     def idle(self):
         if self.clients or self.event_clients or self.pad is not None or self.cfg.get("room_always"):
@@ -387,6 +446,36 @@ def make_app(svc):
     async def recent(_request):
         return web.json_response(list(svc.engine.events)[-60:])
 
+    async def game(request):
+        b = await body(request)
+        now = time.time()
+        with svc.lock:
+            if b.get("action") == "start":
+                key = b.get("game")
+                import games as gameslib
+                if key not in gameslib.GAMES:
+                    raise web.HTTPBadRequest(text="game: walls, pose or race")
+                kw = {"steer": b["steer"]} if key == "race" and b.get("steer") in ("wheel", "lean") else {}
+                svc.engine.workout.finish(now)
+                svc.engine.start_game(key, now, b.get("seed"), **kw)
+            elif b.get("action") == "stop":
+                svc.engine.stop_game()
+            else:
+                raise web.HTTPBadRequest(text="action: start or stop")
+        return web.json_response({"ok": True})
+
+    async def calibration_api(request):
+        if request.method == "POST":
+            b = await body(request)
+            if "tilt_by" in b:
+                status = await asyncio.get_running_loop().run_in_executor(None, svc._hub_status)
+                now_tilt = (status or {}).get("tilt") or 0.0
+                target = max(-27.0, min(27.0, float(now_tilt) + float(b["tilt_by"])))
+                await asyncio.get_running_loop().run_in_executor(None, svc._hub_post, "tilt", target)
+                return web.json_response({"ok": True, "tilt": target})
+            raise web.HTTPBadRequest(text="tilt_by expected")
+        return web.json_response(svc.snapshot.get("space") or {"error": "The floor is not in view yet."})
+
     async def pad(request):
         b = await body(request)
         ok, why = svc.set_pad(b.get("profile"), int(b.get("slot", 0)))
@@ -402,12 +491,17 @@ def make_app(svc):
             svc.engine.room.zones = [z for z in b["zones"] if z.get("name")]
         if "room_always" in b:
             svc.cfg["room_always"] = bool(b["room_always"])
+        if "space_m" in b:
+            v = b["space_m"]
+            svc.cfg["space_m"] = None if v in (None, "", 0) else max(1.0, min(6.0, float(v)))
+            svc.engine.cfg["space_m"] = svc.cfg["space_m"]
+            svc.engine.space_key = None
         save_config(svc.cfg)
         return web.json_response({"ok": True})
 
     async def config(_request):
         return web.json_response({k: svc.cfg.get(k) for k in ("zones", "voice", "room_always",
-                                                              "sit_minutes", "webhook")})
+                                                              "sit_minutes", "webhook", "space_m")})
 
     app = web.Application()
     app.router.add_get("/", lambda _r: web.HTTPFound("/fitness"))
@@ -427,6 +521,8 @@ def make_app(svc):
     app.router.add_route("*", "/api/coverage", coverage)
     app.router.add_get("/api/events", recent)
     app.router.add_post("/api/pad", pad)
+    app.router.add_post("/api/game", game)
+    app.router.add_route("*", "/api/calibration", calibration_api)
     app.router.add_post("/api/settings", settings)
     app.router.add_get("/api/settings", config)
     return app
@@ -456,6 +552,7 @@ def main():
     svc = Service(load_config(), storelib.Store(args.db), demo=args.demo)
     worker = threading.Thread(target=svc.run, name="hub-reader", daemon=True)
     worker.start()
+    threading.Thread(target=svc.watchdog, name="watchdog", daemon=True).start()
     import signal
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: svc.stop.set())

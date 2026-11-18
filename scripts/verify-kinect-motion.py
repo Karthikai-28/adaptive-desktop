@@ -22,7 +22,9 @@ sys.path.insert(0, str(MOTION))
 sys.path.insert(1, str(REPO / "services/adaptive-air"))     # people.py, measure.py, fusion.py
 
 import bodygestures  # noqa: E402
+import calibration  # noqa: E402
 import engine  # noqa: E402
+import games  # noqa: E402
 import exercises as ex  # noqa: E402
 import pad  # noqa: E402
 import players  # noqa: E402
@@ -320,10 +322,12 @@ def check_engine():
         events += ev
         said += s
     sets = [x for x in events if x["type"] == "set"]
-    check("a 20 s squat race: 8 squats for the squatter, nothing for the one doing jacks",
-          [(x["slot"], x["reps"]) for x in sets] == [(0, 8)], sets)
+    # The squatter is half way down when "Go!" is said: that one is a false start (its first half
+    # was before Go, and a repetition is only counted from rest), so 7 of the 8 under way count.
+    check("a 20 s squat race: 7 squats for the squatter (not the one begun before Go), nothing for "
+          "the one doing jacks", [(x["slot"], x["reps"]) for x in sets] == [(0, 7)], sets)
     check("the named player's set is saved with a calorie estimate; the guest's is not",
-          st.totals(uid)["reps"] == 8 and sets[0]["kcal"] and len(st.history(uid)) == 1)
+          st.totals(uid)["reps"] == 7 and sets[0]["kcal"] and len(st.history(uid)) == 1)
     check("it says who joined, go, and done", "Player 2, you're in." in said and "Go! Squat." in said
           and "Workout done. Well done!" in said, said)
     lat = e.latency_ms()
@@ -355,6 +359,310 @@ def check_engine():
           {x["event"] for x in ev} == {"room_empty", "person_leave_zone"}, ev)
     cov = rm.coverage()
     check("the coverage map has the cell where they sat", cov["samples"] == 2 and any(v is not None for row in cov["grid"] for v in row))
+
+
+def frame_of(people, captured, frame=None, hidden=(), retired=(), identity=None):
+    """A hub state: people = [(id, joints, height_cm)], captured = when the frame was taken."""
+    st = {"captured": captured, "frame": frame, "people": [
+        {"id": pid, "colour": 0, "posture": "standing", "height_cm": h,
+         "identity": (identity or {}).get(pid, "sure"),
+         "joints": [[*map(float, j), 2] for j in J]} for pid, J, h in people],
+        "hidden": [{"id": i, "seen_ago": 0.2, "remembered": True} for i in hidden],
+        "retired": [{"id": i, "why": "unsure"} for i in retired]}
+    return st
+
+
+def check_freshness():
+    print("Freshness: stale and repeated frames, tracking loss, the watchdog (engine.py)")
+    # A set of squats where every frame arrives a second late: nothing may count.
+    e = engine.Engine()
+    e.step(frame_of([(1, sy.figure(), 175)], 0.0, 1), now=0.0)
+    e.workout.start("free", 0.0, exercise="squat")
+    for i in range(int(16 * 15)):
+        t = 0.0 + i / 15
+        e.step(frame_of([(1, sy.move("squat", i / 15), 175)], t - 1.0, 2 + i), now=t)
+    tr = e.workout.trackers.get(0)
+    check("frames that arrive a second late: zero repetitions",
+          (tr is None or tr.reps == 0) and e.dropped["late"] > 200, (tr and tr.reps, e.dropped))
+    # The same frame number again and again (a hub that repeats itself): counted once at most.
+    e = engine.Engine()
+    e.step(frame_of([(1, sy.figure(), 175)], 0.0, 1), now=0.0)
+    e.workout.start("free", 0.0, exercise="squat")
+    k = 0
+    for i in range(int(4 * 15)):                      # 4 s of real squatting first
+        t = i / 15
+        k += 1
+        e.step(frame_of([(1, sy.move("squat", t), 175)], t, k), now=t)
+    before = e.workout.trackers[0].reps
+    bottom, top = sy.move("squat", 1.2), sy.figure(knee=178)
+    for j in range(60):                              # then two frames repeated, alternating
+        t = 4 + j / 15
+        J, n = (bottom, k + 1) if j % 2 else (top, k + 2)
+        e.step(frame_of([(1, J, 175)], t, n), now=t)
+    check("repeated frames are dropped: no repetitions from replays",
+          e.workout.trackers[0].reps - before <= 1 and e.dropped["repeated"] >= 25,
+          (before, e.workout.trackers[0].reps, e.dropped))
+
+    # The camera stops mid-repetition and comes back at the bottom: that repetition is dropped.
+    e = engine.Engine()
+    e.step(frame_of([(1, sy.figure(), 175)], 0.0, 1), now=0.0)
+    e.workout.start("free", 0.0, exercise="squat")
+    n, t = 1, 0.0
+    for i in range(int(2 * 2.4 * 15)):                # two clean squats
+        t = 3.1 + i / 15
+        n += 1
+        e.step(frame_of([(1, sy.move("squat", i / 15), 175)], t, n), now=t)
+    reps2 = e.workout.trackers[0].reps
+    for i in range(int(0.5 * 15)):                    # half way down the third
+        t += 1 / 15
+        n += 1
+        e.step(frame_of([(1, sy.move("squat", i / 15), 175)], t, n), now=t)
+    lost_events = []
+    for j in range(30):                               # one second with no frames at all
+        t += 1 / 30
+        lost_events += e.tick(t)
+    check("no frames for a second: the player is lost (the watchdog, not a frame, says so)",
+          any(x["type"] == "tracking" and x["lost"] for x in lost_events) and e.lost.get(0), lost_events)
+    for i in range(int(0.7 * 15)):                    # back, already at the bottom, standing up
+        t += 1 / 15
+        n += 1
+        e.step(frame_of([(1, sy.move("squat", 1.2 + i / 15), 175)], t, n), now=t)
+    check("... the interrupted repetition is not counted when they stand up",
+          e.workout.trackers[0].reps == reps2, (reps2, e.workout.trackers[0].reps))
+    for i in range(int(2.4 * 2 * 15)):
+        t += 1 / 15
+        n += 1
+        e.step(frame_of([(1, sy.move("squat", i / 15), 175)], t, n), now=t)
+    check("... and the next ones are", e.workout.trackers[0].reps == reps2 + 2, e.workout.trackers[0].reps)
+
+    # A timed challenge waits while nobody is seen.
+    e = engine.Engine()
+    e.step(frame_of([(1, sy.figure(), 175)], 0.0, 1), now=0.0)
+    e.workout.start("challenge", 0.0, exercise="squat", seconds=20)
+    t, n = 0.0, 1
+    for i in range(int(5 * 15)):
+        t = i / 15
+        n += 1
+        e.step(frame_of([(1, sy.figure(), 175)], t, n), now=t)
+    left0 = e.workout.state(e.roster, {}, t)["left"]
+    for j in range(150):                              # 5 s of nothing
+        t += 1 / 30
+        e.tick(t)
+    w = e.workout.state(e.roster, {}, t)
+    check("a timed challenge pauses while nobody is seen", w["paused"] and w["held_by"] == "tracking"
+          and abs(w["left"] - left0) < 0.2, (left0, w))
+    for i in range(5):
+        t += 1 / 15
+        n += 1
+        e.step(frame_of([(1, sy.figure(), 175)], t, n), now=t)
+    check("... and goes on by itself when they are back", not e.workout.state(e.roster, {}, t)["paused"])
+
+    # The pad lets go when frames stop, without waiting for a frame to say so.
+    e = engine.Engine()
+    e.pad_profile = "wheel"
+    wheel = sy.figure(abduct=(30, 30), arm_forward=(70, 70), elbow=(150, 150))
+    e.step(frame_of([(1, wheel, 175)], 0.0, 1), now=0.0)
+    held = e.pad_outputs()["axes"]["throttle"]
+    e.tick(0.6)
+    out = e.pad_outputs()
+    check("Kinect Pad: throttle held while seen, released when frames stop",
+          held > 0.3 and out["axes"]["throttle"] == 0 and out["keys"] == {}, (held, out))
+
+
+def check_roster_identity():
+    print("Players: hidden, unsure, retired, look-alikes (players.py with the hub's identity)")
+    e = engine.Engine()
+    e.step(frame_of([(1, sy.figure(x=-0.6), 180)], 0.0, 1), now=0.0)
+    e.workout.start("free", 0.0, exercise="squat")
+    t, n = 0.0, 1
+    for i in range(int(3.2 * 15)):
+        t = i / 15
+        n += 1
+        e.step(frame_of([(1, sy.figure(x=-0.6), 180)], t, n), now=t)
+    # Hidden behind someone for two seconds while "squatting" (not seen: nothing counts).
+    for i in range(30):
+        t += 1 / 15
+        n += 1
+        e.step(frame_of([(2, sy.move("squat", i / 15, x=0.6), 165)], t, n, hidden=(1,)), now=t)
+    p = e.roster.by_slot(0)
+    check("hidden behind someone: status hidden, nothing counted", p.status == "hidden" and
+          e.workout.trackers.get(0) is None or e.workout.trackers[0].reps == 0, p.status)
+    e.step(frame_of([(1, sy.figure(x=-0.6), 180)], t + 0.1, n + 1), now=t + 0.1)
+    check("... back under the same number: active again", e.roster.by_slot(0).status == "active")
+    # The hub is unsure who is who (a crossing): the player is unsure; nothing counts.
+    e.step(frame_of([(1, sy.figure(x=-0.6), 180)], t + 0.2, n + 2, identity={1: "unsure"}), now=t + 0.2)
+    check("mid-crossing (hub unsure): the player is unsure, not counted",
+          e.roster.by_slot(0).status == "unsure" and 1 not in e.active_bodies())
+    # The hub retired the number: the player waits to rejoin, nobody is matched automatically.
+    e.step(frame_of([(9, sy.figure(x=-0.6), 180)], t + 0.3, n + 3, retired=(1,)), now=t + 0.3)
+    p = e.roster.by_slot(0)
+    check("number retired by the hub: 'raise a hand' (rejoin), not matched to whoever is there",
+          p.status == "rejoin" and p.track == 1, (p.status, p.track))
+    tt = t + 0.3
+    for i in range(20):
+        tt += 1 / 15
+        e.step(frame_of([(9, sy.figure(x=-0.6, abduct=(10, 175)), 180)], tt, n + 4 + i), now=tt)
+    p = e.roster.by_slot(0)
+    check("... a raised hand makes them player 1 again", p.status == "active" and p.track == 9, (p.status, p.track))
+
+    # Two players leave; one person comes back between where both stood, as tall as both.
+    r = players.Roster(auto_solo=False)
+    a = sy.body(sy.figure(x=-0.3, z=2.8), 0.0, pid=1, height_cm=175)
+    b = sy.body(sy.figure(x=0.3, z=2.8), 0.0, pid=2, height_cm=176)
+    r.join(a, 0.0)
+    r.join(b, 0.0)
+    for i in range(10):
+        r.update([sy.body(sy.figure(x=-0.3, z=2.8), i / 15, pid=1, height_cm=175),
+                  sy.body(sy.figure(x=0.3, z=2.8), i / 15, pid=2, height_cm=176)], i / 15)
+    r.update([], 1.0)
+    ev = r.update([sy.body(sy.figure(x=0.0, z=2.8), 2.0, pid=5, height_cm=175)], 2.0)
+    check("two look-alike players could be the one who came back: nobody is assumed",
+          not any(x["type"] == "rejoined" for x in ev) and any(p.status == "rejoin" for p in r.players), ev)
+    # Clearly one of them: back automatically.
+    r = players.Roster(auto_solo=False)
+    r.join(a, 0.0)
+    for i in range(10):
+        r.update([sy.body(sy.figure(x=-0.3, z=2.8), i / 15, pid=1, height_cm=175)], i / 15)
+    r.update([], 1.0)
+    ev = r.update([sy.body(sy.figure(x=-0.25, z=2.85), 3.0, pid=6, height_cm=175)], 3.0)
+    check("... one clear candidate is matched back", any(x["type"] == "rejoined" for x in ev), ev)
+    # Players keep their slots when they swap places (no left-to-right numbering).
+    e = engine.Engine()
+    e.step(frame_of([(1, sy.figure(x=-0.8), 180), (2, sy.figure(x=0.8), 160)], 0.0, 1), now=0.0)
+    e.join_everyone(0.0)
+    slots = {p.track: p.slot for p in e.roster.players}
+    for i in range(60):
+        f = i / 59
+        t = 0.1 + i / 15
+        e.step(frame_of([(1, sy.figure(x=-0.8 + 1.6 * f), 180), (2, sy.figure(x=0.8 - 1.6 * f), 160)], t, 2 + i), now=t)
+    check("two players swap sides: each keeps their slot", {p.track: p.slot for p in e.roster.players} == slots)
+
+
+def lean(J, metres):
+    """The upper body shifted sideways: + = towards the person's right (the picture's left)."""
+    J = J.copy()
+    for i in list(range(0, 23)):
+        J[i] = J[i] + np.array([-metres, 0, 0])
+    return J
+
+
+def check_games():
+    print("Games: the same evidence rules, no penalty for tracking loss (games.py)")
+    check("leaning to your right is +, to your left is - (the person's own sides)",
+          bodygestures.lean_of(sy.body(lean(sy.figure(), 0.25), 0, noise=0)) > 0.5 and
+          bodygestures.lean_of(sy.body(lean(sy.figure(), -0.25), 0, noise=0)) < -0.5)
+
+    def play(kind, pose_at, seconds=8.0, status_at=None, hide=()):
+        g = games.WallDodge([0], 0.0, seed=1)
+        g.KINDS = {kind: kind.upper()}
+        events, t = [], 0.0
+        for i in range(int(seconds * 30)):
+            t = i / 30
+            st = status_at(t) if status_at else "active"
+            if st == "active" and i % 2 == 0:
+                g.frame(0, sy.body(pose_at(t), t, noise=0.003, hide=hide), t)
+            events += g.tick(t, {0: st})
+        return g, [x["event"] for x in events]
+
+    stand = lambda t: sy.figure()                                           # noqa: E731
+    g, ev = play("up", lambda t: sy.figure(abduct=(175, 175)))
+    check("Wall Dodge: arms up through an ARMS UP wall passes", ev and set(ev) == {"pass"} and g.lanes[0].lives == 3, ev)
+    g, ev = play("up", stand)
+    check("... standing still through it is a hit", "hit" in ev and g.lanes[0].lives < 3, ev)
+    g, ev = play("up", stand, hide=(sk.L_WR, sk.R_WR))
+    check("... hands out of the picture: waved through, no life lost", ev and set(ev) == {"unseen"} and
+          g.lanes[0].lives == 3, ev)
+    g, ev = play("up", stand, status_at=lambda t: "hidden" if 2.0 < t < 7.9 else "active")
+    w = g.lanes[0].wall
+    check("... lost as the wall arrives: the wall waits, nothing is lost", g.lanes[0].lives == 3 and
+          "hit" not in ev and (w is None or w["frozen"] is not None or w["due"] > 3.6), (ev, w))
+    g, ev = play("left", lambda t: lean(sy.figure(), -0.25))
+    check("... LEAN LEFT passed by leaning to your own left", set(ev) == {"pass"}, ev)
+
+    pm = games.PoseMatch([0, 1], 0.0, seed=2)
+    target = pm.lanes and games.POSES[pm.k]["name"]
+    for i in range(int(3 * 30)):
+        pm.tick(i / 30, {0: "hidden", 1: "away"})
+    check("Pose Match: the round clock waits while every player is out of sight",
+          pm.state(3.0)["left"] > pm.ROUND - 0.2 and pm.state(3.0)["paused"], pm.state(3.0)["left"])
+    star = sy.figure(abduct=(150, 150), feet=0.35)
+    pm = games.PoseMatch([0], 0.0, seed=0)
+    pm.k = 0                                                              # Star
+    for i in range(int(2 * 30)):
+        t = i / 30
+        if i % 2 == 0:
+            pm.frame(0, sy.body(star, t, noise=0.003), t)
+        pm.tick(t, {0: "active"})
+    check("Pose Match: holding the Star for a second scores", pm.lanes[0].score > 100 or pm.round > 1,
+          (pm.lanes[0].score, pm.lanes[0].sim))
+    pm = games.PoseMatch([0], 0.0, seed=0)
+    pm.k = 0
+    for i in range(int(2 * 30)):
+        t = i / 30
+        if i % 2 == 0:
+            pm.frame(0, sy.body(star, t, noise=0.003, hide=(sk.L_ANK, sk.R_ANK, sk.L_KNEE, sk.R_KNEE,
+                                                            sk.L_WR, sk.R_WR)), t)
+        pm.tick(t, {0: "active"})
+    check("... with half the joints unseen it does not score from a guess", pm.lanes[0].score == 0,
+          pm.lanes[0].sim)
+
+    race = games.BodyRacer([0], 0.0, seed=3)
+    wheel = sy.figure(abduct=(30, 30), arm_forward=(70, 70), elbow=(150, 150))
+    for i in range(int(10 * 30)):
+        t = i / 30
+        if i % 2 == 0:
+            race.frame(0, sy.body(wheel, t, noise=0.002), t)
+        race.tick(t, {0: "active"})
+    car = race.lanes[0]
+    d0, h0, c0 = car.dist, car.hits, car.coins
+    check("Body Racer: hands out drives the car forward", d0 > 200 and car.speed > 1.0, (d0, car.speed))
+    for i in range(int(10 * 30)):
+        t = 10 + i / 30
+        race.tick(t, {0: "hidden"})
+    check("... lost: the car coasts to a stop and hits nothing", car.speed < 0.2 and car.hits == h0 and
+          car.coins == c0, (car.speed, car.hits, h0))
+    check("... and the race clock does not run while nobody is seen", race.played < 10.2, race.played)
+
+
+def check_calibration():
+    print("Calibration: what fits where, from the camera (calibration.py)")
+    cam = calibration.Camera((525.0, 525.0, 319.5, 239.5), 1.0, tilt_deg=0.0)
+    sp = calibration.Space(cam)
+    v = sp.view_at(2.0)
+    top, bottom = 1.0 + 2.0 * 239.5 / 525, 1.0 - 2.0 * 240.5 / 525
+    check("a level camera 1 m up sees from 0.08 to 1.91 m high at 2 m (pinhole maths)",
+          abs(v["top"] - top) < 0.02 and abs(v["bottom"] - bottom) < 0.02, v)
+    check("... and 2.44 m across", abs(v["width"] - 2 * 2.0 * 320 / 525) < 0.03, v)
+    ok, why = sp.fits("squat", (0.0, 2.0), 1.75)
+    check("a squat at 2 m: feet out of view, said as such", not ok and "feet" in why, why)
+    check("... at 3 m it fits", sp.fits("squat", (0.0, 3.0), 1.75)[0])
+    band, why = calibration.Space(cam, limit=2.0).band("squat", 1.75)
+    check("a squat with only 2 m of room fits nowhere, and the reason names the feet and the 2 m",
+          band is None and "feet" in why and "2.0 m" in why, why)
+    band, _ = calibration.Space(cam, limit=2.0).band("curl", 1.75)
+    check("a curl (hips to shoulders) fits within 2 m", band is not None and band[0] <= 2.0, band)
+    infra = calibration.Camera((575.8, 575.8, 314.5, 235.5), 1.0, tilt_deg=0.0)
+    check("the infrared lens (fx 575.8) sees less than the colour one at the same distance",
+          calibration.Space(infra).view_at(2.0)["width"] < v["width"])
+    down = calibration.Camera((525.0, 525.0, 319.5, 239.5), 1.9, tilt_deg=12.0)
+    check("from the TV (1.9 m, 12 deg down) jumping jacks fit from about 2.9 m",
+          (calibration.Space(down).band("jack", 1.75)[0] or (9, 9))[0] < 3.2,
+          calibration.Space(down).band("jack", 1.75))
+    hint = calibration.suggest_tilt(calibration.Space(calibration.Camera((525, 525, 319.5, 239.5), 0.8,
+                                                                         tilt_deg=3.3), limit=2.0))
+    check("a low Kinect with 2 m of room: tilting it up is suggested, with what would then fit",
+          hint["by"] > 0 and len(hint["fits"]) >= len(hint["now"]), hint)
+    e = engine.Engine(cfg={"space_m": 2.0})
+    hub = frame_of([(1, sy.figure(z=1.6), 175)], 0.0, 1)
+    hub.update(floor={"camera_height": 1.0, "tilt": 0.0, "up": [0, -1, 0], "seen": True},
+               intrinsics=[525.0, 525.0, 319.5, 239.5], room={"far": 3.5})
+    e.step(hub, now=0.0)
+    e.workout.start("free", 0.0, exercise="squat")
+    hub2 = dict(hub, frame=2, captured=0.05)
+    ev, _ = e.step(hub2, now=0.05)
+    p = e.roster.by_slot(0)
+    check("the engine uses it: a squat at 1.6 m from this camera is paused with the reason",
+          p.warning and "feet" in p.warning, p.warning)
 
 
 def check_pad():
@@ -474,6 +782,10 @@ def main():
     check_players()
     check_training()
     check_engine()
+    check_freshness()
+    check_roster_identity()
+    check_games()
+    check_calibration()
     check_pad()
     check_fusion()
     check_server()

@@ -45,19 +45,28 @@ class Machine:
         self.phase = "rest"
         self.t0 = self.tw = None
         self.peak = None
+        # A repetition may only start from rest seen with our own eyes: a tracker that begins
+        # (or comes back from lost tracking) with the person half way down waits until they are
+        # back at rest, so a repetition is never counted from its second half.
+        self.armed = False
 
     def depth(self, v):
         """0 at rest, 1 at work (can go past either end)."""
         return (v - self.rest) * self.sign / ((self.work - self.rest) * self.sign)
 
-    def reset(self):
+    def reset(self, disarm=False):
         self.phase, self.t0, self.tw, self.peak = "rest", None, None, None
+        if disarm:
+            self.armed = False
 
     def step(self, v, t):
         """Feed one value; returns None, or ("rep", info) / ("partial", info)."""
         if v is None:
             return None
         d = self.depth(v)
+        if not self.armed:
+            self.armed = d <= 0.12
+            return None
         if self.phase == "rest":
             if d > 0.12:                                    # left the rest position
                 self.phase, self.t0, self.tw, self.peak = "going", t, None, d
@@ -480,6 +489,16 @@ class Tracker:
             self.stand_hips.append(h)
         if self.stand_hips:
             b.stand_hip = float(np.percentile(self.stand_hips, 60))
+        else:
+            # Not seen standing yet (someone who starts seated): standing hip height is the
+            # leg's own length, thigh + shin + the ankle's height, measurable sitting down.
+            legs = []
+            for hip, knee, ank in ((L_HIP, L_KNEE, L_ANK), (R_HIP, R_KNEE, R_ANK)):
+                if all(b.states[j] == sk.TRACKED for j in (hip, knee, ank)):
+                    legs.append(np.linalg.norm(b.joints[hip] - b.joints[knee]) +
+                                np.linalg.norm(b.joints[knee] - b.joints[ank]) + 0.08)
+            if legs:
+                b.stand_hip = float(np.mean(legs))
 
     def step(self, b):
         t = b.t
@@ -583,6 +602,16 @@ class Tracker:
                 events.append({"type": "cue", "key": "hold", "say": cue})
         self.last_cue = cue
         return events
+
+    def interrupt(self):
+        """Tracking was lost (or the player was unsure who they were): whatever repetition or hold
+        was under way is dropped, never finished from frames that were not seen."""
+        for m in self.machines.values():
+            m.reset(disarm=True)
+        for side in self.faults:
+            self.faults[side] = {}
+        self.hold_since = None
+        self.last_t = None
 
     # -- what the screen shows
 

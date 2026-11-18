@@ -45,5 +45,11 @@ class Demo:
             people.append({"id": i + 1, "colour": i, "posture": "standing", "height_cm": 175 - 12 * i,
                            "distance": round(2.8 + 0.3 * i, 2), "skeleton": None, "demo_move": name,
                            "joints": [[round(float(a), 3) for a in j] + [2] for j in J]})
+        # A Kinect on the TV: 1.9 m up, 12 degrees down, the colour lens, a 4.5 m deep room.
         return {"people": people, "count": len(people), "captured": now - 0.045, "seq": self.seq,
-                "running": True, "source": "demo", "mode": "demo"}
+                "frame": 2 * self.seq, "running": True, "source": "demo", "mode": "demo",
+                "intrinsics": [525.0, 525.0, 319.5, 239.5], "size": [640, 480],
+                "floor": {"seen": True, "camera_height": 1.9, "tilt": 12.0,
+                          "up": [0.0, -0.9781, -0.2079]},
+                "room": {"near": 3.2, "median": 4.1, "far": 4.5, "no_depth": 0.05},
+                "hidden": [], "retired": []}

@@ -77,11 +77,12 @@ class OneEuro3:
 class Body:
     """One frame of one person: joints (33, 3) with NaN for missing, states (33,), time t."""
 
-    def __init__(self, pid, joints, states, t, height_cm=None, posture=None, colour=0):
+    def __init__(self, pid, joints, states, t, height_cm=None, posture=None, colour=0, identity="sure"):
         self.id, self.t, self.colour = pid, t, colour
         self.joints = np.asarray(joints, dtype=np.float64)
         self.states = np.asarray(states, dtype=np.int8)
         self.height_cm, self.posture = height_cm, posture
+        self.identity = identity          # the hub's: "sure", or "unsure" mid-crossing
 
     @classmethod
     def from_hub(cls, person, t):
@@ -92,7 +93,7 @@ class Body:
             if j is not None:
                 joints[i], states[i] = j[:3], j[3]
         return cls(person["id"], joints, states, t, person.get("height_cm"), person.get("posture"),
-                   person.get("colour", 0))
+                   person.get("colour", 0), person.get("identity", "sure"))
 
     # -- joints
 
@@ -190,21 +191,33 @@ class Body:
 
 
 class Filter:
-    """Per-person joint smoothing and bone-length sanity, over time.
+    """Per-person joint smoothing and evidence checks, over time.
 
     Each joint gets a One Euro filter. Each person's bone lengths are learnt from their first
     tracked frames (medians); later, a joint whose bone is more than 30% off its learnt length is
-    demoted to inferred: a depth pixel on the sofa, not the knee."""
+    demoted to inferred: a depth pixel on the sofa, not the knee. A joint that moved faster than
+    any limb can (MAX_SPEED, from where it was last frame) is demoted the same way: a landmark
+    that jumped to the other arm, or depth from the wall behind a hand."""
 
     LEARN = 15            # frames of bone lengths before they are trusted
     OFF = 0.30
+    MAX_SPEED = 12.0      # m/s: a punching fist peaks near 8
 
     def __init__(self):
         self.filters = {}
         self.lengths = {}
         self.samples = {}
+        self.last = {}        # pid -> (t, raw joints)
 
     def __call__(self, body):
+        prev = self.last.get(body.id)
+        raw = body.joints.copy()
+        if prev is not None and body.t > prev[0]:
+            dt = body.t - prev[0]
+            moved = np.linalg.norm(raw - prev[1], axis=1) / dt
+            fast = np.nan_to_num(moved, nan=0.0) > self.MAX_SPEED
+            body.states[fast & (body.states == TRACKED)] = INFERRED
+        self.last[body.id] = (body.t, raw)
         # Bone check first, on the raw joints.
         learnt = self.lengths.get(body.id, {})
         for (a, b), length in body.bone_lengths().items():
@@ -228,5 +241,5 @@ class Filter:
         return body
 
     def forget(self, pid):
-        for d in (self.filters, self.lengths, self.samples):
+        for d in (self.filters, self.lengths, self.samples, self.last):
             d.pop(pid, None)

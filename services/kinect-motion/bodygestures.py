@@ -112,11 +112,10 @@ class Gestures:
                 out.append({"gesture": "jump", "cm": round(100 * (h - self.stand_hip))})
             if self.stand_hip - h > 0.25 and self._fresh("duck", t):
                 out.append({"gesture": "duck"})
-        # Lean: the shoulders' sideways offset over the hips, -1 (left) .. 1 (right).
-        sh, hp = b.mid(sk.L_SH, sk.R_SH), b.mid(sk.L_HIP, sk.R_HIP)
-        if sh is not None and hp is not None:
-            ang = math.degrees(math.atan2(sh[0] - hp[0], max(sh[1] - hp[1], 1e-3)))
-            self.lean = max(-1.0, min(1.0, ang / 25.0))
+        # Lean: the shoulders' sideways offset over the hips, in the person's own terms: -1
+        # leaning to their left .. 1 to their right. Facing the Kinect, their right is the
+        # picture's left (smaller x), so it is hips minus shoulders.
+        self.lean = lean_of(b, self.lean)
         # Pointing: a straight arm held still away from the body -> where it points.
         self.pointing = None
         for s in ("left", "right"):
@@ -161,6 +160,15 @@ def pointing_ray(b, side):
         return None
     where, _, at = min(hits, key=lambda h: h[1])
     return {"at": where, "point": at}
+
+
+def lean_of(b, default=0.0):
+    """-1 (leaning to their left) .. 1 (to their right): 25 deg of torso tilt is full."""
+    sh, hp = b.mid(sk.L_SH, sk.R_SH), b.mid(sk.L_HIP, sk.R_HIP)
+    if sh is None or hp is None:
+        return default
+    ang = math.degrees(math.atan2(hp[0] - sh[0], max(sh[1] - hp[1], 1e-3)))
+    return max(-1.0, min(1.0, ang / 25.0))
 
 
 def steering(b):

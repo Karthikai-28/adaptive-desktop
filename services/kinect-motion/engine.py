@@ -1,17 +1,29 @@
 """Kinect Motion's engine: one step per hub frame, for everyone in view.
 
 Pure logic (no HTTP, no camera): server.py feeds it the hub's /api/people state and sends out
-what it returns. The checks drive it with synthetic frames.
+what it returns, and calls tick() many times a second whether frames come or not. The checks
+drive it with synthetic frames.
 
-    bodies -> Filter (smoothing, bone sanity) -> Gestures per person -> Roster (players, safety)
-           -> Workout (free / plan / challenge / fitness check) -> Room events -> Pad outputs
+    hub state -> fresh? (a repeated or late frame is not evidence)
+      bodies -> Filter (smoothing, bone and speed checks) -> Gestures -> Roster (players, safety)
+             -> Workout (free / plan / challenge / fitness check) or Game -> Room events -> Pad
+    tick      the freshness watchdog: a player not seen for LOST seconds (or no fresh frame at
+              all) is lost: their repetition in progress is dropped, a timed step waits while
+              nobody is seen, their game lane freezes, the pad lets go, and the page shows a
+              recovery cue. It runs between frames, so a camera that stops sending cannot leave
+              anything counting or pressed.
+
+Only `active` players (seen in this frame, identity sure) feed counting and games. The play
+area comes from the camera's real geometry (calibration.py), not a fixed band.
 """
 
 import time
 from collections import deque
 
 import bodygestures
+import calibration
 import exercises
+import games as gameslib
 import pad as padlib
 import players as playerslib
 import room as roomlib
@@ -20,6 +32,8 @@ import training
 
 COUNTDOWN = 3.0
 SAY_GAP = 2.5          # s between spoken lines for one player
+STALE = 0.5            # s: a hub state captured longer ago than this is not evidence
+LOST = 0.35            # s without a fresh sighting before a player counts as lost
 
 
 class Workout:
@@ -42,6 +56,7 @@ class Workout:
         self.check_results = {}     # slot -> {exercise: scores}
         self.results = []           # the finished steps of this workout, for the summary
         self.users = {}             # slot -> user id (profile)
+        self.held_by = None         # "you" (pressed pause) or "tracking" (nobody seen)
 
     # -- control
 
@@ -66,16 +81,18 @@ class Workout:
         self.trackers = {}
         self.phase, self.phase_at = "ready", now
 
-    def pause(self, now):
+    def pause(self, now, by="you"):
         if self.phase in ("ready", "go", "rest") and self.paused_at is None:
-            self.paused_at = now
+            self.paused_at, self.held_by = now, by
             return True
+        if self.paused_at is not None and by == "you":
+            self.held_by = "you"              # a pause you asked for outlasts tracking coming back
         return False
 
-    def resume(self, now):
-        if self.paused_at is not None:
+    def resume(self, now, by="you"):
+        if self.paused_at is not None and (by == "you" or self.held_by == by):
             self.phase_at += now - self.paused_at
-            self.paused_at = None
+            self.paused_at, self.held_by = None, None
             return True
         return False
 
@@ -111,7 +128,7 @@ class Workout:
             out.append({"type": "workout-done", "results": self.results})
         self.sessions = {}
         self.mode, self.phase, self.plan, self.trackers = "idle", "idle", None, {}
-        self.paused_at = None
+        self.paused_at, self.held_by = None, None
         return out
 
     # -- per frame
@@ -215,6 +232,7 @@ class Workout:
                  for s in self.plan["steps"]]
         ex = exercises.CATALOG[self.exercise]
         return {"mode": self.mode, "phase": self.phase, "paused": self.paused_at is not None,
+                "held_by": self.held_by,
                 "plan": self.plan["name"], "index": self.index, "steps": steps,
                 "exercise": self.exercise, "name": ex.name, "how": ex.how, "kind": ex.kind,
                 "target": self.target, "seconds": self.seconds,
@@ -238,13 +256,75 @@ class Engine:
         self.bodies = {}
         self.wheel = {}
         self.last_gestures = {}
+        self.cfg = cfg
+        self.game = None
+        self.last_frame = None       # the hub's frame number last used
+        self.last_capture = 0.0      # when the last fresh frame was taken (wall clock)
+        self.fresh = False
+        self.dropped = {"repeated": 0, "late": 0}
+        self.lost = {}               # slot -> True while that player is lost
+        self.hub = {}
+        self.space = None
+        self.space_key = None
+        self.space_state = None
+
+    # -- the play area, from the camera
+
+    def _calibrate(self, hub):
+        cam = calibration.Camera.from_hub(hub)
+        if cam is None:
+            return
+        room = (hub.get("room") or {}).get("far")
+        limit = self.cfg.get("space_m")
+        key = (cam.key(), room and round(room, 1), limit)
+        if key != self.space_key:
+            self.space = calibration.Space(cam, round(room, 1) if room else None, limit)
+            self.space_key, self.space_state = key, None
+            self.roster.space = self.space
+
+    def activity(self):
+        """What everyone is doing now: an exercise or a game key (calibration.ENVELOPES)."""
+        if self.game is not None and not self.game.over:
+            return self.game.key
+        if self.workout.mode != "idle" and self.workout.exercise:
+            return self.workout.exercise
+        return None
+
+    def live(self):
+        """A workout or game is under way (the hub then keeps infrared without colour checks)."""
+        return (self.workout.mode != "idle" and self.workout.phase in ("ready", "go", "rest")) or \
+            (self.game is not None and not self.game.over)
+
+    # -- one hub state
+
+    def _usable(self, hub, now):
+        """Is this hub state new evidence? Repeated frames and late ones are not."""
+        frame = hub.get("frame", hub.get("seq"))
+        captured = hub.get("captured")
+        if frame is not None and self.last_frame is not None:
+            if frame == self.last_frame or 0 < self.last_frame - frame < 100000:
+                self.dropped["repeated"] += 1
+                return False
+        if captured is not None and now - captured > STALE:
+            self.dropped["late"] += 1
+            return False
+        if frame is not None:
+            self.last_frame = frame
+        return True
 
     def step(self, hub, now=None):
         """One hub state -> (events, say lines). Call state() for the screen."""
         now = time.time() if now is None else now
+        self.hub = hub
+        self._calibrate(hub)
+        if not self._usable(hub, now):
+            return [], []
         t = hub.get("captured") or now
         if hub.get("captured"):
             self.latency.append(max(0.0, now - hub["captured"]))
+            self.last_capture = hub["captured"]
+        else:
+            self.last_capture = now
         bodies = []
         for person in hub.get("people") or []:
             if not person.get("joints"):
@@ -253,14 +333,24 @@ class Engine:
         self.bodies = {b.id: b for b in bodies}
         for gone in set(self.gestures) - set(self.bodies):
             self.gestures.pop(gone)
+        known = set(self.bodies) | {h["id"] for h in hub.get("hidden") or []}
+        for gone in set(self.filter.filters) - known:
             self.filter.forget(gone)
-        busy = self.workout.phase == "go"
+        busy = self.workout.phase == "go" or (self.game is not None and not self.game.over)
         g_by = {b.id: self.gestures.setdefault(b.id, bodygestures.Gestures()).step(b, busy) for b in bodies}
         self.last_gestures = g_by
-        # Roster events keep their own type: joined / rejoined / left / safety.
-        events = list(self.roster.update(bodies, now))
+        self.roster.activity = self.activity()
+        # Roster events keep their own type: joined / rejoined / left / status / safety.
+        events = list(self.roster.update(bodies, now, hub))
+        events += self.tick(now)                  # who is lost or back, before anything counts
         events += self._controls(g_by, now)
-        events += self.workout.step(self.roster, self.bodies, now)
+        active = self.active_bodies()
+        events += self.workout.step(self.roster, active, now)
+        if self.game is not None:
+            for p in self.roster.players:
+                b = active.get(p.track)
+                if b is not None and not p.warning:
+                    self.game.frame(p.slot, b, now)
         events += [{"type": "room", **e} for e in self.room.step(bodies, g_by, now)]
         for b in bodies:
             self.wheel[b.id] = bodygestures.steering(b)
@@ -268,15 +358,72 @@ class Engine:
             self.events.append({"t": round(now, 2), **e})
         return events, self._sayings(events, now)
 
+    def active_bodies(self):
+        """The bodies that may be counted and scored: active players' only, from a fresh frame."""
+        return {p.track: self.bodies[p.track] for p in self.roster.players
+                if p.status == "active" and p.track in self.bodies and not self.lost.get(p.slot)}
+
+    # -- between frames: the watchdog
+
+    def tick(self, now=None):
+        """Freshness and game time. Call often (the server: 30 times a second)."""
+        now = time.time() if now is None else now
+        self.fresh = now - self.last_capture < STALE
+        events = []
+        for p in self.roster.players:
+            lost = not self.fresh or p.status != "active" or now - p.seen > LOST
+            was = self.lost.get(p.slot)
+            self.lost[p.slot] = lost
+            if lost != bool(was) and (was is not None or lost):
+                tr = self.workout.trackers.get(p.slot)
+                if lost and tr is not None:
+                    tr.interrupt()
+                events.append({"type": "tracking", "slot": p.slot, "lost": lost,
+                               "status": p.status if self.fresh else "stale",
+                               "say": "I've lost you. Step back into view." if lost and
+                               self.workout.phase == "go" else None})
+        for slot in [s for s in self.lost if self.roster.by_slot(s) is None]:
+            self.lost.pop(slot)
+        # A timed step or countdown waits while no player is seen.
+        w = self.workout
+        if w.mode != "idle" and w.phase in ("ready", "go") and self.roster.players:
+            if all(self.lost.get(p.slot) for p in self.roster.players):
+                # From the last sighting: the unseen moments before "lost" do not run the clock.
+                last = max(p.seen for p in self.roster.players)
+                if w.pause(min(now, max(last, w.phase_at)), by="tracking"):
+                    events.append({"type": "paused", "by": "tracking"})
+            elif w.held_by == "tracking" and w.resume(now, by="tracking"):
+                events.append({"type": "resumed", "by": "tracking"})
+        if self.game is not None:
+            status = {p.slot: ("active" if not self.lost.get(p.slot) and not p.warning else
+                               ("warning" if p.warning else p.status)) for p in self.roster.players}
+            events += self.game.tick(now, status)
+        return events
+
+    # -- games
+
+    def start_game(self, key, now, seed=None, **kw):
+        self.join_everyone(now)
+        self.game = gameslib.make(key, [p.slot for p in self.roster.players], now, seed, **kw)
+        return self.game
+
+    def stop_game(self):
+        self.game = None
+
     def join_everyone(self, now):
-        """No players yet: everyone in view joins (nearest the middle first, up to four)."""
+        """No players yet: everyone in view joins (nearest the middle first, up to four). Only
+        people the hub is sure of; their slots then stay theirs, wherever they move."""
         if self.roster.players:
             return []
         out = []
-        for b in sorted(self.bodies.values(), key=lambda b: abs(b.centre()[0]) if b.centre() is not None else 9):
+        sure = [b for b in self.bodies.values() if b.identity == "sure"]
+        for b in sorted(sure, key=lambda b: abs(b.centre()[0]) if b.centre() is not None else 9):
             p = self.roster.join(b, now)
             if p:
                 out.append({"type": "joined", "slot": p.slot})
+        if self.game is not None:
+            for p in self.roster.players:
+                self.game.add(p.slot)
         return out
 
     def _controls(self, g_by, now):
@@ -288,9 +435,14 @@ class Engine:
                 name = g["gesture"]
                 if p is None and name in ("raise_left", "raise_right"):
                     b = self.bodies[track]
+                    if b.identity != "sure":
+                        continue
+                    waiting = any(q.status == "rejoin" for q in self.roster.players)
                     joined = self.roster.join(b, now)
                     if joined:
-                        out.append({"type": "joined", "slot": joined.slot})
+                        out.append({"type": "rejoined" if waiting else "joined", "slot": joined.slot})
+                        if self.game is not None:
+                            self.game.add(joined.slot)
                 elif p is not None and name == "hands_up":
                     if self.workout.pause(now):
                         out.append({"type": "paused", "slot": p.slot})
@@ -318,6 +470,12 @@ class Engine:
                 text = f"Next: {exercises.CATALOG[e['exercise']].name}."
             elif e["type"] == "joined":
                 text = f"Player {e['slot'] + 1}, you're in."
+            elif e["type"] == "rejoined" and e.get("from") is None:
+                text = f"Player {e['slot'] + 1}, you're back."
+            elif e["type"] == "status" and e["status"] == "rejoin":
+                text = f"Player {e['slot'] + 1}, raise a hand so I know which one you are."
+            elif e["type"] == "tracking" and e.get("say"):
+                text = e["say"]
             elif e["type"] == "safety" and e.get("warning"):
                 text = e["warning"]
             elif e["type"] == "workout-done":
@@ -333,9 +491,11 @@ class Engine:
         return lines
 
     def pad_outputs(self):
-        """What the virtual pad should send now (for the pad player)."""
+        """What the virtual pad should send now (for the pad player): everything released unless
+        that player is active and fresh."""
         p = next((p for p in self.roster.players if p.slot == self.pad_slot), None)
-        if self.pad_profile is None or p is None or p.track not in self.bodies:
+        if (self.pad_profile is None or p is None or p.track not in self.bodies
+                or p.status != "active" or self.lost.get(p.slot, True)):
             return padlib.outputs(self.pad_profile or "wheel", None, 0.0, [], False)
         g = self.gestures.get(p.track)
         return padlib.outputs(self.pad_profile, self.wheel.get(p.track), g.lean if g else 0.0,
@@ -351,7 +511,8 @@ class Engine:
     def state(self, hub, now=None):
         now = time.time() if now is None else now
         people = []
-        for person in hub.get("people") or []:
+        fresh = now - self.last_capture < STALE
+        for person in (hub.get("people") or []) if fresh else []:
             b = self.bodies.get(person["id"])
             pl = self.roster.by_track(person["id"])
             g = self.gestures.get(person["id"])
@@ -366,7 +527,19 @@ class Engine:
                 "wheel": self.wheel.get(person["id"]),
                 "pointing": g.pointing if g else None,
             })
-        return {"people": people, "players": self.roster.state(now),
+        if self.space is not None and self.space_state is None:
+            self.space_state = self.space.to_dict()
+            self.space_state["tilt_hint"] = calibration.suggest_tilt(self.space)
+        players = self.roster.state(now)
+        for p in players:
+            p["lost"] = bool(self.lost.get(p["slot"]))
+        return {"people": people, "players": players, "t": round(now, 3), "fresh": fresh,
                 "workout": self.workout.state(self.roster, self.bodies, now),
+                "game": None if self.game is None else self.game.state(now),
                 "latency": self.latency_ms(), "pad": self.pad_profile,
-                "hub": {k: hub.get(k) for k in ("running", "source", "mode", "size", "error", "floor", "count")}}
+                "tracking": {"visible": len(people), "hidden": len(hub.get("hidden") or []) if fresh else 0,
+                             "active": sum(1 for p in players if p["status"] == "active" and not p["lost"]),
+                             "dropped": dict(self.dropped), "frame": self.last_frame},
+                "space": self.space_state,
+                "hub": {k: hub.get(k) for k in ("running", "source", "mode", "size", "error", "floor", "count",
+                                                "room", "epoch", "timing")}}
