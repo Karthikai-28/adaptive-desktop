@@ -1146,6 +1146,23 @@ def check_pairing():
     r.close()
     w.close()
 
+    # Depth-supported foreground in a pose crop: what is far behind the person is greyed out.
+    src = object.__new__(hub_mod.PoseSource)
+    src.last_ts, src.ts_lock = 0, __import__("threading").Lock()
+    pic = np.full((480, 640, 3), 200, np.uint8)
+    dep = np.full((480, 640), 4000, np.uint16)                  # a wall 4 m away
+    dep[100:400, 280:360] = 2500                                 # the person at 2.5 m
+    dep[150:200, 300:340] = 0                                    # dark hair: no reading
+    f = {"box": (260, 90, 380, 410), "ts": 0, "z": 2500.0}
+    job = src._crop(f, pic, dep, 640, 480)
+    crop, sx = job["crop"], int(320 - job["crop"].shape[1] / 2)
+    S = job["crop"].shape[0]
+    sy0 = int(250 - S / 2)
+    check("pose crop: the person kept, the wall behind greyed out, no-reading kept",
+          (crop[250 - sy0, 320 - sx] == 200).all() and (crop[250 - sy0, 270 - sx] == 128).all()
+          and (crop[175 - sy0, 320 - sx] == 200).all())
+    check("the torso's depth is read as a robust median", abs(hub_mod.torso_depth(dep, (320, 300)) - 2500) < 1)
+
     hub = hub_mod.Hub({})
     now = time.monotonic()
     check("no activity: colour checks allowed", not hub._busy(now))

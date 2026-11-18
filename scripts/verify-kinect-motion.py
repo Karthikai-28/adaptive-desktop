@@ -289,6 +289,31 @@ def check_training():
     s.delete_user(uid)
     check("forgetting a person removes all their results",
           s.db.execute("SELECT COUNT(*) FROM sets").fetchone()[0] == 0)
+    # A history file from before games and tracking quality: kept, and brought up to date.
+    import sqlite3
+    import tempfile
+    old = Path(tempfile.mkdtemp()) / "fitness.db"
+    db = sqlite3.connect(old)
+    db.executescript(store.SCHEMA)
+    db.execute("INSERT INTO users (name, kg, created) VALUES ('Old', 70, 1)")
+    db.execute("INSERT INTO sessions (user_id, started, plan) VALUES (1, 1, 'free')")
+    db.execute("INSERT INTO sets (session_id, exercise, reps, at, details) VALUES (1, 'squat', 12, 1, '{}')")
+    db.commit()
+    db.close()
+    s = store.Store(old)
+    tables = {r[0] for r in s.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    check("an older history file is migrated in place: its people and sets kept, games / quality / scans added",
+          s.migrated == [2] and s.users()[0]["name"] == "Old" and
+          s.db.execute("SELECT reps FROM sets").fetchone()[0] == 12 and {"games", "quality", "scans"} <= tables,
+          (s.migrated, tables))
+    s2 = store.Store(old)
+    check("... once: opening it again changes nothing", s2.migrated == [])
+    gid = s2.add_game(1, "walls", 14, {"lives": 1})
+    s2.add_quality(1, {"activity": "walls", "seconds": 60, "seen_share": 0.92, "losses": 1, "updates_per_s": 15.2,
+                       "evidence": 0.9, "dark_share": 0.4}, game_id=gid)
+    s2.delete_history(1)
+    check("deleting a person's history removes games and tracking records too, and keeps the person",
+          not s2.games(1) and not s2.quality(1) and s2.users()[0]["name"] == "Old")
 
 
 def hub_frame(people, t):
@@ -456,6 +481,34 @@ def check_freshness():
         n += 1
         e.step(frame_of([(1, sy.figure(), 175)], t, n), now=t)
     check("... and goes on by itself when they are back", not e.workout.state(e.roster, {}, t)["paused"])
+
+    # The room goes dark mid-set: the hub switches to infrared (no frames for 0.85 s, measured on
+    # this Kinect), then frames come again in another camera's geometry (a new epoch).
+    e = engine.Engine()
+    e.step(frame_of([(1, sy.figure(), 175)], 0.0, 1), now=0.0)
+    e.workout.start("free", 0.0, exercise="squat")
+    n, t = 1, 3.0
+    for i in range(int(2 * 2.4 * 15)):
+        t = 3.1 + i / 15
+        n += 1
+        st = frame_of([(1, sy.move("squat", i / 15), 175)], t, n)
+        st.update(mode="rgb", epoch=0)
+        e.step(st, now=t)
+    before = e.workout.trackers[0].reps
+    for i in range(int(0.6 * 15)):                 # into the third, then the switch
+        t += 1 / 15
+        n += 1
+        e.step(dict(frame_of([(1, sy.move("squat", i / 15), 175)], t, n), mode="rgb", epoch=0), now=t)
+    for j in range(26):
+        t += 1 / 30
+        e.tick(t)
+    for i in range(int(2.4 * 2 * 15)):            # infrared now, mid-way through that squat
+        t += 1 / 15
+        n += 1
+        e.step(dict(frame_of([(1, sy.move("squat", 1.0 + i / 15), 175)], t, n), mode="ir", epoch=1), now=t)
+    got = e.workout.trackers[0].reps - before
+    check("the room goes dark mid-squat (0.85 s with no frames, then infrared): that squat is not "
+          "counted, the next ones are", got == 1, got)
 
     # The pad lets go when frames stop, without waiting for a frame to say so.
     e = engine.Engine()
