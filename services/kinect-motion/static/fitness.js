@@ -294,6 +294,7 @@
 
   K.section("fitness", {
     title: "Fitness", mount,
+    view: () => shown,
     unmount() { clearInterval(timer); if (offEvent) offEvent(); for (const x of [scene, demo, pip]) if (x) x.stop(); scene = demo = pip = null; shown = null; },
     key(e) { if (e.key === " " && shown === "session") { e.preventDefault(); K.api("/api/workout", { action: (K.live.state.workout || {}).paused ? "resume" : "pause" }); } },
     back() { if (shown === "session") { K.api("/api/workout", { action: "finish" }); return true; } return false; },

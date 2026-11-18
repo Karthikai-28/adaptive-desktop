@@ -40,10 +40,10 @@ class Demo:
         for i in range(self.people):
             name, tt = self.move_at(t, offset=7.0 * i)
             x = -0.6 + 1.3 * i if self.people > 1 else 0.0
-            J = synthetic.move(name, tt, x=x, z=3.2 + 0.3 * i, height=1.75 - 0.12 * i)
+            J = synthetic.move(name, tt, x=x, z=3.4 + 0.3 * i, height=1.75 - 0.12 * i)
             J = J + self.rng.normal(0, 0.008, J.shape)
             people.append({"id": i + 1, "colour": i, "posture": "standing", "height_cm": 175 - 12 * i,
-                           "distance": round(3.2 + 0.3 * i, 2), "skeleton": None, "demo_move": name,
+                           "distance": round(3.4 + 0.3 * i, 2), "skeleton": None, "demo_move": name,
                            "joints": [[round(float(a), 3) for a in j] + [2] for j in J]})
         # A Kinect on the TV: 1.9 m up, 10 degrees down, the colour lens, a 4.8 m deep room.
         return {"people": people, "count": len(people), "captured": now - 0.045, "seq": self.seq,

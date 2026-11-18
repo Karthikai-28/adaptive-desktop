@@ -318,6 +318,7 @@
 
   K.section("games", {
     title: "Games", mount,
+    view: () => phase,
     unmount() { alive = false; clearInterval(timer); clearInterval(tut); if (offEvent) offEvent(); stopDemo(); r = null; },
     back() { if (phase === "play") { stop(); return true; } return false; },
   });

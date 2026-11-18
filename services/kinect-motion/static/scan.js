@@ -295,6 +295,7 @@
 
   K.section("scan", {
     title: "Scan",
+    view: () => job ? job.state : "choose",
     mount(el) {
       mount(el);
       el.addEventListener("click", async (e) => {

@@ -139,6 +139,8 @@ if [ "$QUICK" = 0 ]; then
     step "Files with the inspector (the Nautilus fork, sandboxed)" quiet python3 "$REPO/scripts/verify-files-inspector.py"
     step "Adaptive Link: the daemon against a phone and three intruders" quiet python3 "$REPO/scripts/verify-link.py"
     step "Adaptive Link: the Android app on a device (skips with none attached)" quiet python3 "$REPO/scripts/verify-link-android.py"
+    step "Kinect 3D scanning: snapshots, held turns, failures, units, cancel (synthetic depth)" quiet "$REPO/.local/air-venv/bin/python" "$REPO/scripts/verify-kinect-scan.py"
+    step "Kinect app in its window (virtual display, demo people): every section, games, a workout" quiet xvfb-run -a -s "-screen 0 1920x1200x24" /usr/bin/python3 "$REPO/scripts/verify-kinect-app.py"
 fi
 
 if [ "${#failed[@]}" != 0 ]; then

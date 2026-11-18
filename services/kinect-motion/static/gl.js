@@ -87,7 +87,7 @@ const GL3 = (() => {
     }
     return { p, n };
   }
-  function sphere(lat = 10, lon = 16) {
+  function sphere(lat = 8, lon = 12) {
     const p = [], n = [];
     const pt = (i, j) => { const t = (i / lat) * Math.PI, f = (j / lon) * Math.PI * 2; return [Math.sin(t) * Math.cos(f), Math.cos(t), Math.sin(t) * Math.sin(f)]; };
     for (let i = 0; i < lat; i++) for (let j = 0; j < lon; j++) {
@@ -155,6 +155,7 @@ const GL3 = (() => {
     }
     const lineBuf = gl.createBuffer(), ptPos = gl.createBuffer(), ptCol = gl.createBuffer();
     let ptCount = 0, meshBuf = null;
+    const modelBuf = new Float32Array(16);
     const r = {
       gl, canvas, proj: M.id(), view: M.id(), eye: [0, 1.5, -1], w: 1, h: 1, fog: 0, fogc: [0, 0, 0],
       light: [0.4, 1.0, -0.6], frames: 0, fps: 0, _t: performance.now(),
@@ -172,16 +173,19 @@ const GL3 = (() => {
         gl.clearColor(c[0], c[1], c[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         r.fogc = c.slice(0, 3);
+        r.camVersion += 1;
         const now = performance.now(); r.frames++;
         if (now - r._t > 1000) { r.fps = (r.frames * 1000) / (now - r._t); r.frames = 0; r._t = now; }
       },
+      camVersion: 0,
       camera(eye, target, fov = 0.85, aspect) {
         r.eye = eye;
+        r.camVersion += 1;
         const vw = r.vw || [0, 0, r.w, r.h];
         r.proj = M.perspective(fov, aspect || vw[2] / Math.max(1, vw[3]), 0.05, 60);
         r.view = M.lookAt(eye, target);
       },
-      setView(view, proj) { r.view = view; if (proj) r.proj = proj; },
+      setView(view, proj) { r.view = view; if (proj) r.proj = proj; r.camVersion += 1; },
       // A room point -> canvas pixels (CSS px), for labels drawn over the scene.
       project(p) {
         const q = M.apply(M.mul(r.proj, r.view), p);
@@ -194,10 +198,14 @@ const GL3 = (() => {
         gl.useProgram(g.p);
         gl.bindBuffer(gl.ARRAY_BUFFER, pr.p); gl.enableVertexAttribArray(g.a.pos); gl.vertexAttribPointer(g.a.pos, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, pr.n); gl.enableVertexAttribArray(g.a.nor); gl.vertexAttribPointer(g.a.nor, 3, gl.FLOAT, false, 0, 0);
-        gl.uniformMatrix4fv(g.u.proj, false, new Float32Array(r.proj)); gl.uniformMatrix4fv(g.u.view, false, new Float32Array(r.view));
-        gl.uniformMatrix4fv(g.u.model, false, new Float32Array(model)); gl.uniform4fv(g.u.col, col);
-        gl.uniform3fv(g.u.light, r.light); gl.uniform1f(g.u.lit, lit); gl.uniform3fv(g.u.fogc, r.fogc);
-        gl.uniform1f(g.u.fog, r.fog); gl.uniform3fv(g.u.eye, r.eye);
+        // Camera uniforms only when the camera changed since this program last drew.
+        if (g.cam !== r.camVersion) {
+          g.cam = r.camVersion;
+          gl.uniformMatrix4fv(g.u.proj, false, new Float32Array(r.proj)); gl.uniformMatrix4fv(g.u.view, false, new Float32Array(r.view));
+          gl.uniform3fv(g.u.light, r.light); gl.uniform3fv(g.u.fogc, r.fogc); gl.uniform1f(g.u.fog, r.fog); gl.uniform3fv(g.u.eye, r.eye);
+        }
+        modelBuf.set(model);
+        gl.uniformMatrix4fv(g.u.model, false, modelBuf); gl.uniform4fv(g.u.col, col); gl.uniform1f(g.u.lit, lit);
         gl.depthMask(col[3] >= 0.99);
         gl.drawArrays(gl.TRIANGLES, 0, pr.count);
         gl.depthMask(true);

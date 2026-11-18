@@ -364,11 +364,32 @@ const K = (() => {
     connect();
     catalog().catch(() => {});
     setInterval(bar, 300);
-    const loop = () => { handCursor(); requestAnimationFrame(loop); };
+    // The page's frame rate (every section draws in the same animation frames), measured apart
+    // from the tracking rate, and reported with the section and any script errors.
+    const fps = { n: 0, t: performance.now(), value: 0, worst: null, window: [] };
+    const errors = [];
+    window.addEventListener("error", (e) => errors.push(String(e.message || e)));
+    window.addEventListener("unhandledrejection", (e) => errors.push(String((e.reason && e.reason.message) || e.reason)));
+    const loop = (now) => {
+      handCursor();
+      fps.n += 1;
+      if (now - fps.t >= 1000) {
+        fps.value = (fps.n * 1000) / (now - fps.t); fps.n = 0; fps.t = now;
+        fps.window.push(fps.value); if (fps.window.length > 10) fps.window.shift();
+      }
+      requestAnimationFrame(loop);
+    };
     requestAnimationFrame(loop);
     route();
-    // Render-rate figures for the checks (and the curious): window.__kinect.
-    window.__kinect = { live, serverNow, rate: () => live.rate };
+    setInterval(() => {
+      const view = current && current.view ? current.view() : null;
+      fetch("/api/ui", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        section: currentName, view, fps: Math.round(fps.value * 10) / 10, frames: fps.window.map((v) => Math.round(v)),
+        errors: errors.slice(-5), w: innerWidth, h: innerHeight, dpr: window.devicePixelRatio || 1,
+        screen: [screen.width, screen.height], connected: live.connected,
+        fullscreen: !!document.fullscreenElement || (innerWidth >= screen.width && innerHeight >= screen.height) }) }).catch(() => {});
+    }, 1000);
+    window.__kinect = { live, serverNow, rate: () => live.rate, fps: () => fps.value };
   }
 
   return { $, esc, colour, playerColour, playerRGBA, local, on, emit, live, people, serverNow, api, hub, catalog, users, demo,

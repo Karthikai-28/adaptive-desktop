@@ -646,6 +646,16 @@ def make_app(svc):
             return web.json_response({"ok": True})
         return web.json_response(svc.store.scans())
 
+    async def ui(request):
+        """The page's own report (section, frame rate, errors, size): for the window check and
+        for measuring rendering apart from tracking."""
+        if request.method == "POST":
+            b = await body(request)
+            svc.ui = {**{k: b.get(k) for k in ("section", "view", "fps", "frames", "errors", "w", "h", "dpr",
+                                             "fullscreen", "connected", "screen")}, "at": time.time()}
+            return web.json_response({"ok": True})
+        return web.json_response(getattr(svc, "ui", None))
+
     async def game(request):
         b = await body(request)
         now = time.time()
@@ -747,6 +757,7 @@ def make_app(svc):
     app.router.add_get("/api/events", recent)
     app.router.add_post("/api/pad", pad)
     app.router.add_post("/api/game", game)
+    app.router.add_route("*", "/api/ui", ui)
     app.router.add_route("*", "/api/calibration", calibration_api)
     app.router.add_post("/api/settings", settings)
     app.router.add_get("/api/settings", config)
@@ -758,13 +769,16 @@ async def serve(svc, port):
     svc.loop = asyncio.get_running_loop()
     runner = web.AppRunner(make_app(svc), access_log=None)
     await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", port).start()
+    # A short shutdown: systemd allows 5 s, and open pages are closed below, not waited for.
+    await web.TCPSite(runner, "127.0.0.1", port, shutdown_timeout=1.0).start()
     log(f"on http://127.0.0.1:{port}/fitness")
     while not svc.stop.is_set():
         await asyncio.sleep(1.0)
         if svc.idle():
             log("no page open for a minute; stopping")
             svc.stop.set()
+    for ws in list(svc.clients | svc.event_clients):
+        await ws.close(code=1001, message=b"Kinect Motion is stopping")
     if getattr(svc, "_http", None) is not None:
         await svc._http.close()
     await runner.cleanup()
