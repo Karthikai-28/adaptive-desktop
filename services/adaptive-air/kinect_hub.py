@@ -229,6 +229,8 @@ class PoseSource:
 
     FIND_EVERY = 0.4        # s between looks for newcomers while someone is followed
     MISSES = 3              # frames a follower may lose its person before it is let go
+    REJECTS = 15            # frames depth may say "not a person" (a poster, a coat) before it is
+    IGNORE_S = 20.0         # let go, and that place is ignored for this long
     SPARE = 2               # landmarkers built ahead
     BEHIND_MM, AHEAD_MM = 900, 1300    # depth kept around a person's torso in their crop
 
@@ -245,6 +247,8 @@ class PoseSource:
         self._clahe = None
         self.finder = None
         self.timing = {}
+        self.out = []           # the follower behind each pose detect() returned
+        self.ignored = []       # [(box, until, depth mm)]: places depth said hold no person
         if Path(model).is_file() and Path(detector).is_file():
             self.detector = vision.ObjectDetector.create_from_options(vision.ObjectDetectorOptions(
                 base_options=BaseOptions(model_asset_path=str(detector)),
@@ -332,10 +336,13 @@ class PoseSource:
 
         # Newcomers the finder has found since the last frame (each with its own landmarker).
         self.finder.offer(rgb, bool(self.followers))
+        now = time.monotonic()
+        self.ignored = [x for x in self.ignored if x[1] > now]
         for box, lm in self.finder.take():
             if len(self.followers) < self.max_people and all(
-                    iou(box, f["box"]) < 0.3 and not inside(centre(box), f["box"]) for f in self.followers):
-                self.followers.append({"lm": lm, "box": box, "miss": 0, "ts": 0, "z": None})
+                    iou(box, f["box"]) < 0.3 and not inside(centre(box), f["box"]) for f in self.followers) \
+                    and not self._still_ignored(box, depth):
+                self.followers.append({"lm": lm, "box": box, "miss": 0, "ts": 0, "z": None, "rejects": 0})
             else:
                 self.finder.give_back(lm)
 
@@ -357,6 +364,7 @@ class PoseSource:
         t2 = time.perf_counter()
 
         out, torsos = [], []
+        self.out = []
         for job, poses in zip(jobs, results):
             f = job["f"]
             x0, y0, x1, y1 = f["box"]
@@ -387,6 +395,7 @@ class PoseSource:
                 h = ys.max() - ys.min()
                 f["box"] = (float(xs.min()), float(ys.min() - 0.15 * h), float(xs.max()), float(ys.max()))
             out.append(pose)
+            self.out.append(f)
         self.timing = {"prepare_ms": round(1000 * (t1 - t0), 1), "models_ms": round(1000 * (t2 - t1), 1),
                        "followers": len(self.followers)}
         return out
@@ -432,6 +441,33 @@ class PoseSource:
             return image, full
 
         return {"f": f, "crop": crop, "ts": f["ts"], "place": place}
+
+    def _still_ignored(self, box, depth):
+        """Is this box a place depth already said holds no person, and nothing has moved in
+        since (the depth there within 30 cm of what it was)?"""
+        for b, _, z in self.ignored:
+            if iou(box, b) < 0.5:
+                continue
+            now = torso_depth(depth, centre(box)) if depth is not None else None
+            if z is None or now is None or abs(now - z) < 300:
+                return True
+        return False
+
+    def verdict(self, accepted, depth=None):
+        """people.py's word on the poses detect() just returned (indices of the real people). A
+        follower that depth keeps saying is not a person is let go, and its place ignored for a
+        while, so a poster or a coat on a chair does not cost a model run every frame."""
+        for i, f in enumerate(self.out):
+            if f not in self.followers:
+                continue
+            if i in accepted:
+                f["rejects"] = 0
+                continue
+            f["rejects"] = f.get("rejects", 0) + 1
+            if f["rejects"] >= self.REJECTS:
+                z = torso_depth(depth, centre(f["box"])) if depth is not None else None
+                self.ignored.append((f["box"], time.monotonic() + self.IGNORE_S, z))
+                self._drop(f)
 
     def _drop(self, f):
         self.followers.remove(f)
@@ -851,6 +887,7 @@ class Hub:
                 state = tracker.step(poses, snap.depth, measure.up_vector(snap.accel),
                                      float(self.settings.get("mount_height", 1.92)),
                                      snap.intrinsics, snap.mono)
+                source.verdict(tracker.accepted, snap.depth)
                 # Everything about the frame these skeletons came from (one snapshot), and when
                 # they were ready: the latency budget.
                 state.update(running=True, source=source.kind, **snap.meta(),

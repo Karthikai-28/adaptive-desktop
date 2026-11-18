@@ -642,7 +642,7 @@ def observe(poses, depth, accel_up, mount_height, intr, floor_prev=None, step=ST
         lm = pose.image
         joints, jstate = joints3d(pose, floor, mask, x, y, z, (H, W), step)
         seen.append({
-            "pos": centre3, "joints": joints, "jstate": jstate,
+            "pose": i, "pos": centre3, "joints": joints, "jstate": jstate,
             "top": top, "posture": posture, "straight": straight, "hint": hint,
             "features": f, "distance": f["distance"],
             "outline": outline(mask, step), "box": [int(cols.min()) * step, int(rows.min()) * step,
@@ -823,6 +823,7 @@ class People:
         self.now = 0.0
         self.frames = 0
         self.room = None
+        self.accepted = set()         # which of the frame's poses were real people (observe)
 
     def new_geometry(self):
         """The picture switched camera (colour <-> infrared): fit the floor again from scratch.
@@ -859,6 +860,7 @@ class People:
     def track(self, seen, now):
         """This frame's people (observe()) onto the tracks; -> state(now)."""
         self.now = now
+        self.accepted = {o.get("pose") for o in seen}
         cost = [[self._cost(t, o, now) for o in seen] for t in self.tracks]
         match = assign(cost)
         for t in self.tracks:
