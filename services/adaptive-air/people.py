@@ -21,10 +21,20 @@ Pose Landmarker), so all of this is testable with synthetic depth and hand-made 
               checked for "straight": torso upright, knees locked, arms down, head level, whole
               body in view. Rules after Google's ML Kit pose classification notes and the usual
               knee > 160 deg (straight) / < 140 deg (bent) thresholds.
-    tracking  people keep their number and colour from frame to frame (nearest position on the
-              floor), postures are a vote over the last frames (no flicker), and a height is only
+    tracking  people keep their number and colour from frame to frame: every frame, one global
+              assignment of this frame's people to the known tracks (the cheapest overall, not
+              nearest-first), costed on where each track is predicted to be (its own velocity),
+              its depth, and its body: height, shoulder width and limb lengths (a signature
+              learnt from tracked joints). When two people cross and the assignment could go
+              either way, both tracks are marked unsure; once they are apart again the
+              signatures decide who is who (swapping the numbers back if the motion guess was
+              wrong), and if they cannot, both are retired and get new numbers rather than a
+              guess. Postures are a vote over the last frames (no flicker), and a height is only
               taken while someone stands straight and still, as the median of about a second of
               frames that agree within 3 cm. It stays with them when they sit down again.
+    present   `people` holds only the people seen in this frame. Someone hidden for a moment
+              (behind another person, out of the picture) is in `hidden` with how long ago they
+              were seen and no joints: a remembered position is never passed on as a sighting.
 """
 
 import math
@@ -42,8 +52,17 @@ LOCK_SECONDS = 1.0            # standing straight this long before a height coun
 LOCK_SPREAD = 0.03            # m: the frames must agree this well
 HISTORY = 45                  # straight-standing frames kept per person
 VOTES = 9                     # posture frames voted over
-LOST_AFTER = 1.2              # s unseen before a person is forgotten
-MATCH_METRES = 0.7
+LOST_AFTER = 2.0              # s unseen before a person is forgotten
+MATCH_METRES = 0.7            # m from where a track is predicted to be: further is someone else
+MAX_SPEED = 3.0               # m/s a person can move (the gate widens with time unseen)
+UNMATCHED = 3.0               # cost of leaving a track or a person unmatched
+AMBIGUOUS = 0.8               # cost margin below which swapping two people is just as likely
+APART = 0.8                   # m between two unsure tracks before signatures decide
+RESOLVE_S = 2.5               # s apart to decide; undecided after that: both retired
+SIGNATURE = 60                # frames of body measurements kept per track
+SIG_TOL = {"height": 0.06, "shoulders": 0.04, "upper_arm": 0.035, "forearm": 0.035,
+           "thigh": 0.04, "shin": 0.04}
+SIG_DECIDE = 1.0              # signature cost margin that settles who is who
 COLOURS = 6                   # series.1 .. series.6 on the page
 OUTLINE_POINTS = 64
 
@@ -615,9 +634,64 @@ def observe(poses, depth, accel_up, mount_height, intr, floor_prev=None, step=ST
 
 # ------------------------------------------------------------------ over time
 
+def body_measures(obs):
+    """This frame's body measurements (m) from tracked joints only: the identity signature."""
+    j, st = obs.get("joints"), obs.get("jstate")
+    out = {}
+    if obs.get("posture") == "standing" and obs.get("top"):
+        out["height"] = float(obs["top"])
+    if j is None or st is None:
+        return out
+    pairs = {"shoulders": [(L_SH, R_SH)], "upper_arm": [(L_SH, L_EL), (R_SH, R_EL)],
+             "forearm": [(L_EL, L_WR), (R_EL, R_WR)], "thigh": [(L_HIP, L_KNEE), (R_HIP, R_KNEE)],
+             "shin": [(L_KNEE, L_ANK), (R_KNEE, R_ANK)]}
+    for name, bones in pairs.items():
+        vals = [float(np.linalg.norm(j[a] - j[b])) for a, b in bones
+                if st[a] == TRACKED and st[b] == TRACKED]
+        if vals:
+            out[name] = float(np.mean(vals))
+    return out
+
+
+def signature_cost(sig, measures):
+    """How unlike a track's signature this frame's measurements are (0 = alike), or None."""
+    terms = [abs(sig[k] - v) / SIG_TOL[k] for k, v in measures.items() if k in sig]
+    return float(np.mean(terms)) if len(terms) >= 2 else None
+
+
+def assign(cost, unmatched=UNMATCHED):
+    """The cheapest overall assignment of rows (tracks) to columns (people in this frame):
+    {row: col}. cost[r][c] is None where they cannot be the same person; leaving a row or a
+    column unmatched costs `unmatched`. Exact (dynamic programming over the columns), fine for
+    the handful of people a Kinect sees."""
+    rows = len(cost)
+    cols = len(cost[0]) if rows else 0
+    best = {0: (0.0, ())}                     # columns used (bit mask) -> (cost, choices)
+    for r in range(rows):
+        nxt = {}
+        for used, (c0, picks) in best.items():
+            options = [(c0 + unmatched, used, picks + (None,))]
+            for c in range(cols):
+                if not used & (1 << c) and cost[r][c] is not None:
+                    options.append((c0 + cost[r][c], used | (1 << c), picks + (c,)))
+            for total, mask, pk in options:
+                if mask not in nxt or total < nxt[mask][0]:
+                    nxt[mask] = (total, pk)
+        best = nxt
+    total, picks = min(((c + unmatched * (cols - bin(m).count("1")), pk) for m, (c, pk) in best.items()),
+                       key=lambda x: x[0]) if best else (0.0, ())
+    return {r: c for r, c in enumerate(picks) if c is not None}
+
+
 class Track:
     def __init__(self, tid, colour, obs, now):
         self.id, self.colour = tid, colour
+        self.vel = np.zeros(3)
+        self.sig = {}                  # name -> deque of measurements
+        self.unsure_with = set()       # ids this track may have swapped with
+        self.frozen = None             # the signature when that began
+        self.apart_since = None
+        self.seen_now = True
         self.first = self.last = now
         self.votes = deque(maxlen=VOTES)
         self.posture = obs["posture"]
@@ -629,7 +703,23 @@ class Track:
         self.obs = obs
         self.update(obs, now)
 
+    def predict(self, now):
+        """Where this person should be now: their position moved on by their velocity (for at
+        most half a second: someone hidden for longer may have stopped)."""
+        return self.pos + self.vel * min(0.5, max(0.0, now - self.last))
+
+    def signature(self):
+        return {k: float(np.median(v)) for k, v in self.sig.items() if len(v) >= 5}
+
     def update(self, obs, now):
+        if getattr(self, "pos", None) is not None and now > self.last:
+            v = (obs["pos"] - self.pos) / (now - self.last)
+            speed = float(np.linalg.norm(v))
+            if speed > MAX_SPEED:
+                v *= MAX_SPEED / speed
+            self.vel = 0.6 * self.vel + 0.4 * v
+        for k, val in body_measures(obs).items():
+            self.sig.setdefault(k, deque(maxlen=SIGNATURE)).append(val)
         self.obs, self.last = obs, now
         self.pos = obs["pos"]
         self.live = 0.6 * self.live + 0.4 * obs["top"]
@@ -685,6 +775,8 @@ class Track:
                        "thigh": r(f.get("thigh"), 1), "hip_cm": None if f.get("hip_h") is None
                        else int(round(f["hip_h"] * 100))},
             "x": round(o["centre_x"], 3),
+            "identity": "unsure" if self.unsure_with else "sure",
+            "speed": r(float(np.linalg.norm(self.vel)), 2),
             # 33 joints in the room frame (m): [x, y up, z away, 2 tracked / 1 inferred / 0 missing]
             "joints": [None if s == MISSING else
                        [round(float(j[0]), 3), round(float(j[1]), 3), round(float(j[2]), 3), int(s)]
@@ -703,38 +795,141 @@ class People:
         self.tracks = []
         self.floor = None
         self.next_id = 1
+        self.retired = {}             # id -> (time, why): numbers given up on, for a while
+        self.now = 0.0
+
+    def new_geometry(self):
+        """The picture switched camera (colour <-> infrared): fit the floor again from scratch.
+        People's positions differ by the cameras' 2.5 cm baseline only, so tracks are kept."""
+        self.floor = None
+
+    def _new(self, obs, now):
+        taken = {t.colour for t in self.tracks}
+        colour = next((c for c in range(COLOURS) if c not in taken), self.next_id % COLOURS)
+        t = Track(self.next_id, colour, obs, now)
+        self.next_id += 1
+        self.tracks.append(t)
+        return t
+
+    def _cost(self, t, o, now):
+        pred = t.predict(now)
+        dist = float(np.linalg.norm(pred - o["pos"]))
+        gate = MATCH_METRES + MAX_SPEED * max(0.0, min(1.0, now - t.last - 0.1))
+        if dist > gate:
+            return None
+        c = dist / 0.30
+        sc = signature_cost(t.signature(), body_measures(o))
+        if sc is not None:
+            c += 0.5 * min(sc, 4.0)
+        return c
 
     def step(self, poses, depth, accel_up, mount_height, intr, now):
         seen, self.floor = observe(poses, depth, accel_up, mount_height, intr, self.floor)
-        pairs = sorted(((float(np.linalg.norm(t.pos - o["pos"])), ti, oi)
-                        for ti, t in enumerate(self.tracks) for oi, o in enumerate(seen)),
-                       key=lambda p: p[0])
-        used_t, used_o = set(), set()
-        for dist, ti, oi in pairs:
-            if dist > MATCH_METRES or ti in used_t or oi in used_o:
-                continue
-            self.tracks[ti].update(seen[oi], now)
-            used_t.add(ti)
-            used_o.add(oi)
+        return self.track(seen, now)
+
+    def track(self, seen, now):
+        """This frame's people (observe()) onto the tracks; -> state(now)."""
+        self.now = now
+        cost = [[self._cost(t, o, now) for o in seen] for t in self.tracks]
+        match = assign(cost)
+        for t in self.tracks:
+            t.seen_now = False
+        matched = {}
+        for ti, oi in match.items():
+            matched[self.tracks[ti].id] = (self.tracks[ti], oi)
+        self._ambiguity(cost, match, now)
+        for t, oi in matched.values():
+            t.update(seen[oi], now)
+            t.seen_now = True
         for oi, o in enumerate(seen):
-            if oi not in used_o:
-                taken = {t.colour for t in self.tracks}
-                colour = next((c for c in range(COLOURS) if c not in taken), self.next_id % COLOURS)
-                self.tracks.append(Track(self.next_id, colour, o, now))
-                self.next_id += 1
+            if oi not in match.values():
+                self._new(o, now)
+        self._resolve(now)
         self.tracks = [t for t in self.tracks if now - t.last <= LOST_AFTER]
+        self.retired = {k: v for k, v in self.retired.items() if now - v[0] < 5.0}
         return self.state(now)
 
+    def _ambiguity(self, cost, match, now):
+        """Two matched tracks whose people could just as well be the other way round: both unsure."""
+        pairs = list(match.items())
+        for i, (a, ai) in enumerate(pairs):
+            for b, bi in pairs[i + 1:]:
+                ca, cb = cost[a][bi], cost[b][ai]
+                if ca is None or cb is None:
+                    continue
+                if ca + cb - (cost[a][ai] + cost[b][bi]) < AMBIGUOUS:
+                    ta, tb = self.tracks[a], self.tracks[b]
+                    for t, other in ((ta, tb), (tb, ta)):
+                        if not t.unsure_with:
+                            t.frozen = t.signature()
+                        t.unsure_with.add(other.id)
+                        t.apart_since = None
+
+    def _resolve(self, now):
+        """Unsure tracks that are apart again: the signatures say who is who, or both retire."""
+        by_id = {t.id: t for t in self.tracks}
+        done = set()
+        for t in self.tracks:
+            if not t.unsure_with or t.id in done:
+                continue
+            others = [by_id[i] for i in t.unsure_with if i in by_id]
+            if not others:                    # the other one left: nothing to confuse them with
+                t.unsure_with, t.frozen = set(), None
+                continue
+            u = others[0]
+            apart = (t.seen_now and u.seen_now and
+                     float(np.linalg.norm(t.pos - u.pos)) > APART)
+            if not apart:
+                t.apart_since = u.apart_since = None
+                continue
+            if t.apart_since is None:
+                t.apart_since = u.apart_since = now
+            m_t, m_u = body_measures(t.obs), body_measures(u.obs)
+            keep = [signature_cost(t.frozen or {}, m_t), signature_cost(u.frozen or {}, m_u)]
+            swap = [signature_cost(t.frozen or {}, m_u), signature_cost(u.frozen or {}, m_t)]
+            decided = None
+            if None not in keep and None not in swap:
+                margin = sum(swap) - sum(keep)
+                if margin > SIG_DECIDE:
+                    decided = "keep"
+                elif margin < -SIG_DECIDE:
+                    decided = "swap"
+            if decided == "swap":
+                # The motion guess was wrong: the numbers (and colours) go back to their people.
+                t.id, u.id = u.id, t.id
+                t.colour, u.colour = u.colour, t.colour
+                t.sig, u.sig = u.sig, t.sig
+                t.measured, u.measured = u.measured, t.measured
+                t.measured_at, u.measured_at = u.measured_at, t.measured_at
+            if decided:
+                for x in (t, u):
+                    x.unsure_with, x.frozen, x.apart_since = set(), None, None
+            elif now - t.apart_since > RESOLVE_S:
+                # Cannot tell them apart: new numbers for both rather than a guess.
+                for x in (t, u):
+                    self.retired[x.id] = (now, "unsure")
+                    x.id = self.next_id
+                    self.next_id += 1
+                    x.unsure_with, x.frozen, x.apart_since = set(), None, None
+            done |= {t.id, u.id}
+
     def state(self, now):
-        people = [t.state(now) for t in self.tracks if now - t.last < 0.4]
+        people = [t.state(now) for t in self.tracks if t.seen_now and t.last == now]
         people.sort(key=lambda p: p["x"])
+        hidden = [{"id": t.id, "colour": t.colour, "seen_ago": round(now - t.last, 2),
+                   "identity": "unsure" if t.unsure_with else "sure", "remembered": True,
+                   "pos": [round(float(v), 3) for v in t.pos]}
+                  for t in self.tracks if not (t.seen_now and t.last == now)]
         return {
             "count": len(people),
+            "hidden_count": len(hidden),
             "standing": sum(p["posture"] == "standing" for p in people),
             "postures": {k: sum(p["posture"] == k for p in people) for k in POSTURES
                          if any(p["posture"] == k for p in people)},
             "floor": self.floor.to_dict() if self.floor else None,
             "people": people,
+            "hidden": hidden,
+            "retired": [{"id": k, "why": v[1], "ago": round(now - v[0], 1)} for k, v in self.retired.items()],
             "frame": "room: x right in the picture, y up from the floor, z away from the Kinect",
         }
 

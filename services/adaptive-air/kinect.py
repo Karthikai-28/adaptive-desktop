@@ -45,6 +45,26 @@ def intrinsics(mode="rgb"):
     return INTRINSICS.get(mode, INTRINSICS["rgb"])
 
 
+# The Kinect stamps every picture and depth frame with its own 60 MHz clock (2,000,287 ticks a
+# frame at 30 fps, measured here). A picture and a depth frame read together are normally 2 to
+# 3.3 million ticks apart (colour lags depth by about a frame and a half); the first pair after a
+# colour/infrared switch was 31 to 38 million apart: a picture from before the switch beside
+# depth in the new geometry. Such a pair is dropped, never published.
+TICKS_PER_S = 60_000_000
+PAIR_TICKS = 4_200_000        # ~70 ms: two frames
+
+
+def tick_gap(a, b):
+    """Signed a - b of two 32-bit device timestamps (they wrap every ~71 s)."""
+    d = (int(a) - int(b)) & 0xFFFFFFFF
+    return d - 0x100000000 if d >= 0x80000000 else d
+
+
+def paired(video_ts, depth_ts, limit=PAIR_TICKS):
+    """Were this picture and this depth frame taken together (within two frames)?"""
+    return abs(tick_gap(video_ts, depth_ts)) <= limit
+
+
 LED = {"off": 0, "green": 1, "red": 2, "yellow": 3, "blink-green": 4, "blink-red-yellow": 6}
 
 
@@ -205,8 +225,9 @@ class Camera:
                                                      ctypes.c_int]
         self.index = index
 
-    def read(self, mode="rgb"):
-        """(picture HxWx3 uint8, depth_mm HxW uint16) or raises OSError.
+    def read(self, mode="rgb", stamps=False):
+        """(picture HxWx3 uint8, depth_mm HxW uint16) or raises OSError; with stamps=True also
+        (picture timestamp, depth timestamp) in device ticks, for paired().
 
         mode "ir" gives the infrared camera (it sees in the dark, and shows the projector's dot
         pattern) as a grey picture in the same three channels, and depth in that camera's own
@@ -214,7 +235,7 @@ class Camera:
         distance a few centimetres beside the infrared picture's hand.
         """
         np = self._np
-        ptr, ts = ctypes.c_void_p(), ctypes.c_uint32()
+        ptr, ts, dts = ctypes.c_void_p(), ctypes.c_uint32(), ctypes.c_uint32()
         fmt = VIDEO_IR_8BIT if mode == "ir" else VIDEO_RGB
         if self._lib.freenect_sync_get_video(ctypes.byref(ptr), ctypes.byref(ts), self.index,
                                              fmt) < 0:
@@ -226,11 +247,13 @@ class Camera:
         else:
             rgb = np.ctypeslib.as_array((ctypes.c_uint8 * (WIDTH * HEIGHT * 3)).from_address(
                 ptr.value)).reshape(HEIGHT, WIDTH, 3).copy()
-        if self._lib.freenect_sync_get_depth(ctypes.byref(ptr), ctypes.byref(ts), self.index,
+        if self._lib.freenect_sync_get_depth(ctypes.byref(ptr), ctypes.byref(dts), self.index,
                                              DEPTH_MM if mode == "ir" else DEPTH_REGISTERED) < 0:
             raise OSError("no Kinect depth frame")
         depth = np.ctypeslib.as_array((ctypes.c_uint16 * (WIDTH * HEIGHT)).from_address(
             ptr.value)).reshape(HEIGHT, WIDTH).copy()
+        if stamps:
+            return rgb, depth, (ts.value, dts.value)
         return rgb, depth
 
     def state(self):

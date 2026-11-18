@@ -205,14 +205,16 @@ def _hub_frames():
 
 class HubCapture:
     """The KinectCapture interface over the hub's shared frames. Every frame of one session is in
-    one camera geometry: frames in the other picture (the hub switches colour/infrared with the
-    room's light) are skipped, never mixed."""
+    one camera geometry: frames from another epoch (the hub switched colour/infrared, with the
+    room's light or because something asked) are skipped, never mixed. A switch away and back
+    gives the same mode but a new epoch, and its first frames are not counted either."""
 
     def __init__(self, timeout=10., intrinsics=None):
         self.timeout, self.override = timeout, intrinsics
         self.reader = None
         self.k = None
         self.mode = None
+        self.epoch = None
         self.skipped = 0
         self.last_timestamp = None
 
@@ -229,7 +231,7 @@ class HubCapture:
                 subprocess.run(["systemctl", "--user", "start", HUB_UNIT], capture_output=True)
                 time.sleep(0.3)
         _, _, head = self.reader.read(timeout=self.timeout)
-        self.mode = head["mode"]
+        self.mode, self.epoch = head["mode"], head.get("epoch")
         if self.override is not None:
             self.k = self.override
         else:
@@ -246,7 +248,7 @@ class HubCapture:
             if left <= 0:
                 raise TimeoutError(f"No {self.mode} frame from the Kinect hub (it may have switched picture)")
             _, depth, head = self.reader.read(timeout=left)
-            if head["mode"] != self.mode:
+            if head["mode"] != self.mode or head.get("epoch") != self.epoch:
                 self.skipped += 1
                 continue
             data = depth.copy()

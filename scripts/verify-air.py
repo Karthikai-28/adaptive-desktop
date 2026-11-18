@@ -664,6 +664,7 @@ def check_demo():
 def check_hub():
     print("Kinect hub (frames, helpers, HTTP)")
     import asyncio
+    import time
     import struct as st
 
     import numpy as np
@@ -735,6 +736,8 @@ def check_hub():
         def __init__(self):
             super().__init__({})
             self.rgb, self.depth, self.seq = rgb, depth, 2
+            self.snap = frames.Snapshot(rgb, depth, "rgb", kinect.intrinsics("rgb"), 2, time.time(),
+                                        time.monotonic())
             self.status = "streaming"
             self.sent = []
 
@@ -1113,6 +1116,153 @@ def hardware():
             print(f"  motor: {err}")
 
 
+def check_pairing():
+    """Frames: a picture is published only with the depth taken with it, as one snapshot."""
+    print("Frames: pairing, snapshots, the activity hold and the scan lease")
+    import time
+
+    import numpy as np
+
+    import frames
+    import kinect_hub as hub_mod
+    gap = kinect.tick_gap
+    check("device clock difference, both ways", gap(3_000_000, 1_000_000) == 2_000_000 and gap(1, 2_000_001) == -2_000_000)
+    check("... across the 32-bit wrap", gap(500, 0xFFFFFFFF - 499) == 1000)
+    check("a normal colour + depth pair (measured: 3.1 M ticks apart) is paired",
+          kinect.paired(1_043_050_578, 1_046_188_534))
+    check("the first pair after a switch (measured: 31 M ticks apart) is not",
+          not kinect.paired(1_013_046_265, 1_044_186_379))
+    snap = frames.Snapshot(np.zeros((480, 640, 3), np.uint8), np.zeros((480, 640), np.uint16), "ir",
+                           kinect.intrinsics("ir"), 42, 1000.5, 7.0, epoch=3)
+    m = snap.meta()
+    check("a snapshot carries its own mode, lens numbers, frame and epoch",
+          m["mode"] == "ir" and m["intrinsics"][0] == 575.8 and m["frame"] == 42 and m["epoch"] == 3)
+    d = Path(tempfile.mkdtemp())
+    w = frames.Writer(d / "f")
+    w.write(snap.rgb, snap.depth, "ir", epoch=5)
+    r = frames.Reader(d / "f")
+    _, _, head = r.read(timeout=0.5)
+    check("the shared frame store carries the epoch", head["epoch"] == 5 and head["mode"] == "ir", head)
+    r.close()
+    w.close()
+
+    hub = hub_mod.Hub({})
+    now = time.monotonic()
+    check("no activity: colour checks allowed", not hub._busy(now))
+    hub.command("activity", 4)
+    check("a live workout holds off colour checks", hub._busy(time.monotonic()))
+    hub.command("activity", 999)
+    check("... for at most ten seconds a request", hub.activity_until - time.monotonic() <= 10.01)
+    hub.command("activity", 0)
+    check("... and lets go", not hub._busy(time.monotonic()))
+    hub.command("lease", {"owner": "scan", "mode": "ir", "seconds": 30})
+    check("a scan leases the infrared picture", hub._leased() and hub.lease["mode"] == "ir"
+          and ("force", "ir") in list(hub.commands.queue))
+    hub.command("video", "rgb")
+    hub._apply(type("Cam", (), {})())
+    check("... a mode change asked for during the lease waits", hub.mode == "ir", hub.mode)
+    hub.command("lease", None)
+    check("... released", not hub._leased())
+    hub.lease = {"owner": "scan", "mode": "ir", "until": time.monotonic() - 1}
+    check("an expired lease is let go by itself", not hub._leased())
+
+
+def check_identity():
+    """People keep their numbers through crossings and short occlusions (people.People.track),
+    from synthetic observations: two people who walk past each other, stop and turn back, look
+    alike, or hide behind each other. The right answer is known for every frame."""
+    print("Identity: crossings, occlusion, look-alikes (people.py)")
+    import numpy as np
+
+    import people as P
+
+    def body(x, z, height=1.75, shoulders=0.40, limb=1.0):
+        j = np.full((33, 3), np.nan)
+        st = np.zeros(33, np.int8)
+        hip_y, sh_y = 0.52 * height, 0.82 * height
+        pts = {P.L_SH: (-shoulders / 2, sh_y), P.R_SH: (shoulders / 2, sh_y),
+               P.L_EL: (-shoulders / 2 - 0.02, sh_y - 0.29 * limb), P.R_EL: (shoulders / 2 + 0.02, sh_y - 0.29 * limb),
+               P.L_WR: (-shoulders / 2 - 0.03, sh_y - 0.54 * limb), P.R_WR: (shoulders / 2 + 0.03, sh_y - 0.54 * limb),
+               P.L_HIP: (-0.10, hip_y), P.R_HIP: (0.10, hip_y),
+               P.L_KNEE: (-0.11, hip_y - 0.24 * height * limb), P.R_KNEE: (0.11, hip_y - 0.24 * height * limb),
+               P.L_ANK: (-0.11, 0.06), P.R_ANK: (0.11, 0.06)}
+        for i, (dx, y) in pts.items():
+            j[i], st[i] = (x + dx, y, z), P.TRACKED
+        return {"pos": np.array([x, 0.0, z]), "joints": j, "jstate": st, "top": height,
+                "posture": "standing", "straight": True, "hint": "", "distance": z,
+                "features": {}, "outline": [], "box": [0, 0, 1, 1], "head": None, "foot": None,
+                "ring": [], "skeleton": [[0.5, 0.5, 1.0]] * 33, "centre_x": 0.5 + x / 4}
+
+    def ids_at(state, xs):
+        """The id of whoever is nearest each x (in the state's own people)."""
+        out = []
+        for x in xs:
+            p = min(state["people"], key=lambda q: abs(q["x"] - (0.5 + x / 4)))
+            out.append(p["id"])
+        return out
+
+    # The optimal assignment, not nearest-first: greedy would give track 0 its nearest (0.1)
+    # and leave track 1 with nothing within reach.
+    check("global assignment beats nearest-first", P.assign([[0.1, 0.3], [0.2, None]]) == {0: 1, 1: 0})
+    check("nothing within reach stays unmatched", P.assign([[None], [None]]) == {})
+
+    def walk(a, b, frames=60, fps=15.0, turn_back=False, hide=None):
+        """Person A from x=-1 to +1, person B the other way, at z = 2.5 m; -> (tracker, states)."""
+        tr, states = P.People(), []
+        for k in range(frames):
+            t = k / fps
+            f = k / (frames - 1)
+            xa, xb = -1.0 + 2.0 * f, 1.0 - 2.0 * f
+            if turn_back and f > 0.5:             # both stop in the middle and go back
+                xa, xb = -1.0 + 2.0 * (1 - f), 1.0 - 2.0 * (1 - f)
+            seen = [body(xa, 2.5 + 0.05, **a), body(xb, 2.5 - 0.05, **b)]
+            if hide and hide[0] <= k < hide[1]:
+                seen = seen[:1]                    # B hidden behind A
+            states.append(tr.track(seen, t))
+        return tr, states
+
+    tall, short = {"height": 1.86, "shoulders": 0.44}, {"height": 1.62, "shoulders": 0.35}
+    tr, st = walk(tall, short)
+    first, last = st[2], st[-1]
+    a0, b0 = ids_at(first, [-0.95, 0.95])
+    a1, b1 = ids_at(last, [1.0, -1.0])
+    check("two people cross: each keeps their number", (a1, b1) == (a0, b0), (a0, b0, a1, b1))
+    check("... and nobody else appears", tr.next_id == 3, tr.next_id)
+    check("... sure of both once apart", all(p["identity"] == "sure" for p in last["people"]),
+          [p["identity"] for p in last["people"]])
+
+    tr, st = walk(tall, short, turn_back=True)
+    a0, b0 = ids_at(st[2], [-0.95, 0.95])
+    a1, b1 = ids_at(st[-1], [-1.0, 1.0])
+    retired = {r["id"] for s in st for r in s["retired"]}
+    check("meet half way and turn back (velocity says they swapped): a tall and a short person keep "
+          "their numbers, by their bodies", (a1, b1) == (a0, b0) and not retired, (a0, b0, a1, b1, retired))
+
+    same = {"height": 1.75, "shoulders": 0.40}
+    tr, st = walk(same, same, turn_back=True, frames=200)
+    a0, b0 = ids_at(st[2], [-0.95, 0.95])
+    unsure = [k for k, s in enumerate(st) if any(p["identity"] == "unsure" for p in s["people"])]
+    retired = {r["id"] for s in st for r in s["retired"]}
+    a1, b1 = ids_at(st[-1], [-1.0, 1.0])
+    check("look-alikes who meet and turn back: marked unsure from the moment they meet",
+          bool(unsure) and 90 <= unsure[0] <= 101, unsure[:1])
+    check("... and once apart, both numbers retired rather than guessed",
+          {a0, b0} <= retired and {a1, b1}.isdisjoint({a0, b0}), (retired, a0, b0, a1, b1))
+    check("... the new numbers are sure", all(p["identity"] == "sure" for p in st[-1]["people"]))
+
+    tr, st = walk(tall, short, hide=(20, 30))
+    hidden_frames = st[20:30]
+    check("hidden behind someone: not reported as present",
+          all(len(s["people"]) == 1 for s in hidden_frames))
+    check("... but listed as hidden, with how long ago they were seen, and no joints",
+          all(len(s["hidden"]) == 1 and s["hidden"][0]["remembered"] and "joints" not in s["hidden"][0]
+              for s in hidden_frames) and hidden_frames[-1]["hidden"][0]["seen_ago"] > 0.5)
+    b_id = ids_at(st[5], [1.0 - 2.0 * 5 / 59])[0]
+    check("... and back under their own number", b_id in [p["id"] for p in st[40]["people"]],
+          (b_id, [p["id"] for p in st[40]["people"]]))
+    check("counts: visible and hidden apart", st[25]["count"] == 1 and st[25]["hidden_count"] == 1)
+
+
 def main():
     check_shapes()
     check_filter()
@@ -1138,6 +1288,8 @@ def main():
     check_hub()
     check_height()
     check_people()
+    check_pairing()
+    check_identity()
     if "--hardware" in sys.argv:
         hardware()
     print()

@@ -56,6 +56,8 @@ REPROBE = 3.0
 WEBCAM_NAME = "Kinect Camera"
 VIDEO = ("auto", "rgb", "ir")
 BUSY_STALE = 3.0       # s: Air saying it is engaged counts only while Air still reads frames
+ACTIVITY_MAX = 10.0    # s an app may hold "an activity is live" (no colour checks) per request
+LEASE_MAX = 600.0      # s a scan may hold one picture mode per request
 
 
 def log(msg):
@@ -210,12 +212,25 @@ class PoseSource:
     "person") finds everyone, then each person gets their own Pose Landmarker that follows them
     from frame to frame on a square crop around them (as air.py follows each hand). MediaPipe's
     one-shot multi-person mode misses most people in a group; this way each person is the only
-    subject of their own model. The detector runs every DETECT_EVERY frames to find newcomers.
-    Models: .local/air-models (scripts/install-air.sh). Without the detector: the multi-person
-    landmarker on the whole picture; without that either: the one-person Pose in MediaPipe."""
+    subject of their own model.
 
-    DETECT_EVERY = 6
+    The detector costs ~70 ms a frame and a new landmarker ~150 ms to build on this laptop
+    (measured), more than a frame's budget, so neither happens on the frame path: the finder
+    thread runs the detector on the newest frame it is given (continuously while nobody is
+    followed, every FIND_EVERY s otherwise) and hands over newcomers with a landmarker it has
+    already built; spare landmarkers are kept warm. The frame path only runs the followers.
+
+    In infrared the picture is the projector's dot pattern: it is cleaned first (a median filter
+    and CLAHE, as Air does for hands). Every crop also greys out what depth says is far behind or
+    in front of its person (depth-supported foreground), which matters most in infrared, where a
+    sofa and a person are the same grey. Models: .local/air-models (scripts/install-air.sh).
+    Without the detector: the multi-person landmarker on the whole picture; without that either:
+    the one-person Pose in MediaPipe."""
+
+    FIND_EVERY = 0.4        # s between looks for newcomers while someone is followed
     MISSES = 3              # frames a follower may lose its person before it is let go
+    SPARE = 2               # landmarkers built ahead
+    BEHIND_MM, AHEAD_MM = 900, 1300    # depth kept around a person's torso in their crop
 
     def __init__(self, model=POSE_MODEL, detector=DETECTOR_MODEL, max_people=MAX_PEOPLE):
         import mediapipe as mp
@@ -225,14 +240,18 @@ class PoseSource:
         self.task = self.legacy = self.detector = None
         self.followers = []
         self.pool = None
-        self.n = 0
         self.last_ts = 0
+        self.ts_lock = threading.Lock()
+        self._clahe = None
+        self.finder = None
+        self.timing = {}
         if Path(model).is_file() and Path(detector).is_file():
             self.detector = vision.ObjectDetector.create_from_options(vision.ObjectDetectorOptions(
                 base_options=BaseOptions(model_asset_path=str(detector)),
                 running_mode=vision.RunningMode.IMAGE, score_threshold=0.4,
                 category_allowlist=["person"], max_results=max_people))
             self.kind = "top-down"
+            self.finder = Finder(self)
         elif Path(model).is_file():
             self.task = vision.PoseLandmarker.create_from_options(self._options(max_people))
             self.kind = "multi"
@@ -247,12 +266,32 @@ class PoseSource:
             min_pose_detection_confidence=0.3, min_pose_presence_confidence=0.5,
             min_tracking_confidence=0.5, output_segmentation_masks=True)
 
+    def new_landmarker(self):
+        """A landmarker, warmed: its first inference costs ~3x a later one (measured), so it is
+        spent here, off the frame path, on a blank square."""
+        import numpy as np
+        lm = self.vision.PoseLandmarker.create_from_options(self._options())
+        lm.detect_for_video(self._image(np.full((256, 256, 3), 128, np.uint8)), self._ts())
+        return lm
+
     def _ts(self):
-        self.last_ts = max(self.last_ts + 1, int(time.monotonic() * 1000))     # must always increase
-        return self.last_ts
+        with self.ts_lock:
+            self.last_ts = max(self.last_ts + 1, int(time.monotonic() * 1000))   # must always increase
+            return self.last_ts
 
     def _image(self, rgb):
         return self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=rgb)
+
+    def prepare(self, rgb, mode):
+        """What the models look at: the colour picture, or the infrared one cleaned up."""
+        import numpy as np
+        if mode != "ir":
+            return np.ascontiguousarray(rgb)
+        import cv2
+        if self._clahe is None:
+            self._clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        grey = self._clahe.apply(cv2.medianBlur(np.ascontiguousarray(rgb[:, :, 0]), 5))
+        return cv2.cvtColor(grey, cv2.COLOR_GRAY2RGB)
 
     @staticmethod
     def _poses(result, place):
@@ -271,9 +310,12 @@ class PoseSource:
             out.append(people.Pose(image, None if world is None else [(p.x, p.y, p.z) for p in world], mask))
         return out
 
-    def detect(self, rgb):
+    def detect(self, rgb, depth=None, mode="rgb"):
+        """The poses in one frame. rgb: the picture as the camera gave it; depth: millimetres in
+        the same geometry (or None); mode: "rgb" or "ir"."""
         import numpy as np
-        rgb = np.ascontiguousarray(rgb)
+        t0 = time.perf_counter()
+        rgb = self.prepare(rgb, mode)
         H, W = rgb.shape[:2]
         if self.detector is None:
             if self.task is not None:
@@ -288,22 +330,19 @@ class PoseSource:
                                 None if world is None else [(p.x, p.y, p.z) for p in world],
                                 r.segmentation_mask)]
 
-        self.n += 1
-        if self.n % (self.DETECT_EVERY if self.followers else 3) == 1:   # newcomers
-            found = self.detector.detect(self._image(rgb)).detections
-            for d in sorted(found, key=lambda d: -d.categories[0].score):
-                b = d.bounding_box
-                box = (b.origin_x, b.origin_y, b.origin_x + b.width, b.origin_y + b.height)
-                if len(self.followers) >= self.max_people:
-                    break
-                if all(iou(box, f["box"]) < 0.3 and not inside(centre(box), f["box"]) for f in self.followers):
-                    lm = self.vision.PoseLandmarker.create_from_options(self._options())
-                    self.followers.append({"lm": lm, "box": box, "miss": 0, "ts": 0})
+        # Newcomers the finder has found since the last frame (each with its own landmarker).
+        self.finder.offer(rgb, bool(self.followers))
+        for box, lm in self.finder.take():
+            if len(self.followers) < self.max_people and all(
+                    iou(box, f["box"]) < 0.3 and not inside(centre(box), f["box"]) for f in self.followers):
+                self.followers.append({"lm": lm, "box": box, "miss": 0, "ts": 0, "z": None})
+            else:
+                self.finder.give_back(lm)
 
         # Each follower on its own square crop, all at once (MediaPipe lets go of the GIL).
         jobs = []
         for f in list(self.followers):
-            job = self._crop(f, rgb, W, H)
+            job = self._crop(f, rgb, depth, W, H)
             if job is None:
                 self._drop(f)
             else:
@@ -311,9 +350,11 @@ class PoseSource:
         if self.pool is None:
             from concurrent.futures import ThreadPoolExecutor
             self.pool = ThreadPoolExecutor(self.max_people, thread_name_prefix="pose")
+        t1 = time.perf_counter()
         results = list(self.pool.map(
             lambda j: self._poses(j["f"]["lm"].detect_for_video(self._image(j["crop"]), j["ts"]), j["place"]),
             jobs))
+        t2 = time.perf_counter()
 
         out, torsos = [], []
         for job, poses in zip(jobs, results):
@@ -336,6 +377,7 @@ class PoseSource:
                 continue
             torsos.append(torso)
             f["miss"] = 0
+            f["z"] = torso_depth(depth, torso) if depth is not None else None
             # Follow them: the next crop is around their mask (it includes the top of the head).
             if pose.mask is not None and (pose.mask > 0.5).sum() > 50:
                 ys, xs = np.nonzero(pose.mask > 0.5)
@@ -345,9 +387,11 @@ class PoseSource:
                 h = ys.max() - ys.min()
                 f["box"] = (float(xs.min()), float(ys.min() - 0.15 * h), float(xs.max()), float(ys.max()))
             out.append(pose)
+        self.timing = {"prepare_ms": round(1000 * (t1 - t0), 1), "models_ms": round(1000 * (t2 - t1), 1),
+                       "followers": len(self.followers)}
         return out
 
-    def _crop(self, f, rgb, W, H):
+    def _crop(self, f, rgb, depth, W, H):
         """The square crop a follower looks at (only its person in it), and how to map back."""
         import cv2
         import numpy as np
@@ -367,6 +411,12 @@ class PoseSource:
         ky0, ky1 = int(y0 - 0.10 * bh - 6) - sy, int(y1 + 0.10 * bh + 6) - sy
         keep = np.zeros((S, S), bool)
         keep[max(ky0, 0):max(ky1, 0), max(kx0, 0):max(kx1, 0)] = True
+        # And what depth says is not them: far behind (a wall, a sofa) or far in front. No
+        # reading (0) is kept: hair and dark clothes often have none.
+        if depth is not None and f.get("z"):
+            d = np.zeros((S, S), np.uint16)
+            d[ay0 - sy:ay1 - sy, ax0 - sx:ax1 - sx] = depth[ay0:ay1, ax0:ax1]
+            keep &= ~(((d > f["z"] + self.BEHIND_MM) | ((d > 0) & (d < f["z"] - self.AHEAD_MM))))
         crop[~keep] = 128
         f["ts"] = max(f["ts"] + 1, self._ts())
 
@@ -389,6 +439,8 @@ class PoseSource:
         f["lm"].close()
 
     def close(self):
+        if self.finder is not None:
+            self.finder.close()
         if self.pool is not None:
             self.pool.shutdown(wait=True)
         for f in list(self.followers):
@@ -396,6 +448,102 @@ class PoseSource:
         for x in (self.task, self.legacy, self.detector):
             if x is not None:
                 x.close()
+
+
+class Finder:
+    """PoseSource's person detector, off the frame path (a thread): the newest frame in, boxes of
+    people with a landmarker ready for each out."""
+
+    def __init__(self, source):
+        self.source = source
+        self.cv = threading.Condition()
+        self.frame = None
+        self.busy = False          # someone is followed: look only every FIND_EVERY s
+        self.found = []
+        self.spare = []
+        self.stopped = False
+        self.last = 0.0
+        self.ms = None
+        self.thread = threading.Thread(target=self._run, name="pose-finder", daemon=True)
+        self.thread.start()
+
+    def offer(self, rgb, busy):
+        with self.cv:
+            self.frame, self.busy = rgb, busy
+            self.cv.notify()
+
+    def take(self):
+        with self.cv:
+            out, self.found = self.found, []
+            return out
+
+    def give_back(self, lm):
+        with self.cv:
+            if len(self.spare) < PoseSource.SPARE and not self.stopped:
+                self.spare.append(lm)
+                return
+        lm.close()
+
+    def _landmarker(self):
+        with self.cv:
+            if self.spare:
+                return self.spare.pop()
+        return self.source.new_landmarker()
+
+    def _run(self):
+        src = self.source
+        while True:
+            with self.cv:
+                while True:
+                    if self.stopped:
+                        return
+                    due = self.frame is not None and not (
+                        self.busy and time.monotonic() - self.last < PoseSource.FIND_EVERY)
+                    if due:
+                        rgb, self.frame, job = self.frame, None, "find"
+                        break
+                    if len(self.spare) < PoseSource.SPARE:
+                        job = "spare"                 # build one while there is time
+                        break
+                    self.cv.wait(0.05)
+            if job == "spare":
+                self.give_back(src.new_landmarker())
+                continue
+            self.last = time.monotonic()
+            t0 = time.perf_counter()
+            found = src.detector.detect(src._image(rgb)).detections
+            self.ms = round(1000 * (time.perf_counter() - t0), 1)
+            new = []
+            for d in sorted(found, key=lambda d: -d.categories[0].score):
+                b = d.bounding_box
+                box = (b.origin_x, b.origin_y, b.origin_x + b.width, b.origin_y + b.height)
+                if any(iou(box, f["box"]) >= 0.3 or inside(centre(box), f["box"])
+                       for f in list(src.followers)):
+                    continue
+                new.append((box, self._landmarker()))
+            with self.cv:
+                self.found.extend(new)
+
+    def close(self):
+        with self.cv:
+            self.stopped = True
+            self.cv.notify_all()
+        self.thread.join(timeout=2)
+        for _, lm in self.found:
+            lm.close()
+        for lm in self.spare:
+            lm.close()
+        self.found, self.spare = [], []
+
+
+def torso_depth(depth, torso, r=6):
+    """Median depth (mm) around a torso point in the picture, or None."""
+    import numpy as np
+    u, v = int(torso[0]), int(torso[1])
+    H, W = depth.shape
+    patch = depth[max(0, v - r):min(H, v + r + 1), max(0, u - r):min(W, u + r + 1)]
+    ok = patch[(patch > 300) & (patch < 9000)]
+    return float(np.median(ok)) if ok.size >= 5 else None
 
 
 def iou(a, b):
@@ -424,6 +572,11 @@ class Hub:
         self.switch = fusion.LightSwitch(float(settings.get("dark_below", 0.04)),
                                          float(settings.get("light_above", 0.07)))
         self.busy = False      # Air is engaged: no colour checks from infrared while it is
+        self.activity_until = 0.0   # a workout or game is live (Kinect Motion): the same
+        self.lease = None      # {"owner", "mode", "until"}: a scan holds one picture mode
+        self.snap = None       # frames.Snapshot: the newest frame, all of it under one lock
+        self.epoch = 0         # colour/infrared switches so far
+        self.unpaired = 0      # picture + depth pairs dropped: not taken together
         self.commands = queue.Queue()
         self.stop = threading.Event()
         self.lock = threading.Lock()
@@ -462,6 +615,25 @@ class Hub:
         elif name == "busy":
             self.busy = bool(value)
             return
+        elif name == "activity":
+            # {"value": seconds}: a workout or game is live for that long (re-sent while it is).
+            try:
+                hold = min(ACTIVITY_MAX, max(0.0, float(value or 0)))
+            except (TypeError, ValueError):
+                hold = 0.0
+            self.activity_until = time.monotonic() + hold if hold else 0.0
+            return
+        elif name == "lease":
+            # {"value": {"owner": "scan", "mode": "ir", "seconds": 120}} holds the picture mode;
+            # {"value": null} lets it go. While held, the light switch does not change it.
+            if isinstance(value, dict) and value.get("mode") in ("rgb", "ir"):
+                seconds = min(LEASE_MAX, max(1.0, float(value.get("seconds") or 60)))
+                self.lease = {"owner": str(value.get("owner") or "app")[:40], "mode": value["mode"],
+                              "until": time.monotonic() + seconds}
+                self.commands.put(("force", value["mode"]))
+            else:
+                self.lease = None
+            return
         self.commands.put((name, value))
 
     def _apply(self, cam):
@@ -480,8 +652,10 @@ class Hub:
                     self.video = value
                     self.switch = fusion.LightSwitch(self.switch.dark_below,
                                                      self.switch.light_above)
-                    if value != "auto":
+                    if value != "auto" and not self._leased():
                         self.mode = value
+                elif name == "force" and value in ("rgb", "ir"):
+                    self.mode = value
             except (OSError, ValueError) as err:
                 log(f"{name}: {err}")
 
@@ -513,8 +687,16 @@ class Hub:
                 self.webcam = None
 
     def _busy(self, now):
+        """No colour checks from infrared now: Air is engaged (and still reading), or a workout
+        or game is live. A look at colour interrupts infrared tracking for most of a second."""
         seen = self.writer.client_seen() if self.writer else 0.0
-        return self.busy and now - seen < BUSY_STALE
+        return (self.busy and now - seen < BUSY_STALE) or now < self.activity_until
+
+    def _leased(self, now=None):
+        now = time.monotonic() if now is None else now
+        if self.lease is not None and now >= self.lease["until"]:
+            self.lease = None
+        return self.lease is not None
 
     def idle(self, now):
         if self.settings.get("webcam") or self.studio_clients > 0:
@@ -527,6 +709,7 @@ class Hub:
         cam = None
         last_probe = 0.0
         frames_n, fps_t, last_state, last_stats = 0, time.monotonic(), 0.0, 0.0
+        last_vts, last_mode = None, None
         self.writer = frames.Writer()
         try:
             while not self.stop.is_set():
@@ -558,8 +741,9 @@ class Hub:
                         cam = None
                         continue
                 self._apply(cam)
+                mode = self.mode
                 try:
-                    rgb, depth = cam.read(self.mode)
+                    rgb, depth, (vts, dts) = cam.read(mode, stamps=True)
                 except OSError as err:
                     log(f"Kinect lost: {err}")
                     self.status, self.error = "error", str(err)
@@ -569,6 +753,17 @@ class Hub:
                         pass
                     cam = None
                     continue
+                # A picture and a depth frame not taken together (the first pair after a
+                # colour/infrared switch is half a second apart), or a repeat: never published.
+                if not kinect.paired(vts, dts) or vts == last_vts:
+                    self.unpaired += 1
+                    last_vts = vts
+                    continue
+                last_vts = vts
+                if mode != last_mode:
+                    if last_mode is not None:
+                        self.epoch += 1
+                    last_mode = mode
                 if now - last_state >= 0.2:
                     try:
                         self.motor = cam.state()
@@ -578,18 +773,24 @@ class Hub:
                 frames_n += 1
                 if now - fps_t >= 1.0:
                     self.fps, frames_n, fps_t = frames_n / (now - fps_t), 0, now
-                self.writer.write(rgb, depth, self.mode, self.motor["accel"],
-                                  self.motor["tilt"], self.fps)
+                captured = time.time()
+                self.writer.write(rgb, depth, mode, self.motor["accel"],
+                                  self.motor["tilt"], self.fps, self.epoch)
+                snap = frames.Snapshot(rgb, depth, mode, kinect.intrinsics(mode), self.writer.seq,
+                                       captured, now, self.motor["accel"], self.epoch, (vts, dts))
                 with self.lock:
+                    self.snap = snap
                     self.rgb, self.depth, self.seq = rgb, depth, self.writer.seq
-                    self.captured = time.time()
-                if self.mode == "rgb":
+                    self.captured = captured
+                if mode == "rgb":
                     self.light = round(fusion.light_level(rgb), 3)
                 if now - last_stats >= 0.25:
                     self.stats = depth_stats(depth)
                     last_stats = now
-                if self.video == "auto":
-                    self.mode = self.switch.step(now, self.mode, self.light, busy=self._busy(now),
+                if self._leased(now):
+                    self.mode = self.lease["mode"]
+                elif self.video == "auto":
+                    self.mode = self.switch.step(now, mode, self.light, busy=self._busy(now),
                                                  hold=bool(self.settings.get("webcam")))
                 self._sync_webcam(rgb)            # in infrared mode: a night-vision webcam
         finally:
@@ -632,23 +833,31 @@ class Hub:
             return
         log(f"people tracker on ({source.kind} pose)")
         tracker = people.People()
-        last = 0
+        last, epoch = 0, None
         try:
             while not self.stop.is_set() and time.monotonic() < self.people_until:
-                rgb, depth, seq = self.latest()
-                if rgb is None or seq == last:
-                    time.sleep(0.01)
+                snap = self.snapshot()
+                if snap is None or snap.seq == last:
+                    time.sleep(0.004)
                     continue
-                last = seq
-                captured = self.captured
-                poses = source.detect(rgb)
-                state = tracker.step(poses, depth, measure.up_vector(self.motor["accel"]),
+                last = snap.seq                      # always the newest frame: no backlog
+                if snap.epoch != epoch:
+                    if epoch is not None:
+                        tracker.new_geometry()        # another camera: the floor is refitted
+                    epoch = snap.epoch
+                t0 = time.perf_counter()
+                poses = source.detect(snap.rgb, snap.depth, snap.mode)
+                t1 = time.perf_counter()
+                state = tracker.step(poses, snap.depth, measure.up_vector(snap.accel),
                                      float(self.settings.get("mount_height", 1.92)),
-                                     kinect.intrinsics(self.mode), time.monotonic())
-                # When the frame was taken and when its skeletons were ready: the latency budget.
-                state.update(running=True, frame=seq, source=source.kind, mode=self.mode,
-                             size=[frames.W, frames.H], captured=round(captured, 4),
-                             ready=round(time.time(), 4))
+                                     snap.intrinsics, snap.mono)
+                # Everything about the frame these skeletons came from (one snapshot), and when
+                # they were ready: the latency budget.
+                state.update(running=True, source=source.kind, **snap.meta(),
+                             ready=round(time.time(), 4),
+                             timing={**source.timing, "pose_ms": round(1000 * (t1 - t0), 1),
+                                     "people_ms": round(1000 * (time.perf_counter() - t1), 1),
+                                     "find_ms": source.finder.ms if source.finder else None})
                 self._publish(state)
         except Exception as err:                    # noqa: BLE001
             log(f"people tracker stopped: {err}")
@@ -712,29 +921,34 @@ class Hub:
         with self.lock:
             return self.rgb, self.depth, self.seq
 
+    def snapshot(self):
+        """The newest frame as one frames.Snapshot (picture, depth, mode, lens, times), or None."""
+        with self.lock:
+            return self.snap
+
     def jpeg(self, kind):
         import cv2
-        rgb, depth, seq = self.latest()
-        if rgb is None:
+        snap = self.snapshot()
+        if snap is None:
             return None, 0
         cached = self._jpeg.get(kind)
-        if cached and cached[0] == seq:
-            return cached[1], seq
-        img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR) if kind == "video" else colour_depth(depth)
+        if cached and cached[0] == snap.seq:
+            return cached[1], snap.seq
+        img = cv2.cvtColor(snap.rgb, cv2.COLOR_RGB2BGR) if kind == "video" else colour_depth(snap.depth)
         ok, data = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
         data = data.tobytes() if ok else None
-        self._jpeg[kind] = (seq, data)
-        return data, seq
+        self._jpeg[kind] = (snap.seq, data)
+        return data, snap.seq
 
     def cloud(self, step):
-        rgb, depth, seq = self.latest()
-        if rgb is None:
+        snap = self.snapshot()
+        if snap is None:
             return None
         cached = self._cloud.get(step)
-        if cached and cached[0] == seq:
+        if cached and cached[0] == snap.seq:
             return cached[1]
-        data = cloud_bytes(*point_cloud(rgb, depth, step, mode=self.mode), seq)
-        self._cloud = {step: (seq, data)}
+        data = cloud_bytes(*point_cloud(snap.rgb, snap.depth, step, mode=snap.mode), snap.seq)
+        self._cloud = {step: (snap.seq, data)}
         return data
 
     def info(self):
@@ -743,7 +957,9 @@ class Hub:
         g = math.sqrt(sum(float(v) ** 2 for v in self.motor["accel"])) / kinect.COUNTS_PER_G
         return {
             "status": self.status, "error": self.error, "kinect": kinect.probe(),
-            "mode": self.mode, "video": self.video,
+            # The picture frames are in now (the snapshot's), and the one asked for next.
+            "mode": self.snap.mode if self.snap is not None else self.mode, "next_mode": self.mode,
+            "video": self.video,
             "auto": self.switch.reason if self.video == "auto" else None,
             "fps": round(self.fps, 1), "seq": self.seq,
             "accel": self.motor["accel"], "g": round(g, 3), "pitch": pitch, "roll": roll,
@@ -753,6 +969,12 @@ class Hub:
                        "streaming": self.webcam is not None, "error": self.webcam_error},
             "air": time.monotonic() - seen < 3.0 if seen else False,
             "studio": self.studio_clients,
+            "epoch": self.epoch, "unpaired": self.unpaired,
+            "activity": time.monotonic() < self.activity_until,
+            "lease": None if not self._leased() else
+            {"owner": self.lease["owner"], "mode": self.lease["mode"],
+             "left": round(self.lease["until"] - time.monotonic(), 1)},
+            "intrinsics": list(self.snap.intrinsics if self.snap is not None else kinect.intrinsics(self.mode)),
         }
 
 
@@ -808,11 +1030,10 @@ def make_app(hub):
         return web.Response(body=data, content_type="application/octet-stream")
 
     async def ply(_request):
-        rgb, depth, _ = hub.latest()
-        if rgb is None:
+        snap = hub.snapshot()
+        if snap is None:
             raise web.HTTPServiceUnavailable(text="no Kinect frame yet")
-        mode = hub.mode
-        data = await in_thread(lambda: ply_bytes(*point_cloud(rgb, depth, 2, mode=mode)))
+        data = await in_thread(lambda: ply_bytes(*point_cloud(snap.rgb, snap.depth, 2, mode=snap.mode)))
         name = time.strftime("kinect-%Y%m%d-%H%M%S.ply")
         return web.Response(body=data, content_type="application/octet-stream",
                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -848,7 +1069,7 @@ def make_app(hub):
 
     async def api(request):
         name = request.match_info["name"]
-        if name not in ("led", "tilt", "video", "webcam", "busy"):
+        if name not in ("led", "tilt", "video", "webcam", "busy", "activity", "lease"):
             raise web.HTTPNotFound()
         try:
             body = await request.json()
