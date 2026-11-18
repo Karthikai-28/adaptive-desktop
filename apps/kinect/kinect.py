@@ -124,6 +124,7 @@ class App(Gtk.Application):
         manager = WebKit2.WebsiteDataManager(base_data_directory=data, base_cache_directory=data + "/cache")
         context = WebKit2.WebContext.new_with_website_data_manager(manager)
         context.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
+        context.connect("download-started", self._download)
         self.view = WebKit2.WebView(settings=settings, web_context=context)
         ground = Gdk.RGBA()
         ground.parse(adaptive_tokens.load().hex("surface.ground"))
@@ -131,6 +132,30 @@ class App(Gtk.Application):
         self.win.add(self.view)
         self.win.connect("key-press-event", self._key)
         self.win.show_all()
+
+    def _download(self, _context, download):
+        """Exports (a scan's STL, a point cloud) go to Downloads, never over an existing file;
+        the page says where."""
+        def destination(dl, name):
+            folder = Path(GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or Path.home() / "Downloads")
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / Path(name).name
+            n = 2
+            while target.exists():
+                target = folder / f"{Path(name).stem} ({n}){Path(name).suffix}"
+                n += 1
+            dl.set_destination(target.as_uri())
+            dl.target = target
+            return True
+
+        def finished(dl):
+            where = getattr(dl, "target", None)
+            if where is not None and self.view is not None:
+                text = f"Saved to {where}".replace("\\", "").replace("'", "")
+                self.view.run_javascript(f"K.toast('{text}', '', 5000)", None, None, None)
+
+        download.connect("decide-destination", destination)
+        download.connect("finished", finished)
 
     def toggle_full(self):
         (self.win.unfullscreen if self.full else self.win.fullscreen)()

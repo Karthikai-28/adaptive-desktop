@@ -76,7 +76,7 @@ class Job:
     def to_dict(self):
         return {"id": self.id, "kind": self.kind, "state": self.state, "stage": self.stage,
                 "progress": self.progress, "message": self.message, "error": self.error,
-                "segment": self.segment, "turn": self.turn,
+                "segment": self.segment, "turn": self.turn, "failed_stage": getattr(self, "failed_stage", None),
                 "result": self.result, "background": bool(self.segment.get("background"))}
 
 
