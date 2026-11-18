@@ -1363,6 +1363,56 @@ docs/KINECT_MOTION.md.
 - The 582-line fitness chapter and v0.2.0 code from ChatGPT never arrived (sandbox links): compare
   once downloaded.
 
+## Milestone 24 — Kinect: one app, tracking repairs, guided 3D scanning (2026-11-18)
+
+Guide: docs/KINECT_MOTION.md (its "Acceptance" section is the live protocol). **Not ready**:
+darkness is a release gate, and nothing below marked 🔬 has been tried with people yet.
+
+### Done (software, checked)
+
+- ✅ Baseline measured first (`scripts/kinect-baseline.py`, nobody in view, Kinect 0.80 m up):
+  11.3 skeleton updates/s, camera to Motion p50 79 / p95 259 ms → after the repairs 28.9/s,
+  21 / 38 ms. Saved in `~/.local/share/adaptive-desktop/kinect-baseline/`.
+- ✅ Hub: picture/depth pairs within two frames by device clock (first pair after a switch measured
+  31-38 M ticks apart; the switch itself ~0.83 s), one snapshot with mode, lens, times and epoch;
+  person detector off the frame path, warmed pose models, infrared cleaned for bodies, depth-masked
+  crops, phantom followers let go; `activity` (no colour checks during play) and `lease` (scan).
+- ✅ Identity: global assignment on predicted position, depth and body signature; unsure crossings
+  resolved by bodies or retired, never guessed; hidden people listed apart without joints.
+- ✅ Motion: repeated/late frames dropped; a watchdog independent of frames (lost players, paused
+  clocks from the last sighting, pad release); repetitions only from a seen rest; speed and bone
+  checks; games decided server-side on the same evidence; lean on the person's own sides;
+  calibration from the camera's geometry with reasons and a tilt suggestion (2 m of floor default).
+- ✅ One app, one launcher (`apps/kinect/kinect.py`): Home, Fitness, Games, Camera, Room, Scan,
+  History; old commands and Mario open its sections; 3D figures, demonstrations, tutorials, sounds,
+  hand cursor, keyboard, full screen; tracking quality and game scores in History; history
+  migrated in place, deletable per workout / person / everyone.
+- ✅ Guided scanning: object, turning object (12 held turns), person (8 held turns); hub lease, a
+  supervised worker, Cancel, temporary captures deleted when the build ends, coverage and failed
+  turns named, STL/OBJ/PLY with explicit units, Save to `~/Kinect Scans`. Synthetic accuracy: face
+  within 6 mm; turned object within 4 mm in height, +8..+37 mm in width/depth; person height
+  within 30 mm. The scanner's ICP no longer runs away on flat views (39/39 of its tests).
+- ✅ Checks: `verify-kinect-motion.py` (136, quick), `verify-air.py` (pairing, lease, crops,
+  identity), `verify-kinect-scan.py` and `verify-kinect-app.py` (the real window on a 1920x1200
+  virtual display: every section, old commands, full screen, workout, games, reconnecting) in the
+  full `verify-all.sh`. Kinect Motion now stops within the unit's 5 s with pages open.
+- ✅ Live, without people: framing a scan on the real Kinect (lease into infrared and back, the
+  preview, guidance, a refused capture with its files deleted).
+
+### Live, not yet tried
+
+- 🔬 Tracking figures with one and two people, lights on and off (targets: 15/s one, 12/s two,
+  p95 < 200 ms, ids stable through repeated crossings).
+- 🔬 **Darkness (release gate)**: full workouts and every game in infrared with people.
+- 🔬 Repetition counts against hand counts for every exercise that fits (≥95%, ≤1 error per 20,
+  zero from stale frames), in light and dark.
+- 🔬 Render rate full screen on this laptop's GPU (60 aimed, 30 sustained required; 21-22 on a
+  virtual display is software rendering, not the measurement).
+- 🔬 Scanning a known-size object, a failed alignment, an incomplete turn, a person; export units
+  in a slicer; measured error recorded.
+- 🔬 The hand cursor and Kinect Pad with a real person; the space report against where people
+  really fit (2026-11-18: 13 of 17 activities fit at 0.80 m and 2 m of floor; tilt up 9° for all).
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the

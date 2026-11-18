@@ -34,7 +34,7 @@ Nothing is installed system-wide.
 ## 2. The three senses, and the one rule that shapes everything
 
 The Kinect v1 sends **colour or infrared, never both at once**: they share one USB stream, and a
-switch between them takes about 0.3 s. **Depth always comes alongside** whichever one is on,
+switch between them takes about 0.8 s (measured: 0.78-0.84 s on this Kinect). **Depth always comes alongside** whichever one is on,
 because it is made inside the Kinect from the infrared camera and the projector's dots.
 
 So "use all three" means: depth all the time, and colour or infrared depending on the light.
@@ -141,15 +141,40 @@ One process opens the Kinect: the hub (`services/adaptive-air/kinect_hub.py`, us
 through shared memory (`/dev/shm/adaptive-kinect-<uid>`, mode 0600) and HTTP on 127.0.0.1:8792.
 It stops itself 20 s after nothing uses it.
 
-Kinect Studio (app grid, `scripts/adaptive-air.sh --studio`, or http://127.0.0.1:8792) shows the
-colour or infrared picture, depth, the 3D point cloud (drag, right-drag, scroll; PLY export), the
-accelerometer with pitch and roll, the tilt motor, the LED, depth statistics, the frame rate,
-whether Air is reading, and the webcam switch. *Auto / Colour / Infrared* is at the top.
+Kinect Studio is the **Camera** section of the Kinect app now ([KINECT_MOTION.md](KINECT_MOTION.md);
+`scripts/adaptive-air.sh --studio` and `apps/kinect-studio/studio.py` open it there). Its page is
+still served at http://127.0.0.1:8792 for a browser: the colour or infrared picture, depth, the 3D
+point cloud (drag, right-drag, scroll; PLY export), the accelerometer with pitch and roll, the
+tilt motor, the LED, depth statistics, the frame rate, whether Air is reading, and the webcam
+switch.
+
+**Every published frame is one consistent snapshot.** libfreenect hands out the newest picture
+and the newest depth separately; each carries the Kinect's own 60 MHz timestamp. A pair is
+published only when the two were taken within two frames of each other (normally 2 to 3.3
+million ticks apart; the first pair after a colour/infrared switch was measured 31 to 38 million
+apart: a picture from before the switch beside depth in the new geometry). The hub keeps the
+picture, depth, mode, the lens numbers of that mode, the sequence number, the capture time and
+the camera *epoch* (how many switches so far) together under one lock; the point cloud, the PLY
+export and the people tracker use only that; the shared frame store carries the epoch too, so a
+reader can tell a switch away and back from one long run (the scanner skips other epochs).
+
+**The people tracker** (`PoseSource`, `people.py`): the person detector runs in its own thread on
+the newest frame (it costs ~70 ms; a new pose model ~150 ms to build, ~3x more on its first
+inference, so models are built and warmed ahead); each person has a pose model on their own
+crop, the infrared picture cleaned first and what depth says is far behind or in front of them
+greyed out; a "person" depth keeps rejecting is let go and its place ignored until something
+moves there. Identities: one global assignment per frame on predicted position, depth and body
+signature; crossings that could go either way are *unsure* until resolved by the bodies, or both
+numbers retired. `/api/people` lists only people seen in that frame; `hidden` lists the rest
+without joints; `room` gives how far the floor goes before a wall; `timing` the costs.
 
 Hub API (POST JSON `{"value": ...}` to `/api/<name>`): `led`, `tilt`, `video`
-(`auto`/`rgb`/`ir`), `webcam` (true/false), `busy` (Air: engaged or not). GET `/api/status`
-reports `mode` (the picture now), `video` (the setting), `auto` (`lit`/`dark`), `light`, depth
-statistics, accelerometer, tilt and more.
+(`auto`/`rgb`/`ir`), `webcam` (true/false), `busy` (Air: engaged or not), `activity` (seconds, at
+most 10, re-sent while a workout or game is live: no colour checks from infrared meanwhile), and
+`lease` (`{"owner", "mode", "seconds"}` holds one picture mode for a 3D scan, up to 10 minutes per
+request; `null` lets it go). GET `/api/status` reports `mode` (the picture frames are in now),
+`next_mode`, `video` (the setting), `auto` (`lit`/`dark`), `light`, `epoch`, `unpaired` (pairs
+dropped), `activity`, `lease`, `intrinsics`, depth statistics, accelerometer, tilt and more.
 
 ## 6. Settings, all optional
 

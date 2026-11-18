@@ -90,7 +90,7 @@ The Kinect is meant to sit on the TV, about 1.92 m (6.3 ft) up, looking into the
 
 - **Three senses, combined.** The Kinect v1 has a colour camera, an infrared camera and depth
   (made by the infrared camera from the projector's dots). Colour and infrared share one USB
-  stream: the Kinect gives one or the other, never both (a switch takes ~0.3 s). Depth comes
+  stream: the Kinect gives one or the other, never both (a switch takes ~0.8 s, measured). Depth comes
   with either. So with `"video": "auto"` in `kinect.json` (the default) the hub gives **colour +
   depth while the room is lit and infrared + depth in the dark** (colour darker than 0.04 for
   2 s; every 20 s, while you are not engaged, it glances at colour to see if the lights came

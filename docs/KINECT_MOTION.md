@@ -1,263 +1,304 @@
-# Kinect Motion: Kinect Fitness, Kinect Arcade, Kinect Room, Kinect Pad, and the scanner
+# Kinect: one app for fitness, games, the camera, the room, 3D scanning and your history
 
 What the Kinect research in `kinect/` became. Every claim it rests on was checked first:
 [KINECT_RESEARCH_VERIFICATION.md](KINECT_RESEARCH_VERIFICATION.md). The sensor itself, mounting
 and the hub: [KINECT.md](KINECT.md).
 
-| App | What it is | Open it |
-| --- | --- | --- |
-| **Kinect Fitness** | Workouts for one to four people: counts repetitions, coaches form aloud, times holds, rep races, a fitness check every four weeks, history | App grid "Kinect Fitness", or http://127.0.0.1:8793/fitness |
-| **Kinect Arcade** | Whole-body games (Wall Dodge, Pose Match, Body Racer) and **Kinect Pad** (your body as a gamepad for any game) | App grid "Kinect Arcade", or /arcade |
-| **Kinect Room** | Who is in the room and where, zones, sitting reminders, pointing at things, the tracking-coverage map, the event stream | App grid "Kinect Room", or /room |
-| **Kinect scanner** | 3D snapshots, measurements, turntable and rotation scans, STL/PLY/OBJ export | `scripts/kinect-scan.sh <command>` |
+**Status (2026-11-18): built and checked in software; not yet accepted live.** The live
+acceptance needs people in front of the Kinect, in the light and in the dark, and a known object
+to scan; see [Acceptance](#acceptance-what-is-measured-live). Until full fitness and games are
+shown to work in darkness, this is not called ready.
 
-From a terminal: `apps/kinect-motion/motion.py fitness|arcade|room [--fullscreen]`. **F11** toggles
-full screen (for the TV). `--demo` opens the same apps with two synthetic people, no Kinect needed.
-Install / reinstall: `./install.sh --only motion` (needs Air: `./install.sh --only air`).
+## The app
+
+One window, **Kinect** in the app grid (`apps/kinect/kinect.py`), with seven sections:
+
+| Section | What it is |
+| --- | --- |
+| **Home** | The room as the Kinect sees it now (everyone as a figure), how many are in view, hidden and playing, the way into everything, and *your space*: how many activities fit where the Kinect is, with a one-press tilt fix |
+| **Fitness** | 14 exercises with a 3D demonstration each, workouts, a rep race, the fitness check; a session with a countdown, a figure per person with a ring that fills each repetition, per-person coaching, rests that show the next move, and a summary that includes how well the Kinect saw you |
+| **Games** | Wall Dodge, Pose Match, Body Racer as 3D scenes with a tutorial, sounds and scores; Kinect Pad (your body as a gamepad) |
+| **Camera** | What Kinect Studio did: colour or infrared with everyone's skeleton, depth, the 3D point cloud (PLY export), picture mode, the "Kinect Camera" webcam, tilt, LED, measuring people, depth statistics, frame pairing |
+| **Room** | The floor from above with everyone, where each activity fits (from the camera's real geometry), the room's measured end, zones, the coverage map, the event feed |
+| **Scan** | Guided 3D scans: choose the subject, frame it, capture, build, inspect, export or save |
+| **History** | People, the week, movement summaries, how well the Kinect saw each person, games, fitness checks, workouts; equipment; deleting history |
+
+Navigation: the tabs, the keyboard (arrows and Enter, Escape back, 1 to 7 for the sections,
+Space pauses a workout), or **the hand cursor**: hold a hand out towards the screen and a ring
+follows it; hover over anything for 1.3 s to choose it. **F11** or the corner button: full
+screen. Settings (the gear): voice, sounds, the hand cursor, your floor space, keeping the room
+watched, and the full *where things fit* report.
+
+Open it from the app grid, or `apps/kinect/kinect.py [home|fitness|games|camera|room|scan|history]
+[--fullscreen] [--demo]` (`fitness/squat`, `games --game walls` open one thing directly). It is
+one instance: a second command moves the open window. The old commands still work and open the
+matching section: `apps/kinect-motion/motion.py fitness|arcade|room`, `apps/kinect-studio/studio.py`,
+`scripts/adaptive-air.sh --studio`, Mario's "open Kinect Studio". `--demo` runs the app with two
+synthetic people and its own settings and history (none of yours). The right-click menu of the
+launcher has Fitness, Games, Camera and 3D Scan.
+
+Install / reinstall: `./install.sh --only motion` (needs Air: `./install.sh --only air`). It puts
+one launcher in the app grid and removes the old Kinect Fitness, Arcade, Room and Studio ones.
+Kinect Studio's own page is still at http://127.0.0.1:8792 for a browser.
 
 ## How it fits together
 
 ```
 Kinect v1 ─USB─▶ Kinect hub (adaptive-kinect, :8792)                      services/adaptive-air/
-                 one owner of the Kinect; colour/infrared + depth
-                 PoseSource: person detector + one pose model per person (MediaPipe, up to 6)
-                 people.py: floor plane, each person's depth, posture, height,
-                   33 joints in the ROOM frame, depth-fused, each Tracked / Inferred / Missing
-                           │ /api/people (long poll, every frame)
+                 the one owner of the Kinect. Each picture is published only with the depth taken
+                 with it (device clocks within two frames), as one snapshot: picture, depth, mode,
+                 lens numbers, sequence, capture time, camera epoch.
+                 PoseSource: person detector in its own thread, one warmed pose model per person,
+                 the infrared picture cleaned first, each crop masked by depth around its person
+                 people.py: floor plane, room depth, 33 depth-fused joints per person, identities by
+                 global assignment, crossings marked unsure, hidden people listed apart
+                 holds infrared for a live activity (no colour checks) and for a scan (a lease)
+                           │ /api/people (long poll: always the newest state)
                            ▼
 Kinect Motion (kinect-motion, :8793)                                       services/kinect-motion/
-  skeleton.py     angles; One Euro smoothing; bone-length sanity per person
-  bodygestures.py raise a hand, both hands up, T-pose, clap, swipe, point, jump, duck, lean, wheel
-  players.py      join, slots 1-4, identity kept across exits, play area and spacing
-  exercises.py    14 exercises: repetition machine, form cues, holds, "insufficient evidence"
-  training.py     MET calories (estimate), trusted load, volume, progression, workouts, the check
-  store.py        SQLite history: results only
-  room.py         occupancy, zones, sit and slouch reminders, point-at-zone, coverage map
-  pad.py          uinput virtual gamepad / arrow keys
-  engine.py       all of the above, once per frame       server.py  pages, /ws, /events, API
-                           │
-              /fitness  /arcade  /room   (static/, motion.src.css from the design tokens)
+  engine.py      drops repeated and late frames; the watchdog (30 a second, frames or not)
+  skeleton.py    One Euro smoothing; bone-length and speed checks demote joints to inferred
+  players.py     slots 1-4: active / unsure / hidden / rejoin / away; rejoin only when unambiguous
+  calibration.py what fits where, from the camera's height, tilt, lens, the room and your body
+  exercises.py   14 exercises: repetitions only from rest seen, holds, cues, insufficient evidence
+  games.py       Wall Dodge, Pose Match, Body Racer on the same evidence rules
+  training.py, store.py   maths and history (results only; migrated in place)
+  scan.py + scan_worker.py   3D scan jobs in a supervised process
+  room.py, pad.py, bodygestures.py, demos.py
+                           │ /ws (state per frame, and from the watchdog), /api/..., /hub/... (proxy)
+                           ▼
+apps/kinect/kinect.py: one GTK/WebKit window on /app (static/: core.js, gl.js, scene.js and a file
+per section; app.src.css from the design tokens)
 ```
 
-**Tracking.** Microsoft's Kinect found joints with a forest classifying every depth pixel
-(Shotton et al. 2011); that model and its training data are not available on Linux. Here,
-MediaPipe's pose model runs on each person separately (top-down, so six people each get a full
-33-joint skeleton, where the Kinect v1 SDK gave full skeletons to two), and **Kinect depth fixes
-where each joint really is**: the depth under each landmark, pushed back by the limb's radius
-(the same correction Shotton's method makes), checked against the model's own skeleton. A joint
-whose depth agrees is *tracked*; a hidden one is *inferred* from the model anchored on the
-depth-measured torso; and the screen draws them solid and hollow. Joints are smoothed with a
-One Euro filter, and a joint that suddenly breaks its learnt bone length (a depth pixel on the
-sofa) is demoted to inferred.
+## Tracking: what was measured, what changed
 
-## Kinect Fitness
+The baseline was measured first, on this Kinect (0.80 m up, nobody in view), with
+`scripts/kinect-baseline.py`:
 
-**Players.** Alone in the room you are Player 1 by being there. In a group, **raise a hand** for
-a moment to join, or press **Start** and everyone in view plays (up to four, each in their own
-colour). Pick a **profile** for each player (History → People: add a name, and body weight if you
-want calorie estimates); a Guest's results are shown but not saved. Step out and back within
-25 s and you keep your slot: you are matched by where you stood and your height.
+| | Before | After |
+| --- | --- | --- |
+| Skeleton updates a second (hub) | 11.3 | 28.9 |
+| Camera to Kinect Motion, median / 95th percentile | 79 / 259 ms | 21 / 38 ms |
+| Repeated frames | 0 | 0 |
 
-**Choosing** (side panel):
+The numbers with people in view are part of the live acceptance (each pose model costs about
+25 ms on this CPU when warmed; two run in parallel in about 26 ms).
 
-- **Train**: any exercise, with a target. Ends when you press Finish (or swipe between sets).
-- **Workouts**: Quick start, Strength, Cardio burst, Balance and mobility: steps with rests.
-- **Challenge**: a rep race (30/60/90 s). Only full, clean repetitions count.
-- **Check**: the fitness check: sit-to-stands in 30 s, jumping jacks in 30 s, one-leg balance
-  (time and sway), toe-touch reach (how close to the floor), squat-jump height. Retake every four
-  weeks; each number is compared with *your* last check (better / same / worse). No population
-  norms are claimed.
-- **History**: the week's workouts, reps, minutes, estimated kcal, kg lifted, streak; past
-  checks; recent sets; people and their weights.
+What was wrong and what was done:
 
-**Controls without a remote** (all held or fast on purpose, so exercising does not trigger them):
+- **The detector was on the frame path.** The person detector takes ~70 ms and a new pose model
+  ~150 ms to build (measured); both ran inside the frame loop. Now the detector runs in its own
+  thread on the newest frame, newcomers arrive with a model already built and warmed (a model's
+  first inference costs ~3x a later one), and a "person" that depth keeps rejecting (a coat, a
+  poster) is let go and its place ignored until something moves there.
+- **Pictures could be paired with the wrong depth.** After a colour/infrared switch the first
+  picture was ~0.5 s older than its depth (device timestamps 31-38 million ticks apart, against
+  2-3.3 million normally), and the switch takes ~0.83 s, not the 0.3 s once assumed. The hub now
+  drops any pair more than two frames apart and publishes one snapshot (picture, depth, mode, lens
+  numbers, times, epoch) under one lock; the point cloud, PLY export and the people tracker use
+  only snapshots; the scanner skips frames from another epoch.
+- **Infrared for bodies.** The pose path now cleans the infrared picture (median filter for the
+  projector's dots, CLAHE) as Air does for hands, and greys out what depth says is far behind or
+  in front of each person in their crop. A workout or game in progress tells the hub so: no look
+  at colour interrupts infrared play.
+- **Identity.** One global assignment per frame (cheapest overall, not nearest-first) on predicted
+  position, depth and a body signature (height, shoulder width, limb lengths). Two people whose
+  assignment could go either way are marked *unsure* until they are apart; then their bodies
+  decide, or both numbers are retired rather than guessed. Players follow hub numbers, never
+  positions in the picture; an unsure player does not count, a retired one must raise a hand,
+  and someone coming back is matched automatically only when exactly one player could be them.
+- **Present, hidden and playing are counted apart.** The hub lists only people seen in this frame;
+  someone behind another person is *hidden* (with how long ago they were seen, no joints). A
+  remembered position is never drawn or counted as a sighting.
+- **Freshness.** Kinect Motion drops repeated and late frames (captured more than 0.5 s ago), and a
+  watchdog 30 times a second marks a player *lost* after 0.35 s without a fresh sighting: their
+  repetition in progress is dropped (a repetition counts only from a rest the camera saw), a
+  timed step waits while nobody is seen (from the last sighting), game lanes freeze, Kinect Pad
+  lets go, and the screen says what to do.
+- **Evidence.** Joints moving faster than a limb can (12 m/s) or breaking their learnt bone length
+  are demoted to inferred; counting needs the exercise's joints seen; Arcade's old left-to-right
+  numbering and its page-side scoring from whatever joints it had last are gone: the games run on
+  the server on the same rules.
+- **Lean was the wrong way round.** `lean` was +1 for the person's left (the picture's right);
+  Wall Dodge, Body Racer's lean steering and Kinect Pad's lean mode now use the person's own sides.
+- **Drawing is smooth, deciding is not.** The page draws each joint between the last two real
+  observations (never ahead of them); every count and score is the server's.
 
-| Do | It does |
-| --- | --- |
-| Raise one hand above your head (~½ s) | Join |
-| Both hands up and hold (~1 s; ~2 s during a set, so a press is not a pause) | Pause / resume |
-| Swipe a hand across your chest, between sets | Skip to the next step |
-| T-pose (arms straight out) and hold | Recalibrate (forget learnt bone lengths) |
+## Where things fit (calibration.py)
 
-**On screen:** your skeleton (or, with **Camera** on, over the Kinect's picture), a ring above
-your head that fills through each repetition with the count inside, the cue for you in yellow,
-and the scoreboard: reps / target, form %, partial reps, seconds per rep, left/right counts, best
-jump, sway, reach. **Voice** speaks the cues (speech-dispatcher, one line at a time, at most every
-2.5 s per player).
+The fixed play area (1.3 to 4.2 m) is gone. From the hub's floor fit (the Kinect's height and its
+full up vector), the lens of the picture the joints came from, the room's measured end (depth of
+what stands 0.3-2 m high), your floor space (`space_m`, 2 m unless you change it) and the
+player's height, every activity's envelope (the joints it counts from: a squat needs feet to
+shoulders, jumping jacks feet to raised hands and arms out, a curl hips to shoulders) is projected
+into the picture. The answer is a band of distances where it fits, or exactly why it fits nowhere:
+*"It needs feet to raised hands in view: your raised hands would leave the top of the picture
+closer than 3.1 m and you have 2.0 m."* Players standing where their activity does not fit are
+paused with the reason. Settings also suggests a tilt: *"Tilt it up 10° and curls, raises,
+punches and Body Racer fit too, but not jumps, planks and balance."*
 
-**The exercises** (MET from the 2024 Adult Compendium; *proxy* = no entry, nearest one used):
+On 2026-11-18 (Kinect 0.80 m up, 4° down, 2 m of floor): 13 of 17 activities fit; jumping jacks,
+the shoulder press, Wall Dodge and Pose Match do not (raised hands leave the picture), and tilting
+up 9° fits all 17. A Kinect v1 sees 43° vertically: at 2 m that is 1.6 m of height in all.
 
-| Exercise | Counts | Coaches | MET |
-| --- | --- | --- | --- |
-| Squat | knees from straight (> 155°) to < 100° and back | "Go a little deeper" (half reps are not counted), "Keep your chest up", "Push your knees out over your toes", "Sit evenly on both legs", "Lower yourself more slowly" | 5.0 (02052) |
-| Lunge | either knee to < 108°; left/right legs counted | "Drop your back knee lower", "Keep your torso upright" | 3.8 (02022) |
-| Jumping jacks | arms from down to overhead | "Arms all the way up", "Jump your feet wider" | 7.5 (02020) |
-| High knees | each knee to hip height, each side counted | "Knees higher" | 7.5 proxy |
-| Biceps curl | elbow 145° → 62°; both arms together count once, alternating each | "Curl all the way up", "Keep your elbows by your sides", "Don't swing your body", "Lower the weight slowly" | 3.5 (02054) |
-| Shoulder press | wrists from shoulder rack to straight overhead | "Press all the way up", "Brace your core, don't lean back", "Press both arms evenly" | 3.5 (02054) |
-| Lateral raise | arms to shoulder height | "Raise to shoulder height", "Stop at shoulder height", "Raise both arms evenly" | 3.5 (02054) |
-| Sit to stand | hips from seated to your standing height | "Stand all the way up" | 3.0 (02056) |
-| Squat jump | hips above standing height; **jump height in cm** | — | 6.5 (02057) |
-| Punches | each arm's elbow to straight | — | 7.5 proxy |
-| Plank (side-on to the TV) | seconds in a straight line | "Lift your hips a little", "Lower your hips into a straight line" | 2.8 (02024) |
-| Wall sit | seconds with knees ~90° | "Slide down to about a right angle", "Not quite that low" | 3.8 proxy |
-| One-leg balance | seconds on one leg, **sway in cm** | "Lift one foot off the floor" | 2.3 proxy |
-| Toe-touch reach | seconds folded, **hands' lowest height in cm** | "Keep your knees straight" | 2.3 (02101) |
+## Fitness
 
-**Honest by design.**
-- If the Kinect cannot see the joints an exercise needs (any of them missing, or too many only
-  estimated), it stops counting and coaching and says *"I can't see you well enough"*, rather
-  than coach from a guess. Joint angles from a depth camera are good when the joint is visible
-  and poor when it is hidden, so this matters.
-- **Calories** are estimates (MET x 3.5 x kg / 200 per minute of work, ACSM), shown only when
-  you have entered a body weight.
-- **Weights** are never guessed from the picture (no camera can see a dumbbell's mass). Register
-  your equipment (History → a person → "Add weight"), then pick it for a player; or choose "Other
-  weight…" and type it. The source is recorded with the set (catalog / confirmed).
-- **Next time** suggestions use double progression: all sets done well → +2 reps; high reps with
-  a weight → +2.5 kg; poor form → same again, cleaner.
+Choose an exercise (its tile says whether it fits here, and why not), a workout, a challenge or
+the fitness check; every exercise has a looping 3D demonstration made from the same joint angles
+the counter measures. Pick a profile and any weights for each player. In the session: a countdown
+with the demonstration in the corner, everyone as a figure (or over the camera picture), a ring
+over each head that fills through a repetition with the count inside, the cue for each person, a
+card per player (count, form, partials, tempo, left/right, jump height, sway, reach), rests that
+show the next exercise, and a summary with *next time* advice and how well the Kinect saw each
+person (share of time seen, losses, updates a second, share in infrared).
 
-**Safety.** The safe area is where a whole body stays in the Kinect's view: 1.3 to 4.2 m from
-the TV and away from the picture's edges. Too close to the TV, out of the area, or two players
-closer than 0.9 m: that player's count pauses and the screen and voice say why.
+Body controls (held, so exercising does not trigger them): raise a hand to join (or rejoin), both
+hands up and hold to pause, swipe between sets to skip, T-pose to recalibrate.
 
-## Kinect Arcade
+The exercises, their counting rules, cues and MET values are unchanged from the first version
+(table in `exercises.py`); what changed is that a repetition counts only from a rest position the
+camera saw, so a set started mid-movement (or interrupted by lost tracking) does not count its
+second half, and that sit-to-stand can start seated (the standing hip height comes from the leg's
+own length until the person has stood).
 
-Everyone who joined in Fitness plays; with nobody joined, everyone in view plays (up to four).
+## Games
 
-- **Wall Dodge**: walls rush at each player's lane; **duck, jump, lean left/right, arms up or
-  arms out** to fit through as it arrives. Three lives; walls speed up.
-- **Pose Match**: copy the white figure (Star, Robot, Goalpost, T, Skier, Reach up, Half star)
-  and hold it for a second; similarity is from your joint angles; quicker scores more.
-- **Body Racer**: one road per player, 60 s. Steer an imaginary wheel (or by leaning, chosen in
-  the panel), push your hands out to speed up, pull them back to brake. Coins and cones.
+Wall Dodge (walls with real cut-outs rush down each player's lane; seen from behind your own
+figure), Pose Match (copy the white figure and hold it), Body Racer (3D roads with coins and
+cones; steer with an imaginary wheel or by leaning). Each has a tutorial with demonstrated moves,
+a 3-2-1, sounds and a game-over screen; named players' scores are saved. Nobody is penalised for
+being out of sight: a wall waits, the round clock stops, the car coasts and meets nothing, and a
+wall that arrives while the joints it needs cannot be seen is waved through (no point, no life).
 
-`motion.py arcade --game walls|pose|race` opens straight into a game.
+Kinect Pad (Off / Wheel / Lean / Arrow keys) is unchanged and lets go the moment its player is out
+of sight or frames stop, from the watchdog, not only when a frame says so.
 
-### Kinect Pad: your body as a game controller
+## Camera and Room
 
-Off / **Wheel** / **Lean** / **Arrow keys** in the Arcade panel. It makes a virtual device through
-Linux uinput that games see as an ordinary controller:
+Camera is Kinect Studio inside the app (through `/hub/`, so one origin): the picture mirrored
+like everywhere else with skeletons, depth, the point cloud (drag, right-drag, scroll; PLY),
+picture mode, webcam, tilt, LED, measuring everyone, depth statistics, and the hub's frame figures
+(camera switches, pairs dropped, whether a scan holds the picture).
 
-| | Wheel | Lean | Arrow keys |
-| --- | --- | --- | --- |
-| Steer | tilt the wheel in your hands → left stick X | lean your body | Left / Right |
-| Accelerate | hands pushed out → right trigger | — | Up |
-| Brake | hands back at the chest → left trigger | — | Down |
-| Jump / duck | A / B | A / B | Space / Ctrl |
-| Both hands up | Start | Start | Enter |
+Room: the floor from above with the Kinect's real lens, your floor limit and the room's end,
+where a chosen activity fits, zones (with *Where I stand*), the coverage map and the event feed.
+Events and Home Assistant / MQTT are as before (`ws://127.0.0.1:8793/events`, `motion.json`).
 
-Steering has a dead zone and an exponential response, and **every input is released the moment
-you leave the picture**. Works with Steam, emulators and native games; and with **chiaki-ng**
-(open-source PS5/PS4 Remote Play for Linux), which makes this the route from your body to a PS5:
-unofficial, not Sony-endorsed, with Remote Play's own latency on top. On this machine /dev/uinput
-is already writable for you; on another one run `scripts/install-kinect-motion.sh --pad` once
-(udev rule for the `input` group, asks for sudo).
+## Scan
 
-## Kinect Room
+**Choose → Frame → Capture → Build → Inspect → Export.**
 
-- **The floor from above**: the Kinect and its 57° view, the safe area (dashed), everyone as a
-  dot with their shoulders, posture and height, zones, and where anyone is pointing.
-- **Coverage map**: walk slowly over the area you use for a minute, alone; each 25 cm cell turns
-  green (the Kinect saw your whole body there), yellow or red. Move the Kinect or furniture until
-  where you exercise is green: the research's "room-specific tracking heat map".
-- **Zones**: name rectangles on the floor (sofa, desk, mat) or on the TV wall (lamp, picture);
-  stand somewhere to read your position in the "In the room" panel.
-- **Events**, live at `ws://127.0.0.1:8793/events` as JSON lines: `room_occupied`,
-  `room_empty`, `people_count`, `person_enter_zone` / `person_leave_zone`, `raise_hand`,
-  `point_at_zone` / `point_at`, `sit_reminder` (after `sit_minutes` sitting, spoken),
-  `posture_warning` (slouching for ten minutes while sitting), and from Fitness `exercise_rep`,
-  `exercise_set`, `joined`, `paused`... Only the event leaves the service, never a picture or a
-  skeleton (`person 2 / squat / repetition 14`).
-- **Home Assistant**: put its webhook URL in `motion.json` as `"webhook"`; each event is POSTed
-  as JSON (HA's webhook trigger reads it directly). With `mosquitto_pub` installed, `"mqtt":
-  {"host": "...", "topic": "kinect"}` publishes to `kinect/<event>` too.
+| Subject | Capture | What you get |
+| --- | --- | --- |
+| Object | one view, the median of 15 depth frames | the side facing the Kinect; the back is reported as not seen |
+| Turning object | 12 held turns of about 30° (anticlockwise seen from above), let go each time | the whole way round |
+| Person | 8 held turns of 45°, standing still at each | a 3D you |
 
-The room is watched only while one of the pages is open, unless you tick "Keep watching the room
-with no page open" (`room_always`): then the Kinect stays on.
+*Frame* shows depth live with the subject lit: a depth range, an area you drag on the picture, and
+the empty background captured first if you like; it says what to do (too close, off the edge, the
+room is in it, ready). *Capture* tells you when to turn and waits until you hold still. *Build*
+lines up each held view from its turn about the subject's own vertical axis (the axis and the way
+it turned are found from the first turn; ICP may only nudge after that) and fuses them (TSDF).
+*Inspect* is an orbitable surface or point view with the size (along the camera's axes and the
+scan's own), views fused, open edges, and plainly what was not seen: a turn that did not line up
+is left out and named, and the scan is not called complete. Nothing unseen is filled in.
+*Export*: STL in millimetres, OBJ and PLY in metres or millimetres, each with a `.units.json`;
+*Save* puts every format and the measurement report in `~/Kinect Scans/<name>/` and lists it in the
+Scan section (remove from the list, or delete the files).
 
-## The scanner
+While framing and capturing, the hub is leased into infrared depth (the scanner's geometry); a
+workout or game must be paused first (the app asks). The capture and build run in
+`scan_worker.py`, a separate process: Cancel stops it at once. Depth captures live in
+`$XDG_RUNTIME_DIR/kinect-scan/` (yours only) and are deleted as soon as the build ends, whether it
+worked or not; the built geometry is deleted when you discard the scan, scan again, or the service
+stops. `scripts/kinect-scan.sh` (the scanner's own command line) is unchanged.
 
-The Ubuntu scanner from the research (`kinect/kinect-v1-ubuntu-scanner`), run from this checkout:
+**Accuracy measured on synthetic depth** (boxes of known size ray-cast through the Kinect's
+infrared lens, `scripts/verify-kinect-scan.py`): a single view measures the face it sees within
+6 mm; a 370 x 260 x 150 mm object turned in 12 held steps, each up to 8° off, comes out within
+4 mm in height and 8-37 mm too large in width and depth (flat faces register least well); a
+body-sized subject in 8 turns comes out within 30 mm in height. Turning objects were first
+registered frame to frame from continuous capture, which drifted 50 to 110 mm over a turn; that
+was replaced. Real accuracy on the Kinect, with its noise, is part of the live acceptance.
 
-```sh
-scripts/kinect-scan.sh doctor                                   # what is installed, what is on USB
-scripts/kinect-scan.sh probe --out ~/Kinect\ Scans/intrinsics.json   # factory calibration (hub stopped)
-scripts/kinect-scan.sh background --out ~/Kinect\ Scans/empty.npz --samples 30
-scripts/kinect-scan.sh snapshot --background ~/Kinect\ Scans/empty.npz --z-min 0.6 --z-max 1.5 --out ~/Kinect\ Scans/mug
-scripts/kinect-scan.sh record --background ~/Kinect\ Scans/empty.npz --seconds 40 --fps 5 --delay 5 --out ~/Kinect\ Scans/turn
-scripts/kinect-scan.sh reconstruct --session ~/Kinect\ Scans/turn --mode auto --out ~/Kinect\ Scans/turn-mesh
-scripts/kinect-scan.sh convert --input ~/Kinect\ Scans/turn-mesh/fused_mesh.ply --input-units m --out print.stl
-```
+## History
 
-It reads the Kinect through the hub when the hub runs (so the apps can stay open; frames are
-never mixed between the colour and infrared geometries), otherwise directly through
-`.local/libfreenect`. Outputs: PLY/PCD/XYZ points and PLY/OBJ/STL meshes (STL in millimetres with
-a units file) and a measurements report that says what was and was not observed. The full guide:
-`kinect/kinect-v1-ubuntu-scanner/docs/INSTALL_AND_USAGE.md`; what was run here: its
-`docs/VALIDATION.md` addendum.
+Results only, on this computer (`~/.local/share/adaptive-desktop/fitness.db`, mode 600): people,
+equipment, workouts and sets (with each repetition's range and tempo), fitness checks, game scores,
+how well the Kinect saw each person per activity, and the list of saved scans. Older files are
+migrated in place (schema version 2), keeping everything. History shows movement summaries (form,
+range of motion, tempo, left/right per exercise over four weeks) and tracking quality by activity.
+Delete one workout, one person's history (they and their weights stay), forget a person entirely,
+or delete everyone's history; deleted rows are gone from the file too (VACUUM).
 
 ## Settings
 
-`~/.config/adaptive-desktop/motion.json` (all optional; the pages write `zones`, `voice`,
-`room_always`):
+`~/.config/adaptive-desktop/motion.json` (all optional; the app writes what you change):
 
 ```json
-{"voice": true, "auto_solo": true, "sit_minutes": 45, "slouch_degrees": 25,
+{"voice": true, "space_m": 2.0, "auto_solo": true, "sit_minutes": 45, "slouch_degrees": 25,
  "zones": [{"name": "sofa", "on": "floor", "x": [-1.2, 0.4], "z": [3.4, 4.2]}],
  "room_always": false, "webhook": null, "mqtt": null}
 ```
 
-History: `~/.local/share/adaptive-desktop/fitness.db` (mode 600). "Forget <name>" in History
-deletes a person and every result recorded for them.
+`space_m`: metres of floor in front of the Kinect you can use (null: only the room's own end).
 
 ## Privacy
 
 Pictures never leave the hub (shared memory readable by you only, HTTP on 127.0.0.1). Kinect
-Motion sees joints only and stores results only: no images, no depth, no skeletons on disk.
-Nothing leaves the computer unless you configure a webhook or MQTT, and then only the small
-semantic events above. The Kinect is off unless an app is open (or `room_always`).
+Motion keeps results only: no images, no depth, no skeletons on disk; the only depth it ever
+writes is a scan's temporary captures, while you scan, deleted as soon as the build ends. Nothing
+leaves the computer unless you configure a webhook or MQTT, and then only small semantic events.
+The Kinect is off unless the app is open (or `room_always`).
 
 ## Checks
 
 ```sh
-scripts/verify-kinect-motion.py      # ~90 checks, seconds, no Kinect (in verify-all.sh --quick)
-apps/kinect-motion/motion.py fitness --demo    # the whole app with two synthetic people
+scripts/verify-kinect-motion.py   # ~140 checks in seconds (verify-all.sh --quick): exercises,
+                                  # gestures, freshness and the watchdog, identity, games, calibration,
+                                  # history and migration, server
+scripts/verify-air.py             # the hub: frame pairing, snapshots, lease, crops, identity in people.py
+scripts/verify-kinect-scan.py     # scanning on synthetic depth, ~30 s (verify-all.sh, full)
+xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/verify-kinect-app.py [--shots DIR]
+                                  # the real window on a virtual display: every section, the old
+                                  # commands, full screen, a workout, the games, reconnecting
+scripts/kinect-baseline.py --seconds 30 --players 1 --label "..." --save   # live tracking figures
 ```
 
-The checks drive everything with synthetic people built from joint angles, so each one knows
-the right answer: exact repetition counts for every exercise, also under 3 cm of noise and with a
-quarter of the frames lost; each form fault produces its cue and clean form does not; hidden
-knees stop the count; gestures fire when held and not when brief (and a press is not a pause);
-the steering wheel's sign; rejoining by position and height (and a 30 cm shorter stranger is
-not taken for the player); spacing and the play area; the calorie, load, volume and progression
-maths; the history and "forget"; a two-player 20 s squat race end to end (8 squats, the guest not
-saved); room events; the pad's release on tracking loss; the depth-fused joints on Air's
-synthetic room (head within 4 cm, hips within 6 cm); the server, pages and scripts.
+## Acceptance: what is measured live
 
-## Not yet verified live
+Done in software (the checks above); **to do with people and the real room**, in this order:
 
-Measured on the real Kinect so far: the hub → Kinect Motion pipeline (~9 skeleton updates a
-second, latency median 86 ms, 95th percentile 292 ms with nobody in view), the floor plane, the
-scanner's snapshot both ways. **Not yet tried with people in front of it**:
+1. Tracking figures with `scripts/kinect-baseline.py --save`: one person, then two, lights on,
+   then lights off (infrared). Targets: 15 updates a second for one, 12 for two, camera to here
+   under 200 ms at the 95th percentile, no repeated frames, ids kept while two people cross
+   repeatedly.
+2. Rendering: the app full screen on this laptop during each game, the page's own figure (the
+   `fps` in `curl 127.0.0.1:8793/api/ui`): 60 aimed for, 30 sustained required. On a virtual
+   display (software rendering) it is 21-22; that is not the measurement.
+3. Repetitions: for each exercise that fits, three sets counted by hand against the app, in light
+   and in the dark: at least 95% correct, at most one error in a 20-repetition set, and none from
+   a stale frame (cover the Kinect mid-set: nothing may count).
+4. Every game in light and dark: no life, point or crash from tracking loss alone; identities
+   stable while two players cross.
+5. Scanning: a box or book of known size (object and turning object), a failed alignment (move
+   it while it is taken), incomplete coverage (stop half way), export units in a slicer,
+   Cancel leaves nothing in `$XDG_RUNTIME_DIR/kinect-scan/`, and a person scan. Record the
+   measured error.
 
-- Repetition counts and cues against a person (count by hand on a recorded set and compare;
-  the research's acceptance protocol), for each exercise.
-- Two to four people at once: tracking rate with several pose followers, identity swaps when
-  people cross.
-- The mount: the Kinect was 0.79 m up on Nov 18; the coverage map at the final ~1.9 m TV mount.
-- Plank and other floor exercises from the final mount (the floor is near the picture's bottom).
-- Kinect Pad in a real game, and through chiaki-ng to a PS5.
-- Wall Dodge jump timing at the real frame rate.
+**Darkness is a release gate**: infrared viewing alone does not pass; if body tracking in the dark
+fails these tests, that is reported as unmet and the app is not called ready.
 
 ## When something is wrong
 
 | You see | Do |
 | --- | --- |
 | "Kinect hub: ..." in the status pill | `systemctl --user status adaptive-kinect`; the Kinect needs its 12 V supply ([KINECT.md](KINECT.md)) |
-| Nobody appears | Stand 2 to 3.5 m away, facing the TV; light the room or let infrared take over; Kinect Studio shows what the Kinect sees |
-| "I can't see you well enough" | Step back until your feet are in the picture; move furniture from between you and the TV |
-| Counts look wrong for an exercise | Face the TV (plank: side-on); slow down; check the scoreboard's partials: half reps are not counted on purpose |
-| Kinect Pad: "No access to /dev/uinput" | `scripts/install-kinect-motion.sh --pad` once, then log out and in |
-| A Kinect process will not stop | `scripts/adaptive-air.sh --stop-all` closes the windows and stops Motion, Air and the hub. Stop them with `systemctl --user stop`, not `kill -9`, though a `kill -9` now also stays stopped. Each service also stops itself when unused: Motion a minute after the last page closes, the hub 20 s after nothing uses it |
-| Latency feels high | Close Kinect Studio's point cloud; fewer people in view; the status pill's tooltip shows the median and 95th percentile |
+| An activity says it does not fit | Settings (gear) → *Where things fit* says why; try the tilt it suggests, or stand where Room shows the green band |
+| Nobody appears | Stand where Room's band is, facing the TV; Camera shows what the Kinect sees |
+| "I've lost you" | Step back into view; nothing counts while you are not seen, and the clock waits |
+| "Raise a hand so I know which one you are" | Two people crossed and could not be told apart: raise a hand to take your slot back |
+| A scan says the room is in it | Narrow the depth range, drag an area on the picture, or capture the empty background first |
+| A Kinect process will not stop | `scripts/adaptive-air.sh --stop-all` closes the app and stops Motion, Air and the hub |
+| Latency feels high | Close Camera's point cloud; fewer people in view; the status pill's tooltip shows the figures |
