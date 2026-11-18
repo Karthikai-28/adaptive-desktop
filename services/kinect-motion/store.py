@@ -3,6 +3,12 @@
 Only results are kept - "Karthi, squat, 12 reps, form 92" - never pictures, depth or skeletons
 (the research's privacy rule: keep semantic events, not video). The file is readable by you only:
 $XDG_DATA_HOME/adaptive-desktop/fitness.db (~/.local/share/...).
+
+Schema versions (PRAGMA user_version), migrated in place on open, never by dropping a table:
+    1  people, equipment, sessions, sets, fitness checks (Kinect Fitness)
+    2  game results, tracking quality per workout or game (how well the Kinect saw each
+       player: share of time seen, losses, update rate, evidence), and saved scans (only what
+       you chose to save: a name, where the files are, the measurement report)
 """
 
 import json
@@ -30,6 +36,23 @@ CREATE TABLE IF NOT EXISTS checks (id INTEGER PRIMARY KEY, user_id INTEGER NOT N
     at REAL NOT NULL, results TEXT NOT NULL,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);
 """
+VERSION = 2
+MIGRATIONS = {
+    2: """
+CREATE TABLE IF NOT EXISTS games (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
+    game TEXT NOT NULL, score INTEGER, details TEXT, at REAL NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS quality (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
+    session_id INTEGER, game_id INTEGER, at REAL NOT NULL, activity TEXT, seconds REAL,
+    seen_share REAL, losses INTEGER, lost_seconds REAL, updates_per_s REAL, evidence REAL,
+    dark_share REAL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY(game_id) REFERENCES games(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS scans (id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT,
+    path TEXT NOT NULL, at REAL NOT NULL, report TEXT);
+""",
+}
 
 
 class Store:
@@ -44,8 +67,20 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        self.migrated = self._migrate()
         if fresh:
             os.chmod(self.path, 0o600)            # your history, yours only
+
+    def _migrate(self):
+        """Bring an older file up to VERSION, keeping everything in it. -> versions applied."""
+        have = self.db.execute("PRAGMA user_version").fetchone()[0] or 1
+        done = []
+        for v in range(have + 1, VERSION + 1):
+            self.db.executescript(MIGRATIONS[v])
+            self.db.execute(f"PRAGMA user_version = {v}")
+            done.append(v)
+        self.db.commit()
+        return done
 
     def _rows(self, sql, *args):
         return [dict(r) for r in self.db.execute(sql, args).fetchall()]
@@ -175,6 +210,107 @@ class Store:
             else:
                 break
         return n
+
+    # -- games and how well the Kinect saw each player
+
+    def add_game(self, uid, game, score, details=None):
+        cur = self.db.execute("INSERT INTO games (user_id, game, score, details, at) VALUES (?, ?, ?, ?, ?)",
+                              (uid, game, int(score or 0), json.dumps(details or {}), time.time()))
+        self.db.commit()
+        return cur.lastrowid
+
+    def games(self, uid, days=60):
+        rows = self._rows("SELECT * FROM games WHERE user_id = ? AND at >= ? ORDER BY at DESC",
+                          uid, time.time() - days * 86400)
+        for r in rows:
+            r["details"] = json.loads(r["details"] or "{}")
+        return rows
+
+    def best_games(self, uid):
+        return {r["game"]: r["best"] for r in self._rows(
+            "SELECT game, MAX(score) best FROM games WHERE user_id = ? GROUP BY game", uid)}
+
+    def add_quality(self, uid, q, session_id=None, game_id=None):
+        self.db.execute(
+            "INSERT INTO quality (user_id, session_id, game_id, at, activity, seconds, seen_share, losses,"
+            " lost_seconds, updates_per_s, evidence, dark_share) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (uid, session_id, game_id, time.time(), q.get("activity"), q.get("seconds"), q.get("seen_share"),
+             q.get("losses"), q.get("lost_seconds"), q.get("updates_per_s"), q.get("evidence"),
+             q.get("dark_share")))
+        self.db.commit()
+
+    def quality(self, uid, days=60):
+        """How well the Kinect saw this person, by activity, over the last `days`."""
+        return self._rows(
+            "SELECT activity, COUNT(*) n, ROUND(SUM(seconds) / 60.0, 1) minutes,"
+            " ROUND(AVG(seen_share), 3) seen_share, SUM(losses) losses, ROUND(AVG(updates_per_s), 1) updates_per_s,"
+            " ROUND(AVG(evidence), 2) evidence, ROUND(AVG(dark_share), 2) dark_share"
+            " FROM quality WHERE user_id = ? AND at >= ? GROUP BY activity ORDER BY minutes DESC",
+            uid, time.time() - days * 86400)
+
+    def movement(self, uid, days=28):
+        """Per exercise: repetitions, form, range of motion, tempo and left/right balance, from the
+        sets' own per-repetition records (what was measured, never a picture)."""
+        out = {}
+        rows = self._rows("SELECT s.exercise, s.reps, s.form, s.details FROM sets s JOIN sessions x"
+                          " ON x.id = s.session_id WHERE x.user_id = ? AND s.at >= ? ORDER BY s.at",
+                          uid, time.time() - days * 86400)
+        for r in rows:
+            m = out.setdefault(r["exercise"], {"sets": 0, "reps": 0, "form": [], "rom": [], "tempo": [],
+                                              "left": 0, "right": 0})
+            m["sets"] += 1
+            m["reps"] += r["reps"] or 0
+            if r["form"] is not None:
+                m["form"].append(r["form"])
+            d = json.loads(r["details"] or "{}")
+            for rec in d.get("record") or []:
+                if rec.get("rom") is not None:
+                    m["rom"].append(rec["rom"])
+                if rec.get("time_s") is not None:
+                    m["tempo"].append(rec["time_s"])
+            sides = d.get("sides") or {}
+            m["left"] += sides.get("left", 0) or 0
+            m["right"] += sides.get("right", 0) or 0
+        avg = lambda v, k=1: round(sum(v) / len(v), k) if v else None   # noqa: E731
+        return {k: {"sets": m["sets"], "reps": m["reps"], "form": avg(m["form"], 0),
+                    "rom": avg(m["rom"], 2), "tempo_s": avg(m["tempo"], 2),
+                    "sides": {"left": m["left"], "right": m["right"]} if m["left"] + m["right"] else None}
+                for k, m in out.items()}
+
+    # -- deleting history
+
+    def delete_session(self, sid):
+        self.db.execute("DELETE FROM sessions WHERE id = ?", (sid,))
+        self.db.commit()
+
+    def delete_history(self, uid=None):
+        """Every workout, set, check, game and quality record (of one person, or of everyone);
+        the people and their equipment stay."""
+        for table in ("quality", "games", "checks", "sessions"):
+            if uid is None:
+                self.db.execute(f"DELETE FROM {table}")
+            else:
+                self.db.execute(f"DELETE FROM {table} WHERE user_id = ?", (uid,))
+        self.db.commit()
+        self.db.execute("VACUUM")             # deleted means gone from the file too
+
+    # -- saved scans (only what you chose to save)
+
+    def add_scan(self, name, kind, path, report):
+        cur = self.db.execute("INSERT INTO scans (name, kind, path, at, report) VALUES (?, ?, ?, ?, ?)",
+                              (name[:80], kind, str(path), time.time(), json.dumps(report)))
+        self.db.commit()
+        return cur.lastrowid
+
+    def scans(self):
+        rows = self._rows("SELECT * FROM scans ORDER BY at DESC")
+        for r in rows:
+            r["report"] = json.loads(r["report"] or "{}")
+        return rows
+
+    def delete_scan(self, scan_id):
+        self.db.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+        self.db.commit()
 
     # -- fitness checks
 
