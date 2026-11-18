@@ -24,6 +24,10 @@ def _cloud(o3d,depth,k,voxel):
 
 
 def _icp(o3d,source,target,voxel,initial):
+    """Coarse-to-fine ICP. Point-to-plane converges fastest, but on a view that is mostly one
+    flat face (a box seen square-on) it is underdetermined and can run away (translations of
+    10^9 m were measured on Open3D 0.20); a level whose result is not finite, moves further
+    than its own correspondence reach, or matches nothing is redone point-to-point."""
     transform=np.array(initial,copy=True)
     reg=o3d.pipelines.registration
     for factor,iterations in ((4,60),(2,40),(1,30)):
@@ -34,6 +38,13 @@ def _icp(o3d,source,target,voxel,initial):
         result=reg.registration_icp(src,dst,size*3,transform,
               reg.TransformationEstimationPointToPlane(),
               reg.ICPConvergenceCriteria(max_iteration=iterations))
+        t=np.asarray(result.transformation)
+        ran_away=(not np.isfinite(t).all() or result.fitness<0.05 or
+                  np.linalg.norm(t[:3,3]-transform[:3,3])>size*3*4)
+        if ran_away:
+            result=reg.registration_icp(src,dst,size*3,transform,
+                  reg.TransformationEstimationPointToPoint(),
+                  reg.ICPConvergenceCriteria(max_iteration=iterations*2))
         transform=validate_transform(result.transformation)
     return result
 
@@ -68,7 +79,10 @@ def _uniform_volume(o3d,frames,k,voxel_m,max_resolution=384):
 
 
 def reconstruct(session,out,mode,*,voxel_m=0.006,min_fitness=0.6,max_rmse_m=0.02,
-                max_rotation_deg=25.,max_translation_m=0.30,close_loop=False):
+                max_rotation_deg=25.,max_translation_m=0.30,close_loop=False,progress=None):
+    """progress(stage, done, total), if given, is called as frames are registered and fused
+    (for a window to show; the command line passes nothing)."""
+    note = progress or (lambda *_: None)
     if mode not in ("known","auto","static"): raise ValueError("Invalid reconstruction mode")
     if not 0.001<=voxel_m<=0.05: raise ValueError("voxel_m must be 0.001..0.05")
     if not 0<min_fitness<=1 or max_rmse_m<=0: raise ValueError("Invalid registration thresholds")
@@ -82,6 +96,7 @@ def reconstruct(session,out,mode,*,voxel_m=0.006,min_fitness=0.6,max_rmse_m=0.02
     o3d=open3d_module(); out=new_directory(out)
     records=[]; poses=[]; clouds=[]; quality=[]; k0=None
     for i,(path,item) in enumerate(entries):
+        note("register", i, len(entries))
         depth,k,pose=load_frame(path)
         if k.distortion and not np.allclose(k.distortion,0):
             raise ValueError("Session depth must be rectified before TSDF integration")
@@ -134,7 +149,8 @@ def reconstruct(session,out,mode,*,voxel_m=0.006,min_fitness=0.6,max_rmse_m=0.02
     frames=[(load_frame(path)[0],pose) for (path,_),pose in zip(records,poses)]
 
     def integrate(volume):
-        for depth,pose in frames:
+        for n,(depth,pose) in enumerate(frames):
+            note("fuse", n, len(frames))
             rgbd=o3d.geometry.RGBDImage.create_from_color_and_depth(dummy,o3d.geometry.Image(depth),
                   depth_scale=1000.,depth_trunc=9.9,convert_rgb_to_intensity=False)
             # Open3D integrates WORLD -> CAMERA, inverse of the stored pose.
@@ -144,6 +160,7 @@ def reconstruct(session,out,mode,*,voxel_m=0.006,min_fitness=0.6,max_rmse_m=0.02
     volume=integrate(o3d.pipelines.integration.ScalableTSDFVolume(voxel_length=voxel_m,
             sdf_trunc=voxel_m*4,color_type=o3d.pipelines.integration.TSDFVolumeColorType.NoColor,
             depth_sampling_stride=1))
+    note("mesh", 0, 1)
     mesh=volume.extract_triangle_mesh()
     volume_kind="scalable"
     if len(mesh.triangles)==0:
