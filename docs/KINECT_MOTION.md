@@ -259,4 +259,5 @@ scanner's snapshot both ways. **Not yet tried with people in front of it**:
 | "I can't see you well enough" | Step back until your feet are in the picture; move furniture from between you and the TV |
 | Counts look wrong for an exercise | Face the TV (plank: side-on); slow down; check the scoreboard's partials: half reps are not counted on purpose |
 | Kinect Pad: "No access to /dev/uinput" | `scripts/install-kinect-motion.sh --pad` once, then log out and in |
+| A Kinect process will not stop | `scripts/adaptive-air.sh --stop-all` closes the windows and stops Motion, Air and the hub. Stop them with `systemctl --user stop`, not `kill -9`, though a `kill -9` now also stays stopped. Each service also stops itself when unused: Motion a minute after the last page closes, the hub 20 s after nothing uses it |
 | Latency feels high | Close Kinect Studio's point cloud; fewer people in view; the status pill's tooltip shows the median and 95th percentile |

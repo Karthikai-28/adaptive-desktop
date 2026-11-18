@@ -13,6 +13,8 @@ Environment=TF_CPP_MIN_LOG_LEVEL=2
 Environment=XDG_RUNTIME_DIR=%t
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
 Restart=on-failure
+# A kill -9 is someone stopping it on purpose, not a crash: stay stopped.
+RestartPreventExitStatus=SIGKILL
 RestartSec=3
 KillMode=mixed
 TimeoutStopSec=5

@@ -10,6 +10,8 @@ ExecStart=@ADAPTIVE_REPO@/.local/air-venv/bin/python @ADAPTIVE_REPO@/services/ki
 Environment=PYTHONUNBUFFERED=1
 Environment=ADAPTIVE_REPO=@ADAPTIVE_REPO@
 Restart=on-failure
+# A kill -9 is someone stopping it on purpose, not a crash: stay stopped.
+RestartPreventExitStatus=SIGKILL
 RestartSec=3
 KillMode=mixed
 TimeoutStopSec=5

@@ -3,6 +3,7 @@
 #
 #   scripts/adaptive-air.sh --toggle   start Air, or stop it if it is running
 #   scripts/adaptive-air.sh --start | --stop
+#   scripts/adaptive-air.sh --stop-all   stop everything using the Kinect (windows, Motion, Air, hub)
 #   scripts/adaptive-air.sh --status   running or not, the camera in use, the Kinect on USB
 #   scripts/adaptive-air.sh --demo     stop Air and play the scripted demo hands once (no camera)
 #   scripts/adaptive-air.sh --studio   open Kinect Studio (camera, depth, point cloud, sensors)
@@ -35,6 +36,12 @@ case "${1:---toggle}" in
     --toggle) if running; then systemctl --user stop "$UNIT"; else start; fi ;;
     --start) start ;;
     --stop) systemctl --user stop "$UNIT" ;;
+    --stop-all)
+        # Everything that uses the Kinect: the windows first, then Motion and Air, then the hub they start.
+        pkill -f "$ADAPTIVE_REPO/apps/kinect-motion/motion.py" || true
+        pkill -f "$ADAPTIVE_REPO/apps/kinect-studio/studio.py" || true
+        systemctl --user stop kinect-motion.service "$UNIT" adaptive-kinect.service 2>/dev/null || true
+        echo "Kinect stopped: Fitness, Arcade, Room, Studio, Air and the hub" ;;
     --status)
         if running; then
             echo "Air: running"
