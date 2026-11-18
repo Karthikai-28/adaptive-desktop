@@ -34,6 +34,7 @@ COUNTDOWN = 3.0
 SAY_GAP = 2.5          # s between spoken lines for one player
 STALE = 0.5            # s: a hub state captured longer ago than this is not evidence
 LOST = 0.35            # s without a fresh sighting before a player counts as lost
+DEFAULT_SPACE = 2.0    # m of floor in front of the Kinect, unless motion.json says otherwise
 
 
 class Workout:
@@ -57,11 +58,14 @@ class Workout:
         self.results = []           # the finished steps of this workout, for the summary
         self.users = {}             # slot -> user id (profile)
         self.held_by = None         # "you" (pressed pause) or "tracking" (nobody seen)
+        self.on_start = self.on_finish = None    # the engine's tracking-quality recorder
 
     # -- control
 
     def start(self, mode, now, exercise=None, plan=None, seconds=None, target=None):
         self.finish(now)
+        if self.on_start:
+            self.on_start(now)
         self.mode = mode
         self.results, self.check_results = [], {}
         if mode == "free" or mode == "challenge":
@@ -125,7 +129,10 @@ class Workout:
                         out.append({"type": "check-compare", "slot": slot,
                                     "compare": training.compare(res, before[0]["results"])})
         if self.mode != "idle":
-            out.append({"type": "workout-done", "results": self.results})
+            done = {"type": "workout-done", "results": self.results}
+            if self.on_finish:
+                done["quality"] = self.on_finish(now, dict(self.sessions), dict(self.users), None)
+            out.append(done)
         self.sessions = {}
         self.mode, self.phase, self.plan, self.trackers = "idle", "idle", None, {}
         self.paused_at, self.held_by = None, None
@@ -267,6 +274,72 @@ class Engine:
         self.space = None
         self.space_key = None
         self.space_state = None
+        self.quality = {}            # slot -> how well the Kinect saw them in this activity
+        self.q_last = None
+        self.workout.on_start = self._quality_start
+        self.workout.on_finish = self._quality_finish
+
+    # -- tracking quality, per player and activity (kept with the results, never the frames)
+
+    def _quality_start(self, now):
+        self.quality, self.q_last = {}, now
+
+    def _quality_note(self, now):
+        """In tick(): time seen and lost per player while something is under way."""
+        if not self.live():
+            self.q_last = now
+            return
+        dt = 0.0 if self.q_last is None else max(0.0, min(0.5, now - self.q_last))
+        self.q_last = now
+        for p in self.roster.players:
+            q = self.quality.setdefault(p.slot, {"seconds": 0.0, "seen": 0.0, "losses": 0, "lost_seconds": 0.0,
+                                                 "frames": 0, "evidence": 0.0, "dark": 0})
+            q["seconds"] += dt
+            if self.lost.get(p.slot):
+                q["lost_seconds"] += dt
+            else:
+                q["seen"] += dt
+
+    def _quality_frame(self, active, hub):
+        if not self.live():
+            return
+        key = self.activity()
+        joints = exercises.CATALOG[key].joints if key in exercises.CATALOG else \
+            (sk.L_SH, sk.R_SH, sk.L_HIP, sk.R_HIP, sk.L_WR, sk.R_WR, sk.L_KNEE, sk.R_KNEE)
+        for p in self.roster.players:
+            b = active.get(p.track)
+            q = self.quality.get(p.slot)
+            if b is None or q is None:
+                continue
+            q["frames"] += 1
+            q["evidence"] += b.evidence(joints)
+            q["dark"] += hub.get("mode") == "ir"
+
+    def _quality_summary(self, slot, activity):
+        q = self.quality.get(slot)
+        if not q or q["seconds"] < 1.0:
+            return None
+        return {"activity": activity, "seconds": round(q["seconds"], 1),
+                "seen_share": round(q["seen"] / q["seconds"], 3), "losses": q["losses"],
+                "lost_seconds": round(q["lost_seconds"], 1),
+                "updates_per_s": round(q["frames"] / q["seen"], 1) if q["seen"] > 0.5 else None,
+                "evidence": round(q["evidence"] / q["frames"], 2) if q["frames"] else None,
+                "dark_share": round(q["dark"] / q["frames"], 2) if q["frames"] else None}
+
+    def _quality_finish(self, now, sessions, users, game_ids):
+        activity = self.workout.exercise if game_ids is None else self.game.key
+        self.last_quality = {}
+        for slot in list(self.quality):
+            summary = self._quality_summary(slot, activity if game_ids is None else self.game.key)
+            if summary is None:
+                continue
+            self.last_quality[slot] = summary
+            uid = users.get(slot)
+            if self.store and uid and (sessions.get(slot) or (game_ids or {}).get(slot)):
+                self.store.add_quality(uid, summary, session_id=sessions.get(slot),
+                                       game_id=(game_ids or {}).get(slot))
+        self.quality = {}
+        return self.last_quality
 
     # -- the play area, from the camera
 
@@ -275,7 +348,8 @@ class Engine:
         if cam is None:
             return
         room = (hub.get("room") or {}).get("far")
-        limit = self.cfg.get("space_m")
+        # The owner's floor space (motion.json "space_m"; null = only the room's own end).
+        limit = self.cfg.get("space_m", DEFAULT_SPACE)
         key = (cam.key(), room and round(room, 1), limit)
         if key != self.space_key:
             self.space = calibration.Space(cam, round(room, 1) if room else None, limit)
@@ -293,7 +367,7 @@ class Engine:
     def live(self):
         """A workout or game is under way (the hub then keeps infrared without colour checks)."""
         return (self.workout.mode != "idle" and self.workout.phase in ("ready", "go", "rest")) or \
-            (self.game is not None and not self.game.over)
+            (self.game is not None and not self.game.over) or getattr(self, "live_override", False)
 
     # -- one hub state
 
@@ -346,6 +420,7 @@ class Engine:
         events += self._controls(g_by, now)
         active = self.active_bodies()
         events += self.workout.step(self.roster, active, now)
+        self._quality_frame(active, hub)
         if self.game is not None:
             for p in self.roster.players:
                 b = active.get(p.track)
@@ -375,6 +450,8 @@ class Engine:
             was = self.lost.get(p.slot)
             self.lost[p.slot] = lost
             if lost != bool(was) and (was is not None or lost):
+                if lost and p.slot in self.quality:
+                    self.quality[p.slot]["losses"] += 1
                 tr = self.workout.trackers.get(p.slot)
                 if lost and tr is not None:
                     tr.interrupt()
@@ -397,18 +474,45 @@ class Engine:
         if self.game is not None:
             status = {p.slot: ("active" if not self.lost.get(p.slot) and not p.warning else
                                ("warning" if p.warning else p.status)) for p in self.roster.players}
+            was_over = self.game.over
             events += self.game.tick(now, status)
+            if self.game.over and not was_over:
+                events += self._game_over(now)
+        self._quality_note(now)
         return events
+
+    def _game_over(self, now):
+        """Save each named player's score (and how well they were seen); -> a summary event."""
+        g = self.game
+        results, ids, users = {}, {}, {}
+        for slot, lane in g.lanes.items():
+            p = self.roster.by_slot(slot)
+            results[slot] = {"score": lane.score}
+            if p is not None and p.profile and self.store:
+                users[slot] = p.profile
+                ids[slot] = self.store.add_game(p.profile, g.key, lane.score, g.lane_state(lane, now))
+        self.live_override = True
+        self._quality_finish(now, {}, users, ids)
+        self.live_override = False
+        return [{"type": "game-over", "game": g.key, "results": results,
+                 "quality": getattr(self, "last_quality", {})}]
 
     # -- games
 
     def start_game(self, key, now, seed=None, **kw):
         self.join_everyone(now)
+        self._quality_start(now)
         self.game = gameslib.make(key, [p.slot for p in self.roster.players], now, seed, **kw)
         return self.game
 
-    def stop_game(self):
+    def stop_game(self, now=None):
+        """Stop the game; a game stopped part way still saves its scores."""
+        out = []
+        if self.game is not None and not self.game.over:
+            self.game.over = True
+            out = self._game_over(time.time() if now is None else now)
         self.game = None
+        return out
 
     def join_everyone(self, now):
         """No players yet: everyone in view joins (nearest the middle first, up to four). Only

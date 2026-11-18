@@ -4,9 +4,11 @@
 Reads everyone's skeletons from the Kinect hub (services/adaptive-air/kinect_hub.py, /api/people,
 which it keeps running while it reads) and serves:
 
-    /fitness   Kinect Fitness: workouts, form coaching, rep races, the fitness check, history
-    /arcade    Kinect Arcade: body games, and Kinect Pad (your body as a gamepad)
-    /room      Kinect Room: who is here, zones, sitting reminders, tracking coverage, events
+    /app       the Kinect app: Home, Fitness, Games, Camera, Room, Scan and History in one page
+               (apps/kinect/kinect.py shows it in a window). The old pages' addresses (/fitness,
+               /arcade, /room) open the same sections of it.
+    /hub/...   the hub's own pictures, point cloud and controls, through this origin (the
+               Camera section), so the page has one address
     /ws        the live state for those pages (one message per hub frame, and from the watchdog
                between frames while a game runs or tracking is lost)
     /events    semantic events only, for Mario / Home Assistant: {"event": "exercise_rep", ...}
@@ -296,6 +298,13 @@ class Service:
                 self.engine.pad_profile = profile
         return True, None
 
+    def http(self):
+        """One aiohttp client session for the hub proxy (made in the event loop)."""
+        import aiohttp
+        if getattr(self, "_http", None) is None or self._http.closed:
+            self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5))
+        return self._http
+
     def _hub_status(self):
         try:
             return json.loads(urllib.request.urlopen(HUB + "/api/status", timeout=1.0).read())
@@ -313,11 +322,6 @@ class Service:
 
 def make_app(svc):
     from aiohttp import web
-
-    def page(name):
-        async def handler(_request):
-            return web.FileResponse(STATIC / f"{name}.html", headers={"Cache-Control": "no-cache"})
-        return handler
 
     async def ws_state(request):
         ws = web.WebSocketResponse(heartbeat=15)
@@ -353,7 +357,9 @@ def make_app(svc):
                                   "plans": [{"key": k, "name": p["name"], "rest": p["rest"],
                                              "steps": [{"exercise": e, "target": n} for e, n in p["steps"]]}
                                             for k, p in training.PLANS.items()],
-                                  "check": training.plan("check"), "retest_days": training.RETEST_DAYS})
+                                  "check": training.plan("check"), "retest_days": training.RETEST_DAYS,
+                                  "games": [{"key": g.key, "name": g.name, "tutorial": g.tutorial}
+                                            for g in __import__("games").GAMES.values()]})
 
     async def state(_request):
         return web.json_response(svc.snapshot)
@@ -446,6 +452,58 @@ def make_app(svc):
     async def recent(_request):
         return web.json_response(list(svc.engine.events)[-60:])
 
+    async def hub_proxy(request):
+        """GET/POST to the hub, from this origin: the camera picture and depth (with their frame
+        number), the point cloud, the PLY export, status and the hub's controls."""
+        import aiohttp
+        path = request.match_info["path"]
+        if not (path.startswith(("frame/", "api/")) or path in ("cloud.bin", "cloud.ply", "depth-scale.png")):
+            raise web.HTTPNotFound()
+        url = f"{HUB}/{path}" + (f"?{request.query_string}" if request.query_string else "")
+        data = await request.read() if request.method == "POST" else None
+        try:
+            async with svc.http().request(request.method, url, data=data, headers={
+                    "Content-Type": request.headers.get("Content-Type", "application/json")}) as r:
+                body = await r.read()
+                headers = {k: v for k, v in r.headers.items() if k in ("X-Seq", "Content-Disposition")}
+                headers["Cache-Control"] = "no-store"
+                return web.Response(body=body, status=r.status, headers=headers,
+                                    content_type=r.content_type)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            return web.json_response({"error": f"Kinect hub: {err}"}, status=503)
+
+    async def demo(request):
+        import demos
+        out = demos.frames(request.match_info["key"], float(request.query.get("height", "1.75") or 1.75))
+        if out is None:
+            raise web.HTTPNotFound(text="No demonstration for that")
+        return web.json_response(out, headers={"Cache-Control": "max-age=3600"})
+
+    async def pose_demo(_request):
+        import demos
+        import games as gameslib
+        return web.json_response([{"name": p["name"], "frames": [[[round(float(v), 3) for v in j] for j in
+                                                                  demos.pose_figure(p["a"])]]}
+                                  for p in gameslib.POSES])
+
+    async def insight(request):
+        """A person's movement summaries, tracking quality, games and best scores."""
+        uid = int(request.query.get("user", "0") or 0)
+        return web.json_response({"movement": svc.store.movement(uid), "quality": svc.store.quality(uid),
+                                  "games": svc.store.games(uid)[:20], "best": svc.store.best_games(uid)})
+
+    async def forget(request):
+        b = await body(request)
+        if b.get("session"):
+            svc.store.delete_session(int(b["session"]))
+        elif b.get("all"):
+            svc.store.delete_history(None)
+        elif b.get("user"):
+            svc.store.delete_history(int(b["user"]))
+        else:
+            raise web.HTTPBadRequest(text="session, user or all")
+        return web.json_response({"ok": True})
+
     async def game(request):
         b = await body(request)
         now = time.time()
@@ -459,7 +517,7 @@ def make_app(svc):
                 svc.engine.workout.finish(now)
                 svc.engine.start_game(key, now, b.get("seed"), **kw)
             elif b.get("action") == "stop":
-                svc.engine.stop_game()
+                svc.engine.stop_game(now)
             else:
                 raise web.HTTPBadRequest(text="action: start or stop")
         return web.json_response({"ok": True})
@@ -503,10 +561,26 @@ def make_app(svc):
         return web.json_response({k: svc.cfg.get(k) for k in ("zones", "voice", "room_always",
                                                               "sit_minutes", "webhook", "space_m")})
 
+    async def app_page(_request):
+        return web.FileResponse(STATIC / "app.html", headers={"Cache-Control": "no-cache"})
+
+    def legacy(section):
+        async def handler(request):
+            game = request.query.get("game")
+            raise web.HTTPFound(f"/app#/{section}" + (f"/{game}" if game else ""))
+        return handler
+
     app = web.Application()
-    app.router.add_get("/", lambda _r: web.HTTPFound("/fitness"))
-    for name in ("fitness", "arcade", "room"):
-        app.router.add_get(f"/{name}", page(name))
+    app.router.add_get("/", lambda _r: web.HTTPFound("/app"))
+    app.router.add_get("/app", app_page)
+    for name, section in (("fitness", "fitness"), ("arcade", "games"), ("room", "room"),
+                          ("studio", "camera"), ("scan", "scan")):
+        app.router.add_get(f"/{name}", legacy(section))
+    app.router.add_route("*", "/hub/{path:.*}", hub_proxy)
+    app.router.add_get("/api/demo/{key}", demo)
+    app.router.add_get("/api/poses", pose_demo)
+    app.router.add_get("/api/insight", insight)
+    app.router.add_post("/api/forget", forget)
     app.router.add_static("/static/", STATIC)
     app.router.add_get("/ws", ws_state)
     app.router.add_get("/events", ws_events)
@@ -540,6 +614,8 @@ async def serve(svc, port):
         if svc.idle():
             log("no page open for a minute; stopping")
             svc.stop.set()
+    if getattr(svc, "_http", None) is not None:
+        await svc._http.close()
     await runner.cleanup()
 
 
@@ -549,7 +625,9 @@ def main():
     parser.add_argument("--demo", action="store_true", help="synthetic people instead of the Kinect")
     parser.add_argument("--db", help="history file (default ~/.local/share/adaptive-desktop/fitness.db)")
     args = parser.parse_args()
-    svc = Service(load_config(), storelib.Store(args.db), demo=args.demo)
+    # The demo is the app with synthetic people: it uses neither your settings nor your history.
+    cfg = {"voice": False, "space_m": None} if args.demo else load_config()
+    svc = Service(cfg, storelib.Store(args.db), demo=args.demo)
     worker = threading.Thread(target=svc.run, name="hub-reader", daemon=True)
     worker.start()
     threading.Thread(target=svc.watchdog, name="watchdog", daemon=True).start()

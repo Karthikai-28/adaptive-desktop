@@ -751,11 +751,35 @@ def check_server():
             msg = await ws.receive_json(timeout=2)
             out["ws"] = "state" in msg and "people" in msg["state"]
             await ws.close()
-            for page in ("fitness", "arcade", "room"):
-                r = await client.get(f"/{page}")
-                out[page] = r.status
-            r = await client.get("/static/motion.css")
+            for page in ("fitness", "arcade", "room", "studio"):
+                r = await client.get(f"/{page}", allow_redirects=False)
+                out[page] = (r.status, r.headers.get("Location"))
+            r = await client.get("/arcade?game=walls", allow_redirects=False)
+            out["arcade-game"] = r.headers.get("Location")
+            r = await client.get("/app")
+            out["app"] = (r.status, "Kinect" in await r.text())
+            r = await client.get("/static/app.css")
             out["css"] = r.status
+            r = await client.get("/api/demo/squat")
+            out["demo"] = (r.status, len((await r.json())["frames"]))
+            r = await client.get("/api/demo/nope")
+            out["demo-bad"] = r.status
+            r = await client.get("/api/poses")
+            out["poses"] = len(await r.json())
+            r = await client.get(f"/api/insight?user={uid}")
+            out["insight"] = sorted((await r.json()).keys())
+            r = await client.get("/hub/etc/passwd")
+            out["proxy-guard"] = r.status
+            r = await client.post("/api/game", json={"action": "start", "game": "walls"})
+            out["game"] = (r.status, svc.engine.game is not None and svc.engine.game.key)
+            r = await client.post("/api/game", json={"action": "start", "game": "tetris"})
+            out["game-bad"] = r.status
+            r = await client.post("/api/game", json={"action": "stop"})
+            out["game-stop"] = (r.status, svc.engine.game)
+            r = await client.post("/api/forget", json={"user": uid})
+            out["forget"] = r.status
+            r = await client.get("/api/catalog")
+            out["games"] = [g["key"] for g in (await r.json())["games"]]
             return out
         finally:
             await client.close()
@@ -765,8 +789,19 @@ def check_server():
     check("Start with nobody joined: everyone in view plays", out["start"] == 200 and out["players"] == 2, out)
     check("an unknown exercise or action is refused", out["bad"] == 400 and out["bad_action"] == 400, out)
     check("the live state arrives on /ws", out["ws"], out)
-    check("the three pages and the stylesheet are served",
-          all(out[k] == 200 for k in ("fitness", "arcade", "room", "css", "history")), out)
+    check("one app at /app, with its stylesheet", out["app"] == (200, True) and out["css"] == 200, out)
+    check("the old pages open the app's sections (arcade = games, studio = camera)",
+          out["fitness"] == (302, "/app#/fitness") and out["arcade"] == (302, "/app#/games") and
+          out["room"] == (302, "/app#/room") and out["studio"] == (302, "/app#/camera") and
+          out["arcade-game"] == "/app#/games/walls", out)
+    check("demonstrations for exercises (and none for unknown moves), and the Pose Match figures",
+          out["demo"][0] == 200 and out["demo"][1] > 20 and out["demo-bad"] == 404 and out["poses"] == 7, out)
+    check("history: movement, tracking quality, games and best scores", out["insight"] == ["best", "games", "movement", "quality"]
+          and out["history"] == 200 and out["forget"] == 200, out)
+    check("the hub proxy passes only the hub's own pictures and controls", out["proxy-guard"] == 404, out)
+    check("games start on the server (and only known ones), stop, and are listed with tutorials",
+          out["game"] == (200, "walls") and out["game-bad"] == 400 and out["game-stop"] == (200, None)
+          and out["games"] == ["walls", "pose", "race"], out)
     if shutil.which("node"):
         bad = []
         for js in sorted((MOTION / "static").glob("*.js")):
