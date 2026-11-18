@@ -61,7 +61,7 @@ for file in "$AUTOSTART/adaptive-project-context.desktop" "$AUTOSTART/adaptive-g
     "$AUTOSTART/adaptive-first-login.desktop" "$AUTOSTART/adaptive-mario-home.desktop" \
     "$APPS/adaptive-project-context.desktop" "$APPS/com.karthi.AdaptiveSettings.desktop" \
     "$APPS/com.karthi.AdaptiveGestures.desktop" \
-    "$APPS/com.karthi.KinectStudio.desktop" \
+    "$APPS/com.karthi.KinectStudio.desktop" "$APPS/com.karthi.Kinect.desktop" \
     "$APPS/com.karthi.KinectFitness.desktop" "$APPS/com.karthi.KinectArcade.desktop" "$APPS/com.karthi.KinectRoom.desktop" \
     "$HOME/.local/share/gnome-shell/search-providers/org.adaptive.ProjectContext.search-provider.ini"; do
     if [ -f "$file" ]; then

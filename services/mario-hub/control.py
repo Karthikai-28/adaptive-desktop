@@ -24,7 +24,7 @@ HUB = "http://127.0.0.1:8792"
 SHELL = ["gdbus", "call", "--session", "-d", "org.gnome.Shell", "-o", "/org/adaptive/Shell"]
 CAST = str(REPO / "scripts" / "adaptive-cast-launch.sh")
 AIR = str(REPO / "scripts" / "adaptive-air.sh")
-STUDIO = str(REPO / "apps" / "kinect-studio" / "studio.py")
+KINECT_APP = str(REPO / "apps" / "kinect" / "kinect.py")
 CHEATSHEET_URL = "http://127.0.0.1:8791/commands"
 SNAPSHOTS = Path.home() / "Pictures" / "Kinect"
 
@@ -246,8 +246,8 @@ class Control:
         return self.said(r.get("count_sentence") or r.get("error") or "I can't see anyone.", True)
 
     def do_kinect_studio(self):
-        self.sh(["python3", STUDIO], wait=False)
-        return self.said("Opening Kinect Studio.")
+        self.sh(["python3", KINECT_APP, "camera"], wait=False)
+        return self.said("Opening the Kinect camera.")
 
     def _post(self, name, value):
         return self.http("POST", f"{HUB}/api/{name}", {"value": value}, timeout=3)

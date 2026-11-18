@@ -6,7 +6,7 @@
 #   scripts/adaptive-air.sh --stop-all   stop everything using the Kinect (windows, Motion, Air, hub)
 #   scripts/adaptive-air.sh --status   running or not, the camera in use, the Kinect on USB
 #   scripts/adaptive-air.sh --demo     stop Air and play the scripted demo hands once (no camera)
-#   scripts/adaptive-air.sh --studio   open Kinect Studio (camera, depth, point cloud, sensors)
+#   scripts/adaptive-air.sh --studio   open the Kinect app's Camera (picture, depth, point cloud, sensors)
 #   scripts/adaptive-air.sh --webcam on|off   the Kinect's camera as the "Kinect Camera" webcam
 #   scripts/adaptive-air.sh --led COLOUR   set the Kinect's LED (off, green, red, yellow,
 #                                          blink-green, blink-red-yellow)
@@ -38,10 +38,11 @@ case "${1:---toggle}" in
     --stop) systemctl --user stop "$UNIT" ;;
     --stop-all)
         # Everything that uses the Kinect: the windows first, then Motion and Air, then the hub they start.
+        pkill -f "$ADAPTIVE_REPO/apps/kinect/kinect.py" || true
         pkill -f "$ADAPTIVE_REPO/apps/kinect-motion/motion.py" || true
         pkill -f "$ADAPTIVE_REPO/apps/kinect-studio/studio.py" || true
         systemctl --user stop kinect-motion.service "$UNIT" adaptive-kinect.service 2>/dev/null || true
-        echo "Kinect stopped: Fitness, Arcade, Room, Studio, Air and the hub" ;;
+        echo "Kinect stopped: the Kinect app, Motion, Air and the hub" ;;
     --status)
         if running; then
             echo "Air: running"
@@ -56,7 +57,7 @@ case "${1:---toggle}" in
         systemctl --user stop "$UNIT" 2>/dev/null || true
         exec python3 "$AIR/air.py" --demo ;;
     --studio)
-        exec python3 "$ADAPTIVE_REPO/apps/kinect-studio/studio.py" ;;
+        exec python3 "$ADAPTIVE_REPO/apps/kinect/kinect.py" camera ;;
     --webcam)
         case "${2:-}" in on) value=true ;; off) value=false ;; *) echo "--webcam on|off" >&2; exit 2 ;; esac
         systemctl --user start adaptive-kinect.service
