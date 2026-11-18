@@ -110,8 +110,32 @@ class Floor:
         return x * self.up[0] + y * self.up[1] + z * self.up[2] + self.camera_height
 
     def to_dict(self):
+        # up: the room's up in camera coordinates (x right, y down, z forward); with the camera
+        # height it is the whole projection from the room frame to the picture (calibration).
         return {"seen": self.seen, "camera_height": round(self.camera_height, 3),
-                "tilt": round(math.degrees(math.asin(max(-1.0, min(1.0, -self.up[2])))), 1)}
+                "tilt": round(math.degrees(math.asin(max(-1.0, min(1.0, -self.up[2])))), 1),
+                "up": [round(float(v), 4) for v in self.up]}
+
+
+def room_extent(depth, intr, floor, step=8):
+    """How much room there is, from depth: the forward distance (along the floor, m) to what
+    stands between 0.3 and 2.0 m high (a wall, a sofa back), as its 10th / 50th / 90th
+    percentile, and the share of the picture with no depth. None without a floor."""
+    if floor is None:
+        return None
+    x, y, z, valid, _ = grid(depth, intr, step)
+    if valid.sum() < 50:
+        return {"near": None, "median": None, "far": None, "no_depth": 1.0}
+    pts = np.stack([x[valid], y[valid], z[valid]], axis=1)
+    room = to_room(pts, floor)
+    up = room[:, 1]
+    keep = (up > 0.3) & (up < 2.0)
+    fwd = room[keep, 2]
+    if fwd.size < 30:
+        return {"near": None, "median": None, "far": None, "no_depth": round(1 - float(valid.mean()), 3)}
+    q = np.percentile(fwd, [10, 50, 90])
+    return {"near": round(float(q[0]), 2), "median": round(float(q[1]), 2), "far": round(float(q[2]), 2),
+            "no_depth": round(1 - float(valid.mean()), 3)}
 
 
 def grid(depth, intr, step=STEP):
@@ -797,6 +821,8 @@ class People:
         self.next_id = 1
         self.retired = {}             # id -> (time, why): numbers given up on, for a while
         self.now = 0.0
+        self.frames = 0
+        self.room = None
 
     def new_geometry(self):
         """The picture switched camera (colour <-> infrared): fit the floor again from scratch.
@@ -825,6 +851,9 @@ class People:
 
     def step(self, poses, depth, accel_up, mount_height, intr, now):
         seen, self.floor = observe(poses, depth, accel_up, mount_height, intr, self.floor)
+        self.frames += 1
+        if self.frames % 15 == 1:                     # the room does not move: twice a second
+            self.room = room_extent(depth, intr, self.floor)
         return self.track(seen, now)
 
     def track(self, seen, now):
@@ -927,6 +956,7 @@ class People:
             "postures": {k: sum(p["posture"] == k for p in people) for k in POSTURES
                          if any(p["posture"] == k for p in people)},
             "floor": self.floor.to_dict() if self.floor else None,
+            "room": self.room,
             "people": people,
             "hidden": hidden,
             "retired": [{"id": k, "why": v[1], "ago": round(now - v[0], 1)} for k, v in self.retired.items()],
