@@ -40,6 +40,8 @@ from .workflows import Workflows
 from .audit_export import AuditExport
 from .retention import Retention
 from . import verdicts
+from . import operator
+from .journal import Journal
 from .workflows import RISKS
 
 NAME_RE_CACHE = {}
@@ -94,6 +96,11 @@ class Office:
         self.workflows = Workflows(self)
         self.audit_export = AuditExport(self)
         self.retention = Retention()
+        names = {aid: a["name"] for aid, a in self.agents.items()}
+        names[self.mgr["id"]] = self.mgr["name"]
+        self.journal = Journal(store, names, secrets=lambda: (operator.key(),))
+        self.journal.publish = self._publish
+        self.journal.live_check["quota"] = self._quota_live
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 
@@ -115,6 +122,7 @@ class Office:
         if not os.environ.get("OFFICE_NO_REPO_SCAN"):
             self._spawn(self.repos.loop(lambda: agy.write_agy_settings(self.repos.paths, self.repos.hidden)))
         paused = self.settings()["paused"]
+        self.journal.reconcile()          # events a crash lost between a status write and its record
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             self.store.update_task(t["id"], status="queued")
             self.store.add_event(t["agent"], "info", "Office restarted while paused; this task waits for the resume"
@@ -130,7 +138,32 @@ class Office:
         self.graphs.start()
         self.ledger.start()
         self._spawn(self._provider_loop())
+        self._spawn(self._journal_loop())
         self.kick()
+
+    def _publish(self, msg):
+        """The journal's live updates (events, inbox items, notifications) to every open page."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return                          # no loop (a script using the store): the record is enough
+        self._spawn(self.broadcast(msg))
+
+    def _quota_live(self, item):
+        pid = item["issue"].split(":", 1)[1]
+        if pid == "claude-manager":
+            return bool(self.manager._limit_tries)
+        return pid in self.providers and self.provider_paused(pid)
+
+    async def _journal_loop(self):
+        """Close inbox items whose cause has passed by itself (a quota back, an hourly limit reset)."""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                self.journal.sweep()
+            except Exception as e:
+                print(json.dumps({"log": "journal", "level": "error", "msg": "sweep failed", "error": str(e)}),
+                      flush=True)
 
     def _spawn(self, coro):
         t = asyncio.create_task(coro)
@@ -267,6 +300,8 @@ class Office:
         if until > self.paused_until.get(pid, 0):
             self.paused_until[pid] = until
             self.store.set("paused_until", self.paused_until)
+            self.journal.raise_issue("quota.exceeded", f"quota:{pid}", f"{self._label(pid)} is out of quota until "
+                                     f"{dt.datetime.fromtimestamp(until):%H:%M}", agent=aid or "")
             nxt = self.provider_for(aid) if aid else ""
             await self.toast(f"{self._label(pid)} is out of quota until "
                              f"{dt.datetime.fromtimestamp(until):%H:%M}" + (f"; agents continue on {self._label(nxt)}"
@@ -407,6 +442,9 @@ class Office:
             "quota_until": self.quota_until,
             "providers": self.provider_info(),
             "studies": self.study.all_status(),
+            "journal_head": self.journal.head(),
+            "inbox": self.journal.counts(),
+            "notifications": {"head": self.journal.notification_head(), "unread": self.journal.unread()},
         }
 
     # ------------------------------------------------------------------ prompts
@@ -746,6 +784,8 @@ class Office:
         except Exception as e:  # never leave an agent stuck at "working"
             r = agy.AgyResult()
             r.error = f"office error: {e}"
+            self.journal.raise_issue("office.error", "error:task-run", f"Running task #{tid} raised an office "
+                                     f"error: {e}", agent=aid, task_id=tid, mission_id=t.get("mission_id"))
         finally:
             self.task_runs.pop(tid, None)
             self.rt[aid]["task"] = None

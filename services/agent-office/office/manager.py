@@ -112,6 +112,9 @@ class Manager:
         log = [t for t in self.o.store.get("autopilot_log", []) if t > hour_ago]
         limit = self.cfg.get("autopilot_max_per_hour", 20)
         if len(log) >= limit:
+            self.o.journal.raise_issue("limit.reached", "limit:autopilot", f"Autopilot paused itself: {limit} "
+                                       f"automatic reviews in the last hour; {len(tasks)} finished task(s) wait for "
+                                       "a review", agent=self.id)
             self.o._spawn(self.o.post("manager", self.id,
                                       f"Autopilot paused itself: {limit} automatic reviews in the last hour. "
                                       f"{len(tasks)} finished task(s) are waiting — ask me to review them.",
@@ -184,6 +187,10 @@ class Manager:
                 tries = self._limit_tries.get(prompt, 0) + 1
                 self._limit_tries[prompt] = tries
                 if tries <= 36:   # up to six hours
+                    if tries == 1:
+                        self.o.journal.raise_issue("quota.exceeded", "quota:claude-manager",
+                                                   "Claude (the manager) hit its usage limit; held work is retried "
+                                                   "every 10 minutes", agent=self.id)
                     if tries == 1 and kind == "chat":
                         await self.o.post("manager", self.id, "(I've hit my Claude usage limit. I'll answer this "
                                                               "automatically once it resets.)", {"kind": "failure"})
@@ -191,6 +198,8 @@ class Manager:
                     asyncio.get_running_loop().call_later(LIMIT_RETRY_S, self.q.put_nowait, (prompt, kind, fut))
                     continue
             self._limit_tries.pop(prompt, None)
+            if text and not self._limit_tries:
+                self.o.journal.clear_issue("quota.restored", "quota:claude-manager", "Claude is answering again")
             if fut and not fut.done():
                 fut.set_result(text)
             if kind == "chat":

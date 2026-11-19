@@ -1,7 +1,15 @@
-"""SQLite persistence: tasks, chat messages, activity events, meetings, key/value."""
+"""SQLite persistence: tasks, chat messages, activity events, meetings, key/value.
+
+The tables of the first releases are created by SCHEMA and widened by hand (older databases). Everything after
+is a numbered migration in MIGRATIONS, applied once and recorded in PRAGMA user_version. Rolling back is in
+docs/AGENT_OFFICE.md (Notifications and the Action Inbox -> Database).
+"""
+import contextlib
 import json
 import sqlite3
+import threading
 import time
+import traceback
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -39,6 +47,50 @@ CREATE TABLE IF NOT EXISTS meetings (
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 """
 
+# Numbered schema changes. Each runs once, in order, inside one transaction; user_version is the last applied.
+MIGRATIONS = [
+    (1, """
+CREATE TABLE IF NOT EXISTS event_log (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE, ts REAL NOT NULL,
+  type TEXT NOT NULL, severity TEXT NOT NULL,
+  agent TEXT DEFAULT '', task_id INTEGER, mission_id INTEGER,
+  text TEXT NOT NULL DEFAULT '', evidence TEXT NOT NULL DEFAULT '[]',
+  issue TEXT DEFAULT '', actor TEXT DEFAULT '', dedup TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS event_log_task ON event_log(task_id, seq);
+CREATE INDEX IF NOT EXISTS event_log_mission ON event_log(mission_id, seq);
+CREATE INDEX IF NOT EXISTS event_log_agent ON event_log(agent, seq);
+CREATE INDEX IF NOT EXISTS event_log_issue ON event_log(issue, seq);
+CREATE INDEX IF NOT EXISTS event_log_ts ON event_log(ts);
+CREATE TRIGGER IF NOT EXISTS event_log_no_update BEFORE UPDATE ON event_log
+  BEGIN SELECT RAISE(ABORT, 'event history is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS event_log_no_delete BEFORE DELETE ON event_log
+  BEGIN SELECT RAISE(ABORT, 'event history is append-only'); END;
+CREATE TABLE IF NOT EXISTS inbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  issue TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, state TEXT NOT NULL, priority TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '',
+  agent TEXT DEFAULT '', task_id INTEGER, mission_id INTEGER, request TEXT DEFAULT '',
+  first_seq INTEGER, last_seq INTEGER, generation INTEGER NOT NULL DEFAULT 1,
+  created_at REAL, updated_at REAL, acknowledged_at REAL, acknowledged_by TEXT DEFAULT '',
+  resolved_at REAL, resolved_by TEXT DEFAULT '', resolution TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS inbox_state ON inbox(state, updated_at);
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seq INTEGER NOT NULL UNIQUE, priority TEXT NOT NULL, grp TEXT DEFAULT '',
+  title TEXT NOT NULL, text TEXT NOT NULL DEFAULT '',
+  agent TEXT DEFAULT '', task_id INTEGER, mission_id INTEGER, inbox_id INTEGER,
+  created_at REAL NOT NULL, read_at REAL, read_by TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS deliveries (
+  channel TEXT PRIMARY KEY, through INTEGER NOT NULL DEFAULT 0, updated_at REAL,
+  failures INTEGER NOT NULL DEFAULT 0, last_error TEXT DEFAULT ''
+);
+"""),
+]
+
 TASK_FIELDS = ("agent", "title", "body", "project", "status", "created_by", "depends_on",
                "attempts", "created_at", "started_at", "finished_at", "result", "error",
                "steps", "tokens", "repo", "mission_id")
@@ -67,6 +119,52 @@ class Store:
         for col, decl in MISSION_COLUMNS.items():
             if col not in have:
                 self.db.execute(f"ALTER TABLE missions ADD COLUMN {col} {decl}")
+        self._lock = threading.RLock()
+        self._depth = 0
+        self.observers = []             # f(kind, old row or None, new row), inside the write's transaction
+        self.migrate()
+
+    # ---- schema versions ----
+    def version(self):
+        return self.db.execute("PRAGMA user_version").fetchone()[0]
+
+    def migrate(self):
+        for number, sql in MIGRATIONS:
+            if number <= self.version():
+                continue
+            with self.transaction():
+                for stmt in _statements(sql):
+                    self.db.execute(stmt)
+                if number == 1:             # the journal starts now: nothing older is turned into alerts
+                    self.set("journal_since", time.time())
+                self.db.execute(f"PRAGMA user_version={int(number)}")
+
+    @contextlib.contextmanager
+    def transaction(self):
+        """One atomic write; nested uses join the outer one."""
+        with self._lock:
+            outer = self._depth == 0
+            if outer:
+                self.db.execute("BEGIN IMMEDIATE")
+            self._depth += 1
+            try:
+                yield
+            except BaseException:
+                self._depth -= 1
+                if outer:
+                    self.db.execute("ROLLBACK")
+                raise
+            self._depth -= 1
+            if outer:
+                self.db.execute("COMMIT")
+
+    def _observe(self, kind, old, new):
+        for f in self.observers:
+            try:
+                f(kind, old, new)
+            except Exception:           # the journal must never stop a task from changing state
+                print(json.dumps({"log": "journal", "level": "error", "where": f"observe {kind}",
+                                  "error": traceback.format_exc(limit=3)}), flush=True)
 
     # ---- key/value ----
     def get(self, key, default=None):
@@ -86,11 +184,14 @@ class Store:
     # ---- tasks ----
     def add_task(self, agent, title, body="", project="", created_by="operator", depends_on=None, repo="",
                  mission_id=None):
-        cur = self.db.execute(
-            "INSERT INTO tasks(agent,title,body,project,created_by,depends_on,created_at,repo,mission_id) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
-            (agent, title, body, project, created_by, depends_on, time.time(), repo, mission_id))
-        return self.task(cur.lastrowid)
+        with self.transaction():
+            cur = self.db.execute(
+                "INSERT INTO tasks(agent,title,body,project,created_by,depends_on,created_at,repo,mission_id) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (agent, title, body, project, created_by, depends_on, time.time(), repo, mission_id))
+            t = self.task(cur.lastrowid)
+            self._observe("task", None, t)
+        return t
 
     def task(self, tid):
         row = self.db.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
@@ -101,8 +202,13 @@ class Store:
         if bad:
             raise ValueError(f"unknown task fields {bad}")
         sets = ",".join(f"{k}=?" for k in kw)
-        self.db.execute(f"UPDATE tasks SET {sets} WHERE id=?", (*kw.values(), tid))
-        return self.task(tid)
+        with self.transaction():
+            old = self.task(tid) if self.observers and "status" in kw else None
+            self.db.execute(f"UPDATE tasks SET {sets} WHERE id=?", (*kw.values(), tid))
+            new = self.task(tid)
+            if old and new and old["status"] != new["status"]:
+                self._observe("task", old, new)
+        return new
 
     def tasks(self, agent=None, status=None, limit=200, created_since=None):
         q, args = "SELECT * FROM tasks WHERE 1=1", []
@@ -129,12 +235,15 @@ class Store:
 
     def add_mission(self, title, objective, criteria=None, project="", repo="", created_by="operator", risk="",
                     workflow_id="", approved_by="", approved_at=None, allowed_agents=None, template=None):
-        cur = self.db.execute(
-            "INSERT INTO missions(title,objective,criteria,project,repo,created_by,created_at,risk,workflow_id,"
-            "approved_by,approved_at,allowed_agents,template) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (title, objective, json.dumps(criteria or []), project, repo, created_by, time.time(), risk,
-             workflow_id, approved_by, approved_at, json.dumps(allowed_agents or []), json.dumps(template or {})))
-        return self.mission(cur.lastrowid)
+        with self.transaction():
+            cur = self.db.execute(
+                "INSERT INTO missions(title,objective,criteria,project,repo,created_by,created_at,risk,workflow_id,"
+                "approved_by,approved_at,allowed_agents,template) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (title, objective, json.dumps(criteria or []), project, repo, created_by, time.time(), risk,
+                 workflow_id, approved_by, approved_at, json.dumps(allowed_agents or []), json.dumps(template or {})))
+            m = self.mission(cur.lastrowid)
+            self._observe("mission", None, m)
+        return m
 
     def mission(self, mid, with_tasks=False):
         row = self.db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone()
@@ -162,8 +271,13 @@ class Store:
             if k in kw and not isinstance(kw[k], str):
                 kw[k] = json.dumps(kw[k])
         sets = ",".join(f"{k}=?" for k in kw)
-        self.db.execute(f"UPDATE missions SET {sets} WHERE id=?", (*kw.values(), mid))
-        return self.mission(mid, with_tasks=True)
+        with self.transaction():
+            old = self.mission(mid) if self.observers and "status" in kw else None
+            self.db.execute(f"UPDATE missions SET {sets} WHERE id=?", (*kw.values(), mid))
+            new = self.mission(mid, with_tasks=True)
+            if old and new and old["status"] != new["status"]:
+                self._observe("mission", old, new)
+        return new
 
     # ---- messages ----
     def add_message(self, thread, sender, text, meta=None):
@@ -215,3 +329,16 @@ class Store:
 
     def set_attendees(self, mid, attendees):
         self.db.execute("UPDATE meetings SET attendees=? WHERE id=?", (json.dumps(attendees), mid))
+
+
+def _statements(sql):
+    """Split a migration into statements, keeping trigger bodies (BEGIN ... END;) whole."""
+    out, buf = [], ""
+    for line in sql.strip().splitlines():
+        buf += line + "\n"
+        if sqlite3.complete_statement(buf):
+            out.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        out.append(buf.strip())
+    return out

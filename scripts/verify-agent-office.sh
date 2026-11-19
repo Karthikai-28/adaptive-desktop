@@ -138,6 +138,135 @@ try:
 finally:
     inner.kill(); other.kill()
 PY
+# Milestone 1: the event journal, Action Inbox and notifications (office/events.py, office/journal.py)
+PYTHONPATH="$APP" python3 - "$TMP/journal.db" "$TMP/journal-old.db" <<'PY' || fail "event journal and Action Inbox"
+import sqlite3, sys, time
+from office import events as E
+from office.journal import Journal
+from office.store import Store
+
+# --- pure rules
+t0 = {"id": 7, "agent": "maya", "title": "Build", "status": "queued", "attempts": 0, "mission_id": None,
+      "started_at": None, "finished_at": None, "error": ""}
+run = {**t0, "status": "running", "attempts": 1, "started_at": 10.0}
+assert [e["type"] for e in E.task_events(t0, run)] == ["task.started"]
+assert [e["type"] for e in E.task_events(t0, {**run, "attempts": 2})] == ["task.resumed"]
+assert [e["type"] for e in E.task_events(t0, run, resumed=True)] == ["task.resumed"]
+fail_ = {**run, "status": "failed", "finished_at": 20.0, "error": "agy exited 1"}
+assert E.task_events(run, fail_)[0]["type"] == "task.failed"
+assert E.task_events(run, fail_)[0]["dedup"] == E.task_events(run, dict(fail_))[0]["dedup"]   # same fact, same key
+assert E.task_events(run, {**fail_, "error": "blocked: task #3 failed"})[0]["type"] == "task.blocked"
+assert E.task_events(run, {**run, "status": "queued", "error": "timeout"})[0]["type"] == "task.retry"
+assert E.task_events(run, {**run, "status": "queued", "attempts": 0})[0]["type"] == "task.interrupted"
+assert E.task_events(fail_, {**fail_, "status": "queued"})[0]["type"] == "task.requeued"
+assert E.task_events(run, run) == []
+assert E.issue_effect(E.task_events(run, fail_)[0]) == ("open", "task:7", "failed")
+assert E.issue_effect(E.task_events(fail_, {**fail_, "status": "queued"})[0]) == ("progress", "task:7", None)
+assert E.issue_effect(E.task_events(run, {**run, "status": "done", "finished_at": 30.0})[0]) == ("resolve", "task:7", None)
+assert E.notification_for({"type": "task.failed"}) == ("high", None)
+assert E.notification_for({"type": "approval.requested"}) == ("critical", None)
+assert E.notification_for({"type": "task.completed"}) == ("normal", "office.done")
+assert E.notification_for({"type": "task.started"}) is None
+m_run = {"id": 3, "title": "M", "status": "running", "tasks": [], "finished_at": None}
+m_fail = E.mission_events(m_run, {**m_run, "status": "failed", "finished_at": 5.0, "tasks": [{"status": "failed"}]})[0]
+assert m_fail.get("quiet") and E.issue_effect(m_fail) is None and E.notification_for(m_fail) is None
+m_verdict = E.mission_events(m_run, {**m_run, "status": "failed", "finished_at": 5.0, "tasks": [{"status": "done"}]})[0]
+assert E.issue_effect(m_verdict) == ("open", "mission:3", "mission-failed")
+for a, s, n in (("ack", E.NEEDS, E.WORKING), ("resolve", E.WORKING, E.RESOLVED), ("reopen", E.RESOLVED, E.NEEDS)):
+    assert E.transition(s, a) == n
+for a, s in (("ack", E.RESOLVED), ("reopen", E.NEEDS), ("resolve", E.RESOLVED)):
+    try:
+        E.transition(s, a); raise AssertionError(f"{a} from {s} allowed")
+    except ValueError:
+        pass
+assert E.request_key("workflow-run", "w", {"a": 1, "b": 2}) == E.request_key("workflow-run", "w", {"b": 2, "a": 1})
+red = E.redact("failed: api_key=abcd1234efgh token ghp_" + "a" * 30 + " key sk-ant-xyzxyzxyzxyz OPKEY12345678", ["OPKEY12345678"])
+assert "abcd1234efgh" not in red and "ghp_" not in red and "sk-ant" not in red and "OPKEY" not in red, red
+
+# --- the journal on a real database
+p = sys.argv[1]
+s = Store(p)
+assert s.version() == 1 and s.get("journal_since")
+j = Journal(s, {"maya": "Maya"}, secrets=lambda: ("SECRETKEY123",))
+t = s.add_task("maya", "Build it")
+s.update_task(t["id"], status="running", started_at=time.time(), attempts=1)
+s.update_task(t["id"], status="failed", finished_at=time.time(), error="it broke; key SECRETKEY123")
+items = j.inbox()["items"]
+assert len(items) == 1 and items[0]["state"] == E.NEEDS and items[0]["kind"] == "failed" and items[0]["priority"] == "high", items
+assert "SECRETKEY123" not in items[0]["text"], items[0]["text"]
+notes = j.notifications()
+assert len(notes) == 1 and notes[0]["priority"] == "high" and notes[0]["links"]["task"] == t["id"], notes
+types = [e["type"] for e in j.events()["events"]]
+assert types == ["task.created", "task.started", "task.failed"], types
+# the event history is append-only
+for sql in ("UPDATE event_log SET text='x'", "DELETE FROM event_log"):
+    try:
+        s.db.execute(sql); raise AssertionError(sql + " was allowed")
+    except sqlite3.DatabaseError:
+        pass
+# a restart: everything is still there, nothing is recorded twice, numbering continues
+head = j.head()
+s2 = Store(p); j2 = Journal(s2, {"maya": "Maya"})
+assert j2.head() == head and j2.reconcile() == 0 and len(j2.inbox()["items"]) == 1 and len(j2.notifications()) == 1
+item = j2.inbox()["items"][0]
+# the blocker stays until it is really resolved
+try:
+    j2.act(item["id"], "resolve", "operator"); raise AssertionError("a live failure was resolved")
+except PermissionError:
+    pass
+try:
+    j2.act(item["id"], "dismiss", "phone"); raise AssertionError("a live failure was dismissed without the key")
+except PermissionError:
+    pass
+assert j2.act(item["id"], "ack", "phone")["state"] == E.WORKING
+assert j2.inbox(state=E.WORKING)["total"] == 1
+s2.update_task(t["id"], status="queued", error="", finished_at=None)                   # the operator retries it
+s2.update_task(t["id"], status="running", started_at=time.time(), attempts=2)
+s2.update_task(t["id"], status="failed", finished_at=time.time() + 1, error="broke again")   # ... and it fails again
+again = j2.inbox()["items"]
+assert len(again) == 1 and again[0]["state"] == E.NEEDS and len(j2.notifications()) == 2, again   # one item, a new alert
+s2.update_task(t["id"], status="queued", error="", finished_at=None)
+s2.update_task(t["id"], status="running", started_at=time.time(), attempts=3)
+s2.update_task(t["id"], status="done", finished_at=time.time() + 2, result="ok")
+done = j2.item(item["id"])
+assert done["state"] == E.RESOLVED and done["resolution"] == "recovered" and not done["live"], done
+hist = [e["type"] for e in done["history"]]
+assert hist.index("inbox.acknowledged") < hist.index("task.completed"), hist
+assert j2.act(item["id"], "reopen", "operator")["state"] == E.NEEDS
+assert j2.act(item["id"], "resolve", "operator")["state"] == E.RESOLVED          # nothing live: resolvable
+# reconnecting clients get what they missed, in order
+evs = j2.events(after=2)["events"]
+assert [e["seq"] for e in evs] == sorted(e["seq"] for e in evs) and evs[0]["seq"] == 3 and evs[0]["ts_utc"].endswith("+00:00")
+assert [n["id"] for n in j2.notifications(after=1)] == [2, 3]
+assert j2.delivered("link", 2)["pending"] == 1 and j2.delivered("link", 1)["through"] == 2   # never moves back
+assert j2.mark_read("operator", through=2)["unread"] == 1
+# approvals: one request asked twice is one item and one alert; declining closes it
+a1 = j2.request_approval("workflow-run", "move", {"inputs": {}}, "manager", "run move")
+a2 = j2.request_approval("workflow-run", "move", {"inputs": {}}, "manager", "run move")
+assert a1["id"] == a2["id"] and a1["priority"] == "critical"
+assert sum(1 for n in j2.notifications(limit=500) if n["priority"] == "critical") == 1
+assert j2.act(a1["id"], "ack", "phone")["state"] == E.WORKING        # acknowledging approves nothing ...
+try:
+    j2.act(a1["id"], "resolve", "phone"); raise AssertionError("an approval was resolved without approving it")
+except ValueError:
+    pass
+assert j2.act(a1["id"], "decline", "operator")["resolution"] == "declined"
+a3 = j2.request_approval("workflow-run", "move", {"inputs": {}}, "manager", "run move")   # asked again later
+assert a3["id"] == a1["id"] and a3["state"] == E.NEEDS and a3["generation"] == 2
+seqs = [e["seq"] for e in j2.events(limit=1000)["events"]]
+assert seqs == list(range(1, len(seqs) + 1)), seqs                     # numbered without gaps, even after duplicates
+
+# an office upgraded with old finished work does not turn its history into alerts
+old = sys.argv[2]
+db = sqlite3.connect(old)
+db.execute("CREATE TABLE tasks (id INTEGER PRIMARY KEY, agent TEXT NOT NULL, title TEXT NOT NULL, status TEXT, "
+           "finished_at REAL, error TEXT DEFAULT '', attempts INTEGER DEFAULT 1)")
+db.execute("INSERT INTO tasks(agent,title,status,finished_at,error) VALUES('maya','old','failed',?, 'x')", (time.time() - 99,))
+db.commit(); db.close()
+so = Store(old)
+jo = Journal(so)
+assert so.version() == 1 and jo.reconcile() == 0 and jo.inbox()["total"] == 0 and jo.notifications() == []
+PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
 # 2. A throwaway server: API, guards, path traversal
@@ -305,6 +434,91 @@ async def main():
 
 asyncio.run(main())
 PY
+# Milestone 1 through the real scheduler (fake runs): a failing task in a mission gives one inbox item and one
+# alert, survives a restart, and is resolved only when the work really succeeds
+OFFICE_STATE="$TMP/journal-office" OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 PYTHONPATH="$REPO/.local/office-pydeps:$APP" python3 - "$APP" <<'PY' || fail "inbox through the office"
+import asyncio
+from office import agy, config
+from office.config import DATA
+from office.core import Office
+from office.store import Store
+
+runs = []
+class FakeRun:
+    def __init__(self):
+        self.done, self.result = asyncio.Event(), agy.AgyResult()
+        runs.append(self)
+    async def wait(self):
+        await self.done.wait(); return self.result
+    def cancel(self):
+        self.result.cancelled = True; self.done.set()
+    def fail(self, err):
+        self.result.error = err; self.done.set()
+    def finish(self, text):
+        self.result.status, self.result.text = "SUCCESS", text; self.done.set()
+
+def office(store):
+    o = Office(config.load(), store)
+    o.provider_paused = lambda pid, tools=True: False
+    def run(*a, **k):
+        r = FakeRun(); r.provider = a[1]; return r
+    o._run = run
+    o.manager.start = o.study.start = o.quota.start = o.graphs.start = o.ledger.start = lambda: None
+    o._provider_loop = lambda: asyncio.sleep(0)
+    o._chat_worker = lambda aid: asyncio.sleep(0)
+    sent = []
+    o.broadcast = lambda msg: (sent.append(msg), asyncio.sleep(0))[1]
+    o.sent = sent
+    return o
+
+async def settle(cond):
+    for _ in range(200):
+        if cond():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("timed out")
+
+async def main():
+    store = Store(DATA / "office.db")
+    o = office(store)
+    await o.start()
+    agent = next(iter(o.agents))
+    m = await o.add_mission(agent, "Ship", "Ship it", ["works"])
+    tid = m["tasks"][0]["id"]
+    await settle(lambda: len(runs) == 1)
+    runs[0].fail("agy exited 2")                                   # first failure: retried by itself
+    await settle(lambda: len(runs) == 2)
+    runs[1].fail("agy exited 2 again")                             # second: the task fails
+    await settle(lambda: store.task(tid)["status"] == "failed")
+    await settle(lambda: store.mission(m["id"])["status"] == "failed")
+    j = o.journal
+    items = j.inbox()["items"]
+    assert len(items) == 1 and items[0]["issue"] == f"task:{tid}" and items[0]["mission_id"] == m["id"], items
+    assert [n["priority"] for n in j.notifications()] == ["high"], j.notifications()
+    types = [e["type"] for e in j.events(limit=1000)["events"]]
+    for want in ("mission.created", "task.created", "task.started", "task.retry", "task.resumed", "task.failed",
+                 "mission.failed"):
+        assert want in types, (want, types)
+    assert any(msg.get("type") == "notification" for msg in o.sent) and any(msg.get("type") == "inbox" for msg in o.sent)
+    assert o.snapshot()["inbox"]["NEEDS_ATTENTION"] == 1 and o.snapshot()["journal_head"] == j.head()
+    await o.shutdown()
+
+    o2 = office(store)                                             # restart: the blocker is still there
+    await o2.start()
+    j2 = o2.journal
+    assert j2.inbox(state="NEEDS_ATTENTION")["total"] == 1 and len(j2.notifications()) == 1
+    await o2.retry_task(tid)                                       # recovery: in progress, not resolved
+    assert j2.item_by_issue(f"task:{tid}")["state"] == "IN_PROGRESS"
+    await settle(lambda: len(runs) == 3)
+    runs[2].finish("Done.\nC1: PASS - it works")
+    await settle(lambda: store.mission(m["id"])["status"] == "succeeded")
+    item = j2.item_by_issue(f"task:{tid}")
+    assert item["state"] == "RESOLVED" and item["resolution"] == "recovered", item
+    assert [n["title"] for n in j2.notifications()][-1].startswith("Mission #"), j2.notifications()
+    await o2.shutdown()
+
+asyncio.run(main())
+PY
 PORT=8799
 OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 \
     PYTHONPATH="$REPO/.local/office-pydeps" \
@@ -409,6 +623,39 @@ code -X POST "${J[@]}" "$B/api/tasks/$HTID/cancel" >/dev/null
 [ "$(code -X POST "${J[@]}" "$B/api/tasks/$HTID/retry")" = 403 ] || fail "hardware mission task re-run without the key"
 [ "$(code -X POST "${J[@]}" "${OP[@]}" "$B/api/tasks/$HTID/retry")" = 200 ] || fail "operator re-run of a hardware mission task"
 code -X POST "${J[@]}" "$B/api/missions/$HMID/cancel" >/dev/null
+# Action Inbox over HTTP: a refused hardware run waits for approval; acknowledging it starts nothing, and only the
+# operator key approves it, through the same checks as a fresh run
+MISSIONS() { curl -fsS "$B/api/missions?limit=500" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
+[ "$(code -X POST "${J[@]}" -H 'X-Office-Actor: manager' -d '{"agent":"maya"}' "$B/api/workflows/move-robot/run")" = 400 ] || fail "hardware workflow ran without approval (inbox)"
+AID="$(curl -fsS "$B/api/inbox?kind=approval&state=NEEDS_ATTENTION" | python3 -c 'import json,sys; d=json.load(sys.stdin); it=[i for i in d["items"] if i["has_request"] and i["text"].startswith("manager asks")]; assert len(it) == 1 and it[0]["priority"] == "critical", d; print(it[0]["id"])')" || fail "approval request in the inbox"
+BEFORE="$(MISSIONS)"
+post -H 'X-Office-Actor: phone' -d '{}' "$B/api/inbox/$AID/ack" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "IN_PROGRESS" and d["acknowledged_by"] == "phone", d' || fail "acknowledge"
+[ "$(MISSIONS)" = "$BEFORE" ] || fail "acknowledging an approval started work"
+[ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/approve")" = 403 ] || fail "approved without the operator key"
+[ "$(code -X POST "${J[@]}" -H 'X-Office-Actor: phone' -d '{}' "$B/api/inbox/$AID/approve")" = 403 ] || fail "the phone approved without the key"
+[ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/resolve")" = 409 ] || fail "an approval was closed by resolving it"
+[ "$(MISSIONS)" = "$BEFORE" ] || fail "a refused approval started work"
+post "${OP[@]}" -d '{}' "$B/api/inbox/$AID/approve" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d["result"]; assert d["item"]["state"] == "RESOLVED" and d["item"]["resolution"] == "approved" and r["approved_by"] == "operator" and r["created_by"] == "manager" and r["workflow_id"] == "move-robot", d' || fail "approve with the operator key"
+[ "$(code -X POST "${J[@]}" "${OP[@]}" -d '{}' "$B/api/inbox/$AID/approve")" = 409 ] || fail "one approval ran twice"
+[ "$(MISSIONS)" = "$((BEFORE + 1))" ] || fail "approval did not start exactly one mission"
+# the event history: ordered, resumable from any point, UTC timestamps
+curl -fsS "$B/api/journal?after=0&limit=1000" | python3 -c '
+import json,sys; d=json.load(sys.stdin); s=[e["seq"] for e in d["events"]]; t=[e["type"] for e in d["events"]]
+assert s == list(range(1, len(s) + 1)) and d["head"] == s[-1], s
+assert "approval.requested" in t and "approval.granted" in t and "inbox.acknowledged" in t, t
+assert all(e["ts_utc"].endswith("+00:00") for e in d["events"])' || fail "journal"
+HEAD="$(curl -fsS "$B/api/journal?after=0&limit=1000" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"])')"
+curl -fsS "$B/api/journal?after=$HEAD" | python3 -c 'import json,sys; assert json.load(sys.stdin)["events"] == []' || fail "journal after head"
+# notifications: numbered, kept until delivered, confirmed per device, long-poll returns on time
+NHEAD="$(curl -fsS "$B/api/notifications?after=0" | python3 -c 'import json,sys; d=json.load(sys.stdin); n=d["notifications"]; assert n and [x["id"] for x in n] == sorted(x["id"] for x in n) and any(x["priority"] == "critical" for x in n); print(d["head"])')" || fail "notifications"
+curl -fsS "$B/api/notifications?after=0&channel=link" -H 'X-Office-Device: phone1' | python3 -c 'import json,sys; d=json.load(sys.stdin)["delivery"]; assert d["channel"] == "link:phone1" and d["pending"] >= 1, d' || fail "undelivered notifications"
+post -H 'X-Office-Device: phone1' -d "{\"channel\":\"link\",\"through\":$NHEAD}" "$B/api/notifications/delivered" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["pending"] == 0 and d["channel"] == "link:phone1", d' || fail "delivery confirmation"
+T0=$(date +%s%N)
+curl -fsS "$B/api/notifications?after=$NHEAD&wait=1" | python3 -c 'import json,sys; assert json.load(sys.stdin)["notifications"] == []' || fail "long poll"
+[ $(( ($(date +%s%N) - T0) / 1000000 )) -ge 900 ] || fail "long poll returned early"
+post -d "{\"through\":$NHEAD}" "$B/api/notifications/read" | python3 -c 'import json,sys; assert json.load(sys.stdin)["unread"] == 0' || fail "mark read"
+[ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/bogus")" = 404 ] || fail "unknown inbox action"
+curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["journal_head"] >= 1 and "NEEDS_ATTENTION" in d["inbox"] and "head" in d["notifications"]' || fail "state carries the inbox"
 # a ROS investigation saved as a workflow keeps its inputs, not its old snapshot, and captures a new one per run
 post -d "{\"id\":\"replay-stall\",\"title\":\"Replay stall\",\"risk\":\"read\",\"from_mission\":$CMID}" "$B/api/workflows" | \
     python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["template"]["kind"] == "ros-investigation" and d["objective"] == "planner stalls in replay" and "snapshot" not in d["objective"], d' || fail "save ROS workflow from a mission"

@@ -138,6 +138,9 @@ class QuotaGuard:
             return                                                         # this pause was announced already
         self._announced = self.o.quota_until
         self._last_probe = time.time()
+        self.o.journal.raise_issue("quota.exceeded", f"quota:{self.o.main_agy}", "Gemini quota used up; work "
+                                   f"resumes by itself at {dt.datetime.fromtimestamp(self.o.quota_until):%H:%M}",
+                                   agent=agent or "")
         when = dt.datetime.fromtimestamp(self.o.quota_until).strftime("%H:%M" if self.o.quota_until - now < 20 * 3600 else "%a %H:%M")
         await self.o.broadcast({"type": "settings", "settings": self.o.settings(), "quota_until": self.o.quota_until})
         fb = self.o.settings()["fallback"]
@@ -158,6 +161,8 @@ class QuotaGuard:
         self.o.quota_until = 0
         self.o.store.set("quota_until", 0)
         self.o.store.set("quota_known", False)
+        self.o.journal.clear_issue("quota.restored", f"quota:{self.o.main_agy}", "Gemini quota is back"
+                                   + (" early" if early else ""))
         await self.o.broadcast({"type": "settings", "settings": self.o.settings(), "quota_until": 0})
         await self.o.toast("Gemini quota is back" + (" early" if early else "") + " - the team is working again.", "ok")
         for aid, batch in list(self.deferred_chats.items()):

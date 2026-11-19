@@ -66,7 +66,8 @@ async def caller(request: Request, claimed=""):
     if operator.valid(request.headers.get("x-office-operator", "")):
         return "operator", True
     claimed = claimed or request.headers.get("x-office-actor", "")
-    return (claimed if claimed in ("manager", "meeting") else "operator"), False
+    # "phone" is set by Adaptive Link's gateway: attribution only, it grants nothing the key would
+    return (claimed if claimed in ("manager", "meeting", "phone") else "operator"), False
 
 
 def manager_limit(by):
@@ -74,6 +75,8 @@ def manager_limit(by):
     if by in ("manager", "meeting"):
         recent = store.tasks(created_since=time.time() - 3600, limit=1000)
         if sum(1 for x in recent if x["created_by"] in ("manager", "meeting")) >= 40:
+            office.journal.raise_issue("limit.reached", "limit:manager-tasks", "Claude reached its limit of 40 "
+                                       "new tasks an hour; more work waits for the owner", agent=office.mgr["id"])
             bad("manager task limit reached (40 per hour) — ask the owner before assigning more")
 
 
@@ -83,10 +86,20 @@ def needs_operator(is_operator, what):
                                  "and enter it in the office app, or use the `office` command yourself)")
 
 
-def guard_mission_risk(mid, is_operator, what):
+def guard_mission_risk(mid, is_operator, what, approval=None, by="operator"):
+    """Work in a hardware/external mission needs the operator key. Without it the request is kept in the
+    Action Inbox as an approval request (approval = (kind, ref, request)) and refused as before."""
     m = store.mission(int(mid)) if mid else None
-    if m and m.get("risk") in ("hardware", "external"):
-        needs_operator(is_operator, f"{what} in a {m['risk']} mission")
+    if m and m.get("risk") in ("hardware", "external") and not is_operator:
+        hint = ""
+        if approval:
+            item = office.journal.request_approval(*approval, requested_by=by, text=f"{by} asks for {what} in "
+                                                   f"{m['risk']} mission #{m['id']} \"{m['title']}\"",
+                                                   mission_id=m["id"])
+            hint = f" It is waiting for approval in the Action Inbox (#{item['id']})."
+        raise HTTPException(403, f"{what} in a {m['risk']} mission needs the operator key (run `office "
+                                 "operator-key` in your terminal and enter it in the office app, or use the `office` "
+                                 "command yourself)." + hint)
 
 
 # ---------------------------------------------------------------- live updates
@@ -159,7 +172,8 @@ class TaskIn(BaseModel):
 async def add_task(t: TaskIn, request: Request):
     by, is_operator = await caller(request, t.created_by or "")
     manager_limit(by)
-    guard_mission_risk(t.mission_id, is_operator, "adding work")
+    guard_mission_risk(t.mission_id, is_operator, "adding work",
+                       ("task-add", t.mission_id, t.model_dump(exclude={"created_by"})), by)
     try:
         return await office.add_task(t.agent, t.title, t.body, t.project, by, t.after, t.repo, t.mission_id)
     except ValueError as e:
@@ -325,6 +339,13 @@ async def run_workflow(wid: str, r: WorkflowRunIn, request: Request):
     if r.approved:
         needs_operator(is_operator, "approving a workflow run")
     manager_limit(by)
+    w = office.workflows.get(wid)
+    if w and (w.get("risk") or "write") in ("hardware", "external") and not r.approved:
+        item = office.journal.request_approval("workflow-run", wid, r.model_dump(exclude={"approved"}), by,
+                                               f"{by} asks to run the {w['risk']} workflow \"{w.get('title') or wid}\"")
+        bad(f"workflow '{wid}' is {w['risk']}: every run needs the operator's approval (the operator key in the "
+            "office app, or `office workflow run --approve` in a terminal). The request is waiting in the Action "
+            f"Inbox (#{item['id']}).")
     try:
         return await office.workflows.run(wid, r.inputs, r.agent, r.project, r.repo,
                                           "operator" if r.approved else "", by)
@@ -406,9 +427,141 @@ async def cancel(tid: int):
 @app.post("/api/tasks/{tid}/retry")
 async def retry(tid: int, request: Request):
     t = store.task(tid)
-    guard_mission_risk(t and t.get("mission_id"), (await caller(request))[1], "running work again")
+    by, is_operator = await caller(request)
+    guard_mission_risk(t and t.get("mission_id"), is_operator, "running work again",
+                       ("task-retry", tid, {"task": tid}), by)
     try:
         return await office.retry_task(tid)
+    except ValueError as e:
+        bad(e)
+
+
+# ---------------------------------------------------------------- journal, Action Inbox, notifications
+INBOX_ACTIONS = ("ack", "resolve", "dismiss", "reopen", "decline")
+
+
+@app.get("/api/journal")
+async def journal(after: int = 0, limit: int = 200, type: str | None = None, agent: str | None = None,
+                  task_id: int | None = None, mission_id: int | None = None, since: float | None = None,
+                  until: float | None = None):
+    """The append-only event history after a sequence number, oldest first (a reconnecting client's catch-up)."""
+    return office.journal.events(after, limit, type, agent, task_id, mission_id, since, until)
+
+
+@app.get("/api/inbox")
+async def inbox(state: str | None = None, kind: str | None = None, agent: str | None = None,
+                task_id: int | None = None, mission_id: int | None = None, priority: str | None = None,
+                limit: int = 50, offset: int = 0):
+    return office.journal.inbox(state, kind, agent, task_id, mission_id, priority, limit, offset)
+
+
+@app.get("/api/inbox/{iid}")
+async def inbox_item(iid: int):
+    item = office.journal.item(iid)
+    if not item:
+        raise HTTPException(404, "no such inbox item")
+    return item
+
+
+class InboxActionIn(BaseModel):
+    note: str = ""
+
+
+@app.post("/api/inbox/{iid}/approve")
+async def inbox_approve(iid: int, request: Request):
+    """Carry out a stored approval request. Only the operator key approves; the request goes through the same
+    checks as a fresh one (workflow boundary, mission scope, roles), now marked approved by the operator."""
+    by, is_operator = await caller(request)
+    needs_operator(is_operator, "approving a request")
+    item = office.journal.item(iid, history=False, request=True)
+    if not item or item["kind"] != "approval" or not item.get("request"):
+        raise HTTPException(404, "no such approval request")
+    if item["state"] == "RESOLVED":
+        raise HTTPException(409, f"this request was already {item['resolution'] or 'closed'}")
+    req, kind = item["request"], item["request"]["kind"]
+    body, asker = req.get("request") or {}, req.get("requested_by") or "operator"
+    try:
+        if kind == "workflow-run":
+            out = await office.workflows.run(req["ref"], body.get("inputs") or {}, body.get("agent", ""),
+                                             body.get("project", ""), body.get("repo", ""), "operator", asker)
+            ref = f"mission #{out['id']}"
+        elif kind == "task-retry":
+            out = await office.retry_task(int(req["ref"]))
+            ref = f"task #{out['id']}"
+        elif kind == "task-add":
+            out = await office.add_task(body["agent"], body["title"], body.get("body", ""), body.get("project", ""),
+                                        asker, body.get("after"), body.get("repo", ""), body.get("mission_id"))
+            ref = f"task #{out['id']}"
+        else:
+            raise HTTPException(400, f"unknown request kind {kind}")
+    except (ValueError, KeyError) as e:
+        bad(e)
+    return {"item": office.journal.approved(iid, by, ref), "result": out}
+
+
+@app.post("/api/inbox/{iid}/{action}")
+async def inbox_action(iid: int, action: str, a: InboxActionIn, request: Request):
+    """ack | resolve | dismiss | reopen | decline. None of these approves or runs anything."""
+    if action not in INBOX_ACTIONS:
+        raise HTTPException(404, f"unknown action; use one of {', '.join(INBOX_ACTIONS)} (approve needs the key)")
+    by, is_operator = await caller(request)
+    if by == "manager" and action in ("dismiss", "resolve", "decline"):
+        raise HTTPException(403, "the manager cannot close inbox items")
+    try:
+        return office.journal.act(iid, action, by, a.note.strip()[:300], is_operator)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except PermissionError as e:
+        raise HTTPException(409 if action == "resolve" else 403, str(e))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+def channel_of(request: Request, name: str):
+    """Delivery bookkeeping per device: Adaptive Link names the paired phone in X-Office-Device."""
+    device = "".join(c for c in request.headers.get("x-office-device", "") if c.isalnum() or c in "-_")[:40]
+    name = "".join(c for c in name if c.isalnum() or c in "-_")[:20] or "client"
+    return f"{name}:{device}" if device else name
+
+
+@app.get("/api/notifications")
+async def notifications(request: Request, after: int = 0, limit: int = 100, wait: float = 0, unread: bool = False,
+                        channel: str = ""):
+    """Notifications after an id, oldest first. wait=N holds the answer up to N seconds until there is one."""
+    if wait > 0 and not unread:
+        await office.journal.wait(after, min(wait, 30))
+    out = {"notifications": office.journal.notifications(after, limit, unread),
+           "head": office.journal.notification_head(), "unread": office.journal.unread()}
+    if channel:
+        out["delivery"] = office.journal.delivery(channel_of(request, channel))
+    return out
+
+
+class DeliveredIn(BaseModel):
+    channel: str = "link"
+    through: int
+
+
+@app.post("/api/notifications/delivered")
+async def notifications_delivered(d: DeliveredIn, request: Request):
+    return office.journal.delivered(channel_of(request, d.channel), d.through)
+
+
+@app.get("/api/notifications/deliveries")
+async def notification_deliveries():
+    return office.journal.deliveries()
+
+
+class ReadIn(BaseModel):
+    ids: list[int] = []
+    through: int | None = None
+
+
+@app.post("/api/notifications/read")
+async def notifications_read(r: ReadIn, request: Request):
+    by, _ = await caller(request)
+    try:
+        return office.journal.mark_read(by, r.ids, r.through)
     except ValueError as e:
         bad(e)
 
