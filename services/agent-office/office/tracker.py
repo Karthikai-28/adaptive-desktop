@@ -10,6 +10,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from . import activity as A
+from . import events as E
 from .config import COMPANY
 
 LOOKBACK_S = 14 * 86400        # how far back a timeline looks for a task's queue or run start
@@ -86,13 +87,14 @@ class Tracker:
             queued = self.store.next_queued(aid)
             open_items = self.o.journal.inbox(state="NEEDS_ATTENTION,IN_PROGRESS", agent=aid, limit=20)["items"]
             state, label = A.desk_state(st["status"], st.get("in_meeting"), open_items)
+            secrets = tuple(self.o.journal.secrets())
             recent = self.db.execute(
                 "SELECT kind, text, ts, task_id FROM events WHERE agent=? AND kind NOT IN ('think','start') "
                 "ORDER BY id DESC LIMIT 3", (aid,)).fetchall()
             out.append({
                 "id": aid, "name": cfg["name"], "role": cfg["role"], "status": st["status"],
                 "state": state, "state_label": label, "in_meeting": bool(st.get("in_meeting")),
-                "activity": st.get("activity", ""), "activity_ts": st.get("activity_ts"),
+                "activity": E.redact(st.get("activity", ""), secrets), "activity_ts": st.get("activity_ts"),
                 "task": _task_brief(task) if task else None,
                 # what the run has done so far: tool steps recorded for it (a count, not a share of the work)
                 "actions": self._actions(task["id"], run_start) if task else 0,
@@ -100,7 +102,7 @@ class Tracker:
                 "running_since": run_start, "running_s": round(now - run_start, 1) if run_start else 0,
                 "queued": [_task_brief(t) for t in queued[:10]], "queued_count": len(queued),
                 "blockers": [{k: i[k] for k in ("id", "kind", "title", "priority", "state")} for i in open_items],
-                "recent": [dict(r) for r in recent],
+                "recent": [dict(r, text=E.redact(r["text"], secrets)) for r in recent],
                 "active_24h_s": summary.get(aid, {}).get("active_s", 0),
                 "runs_24h": summary.get(aid, {}).get("runs", 0),
                 "estimated": summary.get(aid, {}).get("estimated", False),
@@ -153,7 +155,7 @@ class Tracker:
         for t in self.store.tasks(status="running", limit=200):
             a = live.get(t["id"]) or {}
             doing.append(card(t, running_since=a.get("running_since") or t.get("started_at"),
-                              actions=a.get("actions", 0), last=((a.get("recent") or [{}])[0]).get("text", "")))
+                              actions=a.get("actions", 0), last=((a.get("recent") or [{}])[0]).get("text", "")))   # redacted above
         needs = []
         for i in self.o.journal.inbox(state="NEEDS_ATTENTION,IN_PROGRESS", limit=100)["items"]:
             t = self.store.task(i["task_id"]) if i.get("task_id") else None

@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import mimetypes
 import os
+import subprocess
 import time
 
 import uvicorn
@@ -54,6 +55,39 @@ def bad(e):
     raise HTTPException(400, str(e))
 
 
+# The paired phone reaches the office only through Adaptive Link's daemon (office_gateway.py). Its requests are
+# recognised by that process, like the manager's by its tree: a header alone could be sent by any program on
+# this laptop, the agents included (their commands share the loopback network).
+LINK_UNIT = "adaptive-link.service"
+_link = {"pid": 0, "at": 0.0}
+
+
+def _read_link_pid():
+    pid_file = os.environ.get("OFFICE_LINK_PID_FILE")       # the checks stand in for the daemon
+    try:
+        if pid_file:
+            return int(open(pid_file).read().strip() or 0)
+        out = subprocess.run(["systemctl", "--user", "show", "-p", "MainPID", "--value", LINK_UNIT],
+                             capture_output=True, text=True, timeout=3).stdout
+        return int(out.strip() or 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+async def from_link(peer):
+    """Whether this connection comes from the Adaptive Link daemon. Its process id is read again when it is
+    older than 30 s, and at once (at most every 2 s) when a request does not match it: a restarted daemon."""
+    if peer is None:
+        return False
+    for attempt in (0, 1):
+        age = time.time() - _link["at"]
+        if attempt == 0 and age > 30 or attempt == 1 and age > 2 or os.environ.get("OFFICE_LINK_PID_FILE"):
+            _link.update(pid=await asyncio.to_thread(_read_link_pid), at=time.time())
+        if _link["pid"] and await asyncio.to_thread(callers.owned_by, {_link["pid"]}, peer.host, peer.port, PORT):
+            return True
+    return False
+
+
 async def caller(request: Request, claimed=""):
     """(actor, is_operator) for a request. The manager is recognised by its process tree, not by what it
     says; the operator by the key in X-Office-Operator. Anyone else is attributed as they claim
@@ -66,8 +100,24 @@ async def caller(request: Request, claimed=""):
     if operator.valid(request.headers.get("x-office-operator", "")):
         return "operator", True
     claimed = claimed or request.headers.get("x-office-actor", "")
-    # "phone" is set by Adaptive Link's gateway: attribution only, it grants nothing the key would
-    return (claimed if claimed in ("manager", "meeting", "phone") else "operator"), False
+    if claimed == "phone":
+        # the paired phone, but only when the request really comes through Adaptive Link's daemon
+        if await from_link(peer):
+            return "phone", False
+        claimed = ""
+    return (claimed if claimed in ("manager", "meeting") else "operator"), False
+
+
+def owner_side(by, is_operator):
+    """The owner acting: with the operator key, or from the paired phone (recognised by the daemon's
+    process). A keyless local caller may be the owner's page, but it may also be an agent's command."""
+    return is_operator or by == "phone"
+
+
+def needs_owner(by, is_operator, what):
+    if not owner_side(by, is_operator):
+        raise HTTPException(403, f"{what} needs the operator key (run `office operator-key` in your terminal "
+                                 "and enter it in the office app) or the paired phone")
 
 
 def manager_limit(by):
@@ -478,6 +528,21 @@ async def inbox_approve(iid: int, request: Request):
         raise HTTPException(404, "no such approval request")
     if item["state"] == "RESOLVED":
         raise HTTPException(409, f"this request was already {item['resolution'] or 'closed'}")
+    # one approval at a time per request: two at once (a double click, the page and the phone) must not both pass
+    # the check above while the first is still starting the work
+    if iid in _approving:
+        raise HTTPException(409, "this request is being approved right now")
+    _approving.add(iid)
+    try:
+        return await _carry_out(iid, item, by)
+    finally:
+        _approving.discard(iid)
+
+
+_approving = set()
+
+
+async def _carry_out(iid, item, by):
     req, kind = item["request"], item["request"]["kind"]
     body, asker = req.get("request") or {}, req.get("requested_by") or "operator"
     try:
@@ -505,8 +570,12 @@ async def inbox_action(iid: int, action: str, a: InboxActionIn, request: Request
     if action not in INBOX_ACTIONS:
         raise HTTPException(404, f"unknown action; use one of {', '.join(INBOX_ACTIONS)} (approve needs the key)")
     by, is_operator = await caller(request)
-    if by == "manager" and action in ("dismiss", "resolve", "decline"):
-        raise HTTPException(403, "the manager cannot close inbox items")
+    if by == "manager":
+        if action in ("dismiss", "resolve", "decline"):
+            raise HTTPException(403, "the manager cannot close inbox items")
+    else:
+        # the Action Inbox is the owner's: an agent's command must not quiet a problem or turn a request down
+        needs_owner(by, is_operator, "acting on the Action Inbox")
     try:
         return office.journal.act(iid, action, by, a.note.strip()[:300], is_operator)
     except LookupError as e:
@@ -544,6 +613,8 @@ class DeliveredIn(BaseModel):
 
 @app.post("/api/notifications/delivered")
 async def notifications_delivered(d: DeliveredIn, request: Request):
+    by, is_operator = await caller(request)
+    needs_owner(by, is_operator, "confirming delivery")          # it marks reports delivered
     return office.journal.delivered(channel_of(request, d.channel), d.through)
 
 
@@ -559,7 +630,8 @@ class ReadIn(BaseModel):
 
 @app.post("/api/notifications/read")
 async def notifications_read(r: ReadIn, request: Request):
-    by, _ = await caller(request)
+    by, is_operator = await caller(request)
+    needs_owner(by, is_operator, "marking notifications read")
     try:
         return office.journal.mark_read(by, r.ids, r.through)
     except ValueError as e:
@@ -791,8 +863,11 @@ class SettingsIn(BaseModel):
 
 @app.post("/api/settings")
 async def settings(s: SettingsIn, request: Request):
-    if s.paused is not None and (await caller(request))[0] == "manager":
-        raise HTTPException(403, "only the owner can pause or resume the office")
+    if s.paused is not None:
+        by, is_operator = await caller(request)
+        if by == "manager":
+            raise HTTPException(403, "only the owner can pause or resume the office")
+        needs_owner(by, is_operator, "pausing or resuming the office")
     try:
         return await office.update_settings(**s.model_dump())
     except ValueError as e:

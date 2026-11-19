@@ -46,8 +46,8 @@ async def main(tmp):
                 urllib.request.urlopen(B + "/api/state", timeout=1); break
             except OSError:
                 time.sleep(0.25)
-        call("POST", "/api/settings", {"paused": True})
         key = open(f"{tmp}/state/data/operator.key").read().strip()
+        call("POST", "/api/settings", {"paused": True}, key=key)
         m = call("POST", "/api/missions", {"agent": "maya", "title": "UI mission", "objective": "Check the UI",
                                            "criteria": ["first", "second"]})
         call("POST", "/api/workflows", {"id": "arm", "title": "Arm", "objective": "o", "criteria": ["c"],

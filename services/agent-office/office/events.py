@@ -192,6 +192,17 @@ _SECRET = re.compile(
     r"|(?i:(?:api[_-]?key|token|secret|password|passwd)\s*[=:]\s*)[^\s'\"]{6,})", re.S)
 
 
+def redact_tree(value, extra=()):
+    """redact() through every string of a JSON-like value (a report's data), keys and structure kept."""
+    if isinstance(value, str):
+        return redact(value, extra)
+    if isinstance(value, dict):
+        return {k: redact_tree(v, extra) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact_tree(v, extra) for v in value]
+    return value
+
+
 def redact(text, extra=()):
     """text with credential-shaped strings (and any of extra, e.g. the operator key) replaced."""
     text = str(text or "")

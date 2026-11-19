@@ -131,7 +131,10 @@ class Office:
         self.journal.reconcile()          # events a crash lost between a status write and its record
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
             # interrupted, not tried: starting it again must not use up its automatic retry (as a clean
-            # shutdown already does; this is the stop that came too fast for it)
+            # shutdown already does; this is the stop that came too fast for it). The resume mark tells the
+            # agent to continue from its partial work, as after a pause.
+            if not self.store.get(f"resume:{t['id']}"):
+                self.store.set(f"resume:{t['id']}", {"steps": t.get("steps") or 0, "tokens": t.get("tokens") or 0})
             self.store.update_task(t["id"], status="queued", attempts=max(0, t["attempts"] - 1))
             self.store.add_event(t["agent"], "info", "Office restarted while paused; this task waits for the resume"
                                  if paused else "Resuming after an office restart", t["id"])
@@ -773,8 +776,8 @@ class Office:
                       "workspace, don't redo finished steps, and finish the task. Then reply with the report the "
                       "task asked for.]")
         elif carry:
-            prompt += ("\nNote: this task was interrupted part-way when the office was paused. Check the workspace "
-                       "for partial work and continue from there rather than starting over.")
+            prompt += ("\nNote: this task was interrupted part-way when the office was paused or restarted. Check the "
+                       "workspace for partial work and continue from there rather than starting over.")
         run = self._run(aid, pid, prompt, conv, self.cfg.get("task_timeout_min", 45), on_event,
                         repo=t.get("repo") or "")
         run.carry = carry or {}

@@ -402,6 +402,9 @@ assert D("idle", items=[{"kind": "failed", "state": "NEEDS_ATTENTION"}]) == ("er
 assert D("idle", items=[{"kind": "failed", "state": "RESOLVED"}])[0] == "idle"
 assert D("working", items=[{"kind": "failed", "state": "NEEDS_ATTENTION"}])[0] == "working"   # what it does now wins
 assert set(A.DESK_STATES) == {"working", "idle", "blocked", "error", "paused"}
+from office import events as EV
+tree = EV.redact_tree({"a": ["token=supersecretvalue1", {"b": "ghp_" + "x" * 30}], "n": 3, "ok": "plain"})
+assert tree == {"a": ["[redacted]", {"b": "[redacted]"}], "n": 3, "ok": "plain"}, tree
 PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
@@ -546,12 +549,13 @@ async def main():
 
     # a hard stop (killed before the shutdown could queue it again): the run it finds at start was interrupted,
     # not tried, so the task keeps its one automatic retry
-    store.update_task(t2["id"], status="running", attempts=1)
+    store.delete(f"resume:{t2['id']}"); store.update_task(t2["id"], status="running", attempts=1)
     # Claude plans by itself: only a turn that assigned work gets the coverage pass
     o3 = office(store)
     await o3.start()
     await settle(lambda: store.task(t2["id"])["status"] == "running" and len(runs) == 4)
     assert store.task(t2["id"])["attempts"] == 1, store.task(t2["id"])
+    assert "interrupted part-way" in runs[3].prompt, runs[3].prompt      # ... and continues from its partial work
     prompts = []
     async def answers(prompt, kind):
         prompts.append(prompt)
@@ -712,12 +716,15 @@ async def main():
     me = now_agents[agent]
     assert me["status"] == "working" and me["task"]["id"] == t["id"] and me["running_since"], me
     # Milestone 3: one overview for every view; the status word, honest progress (counts, never a percentage)
+    store.add_event(agent, "run", "$ curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123' x", t["id"])
+    leak = [a for a in o.tracker.overview()["agents"] if "abcdefghijklmnop" in str(a)]
+    assert not leak, "a credential reached the overview: " + str(leak)
     store.add_event(agent, "write", "Wrote notes.md", t["id"])
     ov = o.tracker.overview()
     me3 = next(a for a in ov["agents"] if a["id"] == agent)
     doing = o.tracker.board()["columns"]["doing"]
-    assert [c["id"] for c in doing] == [t["id"]] and doing[0]["actions"] == 1 and doing[0]["last"] == "Wrote notes.md", doing
-    assert me3["state"] == "working" and me3["state_label"] == "Working" and me3["actions"] == 1, me3
+    assert [c["id"] for c in doing] == [t["id"]] and doing[0]["actions"] == 2 and doing[0]["last"] == "Wrote notes.md", doing
+    assert me3["state"] == "working" and me3["state_label"] == "Working" and me3["actions"] == 2, me3
     assert me3["recent"][0]["text"] == "Wrote notes.md" and "percent" not in str(me3).lower()
     assert ov["counts"]["active"] == 1 and ov["counts"]["running_tasks"] == 1 and ov["counts"]["agents"] == len(o.agents)
     assert ov["timezone"] == "Asia/Kolkata" and ov["day_start"] <= time.time() and set(ov["inbox"]) >= {"NEEDS_ATTENTION"}
@@ -797,7 +804,7 @@ async def main():
 asyncio.run(main())
 PY
 PORT=8799
-OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 \
+OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 OFFICE_LINK_PID_FILE="$TMP/link.pid" \
     PYTHONPATH="$REPO/.local/office-pydeps" \
     python3 "$APP/server.py" >"$TMP/server.log" 2>&1 &
 SERVER=$!
@@ -813,7 +820,9 @@ B="http://127.0.0.1:$PORT"
 [ "$(code -H 'Host: evil.example' "$B/api/state")" = 403 ] || fail "foreign Host header was accepted"
 [ "$(code "$B/api/files?path=../../..")" = 403 ] || fail "path traversal out of the workspace"
 [ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"agent":"nobody","title":"x"}' "$B/api/tasks")" = 400 ] || fail "task for an unknown agent was accepted"
-[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"autopilot":false,"paused":true}' "$B/api/settings")" = 200 ] || fail "settings"
+# pausing is the owner's: an agent's command (same loopback, no key) can't stop the office
+[ "$(code -X POST -H 'X-Office: 1' -H 'Content-Type: application/json' -d '{"paused":true}' "$B/api/settings")" = 403 ] || fail "paused without the operator key"
+[ "$(code -X POST -H 'X-Office: 1' -H "X-Office-Operator: $(cat "$TMP/state/data/operator.key")" -H 'Content-Type: application/json' -d '{"autopilot":false,"paused":true}' "$B/api/settings")" = 200 ] || fail "settings"
 curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["roster"]) >= 2 and d["settings"]["autopilot"] is False and isinstance(d["missions"], list)' || fail "state"
 # Mission Control records live in the office's private data, never in the agents' workspace
 REC="$TMP/state/data/mission-control"
@@ -906,11 +915,28 @@ MISSIONS() { curl -fsS "$B/api/missions?limit=500" | python3 -c 'import json,sys
 [ "$(code -X POST "${J[@]}" -H 'X-Office-Actor: manager' -d '{"agent":"maya"}' "$B/api/workflows/move-robot/run")" = 400 ] || fail "hardware workflow ran without approval (inbox)"
 AID="$(curl -fsS "$B/api/inbox?kind=approval&state=NEEDS_ATTENTION" | python3 -c 'import json,sys; d=json.load(sys.stdin); it=[i for i in d["items"] if i["has_request"] and i["text"].startswith("manager asks")]; assert len(it) == 1 and it[0]["priority"] == "critical", d; print(it[0]["id"])')" || fail "approval request in the inbox"
 BEFORE="$(MISSIONS)"
-post -H 'X-Office-Actor: phone' -d '{}' "$B/api/inbox/$AID/ack" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "IN_PROGRESS" and d["acknowledged_by"] == "phone", d' || fail "acknowledge"
+# the Action Inbox is the owner's: a keyless local caller (an agent's command, say) and a forged phone header are
+# refused; the paired phone is recognised by Adaptive Link's process (here a stand-in that writes its pid)
+[ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/ack")" = 403 ] || fail "a keyless caller acted on the inbox"
+[ "$(code -X POST "${J[@]}" -H 'X-Office-Actor: phone' -d '{}' "$B/api/inbox/$AID/decline")" = 403 ] || fail "a forged phone header declined an approval"
+as_phone() {   # PATH BODY: a POST from the process the office takes for Adaptive Link's daemon
+    python3 - "$B" "$TMP/link.pid" "$1" "$2" <<'PHONE'
+import os, sys, urllib.request
+base, pidfile, path, body = sys.argv[1:]
+open(pidfile, "w").write(str(os.getpid()))
+req = urllib.request.Request(base + path, data=body.encode(), method="POST", headers={
+    "Content-Type": "application/json", "X-Office": "1", "X-Office-Actor": "phone", "X-Office-Device": "phone1"})
+try:
+    print(urllib.request.urlopen(req, timeout=10).read().decode())
+finally:
+    open(pidfile, "w").write("0")
+PHONE
+}
+as_phone "/api/inbox/$AID/ack" '{}' | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "IN_PROGRESS" and d["acknowledged_by"] == "phone", d' || fail "acknowledge"
 [ "$(MISSIONS)" = "$BEFORE" ] || fail "acknowledging an approval started work"
 [ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/approve")" = 403 ] || fail "approved without the operator key"
 [ "$(code -X POST "${J[@]}" -H 'X-Office-Actor: phone' -d '{}' "$B/api/inbox/$AID/approve")" = 403 ] || fail "the phone approved without the key"
-[ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/resolve")" = 409 ] || fail "an approval was closed by resolving it"
+[ "$(code -X POST "${J[@]}" "${OP[@]}" -d '{}' "$B/api/inbox/$AID/resolve")" = 409 ] || fail "an approval was closed by resolving it"
 [ "$(MISSIONS)" = "$BEFORE" ] || fail "a refused approval started work"
 post "${OP[@]}" -d '{}' "$B/api/inbox/$AID/approve" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d["result"]; assert d["item"]["state"] == "RESOLVED" and d["item"]["resolution"] == "approved" and r["approved_by"] == "operator" and r["created_by"] == "manager" and r["workflow_id"] == "move-robot", d' || fail "approve with the operator key"
 [ "$(code -X POST "${J[@]}" "${OP[@]}" -d '{}' "$B/api/inbox/$AID/approve")" = 409 ] || fail "one approval ran twice"
@@ -926,11 +952,12 @@ curl -fsS "$B/api/journal?after=$HEAD" | python3 -c 'import json,sys; assert jso
 # notifications: numbered, kept until delivered, confirmed per device, long-poll returns on time
 NHEAD="$(curl -fsS "$B/api/notifications?after=0" | python3 -c 'import json,sys; d=json.load(sys.stdin); n=d["notifications"]; assert n and [x["id"] for x in n] == sorted(x["id"] for x in n) and any(x["priority"] == "critical" for x in n); print(d["head"])')" || fail "notifications"
 curl -fsS "$B/api/notifications?after=0&channel=link" -H 'X-Office-Device: phone1' | python3 -c 'import json,sys; d=json.load(sys.stdin)["delivery"]; assert d["channel"] == "link:phone1" and d["pending"] >= 1, d' || fail "undelivered notifications"
-post -H 'X-Office-Device: phone1' -d "{\"channel\":\"link\",\"through\":$NHEAD}" "$B/api/notifications/delivered" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["pending"] == 0 and d["channel"] == "link:phone1", d' || fail "delivery confirmation"
+[ "$(code -X POST "${J[@]}" -H 'X-Office-Device: phone1' -d "{\"channel\":\"link\",\"through\":$NHEAD}" "$B/api/notifications/delivered")" = 403 ] || fail "a keyless caller marked notifications delivered"
+as_phone /api/notifications/delivered "{\"channel\":\"link\",\"through\":$NHEAD}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["pending"] == 0 and d["channel"] == "link:phone1", d' || fail "delivery confirmation"
 T0=$(date +%s%N)
 curl -fsS "$B/api/notifications?after=$NHEAD&wait=1" | python3 -c 'import json,sys; assert json.load(sys.stdin)["notifications"] == []' || fail "long poll"
 [ $(( ($(date +%s%N) - T0) / 1000000 )) -ge 900 ] || fail "long poll returned early"
-post -d "{\"through\":$NHEAD}" "$B/api/notifications/read" | python3 -c 'import json,sys; assert json.load(sys.stdin)["unread"] == 0' || fail "mark read"
+post "${OP[@]}" -d "{\"through\":$NHEAD}" "$B/api/notifications/read" | python3 -c 'import json,sys; assert json.load(sys.stdin)["unread"] == 0' || fail "mark read"
 [ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/bogus")" = 404 ] || fail "unknown inbox action"
 curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["journal_head"] >= 1 and "NEEDS_ATTENTION" in d["inbox"] and "head" in d["notifications"]' || fail "state carries the inbox"
 # activity and report APIs

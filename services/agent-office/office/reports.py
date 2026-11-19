@@ -23,6 +23,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from . import activity as A
+from . import events as E
 from .config import DATA
 
 KINDS = ("standup", "evening")
@@ -358,6 +359,10 @@ class Reports:
             if manual:
                 title = f"{TITLES[kind]} (on demand, {local(now, self.s, '%a %H:%M')})"
                 md = md.replace(md.splitlines()[0], f"# {title}", 1)
+            # a report quotes the agents' own words (task reports, outputs): nothing credential-shaped is kept,
+            # in the database, the Markdown file or what the phone reads
+            secrets = tuple(self.o.journal.secrets())
+            md, data = E.redact(md, secrets), E.redact_tree(data, secrets)
         except Exception as e:
             self.db.execute("INSERT INTO reports(kind,slot,scheduled_at,window_start,window_end,status,attempts,error,"
                             "manual) VALUES(?,?,?,?,?,'failed',1,?,?) ON CONFLICT(kind,slot) DO UPDATE SET "

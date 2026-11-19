@@ -106,14 +106,19 @@ function askOperatorKey(why) {
   if (k && k.trim()) setOperatorKey(k.trim());
   return !!(k && k.trim());
 }
-async function api(method, path, body) {
+async function api(method, path, body, asked = false) {
   const headers = { 'Content-Type': 'application/json', 'X-Office': '1' };
   const key = operatorKey();
   if (key) headers['X-Office-Operator'] = key;
   const r = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) {
-    if (r.status === 403 && key && /operator key/.test(d.detail || '')) setOperatorKey('');   // a wrong or old key
+    const needsKey = r.status === 403 && /operator key/.test(d.detail || '');
+    if (needsKey && key) setOperatorKey('');                     // a wrong or old key
+    // what only the owner may do (the Action Inbox, pausing, approving): ask for the key once, then try again
+    if (needsKey && !asked && method !== 'GET' && askOperatorKey(String(d.detail || 'This').split(' needs ')[0].replace(/^./, c => c.toUpperCase()))) {
+      return api(method, path, body, true);
+    }
     throw new Error(d.detail || d.error || r.statusText);
   }
   return d;
