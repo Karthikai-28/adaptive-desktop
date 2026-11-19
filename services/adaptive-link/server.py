@@ -76,7 +76,9 @@ EVENT_KINDS = {"notification": "send_notifications", "alert": None, "clipboard":
                # The phone's own screen shown here: what is done in its window, and being asked to start.
                "phone-input": None, "cast": None,
                # Something the computer offers to do, for the phone to say yes to with one tap.
-               "offer": None}
+               "offer": None,
+               # The Agent Office's alerts (office_gateway.follow): the office takes the commands switch.
+               "office": office_gateway.SWITCH}
 # What a phone may ask to be kept told about (/v1/watch): how to read each, and how often to look.
 WATCHED = {
     "status": (lambda: desktop.status(), 5), "media": (lambda: {"players": desktop.players(), "volume": desktop.volume()}, 2),
@@ -247,6 +249,7 @@ class Link:
                               lambda: self.config["sync_clipboard"] and self.events.listening("clipboard"),
                               lambda: self._clip_from_phone, self._publish_clipboard)),
                           asyncio.ensure_future(self._watch_scenes()),
+                          asyncio.ensure_future(self.office.follow()),
                           asyncio.ensure_future(usb_link.watch(self.port, lambda what: self.audit.write("-", "usb", what)))]
 
     async def stop(self):

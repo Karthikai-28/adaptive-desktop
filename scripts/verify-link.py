@@ -675,6 +675,9 @@ def pure_checks(check):
           "power: a fixed list of actions")
 
 
+FAKE_OFFICE_NOTES, FAKE_OFFICE_ARRIVED = [], []
+
+
 async def fake_office():
     """The Agent Office's rules, as far as the link meets them: its own host only, and POSTs and the
     socket only with its header and origin."""
@@ -698,6 +701,25 @@ async def fake_office():
     async def tts(_request):
         return web.Response(body=b"ID3fake", content_type="audio/mpeg")
 
+    # its numbered notifications, long-polled (office/journal.py); FAKE_OFFICE_NOTES gets one appended by a check
+    notes, arrived = FAKE_OFFICE_NOTES, asyncio.Event()
+
+    async def notifications(request):
+        after, wait = int(request.query.get("after", "0")), float(request.query.get("wait", "0"))
+        if wait and not [n for n in notes if n["id"] > after]:
+            arrived.clear()
+            try:
+                await asyncio.wait_for(arrived.wait(), wait)
+            except asyncio.TimeoutError:
+                pass
+        return web.json_response({"notifications": [n for n in notes if n["id"] > after][:int(request.query.get("limit", "100"))],
+                                  "head": max((n["id"] for n in notes), default=0), "unread": 0})
+
+    async def whoami(request):
+        return web.json_response({"actor": request.headers.get("X-Office-Actor", ""),
+                                  "device": request.headers.get("X-Office-Device", "")})
+    FAKE_OFFICE_ARRIVED.append(arrived)
+
     async def ws(request):
         if request.headers.get("Origin") != f"http://{host}":
             return web.Response(status=403)
@@ -710,6 +732,8 @@ async def fake_office():
 
     app = web.Application(middlewares=[guard])
     app.router.add_get("/api/state", state)
+    app.router.add_get("/api/notifications", notifications)
+    app.router.add_get("/api/whoami", whoami)
     app.router.add_post("/api/chat", chat)
     app.router.add_get("/api/tts", tts)
     app.router.add_get("/ws", ws)
@@ -943,7 +967,27 @@ async def daemon_checks(sandbox, check):
                 echoed = await live.receive_json(timeout=5)
             check(first["type"] == "state" and echoed == {"type": "echo", "data": "ping"},
                   "office: live updates are relayed both ways")
+            async with phone.get(f"{link_url}/v1/office/api/whoami") as reply:
+                who = await reply.json()
+            check(who["actor"] == "phone" and len(who["device"]) >= 8,
+                  "office: requests are attributed to the phone and its device, for the office's records only")
+            # the office's alerts reach a phone that listens for them, without the Office page open
+            async with phone.ws_connect(f"{link_url}/v1/events?kinds=office") as listening:
+                await asyncio.sleep(0.5)
+                FAKE_OFFICE_NOTES.append({"id": 1, "priority": "high", "group": None, "title": "Maya: task #4 failed",
+                                          "text": "agy exited 2", "agent": "maya", "task_id": 4, "mission_id": None,
+                                          "inbox_id": 1, "created_at": time.time()})
+                FAKE_OFFICE_ARRIVED[0].set()
+                alert = await listening.receive_json(timeout=10)
+            check(alert["kind"] == "office" and alert["office"]["id"] == 1 and alert["office"]["inbox_id"] == 1
+                  and alert["title"] == "Maya: task #4 failed", "office: a new alert is handed to the listening phone")
+            async with phone.get(f"{link_url}/v1/office/api/notifications?after=0") as reply:
+                missed = await reply.json()
+            check([n["id"] for n in missed["notifications"]] == [1] and missed["head"] == 1,
+                  "office: a phone that was away fetches the alerts it missed")
             control.call("POST", "/configure", {"allow_exec": False})
+            async with phone.get(f"{link_url}/v1/events?once=1&kinds=office") as reply:
+                check((await reply.json())["events"] == [], "office: alerts are held back with the commands switch")
             async with phone.get(f"{link_url}/v1/office/api/state") as reply:
                 check(reply.status == 403, "office: a device without the commands switch is kept out")
             control.call("POST", "/configure", {"allow_exec": True})

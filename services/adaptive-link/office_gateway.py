@@ -9,6 +9,12 @@ mutual TLS as everything else, at home or away:
 
 Directing the office means directing agents that run commands, so it takes the commands switch
 (allow_exec): a device held back from commands is held back from the office too.
+
+The office's alerts (a failed or blocked task, an approval waiting, a quota stop: services/agent-office
+office/journal.py) reach the phone without it watching the Office page: `follow` long-polls the office's
+numbered notifications and hands each new one to /v1/events as kind "office". They are not remembered
+here; the office keeps every one, and a phone that was away fetches what it missed from
+/v1/office/api/notifications?after=<the last it showed>, in order, and confirms them.
 """
 import asyncio
 import json
@@ -17,6 +23,9 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import WSMsgType, web
+
+FOLLOW_WAIT_S = 25          # the office holds a notification request open this long when there is nothing new
+FOLLOW_RETRY_S = 30         # the office is not running: look again after this
 
 CONFIG = Path(__file__).resolve().parent.parent / "agent-office" / "config.json"
 SWITCH = "allow_exec"
@@ -39,6 +48,7 @@ class OfficeGateway:
     def __init__(self, link):
         self.link = link
         self._session = None
+        self.followed = None        # the last office notification id handed to the phones
 
     def routes(self, add):
         add.add_get("/v1/office/ws", self.h_ws)
@@ -64,6 +74,11 @@ class OfficeGateway:
             return _error(403, "the office needs the commands switch, which is off for this device")
         tail = request.match_info["tail"]
         headers = {"X-Office": "1"} if request.method == "POST" else {}
+        # who is asking, for the office's records only: "phone" grants nothing the operator key would
+        headers["X-Office-Actor"] = "phone"
+        phone = request.get("phone") or {}
+        if phone.get("fingerprint"):
+            headers["X-Office-Device"] = str(phone["fingerprint"]).replace(":", "")[:16]
         if request.content_type:
             headers["Content-Type"] = request.content_type
         body = await request.read() if request.method == "POST" else None
@@ -121,3 +136,38 @@ class OfficeGateway:
             await up.close()
             await ws.close()
         return ws
+
+    # ------------------------------------------ alerts, without the Office page open
+
+    async def follow(self):
+        """Hand each new office notification to the listening phones, as it is made."""
+        while True:
+            try:
+                if self.followed is None:          # start at the newest: older ones are the phone's own catch-up
+                    self.followed = (await self._notifications(0, 0))["head"]
+                got = await self._notifications(self.followed, FOLLOW_WAIT_S, limit=50)
+                for n in got["notifications"]:
+                    self.followed = max(self.followed, n["id"])
+                    if self.link._allowed(SWITCH):
+                        self.link.events.add("office", n["title"], n["text"], app="Agent Office", keep=False,
+                                             data={"office": _brief(n)})
+                if got["head"] < self.followed:    # the office's database was replaced: start again from it
+                    self.followed = got["head"]
+            except asyncio.CancelledError:
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError, KeyError):
+                self.followed = None
+                await asyncio.sleep(FOLLOW_RETRY_S)
+
+    async def _notifications(self, after, wait, limit=100):
+        async with self._http().get(f"http://{self.base}/api/notifications",
+                                    params={"after": str(after), "wait": str(wait), "limit": str(limit)},
+                                    timeout=aiohttp.ClientTimeout(total=wait + 15)) as up:
+            up.raise_for_status()
+            return await up.json()
+
+
+def _brief(n):
+    """What the phone needs to show a notification and open what it is about."""
+    return {k: n.get(k) for k in ("id", "priority", "group", "title", "text", "agent", "task_id", "mission_id",
+                                  "inbox_id", "created_at")}
