@@ -14,7 +14,9 @@ set -Eeuo pipefail
 
 CONF_LOAD=/etc/modules-load.d/adaptive-link-camera.conf
 CONF_OPTS=/etc/modprobe.d/adaptive-link-camera.conf
-OPTIONS='options v4l2loopback devices=2 video_nr=10,11 card_label="Phone Camera","Kinect Camera" exclusive_caps=1,1'
+# One pair of quotes around the whole list: the kernel splits it at the commas. Quoting each name
+# ("Phone Camera","Kinect Camera") leaves the inner quotes in the names: 'Phone Camera"', '"Kinect Camera'.
+OPTIONS='options v4l2loopback devices=2 video_nr=10,11 card_label="Phone Camera,Kinect Camera" exclusive_caps=1,1'
 
 name_of() { cat "/sys/devices/virtual/video4linux/video$1/name" 2>/dev/null || echo "not loaded"; }
 

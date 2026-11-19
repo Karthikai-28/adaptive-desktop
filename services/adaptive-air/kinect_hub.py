@@ -163,7 +163,8 @@ def find_webcam(name=WEBCAM_NAME, sysfs="/sys/devices/virtual/video4linux"):
         return None
     for entry in entries:
         try:
-            if (entry / "name").read_text().strip() == name:
+            # stray quotes from an older modprobe line ('"Kinect Camera') still name the same device
+            if (entry / "name").read_text().strip().strip('"') == name:
                 return f"/dev/{entry.name}"
         except OSError:
             continue

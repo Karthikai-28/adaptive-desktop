@@ -728,6 +728,10 @@ def check_hub():
     check("the webcam is the loopback device named Kinect Camera",
           hub_mod.find_webcam(sysfs=str(d)) == "/dev/video11")
     check("no Kinect Camera device: no webcam", hub_mod.find_webcam(sysfs=str(d / "none")) is None)
+    for name, label in (("video10", 'Phone Camera"'), ("video11", '"Kinect Camera')):   # the old modprobe line's names
+        (d / name / "name").write_text(label + "\n")
+    check("the webcam is found by its name even with the stray quotes of the old install line",
+          hub_mod.find_webcam(sysfs=str(d)) == "/dev/video11")
 
     # The HTTP side against a stand-in hub (no Kinect).
     from aiohttp.test_utils import TestClient, TestServer

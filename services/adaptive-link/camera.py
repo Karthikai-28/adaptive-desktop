@@ -31,7 +31,8 @@ def find_device(sys_root="/sys/devices/virtual/video4linux"):
     fallback = None
     for entry in entries:
         try:
-            name = (entry / "name").read_text().strip()
+            # stray quotes from an older modprobe line ('Phone Camera"') still name the same device
+            name = (entry / "name").read_text().strip().strip('"')
         except OSError:
             continue
         device = f"/dev/{entry.name}"
