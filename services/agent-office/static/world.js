@@ -3,7 +3,8 @@ import { T, W, H, objects, desks, meetingSeats, idleSpots, labels, spots, buildF
 import { sprite } from './sprites.js';
 
 const SPEED = 52;                       // px per second
-const STATUS_COL = { idle: '#3ecf8e', working: '#f5a524', thinking: '#8b9cff', quota: '#ef4444', paused: '#94a3b8', meeting: '#38bdf8', you: '#3ecf8e' };
+// the same colours as the status chips (style.src.css .st-*): working green, blocked amber, error red, idle grey
+const STATUS_COL = { idle: '#a1a1aa', working: '#3ecf8e', thinking: '#8b9cff', quota: '#f5a524', paused: '#6b7280', meeting: '#38bdf8', you: '#3ecf8e', blocked: '#f5a524', error: '#ef4444' };
 const ICON = { write: '⌨', edit: '⌨', run: '▶', search: '🔍', web: '🌐', image: '🎨', read: '📄', think: '…', tool: '⚙', assign: '📋', error: '⚠', done: '✓', start: '…', info: '…' };
 
 let cv, ctx, floorLayer, hooks;
@@ -69,6 +70,9 @@ export function updateAgent(st) {
   c.act = st.activity || ''; c.task = st.task;
   decide(c);
 }
+// the status word from the office overview: a desk that is blocked or has an unhandled failure shows it on the
+// name tag even while the agent sits idle
+export function setDeskStates(states) { for (const [id, st] of Object.entries(states)) { const c = chars.get(id); if (c) c.deskState = st; } }
 export function activity(id, kind) { const c = chars.get(id); if (c) c.actKind = kind; }
 
 export function setMeeting(m) {
@@ -321,7 +325,7 @@ function draw(now) {
     const th = nf * 1.65;
     ctx.fillStyle = c.id === hoverId || c.id === selectedId ? 'rgba(48,56,140,0.92)' : 'rgba(22,24,38,0.78)';
     pill(x - tw / 2, y - th / 2, tw, th, th / 2); ctx.fill();
-    const st = c.inMeeting ? 'meeting' : c.status;
+    const st = c.deskState === 'blocked' || c.deskState === 'error' ? c.deskState : c.inMeeting ? 'meeting' : c.status;
     ctx.fillStyle = STATUS_COL[st] || STATUS_COL.idle;
     ctx.beginPath(); ctx.arc(x - tw / 2 + nf * 0.8, y, nf * 0.3, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(label, x - tw / 2 + nf * 1.35, y + 0.5); ctx.textAlign = 'center';

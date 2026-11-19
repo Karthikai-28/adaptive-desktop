@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -142,6 +143,59 @@ async def main(tmp):
             await ev("[...document.querySelectorAll('#modal .mission-card')].find(c => c.innerText.includes('Arm')).querySelector('button').click(); true")
             await wait_for(f"{modal}.includes('Approved')", "approved hardware mission")
             assert await ev("window.__prompts.length") == 1 and await ev("localStorage.getItem('office.operatorKey')") == key
+
+            # ---- Milestone 3: Virtual Office (the default) and Command Center over the same data
+            await ev("document.querySelector('#modal .x')?.click(); true")
+            agents = [a["id"] for a in call("GET", "/api/overview")["agents"]]
+            visible = lambda sel: f"(() => {{ const e = document.querySelector({json.dumps(sel)}); return !!e && e.offsetParent !== null; }})()"
+            await wait_for(f"document.querySelectorAll('.desk').length === {len(agents)}", "a desk per agent")
+            assert await ev(visible("#world")) and not await ev(visible("#command"))
+            assert await ev("document.querySelector('#viewSwitch .on').dataset.view") == "office"
+            desk = await ev("document.querySelector('.desk[data-id=\"maya\"]').innerText")
+            assert "Maya" in desk and "Paused" in desk, desk                    # the office is paused: the same word everywhere
+            # selecting a desk opens the agent's workspace in the side panel
+            await ev("document.querySelector('.desk[data-id=\"maya\"]').click(); true")
+            await wait_for("document.querySelector('.tab.on')?.innerText === 'Work' && !!document.querySelector('.wk-now')", "the agent's workspace")
+            await wait_for("document.querySelector('.wk-hist')?.innerText.length > 0 && !document.querySelector('.wk-hist').innerText.includes('Reading')", "the agent's history")
+            # switching keeps the panel (same agent, same tab) and is kept by the office, not just this browser
+            assert await click("#viewSwitch button", "Command Center")
+            await wait_for(visible("#command") + " && !" + visible("#world"), "the Command Center")
+            await wait_for("document.querySelectorAll('.cc-kpis .tk-kpi').length === 7", "the Command Center's figures")
+            await wait_for(f"document.querySelectorAll('.cc-table tbody tr').length === {len(agents)} && document.querySelectorAll('.cc-lane').length === {len(agents)}", "agents table and timelines")
+            assert await ev("document.querySelector('.tab.on')?.innerText") == "Work" and "Maya" in await ev("document.querySelector('#panel').innerText")
+            assert call("GET", "/api/ui")["view"] == "command"
+            await ev("localStorage.removeItem('office.view'); location.reload(); true")
+            await asyncio.sleep(1.5)
+            await wait_for(visible("#command") + " && document.querySelectorAll('.cc-kpis .tk-kpi').length === 7", "the Command Center again after a restart")
+            await ev("document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', altKey: true })); true")
+            await wait_for(visible("#world") + " && document.querySelectorAll('.desk').length > 0", "back to the Virtual Office")
+            for _ in range(20):
+                if call("GET", "/api/ui")["view"] == "office":
+                    break
+                await asyncio.sleep(0.2)
+            assert call("GET", "/api/ui")["view"] == "office"
+            # the Action Inbox: a hardware run asked for without approval waits there; acknowledging it never runs it
+            try:
+                call("POST", "/api/workflows/arm/run", {"agent": "maya"})
+            except urllib.error.HTTPError as e:
+                assert e.code == 400, e.code
+            need = call("GET", "/api/inbox")["counts"]["NEEDS_ATTENTION"]
+            assert need >= 1
+            await wait_for(f"document.querySelector('#btnInbox .badge')?.innerText === '{need}'", "the inbox count")
+            assert await click("#btnInbox", "")
+            await wait_for("!!document.querySelector('#modal .ib-row')", "the inbox list")
+            assert await click("#modal .ib-row", "Approval needed")
+            await wait_for(f"{modal}.includes('Approve and run') && {modal}.includes('Acknowledge')", "the approval item")
+            assert await click("#modal button", "Acknowledge")
+            await wait_for(f"{modal}.includes('In progress')", "acknowledged")
+            items = call("GET", "/api/inbox?kind=approval")["items"]
+            assert items[0]["state"] == "IN_PROGRESS" and not items[0]["resolved_at"], items[0]
+            assert len([m for m in call("GET", "/api/missions") if m["workflow_id"] == "arm"]) == 1     # only the one approved earlier
+            # the daily reports: one on demand opens as a report
+            assert await click("#btnReports", "")
+            await wait_for(f"{modal}.includes('Standup now')", "the reports window")
+            assert await click("#modal button", "Standup now")
+            await wait_for("document.querySelector('#modal h2')?.innerText.includes('Morning standup')", "the standup")
             assert errors == [], errors
         print("ui checks passed")
     finally:

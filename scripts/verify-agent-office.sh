@@ -24,6 +24,25 @@ for f in "$APP"/static/*.js; do
     cp "$f" "$TMP/$(basename "$f" .js).mjs"
     node --check "$TMP/$(basename "$f" .js).mjs" || fail "js syntax: $f"
 done
+# Milestone 3: what the two views compute (views.js is pure): honest progress, timeline lanes, the figures
+node --input-type=module -e "
+import * as V from '$TMP/views.mjs';
+const ok = (c, m) => { if (!c) { console.error('views.js: ' + m); process.exit(1); } };
+ok(V.normalizeView('command') === 'command' && V.normalizeView('cockpit') === 'office' && V.normalizeView() === 'office', 'Virtual Office is the default');
+ok(V.fmtDur(5) === '5s' && V.fmtDur(125) === '2m 05s' && V.fmtDur(3725) === '1h 02m', 'durations');
+const p = V.missionProgress({ total_tasks: 4, done_tasks: 1, failed_tasks: 1 });
+ok(p.text === '1 of 4 tasks done · 1 failed' && p.frac === 0.25, 'mission progress ' + JSON.stringify(p));
+ok(V.missionProgress({ total_tasks: 0 }).frac === null, 'no bar without tasks');
+const run = V.runProgress({ task: { id: 1, status: 'running' }, running_since: 100, actions: 3, queued_count: 2 }, 160);
+ok(run === 'running 1m 00s · 3 actions · 2 queued' && !/%/.test(run), 'run progress is time and counts only: ' + run);
+const L = V.lanes([{ agent: 'a', task: { id: 1 }, runs: [[50, 150, 'done'], [180, null, 'running']] }], 100, 200, ['a', 'b']);
+const a = L.get('a');
+ok(a.length === 2 && a[0].left === 0 && a[0].width === 50 && a[0].outcome === 'done' && a[1].left === 80 && a[1].width === 20 && L.get('b').length === 0, 'lanes ' + JSON.stringify(a));
+ok(V.sortDesks([{ id: 'x', state: 'idle' }, { id: 'y', state: 'error' }, { id: 'z', state: 'working' }]).map(d => d.id).join() === 'z,y,x', 'urgency order');
+const k = V.kpis({ counts: { agents: 8, active: 2, idle: 5, blocked: 1, error: 0, running_tasks: 2, queued_tasks: 3, done_today: 7, failed_today: 1, running_missions: 1 }, inbox: { NEEDS_ATTENTION: 2, critical: 1 } });
+ok(k.length === 7 && k[0].value === '2/8' && k.find(x => x.key === 'decisions').value === 2 && k.find(x => x.key === 'failed').alert, 'figures');
+ok(Object.keys(V.STATE_LABEL).sort().join() === 'blocked,error,idle,paused,working', 'the five status words');
+" || fail "views.js rules"
 python3 - "$APP/config.json" "$APP/static/map.js" <<'PY' || fail "config.json"
 import json, re, sys
 cfg = json.load(open(sys.argv[1]))

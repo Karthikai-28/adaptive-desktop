@@ -3,6 +3,11 @@ import * as world from './world.js';
 import { portrait } from './sprites.js';
 import { speak, stopSpeaking, setMuted, onSpeak, isSpeaking, Mic, sttSupported } from './voice.js';
 import { createTokens } from './tokens.js';
+import { normalizeView, VIEW_LABEL, fmtDur } from './views.js';
+import { createDesks } from './desks.js';
+import { createCommand } from './command.js';
+import { createInbox } from './inbox.js';
+import { createReports } from './reports.js';
 
 const MGR = 'claude';
 const $ = (s, r = document) => r.querySelector(s);
@@ -24,6 +29,7 @@ const S = {
   roster: {}, order: [], agents: {}, tasks: new Map(), missions: new Map(), meeting: null, settings: {}, usage: null, quotaUntil: 0,
   threads: {}, unread: {}, events: [], view: { kind: 'home' }, tab: 'chat', operator: 'You', company: '', model: '',
   ready: false, eventsLoaded: new Set(), studies: [],
+  overview: null, inboxCounts: {}, ui: 'office', uiPicked: false,
 };
 const YOU_LOOK = { skin: '#c68a62', hair: '#1d1d1d', hairStyle: 'short', shirt: '#2fb67c', pants: '#2f3550' };
 
@@ -51,6 +57,9 @@ const P = {
   reset: '<path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>',
   chart: '<path d="M3 3v18h18"/><path d="M7 16v-5M12 16V8M17 16v-8"/>',
   pause: '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  flag: '<path d="M4 22V4a1 1 0 0 1 1-1h11l-2 4 2 4H5"/>',
+  doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>',
   resume: '<path d="M7 4.5v15l12-7.5z"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24">${P[n]}</svg>`;
@@ -176,7 +185,7 @@ function handle(m) {
     case 'state': return onState(m);
     case 'agent': {
       S.agents[m.agent.id] = m.agent; world.updateAgent(m.agent);
-      refreshAgentBits(m.agent.id); return;
+      refreshAgentBits(m.agent.id); overviewSoon(); return;
     }
     case 'event': {
       S.events.push(m.event); if (S.events.length > 400) S.events.shift();
@@ -188,16 +197,21 @@ function handle(m) {
       S.tasks.set(m.task.id, m.task);
       if (S.view.kind === 'agent' && S.view.id === m.task.agent && S.tab === 'tasks') renderBody();
       if (S.view.kind === 'agent' && S.view.id === m.task.agent) renderAgentHeader();
-      refreshBoard(); refreshTaskDetail(m.task.id); return;
+      if (S.view.kind === 'agent' && S.view.id === m.task.agent && S.tab === 'work') renderBody();
+      refreshBoard(); refreshTaskDetail(m.task.id); overviewSoon(); command.taskChanged(); return;
     }
-    case 'mission': S.missions.set(m.mission.id, m.mission); refreshMissions(); refreshMissionDetail(m.mission); return;
+    case 'mission': S.missions.set(m.mission.id, m.mission); refreshMissions(); refreshMissionDetail(m.mission); overviewSoon(); return;
+    // the event journal (office/journal.py): inbox items and notifications, live
+    case 'inbox': S.inboxCounts = m.counts || S.inboxCounts; renderTop(); inbox.changed(m); overviewSoon(); return;
+    case 'notification': if (m.notification?.report_id) reports.changed(); return;
+    case 'journal': return;
     case 'meeting': return onMeeting(m);
     case 'toast': return toast(m.text, m.level, m.agent);
     case 'settings': S.settings = m.settings; S.quotaUntil = m.quota_until; renderQuota(); renderTop(); return;
     case 'usage': S.usage = m; renderQuota(); return;
     case 'providers': S.providers = m.providers; renderQuota(); if (S.view.kind === 'home') renderPanel(); return;
     case 'study': S.studies = m.studies; if (S.view.kind === 'agent' && S.tab === 'learning') renderBody(); return;
-    case 'tokens': tokens.changed(m); return;
+    case 'tokens': tokens.changed(m); command.tokensChanged(); return;
   }
 }
 
@@ -210,6 +224,7 @@ function onState(m) {
   S.tasks = new Map(m.tasks.map(t => [t.id, t]));
   S.missions = new Map((m.missions || []).map(x => [x.id, x]));
   S.settings = m.settings; S.quotaUntil = m.quota_until; S.studies = m.studies || []; S.providers = m.providers || [];
+  S.inboxCounts = m.inbox || {};
   document.title = `${m.company} · Agent Office`;
   $('#company').textContent = m.company;
   world.syncPeople(m.roster);
@@ -219,10 +234,11 @@ function onState(m) {
   S.ready = true;
   // catch up threads we already show (we may have missed messages while disconnected)
   for (const th of Object.keys(S.threads)) loadThread(th, true);
-  if (first) { renderPanel(); loadFeed(); }
+  if (first) { renderPanel(); loadFeed(); loadUi(); }
   else if (!!hadMeeting !== !!m.meeting && S.view.kind === 'meeting' && !m.meeting) setView({ kind: 'home' });
   else renderPanel();
   renderTop(); renderQuota(); renderMeetingBar();
+  loadOverview();
 }
 
 // ------------------------------------------------------------------ threads
@@ -304,11 +320,16 @@ function renderTop() {
   const counts = { working: 0, thinking: 0, idle: 0, quota: 0, paused: 0 };
   for (const id of S.order) { const a = S.agents[id]; if (a) counts[a.status] = (counts[a.status] || 0) + 1; }
   const parts = [];
-  if (counts.working) parts.push(`${counts.working} working`);
-  if (counts.thinking) parts.push(`${counts.thinking} replying`);
-  if (counts.idle) parts.push(`${counts.idle} free`);
-  if (counts.quota) parts.push(`${counts.quota} waiting on quota`);
-  if (counts.paused) parts.push(`${counts.paused} paused`);
+  const oc = S.overview?.counts;
+  if (oc) {             // the same words as the desks and the Command Center
+    for (const [k, w] of [['active', 'working'], ['blocked', 'blocked'], ['error', 'with a failure'], ['paused', 'paused'], ['idle', 'idle']]) if (oc[k]) parts.push(`${oc[k]} ${w}`);
+  } else {
+    if (counts.working) parts.push(`${counts.working} working`);
+    if (counts.thinking) parts.push(`${counts.thinking} replying`);
+    if (counts.idle) parts.push(`${counts.idle} idle`);
+    if (counts.quota) parts.push(`${counts.quota} waiting for quota`);
+    if (counts.paused) parts.push(`${counts.paused} paused`);
+  }
   const queued = [...S.tasks.values()].filter(t => t.status === 'queued').length;
   if (queued) parts.push(`${queued} queued`);
   $('#summary').textContent = parts.join(' · ');
@@ -316,9 +337,15 @@ function renderTop() {
   $('#btnClaude').innerHTML = `${icon('spark')}<span class="lbl">Ask Claude</span>${mu ? `<span class="badge">${mu}</span>` : ''}`;
   $('#btnMeeting').innerHTML = `${icon(S.meeting ? 'users' : 'phone')}<span class="lbl">${S.meeting ? 'In meeting' : 'Call meeting'}</span>`;
   const activeMissions = [...S.missions.values()].filter(m => ['queued', 'running'].includes(m.status)).length;
-  $('#btnMissions').innerHTML = `${icon('spark')}<span class="lbl">Missions</span>${activeMissions ? `<span class="badge">${activeMissions}</span>` : ''}`;
+  $('#btnMeeting').title = S.meeting ? 'Join the meeting' : 'Call a meeting';
+  $('#btnMissions').innerHTML = `${icon('flag')}<span class="lbl">Missions</span>${activeMissions ? `<span class="badge">${activeMissions}</span>` : ''}`;
   $('#btnTasks').innerHTML = `${icon('clip')}<span class="lbl">Tasks</span>${queued ? `<span class="badge" style="background:#5865f2">${queued}</span>` : ''}`;
   $('#btnFiles').innerHTML = `${icon('folder')}<span class="lbl">Files</span>`;
+  const need = S.inboxCounts.NEEDS_ATTENTION || 0, crit = S.inboxCounts.critical || 0;
+  $('#btnInbox').innerHTML = `${icon('inbox')}<span class="lbl">Inbox</span>${need ? `<span class="badge ${crit ? '' : 'calm'}">${need}</span>` : ''}`;
+  $('#btnInbox').title = need ? `${need} item(s) need you${crit ? `, ${crit} critical` : ''}` : 'Action Inbox: nothing needs you';
+  $('#btnReports').innerHTML = `${icon('doc')}<span class="lbl">Reports</span>`;
+  for (const b of document.querySelectorAll('#viewSwitch button')) { const on = b.dataset.view === S.ui; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); }
   $('#btnTokens').innerHTML = `${icon('chart')}<span class="lbl">Tokens</span>`;
   const paused = !!S.settings?.paused;
   $('#btnPause').innerHTML = `${icon(paused ? 'resume' : 'pause')}<span class="lbl">${paused ? 'Resume' : 'Pause'}</span>`;
@@ -361,7 +388,7 @@ function renderQuota() {
     q.append(h('span', { class: `q ${cls}`, title }, `${label} ${r.window}`,
       disabled ? h('span', { class: 'limit-off' }, 'off')
         : h('span', { class: 'bar' }, h('i', { style: `width:${pct == null ? 0 : pct}%` })),
-      disabled ? null : r.remaining));
+      disabled ? null : h('span', null, r.remaining)));
   }
 }
 
@@ -374,7 +401,10 @@ function setView(v, tab) {
   if (tab) S.tab = tab; else if (v.kind === 'agent') S.tab = 'chat';
   world.select(v.kind === 'agent' ? v.id : null);
   renderPanel(); renderMeetingBar();
+  desks.render(); command.selected();
 }
+// an agent's workspace: what is at their desk, their history and outputs (the manager has no desk: chat)
+const openAgentWork = (id) => setView({ kind: 'agent', id }, id === MGR ? 'chat' : 'work');
 function renderPanel() {
   if (!S.ready) { panel.replaceChildren(h('div', { class: 'empty' }, 'Connecting to the office…')); return; }
   V = {};
@@ -409,22 +439,25 @@ const provLabel = (id) => { const p = provider(id); return !p ? prettyModel(S.mo
 const prettyModel = (m) => (m || '').replace(/^gemini-/, 'Gemini ').replace(/-(high|medium|low)$/, (_, e) => ` (${e[0].toUpperCase() + e.slice(1)})`).replace(/-/g, ' ').replace(/(\d) (\d)/g, '$1.$2').replace(/ flash/i, ' Flash');
 
 function statusText(a, id) {
-  if (!a) return ['idle', 'Free'];
+  if (!a) return ['idle', 'Idle'];
   if (a.in_meeting && a.status !== 'working') return ['meeting', 'In meeting'];
-  return ({ working: ['working', 'Working'], thinking: ['thinking', id === MGR ? 'Thinking' : 'Replying'], quota: ['quota', 'Out of quota'], paused: ['paused', 'Paused'], idle: ['idle', 'Free'] })[a.status] || ['idle', a.status];
+  return ({ working: ['working', 'Working'], thinking: ['thinking', id === MGR ? 'Thinking' : 'Replying'], quota: ['quota', 'Waiting for quota'], paused: ['paused', 'Paused'], idle: ['idle', 'Idle'] })[a.status] || ['idle', a.status];
 }
+// the manager has no desk in the overview: its live status mapped onto the same words
+const LOCAL_STATE = { working: 'working', thinking: 'working', meeting: 'working', quota: 'blocked', paused: 'paused', idle: 'idle' };
 function memberRow(id) {
   const p = S.roster[id], a = S.agents[id];
   const [cls, label] = statusText(a, id);
+  const d = desks.agent(id);
   const unread = S.unread[threadOf(id)] || 0;
   let line = '';
   if (a?.task) line = `#${a.task.id} ${a.task.title}`;
   else if (a && a.status !== 'idle' && a.activity) line = a.activity;
   else if (a?.queued) line = `${a.queued} queued`;
-  return h('div', { class: 'member', 'data-id': id, onclick: () => setView({ kind: 'agent', id }) },
+  return h('div', { class: 'member', 'data-id': id, onclick: () => openAgentWork(id) },
     face(id, 38),
     h('div', { class: 'm' },
-      h('div', { class: 'n' }, p.name, h('span', { class: `pill ${cls}` }, label), unread ? h('span', { class: 'pill failed' }, `${unread} new`) : null),
+      h('div', { class: 'n' }, p.name, d ? h('span', { class: `st st-${d.state}` }, h('i'), d.state_label) : h('span', { class: `st st-${LOCAL_STATE[cls] || 'idle'}` }, h('i'), label), unread ? h('span', { class: 'pill failed' }, `${unread} new`) : null),
       h('div', { class: 'r' }, p.role),
       line ? h('div', { class: 'a' }, line) : null));
 }
@@ -529,6 +562,7 @@ function renderTabs() {
   const tab = (key, label, extra) => h('button', { class: `tab ${S.tab === key ? 'on' : ''}`, onclick: () => setView(S.view, key) }, label, extra);
   V.tabs.replaceChildren(
     tab('chat', 'Chat', unread && S.tab !== 'chat' ? h('span', { class: 'badge' }, unread) : null),
+    id === MGR ? null : tab('work', 'Work'),
     studyOf(id) ? tab('learning', 'Learning') : null,
     tab('activity', 'Activity'),
     tab('tokens', 'Tokens'),
@@ -555,6 +589,9 @@ async function renderBody() {
     updateTyping();
     V.body.scrollTop = V.body.scrollHeight;
     V.actFeed = null;
+  } else if (S.tab === 'work') {
+    V.actFeed = null;
+    renderWork(id);
   } else if (S.tab === 'learning') {
     V.actFeed = null;
     renderLearning(id);
@@ -582,6 +619,60 @@ async function renderBody() {
       h('div', { class: 'toolbar', style: 'margin-bottom:10px' }, h('button', { class: 'act', onclick: () => openAssign(id) }, iconEl('plus'), 'New task')),
       ...(list.length ? list.map(taskCard) : [h('div', { class: 'empty' }, 'No tasks yet.')]));
   }
+}
+
+// ---- work: the agent's workspace (from the same overview as the desks and the Command Center)
+function workNow(id) {
+  const a = desks.agent(id), now = Date.now() / 1000;
+  if (!a) return [h('div', { class: 'empty' }, 'Reading the office…')];
+  const out = [h('div', { class: 'wk-line' }, h('span', { class: `st st-${a.state}` }, h('i'), a.state_label),
+    a.running_since ? h('span', { class: 'muted' }, 'for ', h('span', { 'data-since': a.running_since }, fmtDur(now - a.running_since))) : null)];
+  if (a.task) out.push(h('a', { class: 'lnk wk-task', onclick: () => openTask(a.task.id) }, `#${a.task.id} ${a.task.title}`),
+    h('div', { class: 'muted wk-sub' }, [a.actions ? `${a.actions} action${a.actions === 1 ? '' : 's'} so far` : 'no actions recorded yet',
+      a.activity && a.status !== 'idle' ? a.activity : ''].filter(Boolean).join(' · ')));
+  else out.push(h('div', { class: 'muted wk-sub' }, 'No task at the desk.'));
+  if (a.mission) {
+    const m = a.mission, total = m.total_tasks || 0;
+    out.push(h('a', { class: 'lnk wk-mission', onclick: () => openMission(m.id) }, `Mission: ${m.title}`),
+      total ? h('span', { class: 'cc-prog' }, h('i', { style: `width:${(100 * m.done_tasks / total).toFixed(1)}%` })) : null,
+      h('div', { class: 'muted wk-sub' }, total ? `${m.done_tasks} of ${total} tasks done` + (m.failed_tasks ? ` · ${m.failed_tasks} failed` : '') : 'No tasks yet'));
+  }
+  if (a.blockers.length) out.push(h('div', { class: 'section' }, 'Needs you'), ...a.blockers.map(b =>
+    h('button', { class: `ib-row ${b.priority}`, onclick: () => inbox.openItem(b.id) }, h('span', { class: `ib-pri ${b.priority}` }),
+      h('span', { class: 'ib-main' }, h('b', null, b.title || b.kind), h('small', null, b.state === 'IN_PROGRESS' ? 'in progress' : 'needs attention')))));
+  if (a.queued.length) out.push(h('div', { class: 'section' }, `Up next (${a.queued_count})`), ...a.queued.map(t =>
+    h('a', { class: 'lnk wk-q', onclick: () => openTask(t.id) }, `#${t.id} ${t.title}`)));
+  out.push(h('div', { class: 'wk-stats' },
+    h('div', null, h('b', null, fmtDur(a.active_24h_s)), h('small', null, 'active, last 24 h')),
+    h('div', null, h('b', null, a.runs_24h || 0), h('small', null, 'runs, last 24 h')),
+    h('div', null, h('b', null, a.queued_count), h('small', null, 'queued'))));
+  if (a.estimated) out.push(h('p', { class: 'tk-note' }, 'Part of this time is estimated (work from before the event journal).'));
+  return out;
+}
+async function renderWork(id) {
+  V.workNow = h('div', { class: 'wk-now' }, ...workNow(id));
+  V.workHist = h('div', { class: 'wk-hist' }, h('div', { class: 'empty' }, 'Reading the history…'));
+  const outputs = [...S.tasks.values()].filter(t => t.agent === id && t.status === 'done').sort((x, y) => (y.finished_at || 0) - (x.finished_at || 0)).slice(0, 6);
+  V.body.replaceChildren(V.workNow,
+    h('div', { class: 'section' }, 'History, last 7 days'), V.workHist,
+    h('div', { class: 'section' }, 'Outputs'),
+    outputs.length ? h('div', { class: 'wk-out' }, ...outputs.map(t => {
+      const first = (t.result || '').split('\n').map(l => l.replace(/^[#>*\-\s]+/, '').trim()).find(Boolean) || 'No report text.';
+      return h('button', { class: 'wk-orow', onclick: () => openTask(t.id) }, h('b', null, `#${t.id} ${t.title}`),
+        h('small', { html: inline(first.slice(0, 220)) }), h('small', { class: 'muted' }, t.finished_at ? ago(t.finished_at) : ''));
+    })) : h('div', { class: 'empty' }, 'No finished work yet.'));
+  const want = V.workHist;
+  try {
+    const b = Date.now() / 1000;
+    const rows = await api('GET', `/api/activity/history?agent=${encodeURIComponent(id)}&since=${b - 7 * 86400}&until=${b}&limit=60`);
+    if (V.workHist !== want) return;
+    const label = { done: 'done', failed: 'failed', running: 'running', cancelled: 'cancelled', queued: 'queued', retry: 'retried', interrupted: 'interrupted', blocked: 'blocked' };
+    want.replaceChildren(...(rows.length ? rows.map(r => h('button', { class: 'wk-hrow', onclick: () => openTask(r.task.id) },
+      h('span', { class: 'wk-ht' }, h('b', null, `#${r.task.id} ${r.task.title || ''}`),
+        h('small', null, [r.runs.length ? new Date(r.runs[r.runs.length - 1][1] * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '',
+          `ran ${fmtDur(r.run_s)}${r.estimated ? ' (estimated)' : ''}`, r.queue_s ? `waited ${fmtDur(r.queue_s)}` : ''].filter(Boolean).join(' · '))),
+      h('span', { class: `pill ${r.outcome === 'retry' || r.outcome === 'interrupted' ? 'running' : r.outcome}` }, label[r.outcome] || r.outcome))) : [h('div', { class: 'empty' }, 'No work in the last 7 days.')]));
+  } catch (e) { if (V.workHist === want) want.replaceChildren(h('div', { class: 'empty' }, `Couldn't read the history: ${e.message}`)); }
 }
 
 // ---- learning (study programs)
@@ -1325,7 +1416,7 @@ const tip = $('#tip'), hint = $('#hint');
 let lastNear = null;
 world.initWorld($('#map'), {
   youLook: YOU_LOOK,
-  onSelect: (id) => setView({ kind: 'agent', id }),
+  onSelect: (id) => openAgentWork(id),
   onTalk: (id) => setView({ kind: 'agent', id }, 'chat'),
   onHover: (id, x, y) => {
     if (!id || id === 'you' || !S.roster[id]) { tip.classList.add('hidden'); return; }
@@ -1353,6 +1444,62 @@ document.querySelectorAll('#zoomCtl button').forEach(b => b.onclick = () => worl
 // ------------------------------------------------------------------ token usage
 const tokens = createTokens({ h, api, face, iconEl, S, MGR, openModal, modalKind: () => modalKind, openTask });
 
+// ------------------------------------------------------------------ Action Inbox, reports, and the two views
+const inbox = createInbox({ h, api, nameOf, toast, openModal, closeModal, modalKind: () => modalKind, openTask, openMission, askOperatorKey, operatorKey, ago, clock });
+const reports = createReports({ h, api, toast, openModal, modalKind: () => modalKind, md });
+const desks = createDesks({ h, face, S, openAgent: openAgentWork, openTask, openMission, openInboxItem: (id) => inbox.openItem(id), ago });
+const command = createCommand({ h, api, face, S, nameOf, openTask, openMission, openMissions, openBoard, openAgent: openAgentWork, inbox, reports, tokens });
+$('#world').append(desks.el);
+$('#command').append(command.el);
+
+// One overview feeds the desks, the Command Center, the team list and the Work tab (GET /api/overview).
+let ovTimer = null, ovBusy = false;
+function overviewSoon() { if (!ovTimer) ovTimer = setTimeout(() => { ovTimer = null; loadOverview(); }, 1200); }
+async function loadOverview() {
+  if (ovBusy) { overviewSoon(); return; }
+  ovBusy = true;
+  try {
+    const ov = await api('GET', '/api/overview');
+    S.overview = ov; S.inboxCounts = ov.inbox || S.inboxCounts;
+    world.setDeskStates(Object.fromEntries(ov.agents.map(a => [a.id, a.state])));
+    desks.render(ov); command.overview(ov); renderTop();
+    if (V.team) for (const id of S.order) refreshMemberRow(id);
+    if (V.workNow?.isConnected && S.view.kind === 'agent') V.workNow.replaceChildren(...workNow(S.view.id));
+  } catch { /* the connection line says when the office is away */ }
+  finally { ovBusy = false; }
+}
+setInterval(() => { if (!document.hidden && S.ready) loadOverview(); }, 20000);
+// running times tick here, from the start time the overview gave
+setInterval(() => { const now = Date.now() / 1000; for (const el of document.querySelectorAll('[data-since]')) el.textContent = fmtDur(now - Number(el.dataset.since)); }, 1000);
+
+// Virtual Office | Command Center. The choice is the operator's alone and is kept in the office's database
+// (POST /api/ui), so it survives restarts; nothing here ever switches by itself. Both views stay built, and
+// the side panel, open windows and running work are untouched by a switch.
+function applyView(v) {
+  S.ui = normalizeView(v);
+  $('#world').classList.toggle('hidden', S.ui !== 'office');
+  $('#command').classList.toggle('hidden', S.ui !== 'command');
+  document.body.dataset.view = S.ui;
+  if (S.ui === 'command') command.show(); else command.hide();
+  try { localStorage.setItem('office.view', S.ui); } catch { /* private mode */ }
+  renderTop();
+}
+function pickView(v) {
+  v = normalizeView(v);
+  S.uiPicked = true;
+  if (v === S.ui) return;
+  applyView(v);
+  api('POST', '/api/ui', { view: v }).catch(e => toast(`${VIEW_LABEL[v]} is shown, but it could not be kept for next time: ${e.message}`, 'warn'));
+}
+async function loadUi() {
+  try { const d = await api('GET', '/api/ui'); if (!S.uiPicked) applyView(d.view); } catch { /* keep this browser's last view */ }
+}
+document.querySelectorAll('#viewSwitch button').forEach(b => b.onclick = () => pickView(b.dataset.view));
+document.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === '1' || e.key === '2') { e.preventDefault(); pickView(e.key === '1' ? 'office' : 'command'); }
+});
+
 // ------------------------------------------------------------------ top bar buttons
 $('#btnClaude').onclick = () => setView({ kind: 'agent', id: MGR }, 'chat');
 $('#btnMeeting').onclick = () => S.meeting ? setView({ kind: 'meeting' }) : openMeetingSetup();
@@ -1360,6 +1507,8 @@ $('#btnMissions').onclick = openMissions;
 $('#btnTasks').onclick = () => openBoard();
 $('#btnFiles').onclick = () => openFiles('');
 $('#btnTokens').onclick = () => tokens.open();
+$('#btnInbox').onclick = () => inbox.open();
+$('#btnReports').onclick = () => reports.open();
 $('#btnVoice').onclick = () => { prefs.voice = !prefs.voice; savePrefs(); setMuted(!prefs.voice); renderTop(); toast(prefs.voice ? 'Replies will be read aloud' : 'Muted', 'info'); };
 $('#btnSettings').onclick = openSettings;
 function setPaused(v) {
@@ -1370,4 +1519,6 @@ function setPaused(v) {
 $('#btnPause').onclick = () => setPaused(!S.settings?.paused);
 setInterval(() => { renderQuota(); if (S.view.kind === 'agent') renderAgentHeader(); }, 30000);
 
+// first paint: the view this browser showed last, until the office says which one was picked
+applyView((() => { try { return localStorage.getItem('office.view'); } catch { return null; } })());
 renderTop(); renderPanel(); connect();

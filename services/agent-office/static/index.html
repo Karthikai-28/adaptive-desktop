@@ -10,29 +10,38 @@
 <body>
 <header id="top">
   <div class="brand"><span class="logo"></span><b id="company">Agent Office</b><span id="summary"></span></div>
+  <div id="viewSwitch" class="vswitch" role="tablist" aria-label="How the office is shown">
+    <button role="tab" data-view="office" title="The office floor with every agent at their desk (Alt+1)">Virtual Office</button>
+    <button role="tab" data-view="command" title="A compact dashboard of the same office (Alt+2)">Command Center</button>
+  </div>
   <div id="quota"></div>
   <nav>
     <button id="btnClaude" class="btn primary"></button>
-    <button id="btnMeeting" class="btn"></button>
-    <button id="btnMissions" class="btn"></button>
-    <button id="btnTasks" class="btn"></button>
-    <button id="btnFiles" class="btn"></button>
-    <button id="btnTokens" class="btn"></button>
+    <button id="btnInbox" class="btn"></button>
+    <button id="btnMeeting" class="btn sec"></button>
+    <button id="btnMissions" class="btn sec" title="Missions: work grouped around a checked result"></button>
+    <button id="btnTasks" class="btn sec" title="Task board"></button>
+    <button id="btnReports" class="btn sec" title="Daily reports: the 10:00 standup and the 19:00 evening summary"></button>
+    <button id="btnFiles" class="btn sec" title="The company's files"></button>
+    <button id="btnTokens" class="btn sec" title="Token usage"></button>
     <button id="btnPause" class="btn"></button>
     <button id="btnVoice" class="btn icon" title="Read replies aloud"></button>
     <button id="btnSettings" class="btn icon" title="Settings"></button>
   </nav>
 </header>
 <main>
-  <section id="world">
-    <canvas id="map" aria-label="The office floor"></canvas>
-    <div id="meetingBar" class="hidden"></div>
-    <div id="hint" class="hint hidden"></div>
-    <div id="tip" class="tip hidden"></div>
-    <div id="zoomCtl"><button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">−</button><button data-z="fit" title="Fit">⤢</button></div>
-    <div id="keys" class="keys">WASD / arrows to walk · click to go somewhere · <b>E</b> to talk to who's next to you</div>
-    <div id="conn" class="conn hidden">Reconnecting to the office…</div>
+  <section id="world" aria-label="Virtual Office">
+    <div id="floor">
+      <canvas id="map" aria-label="The office floor"></canvas>
+      <div id="meetingBar" class="hidden"></div>
+      <div id="hint" class="hint hidden"></div>
+      <div id="tip" class="tip hidden"></div>
+      <div id="zoomCtl"><button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">−</button><button data-z="fit" title="Fit">⤢</button></div>
+      <div id="keys" class="keys">WASD / arrows to walk · click to go somewhere · <b>E</b> to talk to who's next to you</div>
+    </div>
   </section>
+  <section id="command" class="hidden" aria-label="Command Center"></section>
+  <div id="conn" class="conn hidden">Reconnecting to the office…</div>
   <aside id="panel"></aside>
 </main>
 <div id="toasts"></div>
