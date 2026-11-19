@@ -892,6 +892,7 @@ def test_tiles(cfg, work):
     cfg_file.write_text(json.dumps({"backup_at": "22:40"}))
     check("photos: only a Google Photos share link is accepted",
           tiles.set_album(cfg_file, "https://example.org/album")["ok"] is False
+          and tiles.set_album(cfg_file, "")["ok"] is False and tiles.set_album(cfg_file, "   ")["ok"] is False
           and tiles.set_album(cfg_file, album)["ok"] and json.loads(cfg_file.read_text()) == {"backup_at": "22:40", "photos": {"album": album}})
     hops = []
 

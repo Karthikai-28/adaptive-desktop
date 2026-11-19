@@ -274,6 +274,7 @@ function lightbox(open) {
   if (open) { tell({ type: "tab", id: "today" }); $("#lb-img").src = photoSrc(photoI); $("#lb-count").textContent = `${photoI + 1} / ${photoList.length}`; drawStrip(); $("#lb-close").focus(); }
 }
 async function saveAlbum(input, note) {
+  if (!input.value.trim()) { note.textContent = "Paste the album's link first: in Google Photos choose Share, then Create link."; input.focus(); return; }
   note.textContent = "Looking at the album…";
   let res;
   try { res = await post("/api/photos", { album: input.value.trim() }); } catch (_) { res = { error: "Mario Hub is not answering." }; }

@@ -678,8 +678,10 @@ def album_link(text):
 
 def set_album(cfg_file, album, expand=expand_album_link):
     pasted = str(album or "").strip()
+    if not pasted:          # an empty box is a slip, never a reason to forget the album you have
+        return {"ok": False, "error": "Paste the album's link first: in Google Photos choose Share, then Create link."}
     album = album_link(pasted)
-    if pasted and not album:
+    if not album:
         return {"ok": False, "error": "Paste a Google Photos shared album link (photos.app.goo.gl/… )."}
     if album:
         album = expand(album)
