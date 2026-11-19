@@ -48,6 +48,27 @@ need() { printf '  needed   %s\n' "$*"; MISSING=$((MISSING + 1)); }
 opt() { printf '  optional %s\n' "$*"; }
 MISSING=0
 
+# The dock and app-grid button: office-window starts the service when needed and opens the page in its own
+# window. Pinned to the dock once (left alone if the owner unpins it later: the mark file says it was done).
+install_launcher() {
+    local apps="$HOME/.local/share/applications" icons="$HOME/.local/share/icons/hicolor/scalable/apps"
+    local mark="$HOME/.local/share/adaptive-desktop/agent-office-pinned"
+    mkdir -p "$apps" "$icons" "$(dirname "$mark")"
+    adaptive_render "$APP/com.karthi.AgentOffice.desktop" "$apps/com.karthi.AgentOffice.desktop"
+    cp "$APP/static/icon.svg" "$icons/com.karthi.AgentOffice.svg"
+    gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    update-desktop-database -q "$apps" 2>/dev/null || true
+    if [ ! -e "$mark" ] && command -v gsettings >/dev/null; then
+        python3 - <<'PY' && touch "$mark"
+import ast, subprocess
+apps = ast.literal_eval(subprocess.run(["gsettings", "get", "org.gnome.shell", "favorite-apps"],
+                                       capture_output=True, text=True, check=True).stdout.strip() or "[]")
+if "com.karthi.AgentOffice.desktop" not in apps:
+    subprocess.run(["gsettings", "set", "org.gnome.shell", "favorite-apps",
+                    repr([*apps, "com.karthi.AgentOffice.desktop"])], check=True)
+PY
+    fi
+}
 have_py() { PYTHONPATH="$PYDEPS" python3 -c "import ${PY_MODULES// /, }" 2>/dev/null; }
 agy_signed_in() { agy models 2>/dev/null | grep -q '^gemini-'; }
 claude_signed_in() { claude auth status --json 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("loggedIn") else 1)' 2>/dev/null; }
@@ -57,6 +78,7 @@ check() {
     MISSING=0
     command -v bwrap >/dev/null && ok "bubblewrap (agent sandbox)" || need "bubblewrap: sudo apt install bubblewrap"
     have_py && ok "Python packages" || need "Python packages ($PY_PACKAGES)"
+    [ -e "$HOME/.local/share/applications/com.karthi.AgentOffice.desktop" ] && ok "launcher (app grid and dock)" || need "launcher: scripts/install-agent-office.sh"
     command -v agy >/dev/null && ok "agy $(agy --version 2>/dev/null)" || need "agy (Antigravity CLI)"
     if command -v agy >/dev/null; then
         if agy_signed_in; then
@@ -134,6 +156,10 @@ echo "== office command"
 mkdir -p "$BIN"
 ln -sfn "$APP/bin/office" "$BIN/office"
 echo "   ok ($BIN/office)"
+
+echo "== launcher (app grid and dock)"
+install_launcher
+echo "   ok (Agent Office in the app grid, pinned in the dock)"
 
 echo "== user service"
 mkdir -p "$UNIT_DIR"

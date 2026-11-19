@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=Agent Office
+GenericName=AI Team
+Comment=Your AI company: every agent at their desk, the Command Center, the Action Inbox and the daily reports
+Keywords=agents;office;ai;tasks;missions;kanban;board;claude;gemini;inbox;reports;
+Exec=@ADAPTIVE_REPO@/services/agent-office/bin/office-window
+Icon=com.karthi.AgentOffice
+Terminal=false
+Categories=Office;
+StartupNotify=true
+StartupWMClass=AgentOffice
+Actions=command;inbox;
+
+[Desktop Action command]
+Name=Command Center
+Exec=@ADAPTIVE_REPO@/services/agent-office/bin/office-window command
+
+[Desktop Action inbox]
+Name=Action Inbox
+Exec=@ADAPTIVE_REPO@/services/agent-office/bin/office-window inbox

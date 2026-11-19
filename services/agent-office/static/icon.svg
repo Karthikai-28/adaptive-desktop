@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Agent Office: three desks under one roof, on the desktop's accent blue (tokens: accent #0A84FF) -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="#0A84FF"/>
+  <rect x="30" y="34" width="22" height="22" rx="5" fill="#FFFFFF"/>
+  <rect x="76" y="34" width="22" height="22" rx="5" fill="#FFFFFF"/>
+  <rect x="30" y="70" width="68" height="22" rx="5" fill="#FFFFFF" fill-opacity=".92"/>
+</svg>

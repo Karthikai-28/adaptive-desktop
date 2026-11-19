@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Open the Agent Office in a window of its own: what the dock and app-grid launcher runs
+# (com.karthi.AgentOffice.desktop, installed by scripts/install-agent-office.sh).
+#
+#   office-window            the view picked last (Virtual Office by default)
+#   office-window command    the Command Center      office-window office   the Virtual Office
+#   office-window inbox      the Action Inbox
+#
+# The office service is started first when it is not running. The page opens as a Chrome app window
+# with its own profile and window class (AgentOffice), so the dock keeps it under the office's icon
+# and Chrome's speech input works for talking to agents; without Chrome, the default browser.
+set -u
+APP="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+PORT="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['port'])" "$APP/config.json" 2>/dev/null || echo 8790)"
+URL="http://127.0.0.1:$PORT/"
+case "${1:-}" in
+    office|command) URL="${URL}?view=$1" ;;
+    inbox) URL="${URL}?open=inbox" ;;
+    "") ;;
+    *) echo "usage: office-window [office|command|inbox]" >&2; exit 2 ;;
+esac
+
+up() { curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/health" 2>/dev/null; }
+if ! up; then
+    systemctl --user start adaptive-agent-office.service 2>/dev/null
+    for _ in $(seq 1 60); do up && break; sleep 0.5; done
+    if ! up; then
+        notify-send -a "Agent Office" -i dialog-error "Agent Office did not start" \
+            "See: journalctl --user -u adaptive-agent-office" 2>/dev/null
+        echo "Agent Office did not start; see journalctl --user -u adaptive-agent-office" >&2
+        exit 1
+    fi
+fi
+
+PROFILE="${XDG_DATA_HOME:-$HOME/.local/share}/adaptive-desktop/agent-office-window"
+for browser in google-chrome google-chrome-stable chromium chromium-browser; do
+    if command -v "$browser" >/dev/null 2>&1; then
+        exec "$browser" --app="$URL" --class=AgentOffice --user-data-dir="$PROFILE" \
+            --no-first-run --no-default-browser-check
+    fi
+done
+exec xdg-open "$URL"

@@ -1521,4 +1521,11 @@ setInterval(() => { renderQuota(); if (S.view.kind === 'agent') renderAgentHeade
 
 // first paint: the view this browser showed last, until the office says which one was picked
 applyView((() => { try { return localStorage.getItem('office.view'); } catch { return null; } })());
+// the launcher's shortcuts (office-window command|office|inbox) arrive as ?view= or ?open=
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get('view')) pickView(q.get('view'));
+  if (q.get('open') === 'inbox') setTimeout(() => inbox.open(), 300);
+  if (q.has('view') || q.has('open')) history.replaceState(null, '', location.pathname);
+}
 renderTop(); renderPanel(); connect();
