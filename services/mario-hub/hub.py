@@ -37,6 +37,7 @@ from pathlib import Path
 from aiohttp import web, WSMsgType
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+OFFICE_WINDOW = Path(__file__).resolve().parents[2] / "services" / "agent-office" / "bin" / "office-window"
 import brain  # noqa: E402
 import collectors  # noqa: E402
 import commands  # noqa: E402
@@ -666,6 +667,16 @@ class Hub:
             cmd = ["xdg-open", str(arg)]
         elif aid == "start_office":
             cmd = ["systemctl", "--user", "start", "adaptive-agent-office.service"]
+        elif aid == "office":
+            # the Agent Office in its own window (it starts the office first): a view, the inbox, or a task
+            what = str(arg or "")
+            if what in ("", "office", "command", "inbox"):
+                extra = [what] if what else []
+            elif re.fullmatch(r"task:\d{1,9}", what):
+                extra = ["task", what.split(":")[1]]
+            else:
+                return {"ok": False, "error": "not an Agent Office view"}
+            cmd = [str(OFFICE_WINDOW), *extra]
         elif aid == "launch":
             if arg not in LAUNCH:
                 return {"ok": False, "error": "not one of Mario's launchers"}

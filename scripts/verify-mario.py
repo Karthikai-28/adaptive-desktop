@@ -760,6 +760,10 @@ async def test_after_boot(cfg):
         os.environ.clear(); os.environ.update(saved)
         hub_mod.collectors.session_env = real_se
     check("with nobody logged in a launcher says so instead of failing silently", out["ok"] is False and "session" in out["error"], str(out))
+    # the Agents tab opens the Agent Office only at one of its views or a task, never at anything passed in
+    check("the Agent Office opens only at its own views or a task number",
+          all(hub.action("office", bad)["ok"] is False for bad in ("task:1;rm", "task:", "../x", "--app=evil", "task:12 3"))
+          and hub_mod.OFFICE_WINDOW.name == "office-window" and hub_mod.OFFICE_WINDOW.exists())
     hub_mod.collectors.session_env = lambda: {"DISPLAY": ":7", "XAUTHORITY": "/x"}
     try:
         check("programs open on the display of the current login", hub_mod.launch_env()["DISPLAY"] == ":7")

@@ -671,6 +671,65 @@ body.opening #home .card { animation: rise var(--state) cubic-bezier(0.2, 0, 0, 
 .switch-row input:checked::after { transform: translateX(18px); }
 @media (prefers-reduced-motion: reduce) { .layer.shown .orb-stage, .heard, .layer .log, .train, .train-dots i.now { animation: none !important; } }
 
+/* -- Agents: the Agent Office's work as a board (board.js). One screen: each column scrolls in itself. -- */
+.agents-board { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 14px; }
+.bd-head { display: flex; align-items: center; gap: 8px; }
+.bd-sum { font-size: 14px; color: var(--soft); margin-right: auto; }
+.bd-head .chip svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; }
+.bd-agents { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(190px, 1fr); gap: 10px; overflow-x: auto; scrollbar-width: none; }
+.bd-agent { display: flex; flex-direction: column; gap: 6px; text-align: left; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-s); padding: 10px 12px; min-width: 0; position: relative; overflow: hidden; transition: border-color var(--feedback), background var(--feedback); }
+.bd-agent:hover { background: rgba(255, 255, 255, 0.08); } .bd-agent.on { border-color: var(--blue); }
+.bd-agent.st-working { box-shadow: inset 3px 0 0 var(--ok); } .bd-agent.st-blocked { box-shadow: inset 3px 0 0 var(--warn); }
+.bd-agent.st-error { box-shadow: inset 3px 0 0 var(--danger); }
+.bd-ahead { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bd-av { width: 24px; height: 24px; border-radius: 8px; flex: none; display: inline-grid; place-items: center; font: 700 12px Inter, sans-serif; font-style: normal; color: #FFFFFF; }
+.bd-aname { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.bd-aname b { font-size: 13px; } .bd-aname small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-st { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: var(--muted); white-space: nowrap; }
+.bd-st i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.bd-st.st-working { background: rgba(48, 209, 88, 0.16); color: #9FF0B5; } .bd-st.st-blocked { background: rgba(255, 159, 10, 0.16); color: #FFCF85; }
+.bd-st.st-error { background: rgba(255, 69, 58, 0.16); color: #FFA59E; }
+.bd-st.st-working i { animation: beat 2.4s ease-out infinite; }
+.bd-anow { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-ameta { display: flex; gap: 8px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bd-need { color: #FFCF85; font-weight: 600; }
+.bd-cols { min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.bd-col { min-height: 0; display: flex; flex-direction: column; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 10px 10px; }
+.bd-col header { display: flex; align-items: center; gap: 8px; padding: 0 4px 10px; }
+.bd-col h3 { margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--soft); }
+.bd-n { font-size: 11px; font-weight: 600; color: var(--soft); background: rgba(255, 255, 255, 0.08); border-radius: 999px; padding: 1px 8px; }
+.bd-col.needs_you .bd-n { color: #FFCF85; background: rgba(255, 159, 10, 0.16); }
+.bd-list { min-height: 0; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 2px 2px; scrollbar-width: thin; }
+.bd-card { display: flex; flex-direction: column; gap: 6px; text-align: left; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-s); padding: 10px 11px; position: relative; overflow: hidden; flex: none; transition: border-color var(--feedback), transform var(--feedback); }
+.bd-card:hover { border-color: rgba(255, 255, 255, 0.16); transform: translateY(-1px); }
+.bd-card.fresh { animation: bd-in var(--state) cubic-bezier(0.2, 0, 0, 1) both; }
+@keyframes bd-in { from { opacity: 0; transform: translateY(8px); } }
+.bd-title { font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bd-title b { color: var(--muted); font-weight: 600; }
+.bd-mission { font-size: 11px; color: var(--blue-hover); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-last { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-reason { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+.bd-pri { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+.bd-pri.high { background: var(--warn); } .bd-pri.critical { background: var(--danger); animation: beat 2.4s ease-out infinite; }
+.bd-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.bd-who { display: inline-flex; align-items: center; gap: 5px; margin-right: auto; color: var(--soft); white-space: nowrap; }
+.bd-who .bd-av { width: 18px; height: 18px; border-radius: 6px; font-size: 10px; }
+.bd-tag { background: rgba(255, 255, 255, 0.08); border-radius: 999px; padding: 1px 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bd-tag.done { color: #9FF0B5; background: rgba(48, 209, 88, 0.12); } .bd-tag.failed { color: #FFA59E; background: rgba(255, 69, 58, 0.12); }
+.bd-time { color: #9FF0B5; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bd-card.doing { border-color: rgba(48, 209, 88, 0.32); }
+/* a running card carries light along its bottom edge while it works */
+.bd-run { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--ok), transparent);
+  background-size: 40% 100%; background-repeat: no-repeat; animation: bd-run 1.8s linear infinite; }
+@keyframes bd-run { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.bd-card.needs_you.pri-critical { border-color: rgba(255, 69, 58, 0.45); } .bd-card.needs_you.pri-high { border-color: rgba(255, 159, 10, 0.32); }
+.bd-card.done.st-failed .bd-title { color: var(--soft); }
+.bd-none { color: var(--muted); font-size: 12px; text-align: center; padding: 24px 8px; }
+.bd-empty { display: grid; place-items: center; align-content: center; gap: 10px; height: 100%; text-align: center; }
+.bd-empty .big-ic { width: 40px; height: 40px; color: var(--muted); }
+
 /* Home is away (hidden behind your work): nothing keeps moving for nobody. */
 body.away *, body.away *::before, body.away *::after { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {

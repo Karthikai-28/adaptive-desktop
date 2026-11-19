@@ -121,12 +121,18 @@ async def main(tmp):
             for _ in range(60):
                 if await ev('!!document.querySelector("#c-projects .tile-nav")'): break
                 await asyncio.sleep(.1)
-            # tabs: Today, then the sites from the hub's config; a site tab swaps the cards for its slot
+            # tabs: Today, Agents (the Agent Office's board), then the sites from the hub's config; a site tab
+            # swaps the cards for its slot
             tabs = await ev('[...document.querySelectorAll("#tabs .tab")].map(t => t.firstChild.textContent)')
-            assert tabs[0] == 'Today' and len(tabs) >= 1, tabs
+            assert tabs[:2] == ['Today', 'Agents'], tabs
             assert await ev('document.querySelector("#accts").hidden')      # account chips belong to a Google tab, not Today
-            if len(tabs) > 1:
-                await ev('homeSpace.select(2); true')
+            await ev('homeSpace.select(2); true')                           # Agents: this page, the board instead of the cards
+            assert await ev('document.querySelector(".main").hidden && !document.querySelector("#agents").hidden && document.querySelector("#web").hidden')
+            assert await ev('document.querySelector("#agents").innerText.length > 0 && document.documentElement.scrollHeight <= innerHeight')
+            await ev('homeSpace.select(1); true')
+            assert await ev('!document.querySelector(".main").hidden && document.querySelector("#agents").hidden')
+            if len(tabs) > 2:
+                await ev('homeSpace.select(3); true')
                 assert await ev('document.querySelector(".main").hidden && !document.querySelector("#web").hidden && document.querySelector("#tabs .tab.on").firstChild.textContent !== "Today"')
                 # one chip per account, the main one chosen; a chip chooses its account
                 assert await ev('[...document.querySelectorAll("#accts .acct")].map(a => a.querySelector(".nm").textContent).join() === "first,second" && document.querySelector("#accts .acct.on .nm").textContent === "first"')

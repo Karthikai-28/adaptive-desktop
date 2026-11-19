@@ -309,7 +309,10 @@ def agent_office(cfg):
         for m in state.get("missions") or []:
             if isinstance(m, dict) and str(m.get("status", "")).lower() in ("running", "active", "queued"):
                 active.append({"id": m.get("id"), "title": m.get("title") or m.get("goal") or m.get("id")})
-    return {"running": True, "paused": bool(health.get("paused")), "agents": agents[:6], "missions": active[:3]}
+    # the board for Home's Agents tab (GET /api/board); an older office without it leaves the tab saying so
+    board, _ = _http_json(base + "/api/board", timeout=5)
+    return {"running": True, "paused": bool(health.get("paused")), "agents": agents[:6], "missions": active[:3],
+            "board": board if isinstance(board, dict) and "columns" in board else None}
 
 
 # ----------------------------------------------------------------- usage

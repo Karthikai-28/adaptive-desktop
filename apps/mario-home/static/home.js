@@ -394,7 +394,7 @@ const render = {
 // card -> renderers that read it
 const FEEDS = {
   mail: ["daysum", "tabs"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
-  builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects"], thinking_space: ["thinking"],
+  builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects", "board"], thinking_space: ["thinking"],
   weather: ["weather"], phone: ["phone"], news: ["news"], news_media: ["news"], usage: ["ai"],
   movies: ["movies"], sticky: ["sticky"], storage: ["storage"], spotify: ["spotify"], photos: ["photos"],
   accounts: ["tabs", "sheet"],
@@ -408,9 +408,11 @@ const HOST = window.webkit && window.webkit.messageHandlers && window.webkit.mes
 const tell = (msg) => { if (HOST) HOST.postMessage(JSON.stringify(msg)); };
 let currentTab = "today";
 const siteTabs = () => state.config.tabs || [];
+// Home's own pages come first: Today, and Agents (the Agent Office's board, board.js); then the sites
+const homeTabs = () => [{ id: "today", name: "Today" }, { id: "agents", name: "Agents" }, ...siteTabs()];
 function drawTabs() {
   const unread = data("mail").unread;
-  fill($("#tabs"), [{ id: "today", name: "Today" }, ...siteTabs()].map((t, i) =>
+  fill($("#tabs"), homeTabs().map((t, i) =>
     el("button", { class: `tab${t.id === currentTab ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(t.id === currentTab),
       title: `Ctrl+${i + 1}`, onclick: () => selectTab(t.id) }, t.name,
       t.id === "mail" && unread ? el("span", { class: "n" }, unread > 999 ? "999+" : String(unread)) : null)));
@@ -422,12 +424,16 @@ function webRect() {
 }
 function selectTab(id) {
   const site = siteTabs().find((t) => t.id === id);
-  currentTab = site ? id : "today";
+  currentTab = site ? id : id === "agents" ? "agents" : "today";
+  const agents = currentTab === "agents";
   drawTabs();
-  $(".main").hidden = !!site;
+  $(".main").hidden = !!site || agents;
+  $("#agents").hidden = !agents;
   $("#web").hidden = !site;
-  $(".dayhead .chips").hidden = !!site;
-  $("#daysum").hidden = !!site;
+  $(".dayhead .chips").hidden = !!site || agents;
+  $("#daysum").hidden = !!site || agents;
+  if (agents) draw("board");
+  // Today and Agents are this page: the host shows it and puts every site view away
   if (!site) return tell({ type: "tab", id: "today" });
   fill($("#web"), HOST ? el("span", { class: "web-wait muted" }, `Opening ${site.name}…`)
     : el("button", { class: "btn", type: "button", onclick: () => openUrl(site.url) }, `Open ${site.name} in the browser`));
@@ -449,7 +455,7 @@ window.homeSpace = {
     selectTab(tab || currentTab);
   },
   closed() { cancelVoice(); $("#answer").hidden = true; document.body.classList.add("away"); },
-  select(n) { const all = ["today", ...siteTabs().map((t) => t.id)]; if (all[n - 1]) selectTab(all[n - 1]); },
+  select(n) { const all = homeTabs().map((t) => t.id); if (all[n - 1]) selectTab(all[n - 1]); },
 };
 
 function draw(name) { try { if (name === "tabs") return drawTabs(); if (render[name]) render[name](); } catch (e) { console.error(name, e); } }
@@ -571,7 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
         else if (!voiceId && !voiceBusy && $("#voice-status").hidden) tell({ type: "close" });
       } else if (e.ctrlKey && !e.altKey && !e.metaKey && /^[1-9]$/.test(e.key)) { e.preventDefault(); window.homeSpace.select(Number(e.key)); }
     });
-    window.addEventListener("resize", () => { if (currentTab !== "today") tell({ type: "rect", rect: webRect() }); });
+    window.addEventListener("resize", () => { if (siteTabs().some((t) => t.id === currentTab)) tell({ type: "rect", rect: webRect() }); });
     window.homeSpace.open();
     setInterval(() => { greet(); draw("today"); }, 60000);
   }
