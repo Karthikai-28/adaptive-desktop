@@ -566,6 +566,90 @@ async def notifications_read(r: ReadIn, request: Request):
         bad(e)
 
 
+# ---------------------------------------------------------------- activity and reports
+def _window(since, until, default_s=86400):
+    now = time.time()
+    until = until or now
+    since = since if since is not None else until - default_s
+    if since >= until or until - since > 92 * 86400:
+        bad("give since < until, at most 92 days apart (unix seconds)")
+    return since, until
+
+
+@app.get("/api/activity/agents")
+async def activity_agents():
+    """Every agent now: status, current task and mission, how long this run has gone, queue and blockers."""
+    return office.tracker.assignments()
+
+
+@app.get("/api/activity/summary")
+async def activity_summary(since: float | None = None, until: float | None = None):
+    """Per agent in a window (default the last 24 h): active time (overlaps counted once), idle, queue wait."""
+    return office.tracker.summary(*_window(since, until))
+
+
+@app.get("/api/activity/history")
+async def activity_history(since: float | None = None, until: float | None = None, agent: str | None = None,
+                           limit: int = 200):
+    """Each task that ran or waited in the window: run intervals, run and queue time, outcome."""
+    a, b = _window(since, until)
+    return office.tracker.history(a, b, agent, limit)
+
+
+@app.get("/api/tasks/{tid}/timing")
+async def task_timing(tid: int):
+    t = office.tracker.task_timing(tid)
+    if not t:
+        raise HTTPException(404, "no such task")
+    return t
+
+
+@app.get("/api/missions/{mid}/progress")
+async def mission_progress(mid: int):
+    p = office.tracker.mission_progress(mid)
+    if not p:
+        raise HTTPException(404, "no such mission")
+    return p
+
+
+@app.get("/api/reports")
+async def reports(kind: str | None = None, since: float | None = None, until: float | None = None, limit: int = 50,
+                  status: str | None = None):
+    """Standups and evening summaries (newest first), without their bodies; status generated|delivered|missed|failed."""
+    return office.reports.list(kind, since, until, limit, status)
+
+
+@app.get("/api/reports/schedule")
+async def reports_schedule():
+    return office.reports.schedule()
+
+
+@app.get("/api/reports/{rid}")
+async def report(rid: int):
+    r = office.reports.get(rid)
+    if not r:
+        raise HTTPException(404, "no such report")
+    return r
+
+
+class ReportIn(BaseModel):
+    kind: str
+
+
+@app.post("/api/reports/generate")
+async def report_now(r: ReportIn):
+    """A report on demand, from the end of the last scheduled one to now. It is kept, but it is not the scheduled
+    report and changes nothing about the schedule."""
+    from office.reports import KINDS
+    if r.kind not in KINDS:
+        bad(f"kind must be one of {', '.join(KINDS)}")
+    last = (office.reports.list(kind=r.kind, limit=1, status="delivered") +
+            office.reports.list(kind=r.kind, limit=1, status="generated"))
+    last = [x for x in last if not x["manual"]]
+    start = max((x["window_end"] for x in last), default=time.time() - 86400)
+    return office.reports.generate(r.kind, start, time.time(), manual=True)
+
+
 @app.get("/api/events")
 async def events(agent: str | None = None, task_id: int | None = None, limit: int = 100):
     return store.events(agent=agent, task_id=task_id, limit=min(limit, 1000))

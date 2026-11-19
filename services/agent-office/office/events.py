@@ -28,6 +28,7 @@ NOTIFY = {
     "mission.unverified": ("normal", None),
     "mission.completed": ("normal", "office.missions"),
     "task.completed": ("normal", "office.done"),
+    "report.ready": ("normal", "office.reports"),
 }
 
 # which events open an issue, and its inbox kind

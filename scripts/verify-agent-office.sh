@@ -186,7 +186,8 @@ assert "abcd1234efgh" not in red and "ghp_" not in red and "sk-ant" not in red a
 # --- the journal on a real database
 p = sys.argv[1]
 s = Store(p)
-assert s.version() == 1 and s.get("journal_since")
+from office.store import MIGRATIONS
+assert s.version() == MIGRATIONS[-1][0] == 2 and s.get("journal_since") and s.get("reports_since")
 j = Journal(s, {"maya": "Maya"}, secrets=lambda: ("SECRETKEY123",))
 t = s.add_task("maya", "Build it")
 s.update_task(t["id"], status="running", started_at=time.time(), attempts=1)
@@ -265,7 +266,7 @@ db.execute("INSERT INTO tasks(agent,title,status,finished_at,error) VALUES('maya
 db.commit(); db.close()
 so = Store(old)
 jo = Journal(so)
-assert so.version() == 1 and jo.reconcile() == 0 and jo.inbox()["total"] == 0 and jo.notifications() == []
+assert so.version() == 2 and jo.reconcile() == 0 and jo.inbox()["total"] == 0 and jo.notifications() == []
 PY
 # push channels (office/channels.py): WhatsApp is off and can't send; a failing channel keeps what it missed
 # and gets it again, in order, after a backoff; a channel only ever carries a short line
@@ -304,6 +305,73 @@ async def main():
     await d.once()
     assert ch.sent == [1, 2, 3] and j.delivery("push:flaky")["pending"] == 0, ch.sent
 asyncio.run(main())
+PY
+# Milestone 2 rules: timelines from events (run, queue; overlaps counted once), the IST schedule, the reports
+PYTHONPATH="$APP" python3 - <<'PY' || fail "activity timelines and report rules"
+import datetime as dt
+from office import activity as A, reports as R
+
+ev = lambda seq, ts, typ, tid=1, agent="maya": {"seq": seq, "ts": ts, "type": typ, "task_id": tid, "agent": agent, "mission_id": None}
+events = [ev(1, 0, "task.created"), ev(2, 10, "task.started"), ev(3, 40, "task.retry"), ev(4, 50, "task.resumed"),
+          ev(5, 70, "task.interrupted"), ev(6, 100, "task.resumed"), ev(7, 130, "task.completed"),
+          ev(8, 20, "task.created", 2), ev(9, 60, "task.started", 2)]
+tl = A.task_timelines(events, now=200)
+assert tl[1]["runs"] == [[10, 40, "retry"], [50, 70, "interrupted"], [100, 130, "done"]], tl[1]
+assert tl[1]["queued"] == [[0, 10], [40, 50], [70, 100]] and not tl[1]["running"], tl[1]
+assert tl[2]["runs"] == [[60, 200, "running"]] and tl[2]["running"]
+assert A.union_seconds([[0, 10], [5, 20], [30, 40]]) == 30          # overlapping time counted once
+assert A.clip([[0, 100, "x"]], 50, 80) == [[50, 80, "x"]]
+s = A.agent_summary(tl, 0, 200, ["maya", "arjun"])
+assert s["maya"]["active_s"] == 30 + 150 and s["arjun"]["active_s"] == 0 and s["arjun"]["idle_s"] == 200, s
+assert s["maya"]["tasks"] == {1: 80.0, 2: 140.0}                    # each task's own time stays whole
+est = A.estimated_timeline({"agent": "zoe", "started_at": 5, "finished_at": 9, "status": "done", "created_at": 1}, 50)
+assert est["estimated"] and est["runs"] == [[5, 9, "done"]] and est["queued"] == [[1, 5]]
+assert A.fmt_duration(59) == "59s" and A.fmt_duration(3720) == "1h 02m"
+
+# the schedule: 10:00 and 19:00 in Asia/Kolkata (UTC+5:30), every day
+S = R.settings({})
+ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+at = lambda *a: dt.datetime(*a, tzinfo=ist).timestamp()
+assert R.latest_slot("standup", at(2026, 11, 19, 10, 0), S) == (dt.date(2026, 11, 19), at(2026, 11, 19, 10, 0))
+assert R.latest_slot("standup", at(2026, 11, 19, 9, 59), S) == (dt.date(2026, 11, 18), at(2026, 11, 18, 10, 0))
+assert R.latest_slot("evening", at(2026, 11, 20, 2, 0), S) == (dt.date(2026, 11, 19), at(2026, 11, 19, 19, 0))
+assert R.next_slot("evening", at(2026, 11, 19, 19, 0), S)[1] == at(2026, 11, 20, 19, 0)
+assert R.slot_at("standup", dt.date(2026, 11, 21), S) == dt.datetime(2026, 11, 21, 4, 30, tzinfo=dt.timezone.utc).timestamp()
+
+# the reports, from a period's data
+t = lambda i, st, agent="maya", **k: dict({"id": i, "agent": agent, "title": f"Job {i}", "status": st, "mission_id": None,
+                                           "depends_on": None, "result": "Done: wrote report.md", "error": ""}, **k)
+d = {"since": at(2026, 11, 18, 19, 0), "until": at(2026, 11, 19, 19, 0), "now": at(2026, 11, 19, 19, 0),
+     "agents": {"maya": {"name": "Maya", "role": "Engineer"}, "arjun": {"name": "Arjun", "role": "Research"}},
+     "summary": {"agents": [{"agent": "maya", "active_s": 3600, "idle_s": 82800, "queue_s": 60, "tasks": {1: 3600}, "estimated": False},
+                            {"agent": "arjun", "active_s": 0, "idle_s": 86400, "queue_s": 0, "tasks": {}, "estimated": False}],
+                 "approval_wait_s": 0, "approvals": 0, "estimated": False},
+     "history": [{"task": t(1, "done"), "agent": "maya", "mission_id": None, "runs": [[0, 3600, "done"]], "run_s": 3600,
+                  "queue_s": 60, "estimated": False, "outcome": "done"}],
+     "finished": [t(1, "done"), t(2, "failed", "arjun", error="agy exited 2")],
+     "running": [t(3, "running")], "queued": [t(4, "queued", "arjun", depends_on=3)],
+     "task_status": {1: "done", 2: "failed", 3: "running", 4: "queued"},
+     "missions": [{"id": 5, "title": "Ship", "status": "succeeded", "criteria": 2, "passed": 2, "error": ""}],
+     "retries": [], "recovered": [],
+     "open_items": [{"id": 9, "kind": "failed", "title": "Arjun: task #2 failed", "text": "agy exited 2", "priority": "high",
+                     "state": "NEEDS_ATTENTION", "agent": "arjun", "mission_id": None},
+                    {"id": 10, "kind": "approval", "title": "Approval needed", "text": "run move", "priority": "critical",
+                     "state": "NEEDS_ATTENTION", "agent": "", "mission_id": None}],
+     "tokens": {"available": True, "agents": {"maya": {"total": 1000, "fresh": 100, "cached": 800, "out": 100, "calls": 3}}, "total": 1000},
+     "files": [{"path": "projects/x/report.md", "modified": 0}], "assignments": None}
+title, summary, data, md = R.standup(d, S, d["now"], at(2026, 11, 19, 10, 0), False)
+assert title == "Morning standup — 10:00" and "Catch-up" not in md
+assert [p["level"] for p in data["plan"]][:2] == ["Critical", "High"], data["plan"]      # approvals, then failures
+assert "waits for #3, running" in md and "The office records no deadlines" in md
+maya = next(a for a in data["agents"] if a["agent"] == "maya")
+arjun = next(a for a in data["agents"] if a["agent"] == "arjun")
+assert maya["priority"] == "Normal" and arjun["priority"] == "High" and "**Arjun** — Research" in md and "- Priority: High" in md
+title, summary, data, md = R.evening(d, S, at(2026, 11, 20, 8, 0), at(2026, 11, 19, 19, 0), True)
+assert "catch-up" in title and "> Catch-up: due at" in md, title
+assert "## Still in progress (not finished)" in md and "#3 Job 3" in md.split("## Still in progress")[1].split("##")[0]
+assert "#3 Job 3" not in md.split("## Completed")[1].split("##")[0]                  # in progress is never "completed"
+assert "| Maya | 1h 00m |" in md and "not billed per token" in md and "projects/x/report.md" in md
+assert "2/2 criteria passed" in md and data["priorities"][0]["level"] == "Critical"
 PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
@@ -557,6 +625,110 @@ async def main():
 
 asyncio.run(main())
 PY
+# Milestone 2 through the office (fake runs): measured work time, current assignments, and the scheduled reports:
+# once per time even across restarts, catch-up labelled with the missed times recorded, windows without gaps
+OFFICE_STATE="$TMP/reports-office" OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 PYTHONPATH="$REPO/.local/office-pydeps:$APP" python3 - "$APP" <<'PY' || fail "activity and scheduled reports"
+import asyncio, datetime as dt, time
+from office import agy, config, reports as R
+from office.config import DATA
+from office.core import Office
+from office.store import Store
+
+runs = []
+class FakeRun:
+    def __init__(self):
+        self.done, self.result = asyncio.Event(), agy.AgyResult(); runs.append(self)
+    async def wait(self):
+        await self.done.wait(); return self.result
+    def cancel(self):
+        self.result.cancelled = True; self.done.set()
+    def finish(self, text):
+        self.result.status, self.result.text = "SUCCESS", text; self.done.set()
+
+def office(store):
+    o = Office(config.load(), store)
+    o.provider_paused = lambda pid, tools=True: False
+    def run(*a, **k):
+        r = FakeRun(); r.provider = a[1]; return r
+    o._run = run
+    o.manager.start = o.study.start = o.quota.start = o.graphs.start = o.ledger.start = lambda: None
+    o._provider_loop = o._journal_loop = lambda: asyncio.sleep(0)
+    o._chat_worker = lambda aid: asyncio.sleep(0)
+    return o
+
+async def settle(cond):
+    for _ in range(200):
+        if cond():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("timed out")
+
+async def main():
+    store = Store(DATA / "office.db")
+    o = office(store)
+    await o.start()
+    agent = next(iter(o.agents))
+    t = await o.add_task(agent, "Measured job", "do it")
+    await settle(lambda: len(runs) == 1)
+    now_agents = {a["id"]: a for a in o.tracker.assignments()}
+    assert set(now_agents) == set(o.agents)
+    me = now_agents[agent]
+    assert me["status"] == "working" and me["task"]["id"] == t["id"] and me["running_since"], me
+    await asyncio.sleep(0.4)
+    runs[0].finish("Done.")
+    await settle(lambda: store.task(t["id"])["status"] == "done")
+    timing = o.tracker.task_timing(t["id"])
+    assert 0.35 < timing["run_s"] < 2 and timing["runs"][0][2] == "done" and not timing["estimated"], timing
+    summ = {r["agent"]: r for r in o.tracker.summary(time.time() - 60, time.time())["agents"]}
+    assert 0.35 < summ[agent]["active_s"] < 2 and summ[agent]["tasks"] == {t["id"]: timing["run_s"]}, summ[agent]
+    hist = o.tracker.history(time.time() - 60, time.time())
+    assert [h["task"]["id"] for h in hist] == [t["id"]] and hist[0]["outcome"] == "done"
+
+    # the schedule, with the clock moved: installed on 18 Nov 2026 at 09:00 IST
+    S = o.reports.s
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    at = lambda *a: dt.datetime(*a, tzinfo=ist).timestamp()
+    store.set("reports_since", at(2026, 11, 18, 9, 0))
+    assert o.reports.tick(at(2026, 11, 18, 9, 30)) == []                               # nothing due yet
+    made = o.reports.tick(at(2026, 11, 18, 10, 0, 30))
+    assert [r["kind"] for r in made] == ["standup"] and not made[0]["catch_up"] and made[0]["status"] == "generated", made
+    assert made[0]["window_end"] == at(2026, 11, 18, 10, 0) and made[0]["window_start"] == at(2026, 11, 17, 10, 0)
+    assert o.reports.tick(at(2026, 11, 18, 10, 5)) == []                               # once per time
+    o2 = office(store)                                                                  # ... even after a restart
+    assert o2.reports.tick(at(2026, 11, 18, 10, 6)) == []
+    ev = o2.reports.tick(at(2026, 11, 18, 19, 1))
+    assert [r["kind"] for r in ev] == ["evening"] and ev[0]["window_start"] == at(2026, 11, 17, 19, 0)
+    full = o2.reports.get(ev[0]["id"])
+    assert full["markdown"].startswith("# Evening summary — 19:00") and "Measured job" not in full["markdown"]   # another day
+    real = o2.reports.get(o2.reports.generate("evening", time.time() - 120, time.time() + 1, manual=True)["id"])
+    assert "Measured job" in real["markdown"].split("## Completed")[1].split("##")[0], real["markdown"]
+    assert any(h["task"]["id"] == t["id"] and h["run_s"] > 0.35 for h in real["data"]["history"])
+    note = [n for n in o2.journal.notifications(limit=500) if n.get("report_id") == ev[0]["id"]]
+    assert len(note) == 1 and note[0]["group"] == "office.reports" and full["notification_id"] == note[0]["id"]
+    assert (DATA / "reports" / "2026-11-18-evening.md").read_text() == full["markdown"]
+    # the laptop is off for two days: one catch-up per kind, the missed times recorded, no gap in the windows
+    made = o2.reports.tick(at(2026, 11, 21, 8, 0))
+    assert [(r["kind"], r["catch_up"]) for r in made] == [("standup", 1), ("evening", 1)], made
+    sup = next(r for r in made if r["kind"] == "standup")
+    assert sup["window_start"] == at(2026, 11, 18, 10, 0) and sup["window_end"] == at(2026, 11, 20, 10, 0)
+    assert "catch-up" in sup["title"] and "Catch-up" in o2.reports.get(sup["id"])["markdown"]
+    missed = sorted((r["kind"], r["slot"]) for r in o2.reports.list(status="missed"))
+    assert missed == [("evening", "2026-11-19"), ("standup", "2026-11-19")], missed
+    # delivered once a phone confirms its notification
+    o2.journal.delivered("link:phone1", o2.journal.notification_head())
+    o2.reports.tick(at(2026, 11, 21, 8, 1))
+    assert {r["status"] for r in o2.reports.list() if not r["manual"] and r["status"] != "missed"} == {"delivered"}
+    # a report that can't be made is retried, then raised in the inbox; it never claims to exist
+    o2.tracker.period = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full"))
+    for minute in (1, 2, 3, 4):
+        o2.reports.tick(at(2026, 11, 21, 10, minute))
+    bad = o2.reports.list(kind="standup", limit=1)[0]
+    assert bad["status"] == "failed" and bad["attempts"] == 3 and "disk full" in bad["error"], bad
+    assert o2.journal.item_by_issue("error:report-standup")["state"] == "NEEDS_ATTENTION"
+    await o.shutdown()
+
+asyncio.run(main())
+PY
 PORT=8799
 OFFICE_STATE="$TMP/state" OFFICE_PORT=$PORT OFFICE_NO_STUDY=1 OFFICE_NO_REPO_SCAN=1 \
     PYTHONPATH="$REPO/.local/office-pydeps" \
@@ -694,6 +866,20 @@ curl -fsS "$B/api/notifications?after=$NHEAD&wait=1" | python3 -c 'import json,s
 post -d "{\"through\":$NHEAD}" "$B/api/notifications/read" | python3 -c 'import json,sys; assert json.load(sys.stdin)["unread"] == 0' || fail "mark read"
 [ "$(code -X POST "${J[@]}" -d '{}' "$B/api/inbox/$AID/bogus")" = 404 ] || fail "unknown inbox action"
 curl -fsS "$B/api/state" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["journal_head"] >= 1 and "NEEDS_ATTENTION" in d["inbox"] and "head" in d["notifications"]' || fail "state carries the inbox"
+# activity and report APIs
+curl -fsS "$B/api/activity/agents" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d) >= 2 and all({"id","status","task","mission","running_s","queued","blockers"} <= set(a) for a in d), d[0]' || fail "activity: assignments"
+curl -fsS "$B/api/activity/summary" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["until"] - d["since"] == 86400 and all("active_s" in a and "idle_s" in a for a in d["agents"])' || fail "activity: summary"
+curl -fsS "$B/api/activity/history?since=0&until=86400" | python3 -c 'import json,sys; assert json.load(sys.stdin) == []' || fail "activity: history range"
+[ "$(code "$B/api/activity/summary?since=10&until=5")" = 400 ] || fail "activity: a backwards window was accepted"
+curl -fsS "$B/api/tasks/$HTID/timing" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["task"]["id"] and "queue_s" in d and "approval_s" in d' || fail "task timing"
+[ "$(code "$B/api/tasks/999999/timing")" = 404 ] || fail "timing of a missing task"
+curl -fsS "$B/api/missions/$HMID/progress" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["mission"]["id"] and d["total_tasks"] >= 1 and "contributions" in d' || fail "mission progress"
+curl -fsS "$B/api/reports/schedule" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["timezone"] == "Asia/Kolkata" and d["kinds"]["standup"]["time"] == "10:00" and d["kinds"]["evening"]["time"] == "19:00"' || fail "report schedule"
+RID="$(post -d '{"kind":"standup"}' "$B/api/reports/generate" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"] == "generated" and d["manual"] == 1 and "on demand" in d["title"]; print(d["id"])')" || fail "report on demand"
+curl -fsS "$B/api/reports/$RID" | python3 -c 'import json,sys; d=json.load(sys.stdin); m=d["markdown"]; assert m.startswith("# Morning standup (on demand") and "## By agent" in m and "## Decisions waiting for you" in m and d["data"]["plan"] is not None' || fail "report body"
+post -d '{"kind":"evening"}' "$B/api/reports/generate" | python3 -c 'import json,sys; assert json.load(sys.stdin)["kind"] == "evening"' || fail "evening on demand"
+curl -fsS "$B/api/reports?kind=standup" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d and "markdown" not in d[0]' || fail "report list"
+[ "$(code -X POST "${J[@]}" -d '{"kind":"weekly"}' "$B/api/reports/generate")" = 400 ] || fail "unknown report kind"
 # a ROS investigation saved as a workflow keeps its inputs, not its old snapshot, and captures a new one per run
 post -d "{\"id\":\"replay-stall\",\"title\":\"Replay stall\",\"risk\":\"read\",\"from_mission\":$CMID}" "$B/api/workflows" | \
     python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["template"]["kind"] == "ros-investigation" and d["objective"] == "planner stalls in replay" and "snapshot" not in d["objective"], d' || fail "save ROS workflow from a mission"

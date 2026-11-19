@@ -43,6 +43,8 @@ from . import verdicts
 from . import operator
 from .journal import Journal
 from . import channels
+from .tracker import Tracker
+from .reports import Reports
 from .workflows import RISKS
 
 NAME_RE_CACHE = {}
@@ -102,6 +104,8 @@ class Office:
         self.journal = Journal(store, names, secrets=lambda: (operator.key(),))
         self.journal.publish = self._publish
         self.journal.live_check["quota"] = self._quota_live
+        self.tracker = Tracker(self)
+        self.reports = Reports(self)
         self.dispatcher = channels.Dispatcher(self.journal, channels.from_config(cfg))   # none enabled by default
         self._bg = set()
         self._sched_lock = asyncio.Lock()
@@ -160,14 +164,16 @@ class Office:
         return pid in self.providers and self.provider_paused(pid)
 
     async def _journal_loop(self):
-        """Close inbox items whose cause has passed by itself (a quota back, an hourly limit reset)."""
+        """Close inbox items whose cause has passed by itself (a quota back, an hourly limit reset), and make the
+        standup and evening summary when they are due (office/reports.py)."""
         while True:
             await asyncio.sleep(30)
-            try:
-                self.journal.sweep()
-            except Exception as e:
-                print(json.dumps({"log": "journal", "level": "error", "msg": "sweep failed", "error": str(e)}),
-                      flush=True)
+            for what, step in (("sweep", self.journal.sweep), ("reports", self.reports.tick)):
+                try:
+                    step()
+                except Exception as e:
+                    print(json.dumps({"log": "journal", "level": "error", "msg": f"{what} failed", "error": str(e)}),
+                          flush=True)
 
     def _spawn(self, coro):
         t = asyncio.create_task(coro)

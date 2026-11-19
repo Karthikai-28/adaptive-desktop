@@ -89,6 +89,20 @@ CREATE TABLE IF NOT EXISTS deliveries (
   failures INTEGER NOT NULL DEFAULT 0, last_error TEXT DEFAULT ''
 );
 """),
+    (2, """
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL, slot TEXT NOT NULL, scheduled_at REAL,
+  window_start REAL NOT NULL, window_end REAL NOT NULL,
+  status TEXT NOT NULL, catch_up INTEGER NOT NULL DEFAULT 0, manual INTEGER NOT NULL DEFAULT 0,
+  generated_at REAL, delivered_at REAL, attempts INTEGER NOT NULL DEFAULT 0, error TEXT DEFAULT '',
+  notification_id INTEGER, path TEXT DEFAULT '', title TEXT DEFAULT '', summary TEXT DEFAULT '',
+  data TEXT DEFAULT '{}', markdown TEXT DEFAULT '',
+  UNIQUE(kind, slot)
+);
+CREATE INDEX IF NOT EXISTS reports_when ON reports(scheduled_at);
+ALTER TABLE notifications ADD COLUMN ref TEXT DEFAULT '';
+"""),
 ]
 
 TASK_FIELDS = ("agent", "title", "body", "project", "status", "created_by", "depends_on",
@@ -137,6 +151,8 @@ class Store:
                     self.db.execute(stmt)
                 if number == 1:             # the journal starts now: nothing older is turned into alerts
                     self.set("journal_since", time.time())
+                if number == 2:             # reports start now: no report is made up for an earlier time
+                    self.set("reports_since", time.time())
                 self.db.execute(f"PRAGMA user_version={int(number)}")
 
     @contextlib.contextmanager

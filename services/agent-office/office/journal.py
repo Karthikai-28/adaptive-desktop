@@ -85,7 +85,7 @@ class Journal:
             row = self.event(cur.lastrowid)
             quiet = bool(ev.get("quiet"))
             item = None if quiet else self._apply_issue(row, ev)
-            note = None if quiet else self._notify(row, item)
+            note = None if quiet else self._notify(row, item, ev)
         log("info", "event", seq=row["seq"], type=row["type"], task=row["task_id"], mission=row["mission_id"],
             inbox=item and item["id"], notification=note and note["id"])
         self._emit({"type": "journal", "event": row})
@@ -155,16 +155,17 @@ class Journal:
         who = self.names.get(row["agent"]) or row["agent"] or "An agent"
         return TITLES.get(row["type"], row["type"]).format(who=who, task=row["task_id"], mission=row["mission_id"])
 
-    def _notify(self, row, item):
+    def _notify(self, row, item, ev=None):
         rule = E.notification_for(row)
         if not rule:
             return None
         prio, group = rule
+        ev = ev or {}
         cur = self.db.execute(
             "INSERT OR IGNORE INTO notifications(seq,priority,grp,title,text,agent,task_id,mission_id,inbox_id,"
-            "created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (row["seq"], prio, group or "", self._title(row), row["text"], row["agent"], row["task_id"],
-             row["mission_id"], item and item["id"], row["ts"]))
+            "created_at,ref) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (row["seq"], prio, group or "", ev.get("title") or self._title(row), row["text"], row["agent"],
+             row["task_id"], row["mission_id"], item and item["id"], row["ts"], ev.get("ref") or ""))
         return self.notification(cur.lastrowid) if cur.rowcount else None
 
     # ------------------------------------------------------------------ issues raised by the office itself
@@ -391,6 +392,10 @@ class Journal:
         d["created_at_utc"] = iso(d["created_at"])
         d["links"] = {k: v for k, v in (("task", d["task_id"]), ("mission", d["mission_id"]),
                                         ("inbox", d["inbox_id"])) if v}
+        ref = d.get("ref") or ""
+        if ref.startswith("report:"):
+            d["links"]["report"] = int(ref.split(":", 1)[1])
+            d["report_id"] = d["links"]["report"]
         return d
 
     def notification(self, nid):

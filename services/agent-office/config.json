@@ -32,6 +32,7 @@
   "task_timeout_min": 45,
   "chat_timeout_min": 15,
   "meeting_timeout_min": 4,
+  "reports": {"enabled": true, "timezone": "Asia/Kolkata", "standup": "10:00", "evening": "19:00"},
   "notifications": {"whatsapp": {"enabled": false, "min_priority": "high"}},
   "manager": {
     "id": "claude",
