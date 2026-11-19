@@ -92,12 +92,11 @@
   </div>
 
   <div id="web" class="web" hidden><span class="web-wait muted"></span></div>
-  <!-- Agents: the Agent Office's work as a board (board.js) -->
-  <div id="agents" class="agents-board" hidden aria-label="What the agents are doing"></div>
   <div class="main">
     <div class="left">
       <div class="row r2">
-        <section class="card" id="c-tasks"><header class="ch"><svg class="ci"><use href="#i-check"/></svg><h3>Tasks</h3><span class="count"></span></header><div class="body"></div></section>
+        <!-- Agents: the Agent Office's work as a board (board.js) -->
+        <section class="card" id="c-board"><header class="ch"><svg class="ci"><use href="#i-bot"/></svg><h3>Agents</h3><span class="meta" id="board-sum"></span><button class="open" type="button" id="board-open" aria-label="Open the Agent Office"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card" id="c-movies"><header class="ch"><svg class="ci"><use href="#i-film"/></svg><h3>Watch next</h3><span class="count"></span><button class="open" type="button" id="movies-sheet" aria-label="Open the list in Google Sheets"><svg><use href="#i-out"/></svg></button></header><div class="body"></div></section>
         <section class="card" id="c-sticky"><header class="ch"><svg class="ci"><use href="#i-pin"/></svg><h3>Sticky note</h3><span class="meta" id="sticky-state"></span></header><div class="body"></div></section>
         <section class="card" id="c-storage"><header class="ch"><svg class="ci"><use href="#i-disk"/></svg><h3>Storage</h3><button class="open" type="button" data-refresh="storage" aria-label="Measure the disk again"><svg><use href="#i-refresh"/></svg></button></header><div class="body"></div></section>

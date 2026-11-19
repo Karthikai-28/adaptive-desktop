@@ -40,24 +40,27 @@ tile and horizontal swipes also move between faces. A manual turn pauses that ti
 keyboard focus and reduced-motion preferences stop automatic turns too. New data redraws the
 current face in place without turning it. The top bar keeps the clock.
 
-The top row is Tasks, Watch next, Sticky note and Storage. Home is one screen and never scrolls as
-a page: a list that is longer than its tile (tasks, the movie list, the storage rows, today's
-events, the boards) scrolls inside that tile. Below is a four-column block: Projects and Thinking
+The top row is Agents (twice as wide as the others), Watch next, Sticky note and Storage. Home is one
+screen and never scrolls as a page: a list that is longer than its tile (the board's columns, the
+movie list, the storage rows, today's events, the boards) scrolls inside that tile. Below is a four-column block: Projects and Thinking
 Space side by side with Spotify and This week under them, Photos down the third column and News
 down the last, both through two rows. The side column is Weather, Today, AI assistants and Phone.
 
-**Agents** (the tab after Today, Ctrl+2) is the [Agent Office](AGENT_OFFICE.md)'s work as a board, so
-you can see what every agent is doing without opening the office: a card per agent (its status word,
-the same as the office's: Working, Blocked, Error, Paused, Idle; its task and how long it has run),
-then four columns: **To do** in the order it will run, **In progress** with the run's time, actions and
-last step, **Needs you** (open Action Inbox items), and **Finished today**. Selecting an agent shows
-only its work; selecting a card opens that task in the Agent Office window (`office-window task N`).
-Each column scrolls in itself; running cards carry light along their edge and their clocks tick. The
-data is the office's `GET /api/board`, read by the hub's `agent_office` collector every 10 seconds.
+The **Agents** tile is the [Agent Office](AGENT_OFFICE.md)'s work as a board, so you can see what every
+agent is doing without opening the office. It took the Tasks tile's place on 2026-11-20 (it was a tab
+before); Mario still takes spoken tasks into the Quick Note inbox. The header says how many agents are
+working and how many items need you, and its button opens the office. Then a chip per agent (its status
+dot, the same states as the office's: Working, Blocked, Error, Paused, Idle; the task and role in its
+tooltip; a count when something of its needs you), and four columns: **To do** in the order it will
+run, **In progress** with the run's time, actions and last step, **Needs you** (open Action Inbox
+items), and **Done today**. Selecting an agent chip shows only its work; selecting a card opens that
+task in the Agent Office window (`office-window task N`). Each column scrolls in itself; running cards
+carry light along their edge and their clocks tick. The data is the office's `GET /api/board`, read by
+the hub's `agent_office` collector every 10 seconds.
 
 | Card | Shows | Opens / does |
 | --- | --- | --- |
-| Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; scroll through all tasks, tick to finish, or add a task. Draft text and selection survive live refreshes | `/api/task`, `/api/task/done` |
+| Agents | The Agent Office's board: agent chips, then To do, In progress, Needs you, Done today | A card opens its task in the office; a chip filters to that agent; the header button opens the office |
 | Watch next | From the movie tracker Sheet (its nightly mirror, `reels/data/movies-shows.csv` in the Thinking Space checkout): one pick for **today** and one for **tomorrow** out of the titles not yet watched that a subscription of yours carries, then the whole list, scrolling, with where each one streams and a tally | The round tick marks a title watched or not (`/api/movie`); the header opens the Sheet. Marks are kept on this laptop (`~/.local/share/adaptive-desktop/mario/movies.json`) and laid over the Sheet's own Status; the Sheet is not written |
 | Sticky note | A paper note to scribble on; it saves as you type (`sticky.md` beside the other Mario data) and survives restarts | **Tidy with Mario**, or saying "tidy my sticky note": Mario rewrites the scribble as clean notes, adds them to today's page of Mario Notes (`notes_dir`, `~/Documents/Mario Notes/YYYY-MM-DD.md`) and hands back an empty note; the count of notes filed today opens that page. If nobody can be asked, it is filed as a plain list and says so |
 | Storage | A ring for how full the disk is, free space, how much can be had back; then rows, largest first, that scroll: Trash, thumbnails, pip / npm / Gradle caches, your week-old files in `/tmp`, Chrome and other caches, Downloads, apt's package downloads, the system journal; and the eight largest folders of your home | **Clear** on a row Home may empty (Trash, thumbnails, pip, npm, Gradle, old temporary files) asks once more, then empties it and says how much came back (`/api/storage/clear`). Rows that need your password show the command to copy; the rest open in Files. Refresh button; re-measured every 30 min |

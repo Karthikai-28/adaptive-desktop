@@ -1,12 +1,12 @@
-// Home's Agents tab: the Agent Office's work as a Jira-style board, so you can see what every agent is doing
+// Home's Agents tile: the Agent Office's work as a Jira-style board, so you can see what every agent is doing
 // without opening the office. Loaded after home.js (el, fill, data, act, render ...).
 //
 // The data is the office's own (GET /api/board, read by the hub's agent_office collector every 10 s):
 //   agents      each agent's status word (Working, Blocked, Error, Paused, Idle: the same as the Agent Office's
 //               Virtual Office, Command Center and the phone), its task and how long it has run
 //   columns     To do (in the order it will run), In progress, Needs you (open Action Inbox items), Done today
-// Every column scrolls inside itself; the page never scrolls. Selecting a card opens that task in the Agent
-// Office window. It moves while there is work: running cards carry a moving bar and a ticking clock; new cards
+// Every column scrolls inside itself; the tile and the page never scroll. A chip per agent (selecting one shows
+// only its work), then the four columns. Selecting a card opens that task in the Agent Office window. It moves while there is work: running cards carry a moving bar and a ticking clock; new cards
 // slide in. Like every tile, all of it stops while Home is hidden or when you asked for less motion.
 "use strict";
 
@@ -14,7 +14,7 @@ const BOARD_COLS = [
   ["todo", "To do", "Waiting their turn, in the order they will run"],
   ["doing", "In progress", "Running now"],
   ["needs_you", "Needs you", "Failed or blocked work and decisions in the Action Inbox"],
-  ["done", "Finished today", "Done, failed or cancelled since midnight"],
+  ["done", "Done today", "Done, failed or cancelled since midnight"],
 ];
 const STATE_WORD = { working: "Working", blocked: "Blocked", error: "Error", paused: "Paused", idle: "Idle" };
 let boardAgent = "";                 // the agent filter: "" is everyone
@@ -80,9 +80,11 @@ function boardCard(kind, c, agents) {
 }
 
 render.board = () => {
-  const box = $("#agents");
-  if (!box || box.hidden) return;                    // drawn when the tab is opened
+  const box = body("board");
+  if (!box) return;
   const office = data("agent_office");
+  const sum = $("#board-sum");
+  if (sum) sum.textContent = "";
   if (!office.running) {
     return fill(box, el("div", { class: "bd-empty" }, icon("i-bot", "big-ic"),
       el("div", { class: "ttl" }, "The Agent Office is not running"),
@@ -98,27 +100,22 @@ render.board = () => {
   const scrolls = {};
   box.querySelectorAll(".bd-list").forEach((l) => { scrolls[l.dataset.col] = l.scrollTop; });
 
-  // the team: every agent, what it is doing now; selecting one filters the board to its work
+  // the team: one chip per agent, its status dot and what it is doing in the tooltip; selecting one
+  // filters the board to its work, selecting it again shows everyone's
   const strip = el("div", { class: "bd-agents", role: "list" }, agents.map((a) => el("button", {
     class: `bd-agent st-${a.state}${boardAgent === a.id ? " on" : ""}`, type: "button", role: "listitem",
-    title: boardAgent === a.id ? "Show everyone's work" : `Show only ${a.name}'s work`,
+    title: `${a.name} · ${a.role} · ${a.state_label || STATE_WORD[a.state] || a.state}` +
+      (a.task ? ` · #${a.task.id} ${a.task.title}` : a.queued_count ? ` · ${a.queued_count} waiting` : "") +
+      (boardAgent === a.id ? "\nSelect to show everyone's work" : `\nSelect to show only ${a.name}'s work`),
     onclick: () => { boardAgent = boardAgent === a.id ? "" : a.id; render.board(); } },
-    el("span", { class: "bd-ahead" }, el("i", { class: "bd-av", style: `background:${hue(a.id)}` }, initials(a.name)),
-      el("span", { class: "bd-aname" }, el("b", null, a.name), el("small", null, a.role)),
-      el("span", { class: `bd-st st-${a.state}`, title: a.state_label }, el("i"), a.state === "blocked" || a.state === "error" ? STATE_WORD[a.state] : a.state_label)),
-    el("span", { class: "bd-anow", title: a.task ? a.task.title : "" }, a.task ? `#${a.task.id} ${a.task.title}` : (a.queued_count ? `${a.queued_count} waiting` : "No task")),
-    el("span", { class: "bd-ameta" },
-      a.running_since ? el("span", { class: "bd-time", "data-since": a.running_since }, boardDur(Date.now() / 1000 - a.running_since)) : el("span", null, `${boardDur(a.active_24h_s)} in 24 h`),
-      a.needs_you ? el("span", { class: "bd-need" }, `${a.needs_you} need${a.needs_you === 1 ? "s" : ""} you`) : null))));
+    el("i", { class: "bd-av", style: `background:${hue(a.id)}` }, initials(a.name)),
+    el("span", { class: "bd-aname" }, a.name),
+    a.needs_you ? el("span", { class: "bd-need", title: `${a.needs_you} need${a.needs_you === 1 ? "s" : ""} you` }, String(a.needs_you)) : null,
+    el("i", { class: `bd-dot st-${a.state}`, "aria-label": a.state_label || a.state }))));
 
   const c = b.counts || {};
-  const head = el("div", { class: "bd-head" },
-    // the same figures as the columns: finished today counts done, failed and cancelled alike
-    el("span", { class: "bd-sum" }, `${c.active || 0} of ${c.agents || 0} working · ${(b.inbox || {}).NEEDS_ATTENTION || 0} need you · ` +
-      `${(c.done_today || 0) + (c.failed_today || 0) + (c.cancelled_today || 0)} finished today` + (c.failed_today ? ` (${c.failed_today} failed)` : "")),
-    boardAgent ? el("button", { class: "chip", type: "button", onclick: () => { boardAgent = ""; render.board(); } }, "Everyone") : null,
-    el("button", { class: "chip", type: "button", onclick: () => act({ id: "office", arg: "command" }) }, "Command Center"),
-    el("button", { class: "chip", type: "button", onclick: () => act({ id: "office", arg: "" }) }, icon("i-out"), "Open the office"));
+  // in the tile's header: who is working and how much waits on you (the Needs you column)
+  if (sum) sum.textContent = `${c.active || 0} of ${c.agents || 0} working · ${(b.inbox || {}).NEEDS_ATTENTION || 0} need you`;
 
   const cols = el("div", { class: "bd-cols" }, BOARD_COLS.map(([key, name, hint]) => {
     const all = (b.columns || {})[key] || [];
@@ -129,14 +126,17 @@ render.board = () => {
         : el("div", { class: "bd-none" }, key === "needs_you" ? "Nothing needs you." : key === "doing" ? "Nobody is running a task." : key === "todo" ? "Nothing waiting." : "Nothing finished yet today."));
     return el("section", { class: `bd-col ${key}` }, el("header", { title: hint }, el("h3", null, name), el("span", { class: "bd-n" }, String(total))), list);
   }));
-  fill(box, head, strip, cols);
+  fill(box, strip, cols);
   box.querySelectorAll(".bd-list").forEach((l) => { if (scrolls[l.dataset.col]) l.scrollTop = scrolls[l.dataset.col]; });
 };
 
 // the running clocks count on between the hub's updates
 setInterval(() => {
-  const box = $("#agents");
-  if (!box || box.hidden || document.body.classList.contains("away")) return;
+  const box = body("board");
+  if (!box || document.body.classList.contains("away")) return;
   const now = Date.now() / 1000;
   box.querySelectorAll(".bd-time[data-since]").forEach((t) => { const s = Number(t.dataset.since); if (s) t.textContent = boardDur(now - s); });
 }, 1000);
+
+// the tile's header button: the Agent Office in its own window
+$("#board-open").addEventListener("click", () => act({ id: "office", arg: "" }));

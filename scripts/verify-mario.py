@@ -594,14 +594,16 @@ def test_page():
     host_text = (REPO / "apps" / "mario-home" / "host.py").read_text()
     import re as _re
     tiles_js = (REPO / "apps" / "mario-home" / "static" / "tiles.js").read_text()
-    script = js.read_text() + tiles_js
+    script = js.read_text() + tiles_js + (REPO / "apps" / "mario-home" / "static" / "board.js").read_text()
     css = (REPO / "apps" / "mario-home" / "static" / "home.css").read_text()
     cards = _re.findall(r'id="c-([a-z]+)"', html)
-    want = ["today", "tasks", "projects", "thinking", "weather", "ai", "phone", "news", "week",
+    want = ["today", "board", "projects", "thinking", "weather", "ai", "phone", "news", "week",
             "movies", "sticky", "storage", "spotify", "photos"]
     check("Your day has its fourteen cards, once each", sorted(cards) == sorted(want), str(cards))
     for gone in ("mail", "next", "note", "recent"):
         check(f"no {gone} card (the operator's decision of 2026-11-15)", f'id="c-{gone}"' not in html and f"\n  {gone}() {{" not in script)
+    check("no tasks card: the Agent Office's board took its place (the operator's decision of 2026-11-20)",
+          'id="c-tasks"' not in html and "\n  tasks() {" not in script)
     for gone in ("apps", "focus", "downloads", "reels", "system", "loom", "tonight", "cook", "trynext", "agents", "exposure", "usage", "quick"):
         check(f"no {gone} card", f'id="c-{gone}"' not in html)
     drawn = set(_re.findall(r"^  (\w+)\(\) \{", script, _re.M)) | set(_re.findall(r"^render\.(\w+) = ", script, _re.M))
@@ -760,7 +762,7 @@ async def test_after_boot(cfg):
         os.environ.clear(); os.environ.update(saved)
         hub_mod.collectors.session_env = real_se
     check("with nobody logged in a launcher says so instead of failing silently", out["ok"] is False and "session" in out["error"], str(out))
-    # the Agents tab opens the Agent Office only at one of its views or a task, never at anything passed in
+    # the Agents tile opens the Agent Office only at one of its views or a task, never at anything passed in
     check("the Agent Office opens only at its own views or a task number",
           all(hub.action("office", bad)["ok"] is False for bad in ("task:1;rm", "task:", "../x", "--app=evil", "task:12 3"))
           and hub_mod.OFFICE_WINDOW.name == "office-window" and hub_mod.OFFICE_WINDOW.exists())

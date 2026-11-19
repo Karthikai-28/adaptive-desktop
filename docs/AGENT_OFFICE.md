@@ -579,7 +579,7 @@ own profile, so the dock keeps it under its icon and speech input works). Right-
 
 `GET /api/board` is the work as a Jira-style board: to do (in the order it will run), in progress (run
 time, actions, last step), needs you (open inbox items) and finished today, with every agent's status
-word. Mario Home's **Agents** tab shows it ([MARIO.md](MARIO.md)).
+word. Mario Home's **Agents** tile shows it ([MARIO.md](MARIO.md)).
 
 ## Checks
 

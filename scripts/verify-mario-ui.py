@@ -38,7 +38,21 @@ async def main(tmp):
     now = time.time()
     h.cards = {k: {'data': v, 'at': now} for k, v in {
         'mail': {'unread': 8, 'items': [{'from': 'Project team', 'subject': 'Review the build before Friday', 'when': now} for _ in range(5)]},
-        'tasks': {'count': 12, 'open': [{'text': f'Review task {i}', 'path': '/fixture/Inbox.md', 'line': i, 'project': 'Desktop'} for i in range(12)]},
+        # the Agent Office's board (GET /api/board through the agent_office collector): more cards than a column shows
+        'agent_office': {'running': True, 'paused': False, 'agents': [], 'missions': [], 'board': {
+            'agents': [{'id': f'a{i}', 'name': f'Agent {i}', 'role': 'Researcher', 'state': ('working', 'idle', 'blocked')[i % 3],
+                        'state_label': ('Working', 'Idle', 'Blocked')[i % 3], 'task': {'id': 100 + i, 'title': f'Run {i}'} if i % 3 == 0 else None,
+                        'running_since': now - 90 if i % 3 == 0 else None, 'needs_you': 1 if i % 3 == 2 else 0, 'queued_count': 2,
+                        'active_24h_s': 600} for i in range(6)],
+            'columns': {
+                'todo': [{'id': 200 + i, 'title': f'Queued work item {i} with a long enough title to wrap', 'agent': f'a{i % 6}',
+                          'mission': 'India AV', 'depends_on': 199 + i if i else None, 'attempts': 1} for i in range(12)],
+                'doing': [{'id': 100 + i, 'title': f'Run {i}', 'agent': f'a{i}', 'running_since': now - 90, 'actions': 3, 'last': 'Reading the paper'} for i in (0, 3)],
+                'needs_you': [{'inbox_id': 7, 'priority': 'high', 'reason': 'Approve the plan', 'kind': 'approval', 'state': 'NEEDS_ATTENTION', 'since': now - 600,
+                               'task': {'id': 150, 'title': 'Plan the survey', 'agent': 'a2', 'status': 'blocked'}}],
+                'done': [{'id': 300 + i, 'title': f'Finished {i}', 'agent': f'a{i}', 'status': 'done' if i else 'failed', 'run_s': 400} for i in range(5)]},
+            'counts': {'active': 2, 'agents': 6, 'done_today': 4, 'failed_today': 1, 'cancelled_today': 0},
+            'inbox': {'NEEDS_ATTENTION': 1}, 'todo_total': 12}},
         'builds': {'repos': [{'name': f'Project {i}', 'path': str(tmp), 'branch': 'master', 'subject': 'Latest useful change', 'when': now, 'dirty': 2} for i in range(3)]},
         'downloads': {'files': [{'name': f'Notes {i}.pdf', 'path': f'/fixture/{i}.pdf', 'size': 12345} for i in range(3)]},
         'calendar': {'events': []},
@@ -58,7 +72,7 @@ async def main(tmp):
     }.items()}
     calls = []
     h.action = lambda aid, arg: calls.append((aid, arg)) or {'ok': True}
-    async def fake_ask(text):
+    async def fake_ask(text, **_):
         calls.append(('ask', text))
         return {'answer': 'Done from voice.', 'via': 'Mario'}
     h.ask = fake_ask
@@ -121,18 +135,13 @@ async def main(tmp):
             for _ in range(60):
                 if await ev('!!document.querySelector("#c-projects .tile-nav")'): break
                 await asyncio.sleep(.1)
-            # tabs: Today, Agents (the Agent Office's board), then the sites from the hub's config; a site tab
-            # swaps the cards for its slot
+            # tabs: Today, then the sites from the hub's config; a site tab swaps the cards for its slot. The Agent
+            # Office's board is a tile on Today, not a tab (the operator's decision of 2026-11-20)
             tabs = await ev('[...document.querySelectorAll("#tabs .tab")].map(t => t.firstChild.textContent)')
-            assert tabs[:2] == ['Today', 'Agents'], tabs
+            assert tabs[0] == 'Today' and 'Agents' not in tabs, tabs
             assert await ev('document.querySelector("#accts").hidden')      # account chips belong to a Google tab, not Today
-            await ev('homeSpace.select(2); true')                           # Agents: this page, the board instead of the cards
-            assert await ev('document.querySelector(".main").hidden && !document.querySelector("#agents").hidden && document.querySelector("#web").hidden')
-            assert await ev('document.querySelector("#agents").innerText.length > 0 && document.documentElement.scrollHeight <= innerHeight')
-            await ev('homeSpace.select(1); true')
-            assert await ev('!document.querySelector(".main").hidden && document.querySelector("#agents").hidden')
-            if len(tabs) > 2:
-                await ev('homeSpace.select(3); true')
+            if len(tabs) > 1:
+                await ev('homeSpace.select(2); true')
                 assert await ev('document.querySelector(".main").hidden && !document.querySelector("#web").hidden && document.querySelector("#tabs .tab.on").firstChild.textContent !== "Today"')
                 # one chip per account, the main one chosen; a chip chooses its account
                 assert await ev('[...document.querySelectorAll("#accts .acct")].map(a => a.querySelector(".nm").textContent).join() === "first,second" && document.querySelector("#accts .acct.on .nm").textContent === "first"')
@@ -147,7 +156,7 @@ async def main(tmp):
             assert await ev('!document.querySelector("#c-apps, #c-focus, #c-downloads")')
             # one screen: the page never scrolls, and whatever is long scrolls inside its own tile
             assert await ev('document.documentElement.scrollHeight <= innerHeight && getComputedStyle(document.body).overflowY === "hidden"')
-            assert await ev('getComputedStyle(document.querySelector("#c-tasks .task-list")).overflowY === "auto"')
+            assert await ev('[...document.querySelectorAll("#c-board .bd-list")].every(l => getComputedStyle(l).overflowY === "auto")')
             cut = await ev('[...document.querySelectorAll(".card")].filter(c => c.scrollHeight > c.clientHeight + 2).map(c => c.id)')
             assert not cut, cut
             thinking, projects = await ev('[document.querySelector("#c-thinking").offsetWidth, document.querySelector("#c-projects").offsetWidth]')
@@ -160,9 +169,28 @@ async def main(tmp):
             assert await ev('LIVE.projects.i === 2 && document.querySelector("#c-projects .face").textContent.includes("Project 2")')
             await ev('document.querySelector("#c-projects").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowLeft",bubbles:true})); true')
             assert await ev('LIVE.projects.i') == 1
-            assert await ev('document.querySelectorAll("#c-tasks .tick").length') == 12
-            await ev('document.querySelector("#c-tasks input").value="keep this draft"; render.tasks(); true')
-            assert await ev('document.querySelector("#c-tasks input").value') == 'keep this draft'
+            # Agents: the Agent Office's board in the first tile of the top row, twice as wide as its neighbours: a chip
+            # per agent, four columns that scroll in themselves, a card opens its task in the office
+            assert await ev('!document.querySelector("#c-tasks") && document.querySelector(".r2 > .card").id === "c-board"')
+            board_w, movies_w = await ev('[document.querySelector("#c-board").offsetWidth, document.querySelector("#c-movies").offsetWidth]')
+            assert board_w > 1.8 * movies_w, (board_w, movies_w)
+            assert await ev('[...document.querySelectorAll("#c-board .bd-col h3")].map(h => h.textContent).join()') == 'To do,In progress,Needs you,Done today'
+            assert await ev('document.querySelectorAll("#c-board .bd-agent").length') == 6
+            assert await ev('document.querySelectorAll("#c-board .bd-col.todo .bd-card").length') == 12
+            assert await ev('document.querySelector("#board-sum").textContent') == '2 of 6 working · 1 need you'
+            assert await ev('(l => l.scrollHeight > l.clientHeight)(document.querySelector("#c-board .bd-col.todo .bd-list"))')
+            await ev('document.querySelector("#c-board .bd-col.todo .bd-list").scrollTop = 30; render.board(); true')
+            assert await ev('document.querySelector("#c-board .bd-col.todo .bd-list").scrollTop') == 30
+            assert await ev('document.querySelectorAll("#c-board .bd-col.doing .bd-run").length') == 2
+            await ev('document.querySelector("#c-board .bd-agent").click(); true')          # Agent 0: only its work
+            assert await ev('document.querySelectorAll("#c-board .bd-col.todo .bd-card").length') == 2
+            await ev('document.querySelector("#c-board .bd-agent.on").click(); true')       # again: everyone
+            assert await ev('document.querySelectorAll("#c-board .bd-col.todo .bd-card").length') == 12
+            await ev('document.querySelector("#c-board .bd-col.doing .bd-card").click(); document.querySelector("#board-open").click(); true')
+            for _ in range(30):
+                if ('office', '') in calls: break
+                await asyncio.sleep(.1)
+            assert ('office', 'task:100') in calls and ('office', '') in calls, calls
             # Watch next: today's and tomorrow's picks, a list that scrolls in the tile, a mark that sticks
             assert await ev('[...document.querySelectorAll("#c-movies .pick .ttl")].map(n => n.textContent).join() === "Film 0,Film 1"')
             assert await ev('getComputedStyle(document.querySelector("#c-movies .movie-list")).overflowY === "auto"')
@@ -236,7 +264,7 @@ async def main(tmp):
             assert await ev('document.querySelector("#answer").textContent.includes("Done from voice")')
             await ev('cancelVoice(); document.querySelector("#answer").hidden=true; true')
             # Controls must be visible inside their cards at the target laptop size.
-            clipped = await ev('''[...document.querySelectorAll('.tile-nav button, #c-tasks .add')].filter(n=>!n.closest('[hidden]')).filter(n=>{let a=n.getBoundingClientRect(),b=n.closest('.card').getBoundingClientRect();return a.bottom>b.bottom || a.right>b.right}).map(n=>n.closest('.card').id)''')
+            clipped = await ev('''[...document.querySelectorAll('.tile-nav button, #board-open, #c-board .bd-col')].filter(n=>!n.closest('[hidden]')).filter(n=>{let a=n.getBoundingClientRect(),b=n.closest('.card').getBoundingClientRect();return a.bottom>b.bottom || a.right>b.right}).map(n=>n.closest('.card').id)''')
             assert not clipped, clipped
             shot = await call('Page.captureScreenshot', {'format': 'png'})
             Path('/tmp/mario-home.png').write_bytes(base64.b64decode(shot['data']))
@@ -327,7 +355,7 @@ async def main(tmp):
             assert not wake['enabled'] and await ev('document.querySelector("#tool-wake").dataset.state === "off" && !document.querySelector("#train input[role=switch]").checked')
             shot = await call('Page.captureScreenshot', {'format': 'png'})
             Path('/tmp/mario-layer.png').write_bytes(base64.b64decode(shot['data']))
-            print('PASS: one screen with in-tile scrolling, rapid/wrapping/keyboard slides, all tasks, draft preservation, account chips and sheet, '
+            print('PASS: one screen with in-tile scrolling, rapid/wrapping/keyboard slides, the Agents board tile, account chips and sheet, '
                   'movies, sticky note, storage, the weather sky, Spotify, photos full screen, the listening picture with the words so far, '
                   'spoken request in Home; Mario over your work: the orb at the centre, the outlines its host shows, live words, answer, '
                   '"Hey Mario" hand-over and stepping back, typing instead, voice training and its switch')

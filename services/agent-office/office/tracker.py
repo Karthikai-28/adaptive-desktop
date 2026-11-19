@@ -128,7 +128,7 @@ class Tracker:
                 "created_at": m["created_at"], "started_at": m["started_at"], "finished_at": m["finished_at"]}
 
     def board(self, now=None):
-        """The office's work as a Jira-style board (Mario Home's Agents tab): to do in the order it will run, in
+        """The office's work as a Jira-style board (Mario Home's Agents tile): to do in the order it will run, in
         progress with how long it has run, what needs you (open inbox items), and what finished today."""
         now = now or time.time()
         ov = self.overview(now)

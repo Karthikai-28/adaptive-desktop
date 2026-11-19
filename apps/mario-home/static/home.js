@@ -195,33 +195,6 @@ const render = {
     })) : empty("Nothing on the calendar today. A good day for deep work."));
   },
 
-  tasks() {
-    const t = data("tasks");
-    const open = t.open || [];
-    count("tasks", t.count || "");
-    const input = el("input", { placeholder: "Add task", "aria-label": "Add a task" });
-    const add = el("form", { class: "add", onsubmit: async (e) => {
-      e.preventDefault(); const text = input.value;
-      if (!text.trim()) return;
-      try {
-        const result = await post("/api/task", { text });
-        if (result.ok) { const current = body("tasks").querySelector("input"); if (current && current.value === text) current.value = ""; }
-        else if (result.error) showAnswer(result, "home");
-      } catch (_) { showAnswer({ error: "Task not saved. Your draft is still here; try again." }, "home"); }
-    } }, icon("i-plus"), input);
-    const keep = body("tasks").querySelector("input");
-    if (keep) input.value = keep.value;
-    const focused = keep === document.activeElement;
-    const selection = focused ? [keep.selectionStart, keep.selectionEnd] : null;
-    fill(body("tasks"),
-      open.length ? el("ul", { class: "rows task-list" }, open.map((x) => el("li", {},
-        el("button", { class: "tick", type: "button", "aria-label": `Done: ${x.text}`, onclick: () => post("/api/task/done", { path: x.path, line: x.line }) }),
-        el("div", { class: "grow" }, el("div", { class: "ttl", style: "font-weight:500" }, x.text)),
-        el("span", { class: "dot", title: x.project, style: `background:${hue(x.project)}` }))))
-        : empty("Nothing pending. Add a task or dictate one to Mario."), add);
-    if (focused) { input.focus(); input.setSelectionRange(...selection); }
-  },
-
   projects() {
     // one repo per face, newest first, then what the agents are doing
     const repos = (data("builds").repos || []).slice(0, 3);
@@ -382,10 +355,9 @@ const render = {
   },
 
   daysum() {
-    const events = (data("calendar").events || []).length, tasks = data("tasks").count || 0, unread = data("mail").unread || 0;
+    const events = (data("calendar").events || []).length, unread = data("mail").unread || 0;
     const bits = [];
     if (data("calendar").events) bits.push(`${events} event${events === 1 ? "" : "s"}`);
-    bits.push(`${tasks} open task${tasks === 1 ? "" : "s"}`);
     if (data("mail").unread != null) bits.push(`${unread} unread`);
     $("#daysum").textContent = bits.join(" · ");
   },
@@ -393,7 +365,7 @@ const render = {
 
 // card -> renderers that read it
 const FEEDS = {
-  mail: ["daysum", "tabs"], calendar: ["today", "daysum"], tasks: ["tasks", "daysum"],
+  mail: ["daysum", "tabs"], calendar: ["today", "daysum"],
   builds: ["projects", "week"], agent_sessions: ["projects"], agent_office: ["projects", "board"], thinking_space: ["thinking"],
   weather: ["weather"], phone: ["phone"], news: ["news"], news_media: ["news"], usage: ["ai"],
   movies: ["movies"], sticky: ["sticky"], storage: ["storage"], spotify: ["spotify"], photos: ["photos"],
@@ -408,8 +380,8 @@ const HOST = window.webkit && window.webkit.messageHandlers && window.webkit.mes
 const tell = (msg) => { if (HOST) HOST.postMessage(JSON.stringify(msg)); };
 let currentTab = "today";
 const siteTabs = () => state.config.tabs || [];
-// Home's own pages come first: Today, and Agents (the Agent Office's board, board.js); then the sites
-const homeTabs = () => [{ id: "today", name: "Today" }, { id: "agents", name: "Agents" }, ...siteTabs()];
+// Today is this page; then the sites
+const homeTabs = () => [{ id: "today", name: "Today" }, ...siteTabs()];
 function drawTabs() {
   const unread = data("mail").unread;
   fill($("#tabs"), homeTabs().map((t, i) =>
@@ -424,16 +396,13 @@ function webRect() {
 }
 function selectTab(id) {
   const site = siteTabs().find((t) => t.id === id);
-  currentTab = site ? id : id === "agents" ? "agents" : "today";
-  const agents = currentTab === "agents";
+  currentTab = site ? id : "today";
   drawTabs();
-  $(".main").hidden = !!site || agents;
-  $("#agents").hidden = !agents;
+  $(".main").hidden = !!site;
   $("#web").hidden = !site;
-  $(".dayhead .chips").hidden = !!site || agents;
-  $("#daysum").hidden = !!site || agents;
-  if (agents) draw("board");
-  // Today and Agents are this page: the host shows it and puts every site view away
+  $(".dayhead .chips").hidden = !!site;
+  $("#daysum").hidden = !!site;
+  // Today is this page: the host shows it and puts every site view away
   if (!site) return tell({ type: "tab", id: "today" });
   fill($("#web"), HOST ? el("span", { class: "web-wait muted" }, `Opening ${site.name}…`)
     : el("button", { class: "btn", type: "button", onclick: () => openUrl(site.url) }, `Open ${site.name} in the browser`));
