@@ -4,7 +4,7 @@
 #
 #   office-window            the view picked last (Virtual Office by default)
 #   office-window command    the Command Center      office-window office   the Virtual Office
-#   office-window inbox      the Action Inbox
+#   office-window inbox      the Action Inbox          office-window task 12  task #12 (Mario Home's board)
 #
 # The office service is started first when it is not running. The page opens as a Chrome app window
 # with its own profile and window class (AgentOffice), so the dock keeps it under the office's icon
@@ -16,8 +16,9 @@ URL="http://127.0.0.1:$PORT/"
 case "${1:-}" in
     office|command) URL="${URL}?view=$1" ;;
     inbox) URL="${URL}?open=inbox" ;;
+    task) case "${2:-}" in ''|*[!0-9]*) echo "usage: office-window task ID" >&2; exit 2 ;; esac; URL="${URL}?task=$2" ;;
     "") ;;
-    *) echo "usage: office-window [office|command|inbox]" >&2; exit 2 ;;
+    *) echo "usage: office-window [office|command|inbox|task ID]" >&2; exit 2 ;;
 esac
 
 up() { curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/health" 2>/dev/null; }

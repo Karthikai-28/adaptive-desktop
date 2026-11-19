@@ -1526,6 +1526,7 @@ applyView((() => { try { return localStorage.getItem('office.view'); } catch { r
   const q = new URLSearchParams(location.search);
   if (q.get('view')) pickView(q.get('view'));
   if (q.get('open') === 'inbox') setTimeout(() => inbox.open(), 300);
-  if (q.has('view') || q.has('open')) history.replaceState(null, '', location.pathname);
+  if (/^\d+$/.test(q.get('task') || '')) setTimeout(() => openTask(Number(q.get('task'))), 300);
+  if (q.has('view') || q.has('open') || q.has('task')) history.replaceState(null, '', location.pathname);
 }
 renderTop(); renderPanel(); connect();

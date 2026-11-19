@@ -589,6 +589,12 @@ async def overview():
     return office.tracker.overview()
 
 
+@app.get("/api/board")
+async def board():
+    """The work as a Jira-style board: to do (in run order), in progress, needs you (open inbox), done today."""
+    return office.tracker.board()
+
+
 # How the desktop page shows the office. Kept in the office's database so it survives restarts of the browser
 # and the office; it only changes when the operator picks a view (never by itself).
 UI_VIEWS = ("office", "command")

@@ -544,9 +544,14 @@ async def main():
     await o2.shutdown()                             # not paused: the task still continues after the restart
     assert store.task(t2["id"])["status"] == "queued" and store.get(f"resume:{t2['id']}")["conv"] == "conv-1"
 
+    # a hard stop (killed before the shutdown could queue it again): the run it finds at start was interrupted,
+    # not tried, so the task keeps its one automatic retry
+    store.update_task(t2["id"], status="running", attempts=1)
     # Claude plans by itself: only a turn that assigned work gets the coverage pass
     o3 = office(store)
     await o3.start()
+    await settle(lambda: store.task(t2["id"])["status"] == "running" and len(runs) == 4)
+    assert store.task(t2["id"])["attempts"] == 1, store.task(t2["id"])
     prompts = []
     async def answers(prompt, kind):
         prompts.append(prompt)
@@ -710,6 +715,8 @@ async def main():
     store.add_event(agent, "write", "Wrote notes.md", t["id"])
     ov = o.tracker.overview()
     me3 = next(a for a in ov["agents"] if a["id"] == agent)
+    doing = o.tracker.board()["columns"]["doing"]
+    assert [c["id"] for c in doing] == [t["id"]] and doing[0]["actions"] == 1 and doing[0]["last"] == "Wrote notes.md", doing
     assert me3["state"] == "working" and me3["state_label"] == "Working" and me3["actions"] == 1, me3
     assert me3["recent"][0]["text"] == "Wrote notes.md" and "percent" not in str(me3).lower()
     assert ov["counts"]["active"] == 1 and ov["counts"]["running_tasks"] == 1 and ov["counts"]["agents"] == len(o.agents)
@@ -729,6 +736,11 @@ async def main():
     desk = next(a for a in ov["agents"] if a["id"] == agent)
     assert desk["state"] == "error" and desk["blockers"][0]["kind"] == "failed", desk
     assert ov["counts"]["error"] == 1 and ov["counts"]["failed_today"] == 1 and ov["inbox"]["NEEDS_ATTENTION"] >= 1
+    b = o.tracker.board()
+    cols = b["columns"]
+    assert [n["task"]["id"] for n in cols["needs_you"]] == [f["id"]] and cols["needs_you"][0]["kind"] == "failed", cols["needs_you"]
+    assert {c["id"] for c in cols["done"]} >= {t["id"], f["id"]} and not cols["todo"] and not cols["doing"], cols
+    assert next(c for c in cols["done"] if c["id"] == t["id"])["run_s"] > 0.35 and len(b["agents"]) == len(o.agents)
     o.journal.act(desk["blockers"][0]["id"], "dismiss", "operator", "seen", True)
     assert next(a for a in o.tracker.overview()["agents"] if a["id"] == agent)["state"] == "idle"
     timing = o.tracker.task_timing(t["id"])
@@ -928,6 +940,7 @@ curl -fsS "$B/api/activity/history?since=0&until=86400" | python3 -c 'import jso
 [ "$(code "$B/api/activity/summary?since=10&until=5")" = 400 ] || fail "activity: a backwards window was accepted"
 # Milestone 3: the overview every view reads, and the chosen view kept in the office's database
 curl -fsS "$B/api/overview" | python3 -c 'import json,sys; d=json.load(sys.stdin); c=d["counts"]; assert c["agents"] == len(d["agents"]) >= 2 and {"active","blocked","error","running_tasks","done_today","failed_today","running_missions"} <= set(c) and all(a["state"] in ("working","idle","blocked","error","paused") and a["state_label"] for a in d["agents"]) and "NEEDS_ATTENTION" in d["inbox"] and isinstance(d["missions"], list)' || fail "overview"
+curl -fsS "$B/api/board" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert set(d["columns"]) == {"todo","doing","needs_you","done"} and d["agents"] and all("state" in a for a in d["agents"])' || fail "board"
 curl -fsS "$B/api/ui" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["view"] == "office" and d["views"] == ["office", "command"], d' || fail "Virtual Office is not the default view"
 post -d '{"view":"command"}' "$B/api/ui" >/dev/null || fail "pick the Command Center"
 [ "$(code -X POST "${J[@]}" -d '{"view":"cockpit"}' "$B/api/ui")" = 400 ] || fail "an unknown view was accepted"

@@ -125,6 +125,57 @@ class Tracker:
                 "passed": sum(1 for v in verdicts if v.get("verdict") == "PASS"),
                 "created_at": m["created_at"], "started_at": m["started_at"], "finished_at": m["finished_at"]}
 
+    def board(self, now=None):
+        """The office's work as a Jira-style board (Mario Home's Agents tab): to do in the order it will run, in
+        progress with how long it has run, what needs you (open inbox items), and what finished today."""
+        now = now or time.time()
+        ov = self.overview(now)
+        day = ov["day_start"]
+        live = {a["task"]["id"]: a for a in ov["agents"] if a["task"]}
+        tl = self.timelines(day, now, now)
+        titles = {}
+
+        def mission(mid):
+            if mid and mid not in titles:
+                m = self.store.mission(mid)
+                titles[mid] = m["title"] if m else ""
+            return titles.get(mid, "") if mid else ""
+
+        def card(t, **extra):
+            out = {k: t.get(k) for k in ("id", "title", "agent", "status", "project", "mission_id", "created_by",
+                                         "attempts", "depends_on", "created_at", "started_at", "finished_at")}
+            out["mission"] = mission(t.get("mission_id"))
+            return {**out, **extra}
+
+        queued = sorted(self.store.tasks(status="queued", limit=500), key=lambda t: t["id"])
+        todo = [card(t) for t in queued[:100]]
+        doing = []
+        for t in self.store.tasks(status="running", limit=200):
+            a = live.get(t["id"]) or {}
+            doing.append(card(t, running_since=a.get("running_since") or t.get("started_at"),
+                              actions=a.get("actions", 0), last=((a.get("recent") or [{}])[0]).get("text", "")))
+        needs = []
+        for i in self.o.journal.inbox(state="NEEDS_ATTENTION,IN_PROGRESS", limit=100)["items"]:
+            t = self.store.task(i["task_id"]) if i.get("task_id") else None
+            needs.append({"inbox_id": i["id"], "kind": i["kind"], "priority": i["priority"], "state": i["state"],
+                          "reason": i["title"], "agent": i.get("agent") or (t or {}).get("agent", ""),
+                          "since": i["created_at"], "task": card(t) if t else None,
+                          "mission": mission(i.get("mission_id"))})
+        done = []
+        for r in self.db.execute("SELECT * FROM tasks WHERE finished_at>=? AND finished_at<=? AND "
+                                 "status IN ('done','failed','cancelled') ORDER BY finished_at DESC LIMIT 60", (day, now)):
+            t = dict(r)
+            x = tl.get(t["id"])
+            run = A.seconds(A.clip(x["runs"], day, now)) if x else 0
+            done.append(card(t, run_s=round(run, 1), estimated=bool(x and x.get("estimated"))))
+        agents = [{k: a[k] for k in ("id", "name", "role", "state", "state_label", "running_since", "actions",
+                                     "queued_count", "active_24h_s")}
+                  | {"task": {"id": a["task"]["id"], "title": a["task"]["title"]} if a["task"] else None,
+                     "needs_you": len(a["blockers"])} for a in ov["agents"]]
+        return {"day_start": day, "timezone": ov["timezone"], "agents": agents, "counts": ov["counts"],
+                "inbox": ov["inbox"], "columns": {"todo": todo, "doing": doing, "needs_you": needs, "done": done},
+                "todo_total": len(queued)}
+
     def overview(self, now=None):
         """One picture of the office for every view: the desks (Virtual Office), the dashboard (Command Center)
         and the phone all read this, so they always agree."""

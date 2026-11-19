@@ -130,7 +130,9 @@ class Office:
         paused = self.settings()["paused"]
         self.journal.reconcile()          # events a crash lost between a status write and its record
         for t in self.store.tasks(status="running"):     # the server stopped mid-task: pick it up again
-            self.store.update_task(t["id"], status="queued")
+            # interrupted, not tried: starting it again must not use up its automatic retry (as a clean
+            # shutdown already does; this is the stop that came too fast for it)
+            self.store.update_task(t["id"], status="queued", attempts=max(0, t["attempts"] - 1))
             self.store.add_event(t["agent"], "info", "Office restarted while paused; this task waits for the resume"
                                  if paused else "Resuming after an office restart", t["id"])
             await self._sync_mission(t.get("mission_id"))
