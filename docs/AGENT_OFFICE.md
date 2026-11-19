@@ -43,7 +43,8 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 
 | | |
 |---|---|
-| **Watch the team** | Each agent sits at a desk. The name-tag dot shows their state: green free, amber working, violet replying, blue in a meeting, red out of quota, grey paused. The bubble shows what they are doing now (typing, running a command, browsing, generating an image). Hover over someone for details, or click them for their card. Free agents wander to the kitchen and lounge. |
+| **Watch the team** | Each agent sits at a desk. The name-tag dot shows their state: green working, violet replying, blue in a meeting, amber blocked (an approval waiting, a blocked task, out of quota), red error (a failure nobody has dealt with), grey idle or paused. The bubble shows what they are doing now (typing, running a command, browsing, generating an image). Hover over someone for details, or click them for their workspace. Idle agents wander to the kitchen and lounge. Under the floor, a card per desk says the task, mission, run time and last action ([The two views](#the-two-views-virtual-office-and-command-center-staticviewsjs-desksjs-commandjs)). |
+| **Virtual Office or Command Center** | The switch at the top shows the same office as the walkable floor with its desks (the default) or as a compact dashboard: figures, every agent, task timelines, missions, the Action Inbox, the daily reports, work time and tokens. **Alt+1** / **Alt+2**. The choice is kept through restarts; switching never stops or changes any work. |
 | **Talk to anyone** | Click an agent, or walk up to them (WASD / arrows / click) and press **E**. They reply right away, even mid-task. Click the mic to speak; it sends when you pause. Replies are read aloud in each agent's own voice (🔊). |
 | **Ask Claude** | Tell Claude what you want. Claude plans it, then assigns useful work across the whole available team (chaining dependencies), reviews what comes back on *autopilot*, sends work back when it falls short, and reports to you. |
 | **Meetings and calls** | **Call meeting** → pick people → everyone walks to the meeting room. Type or talk; agents answer out loud. Say a name ("Arjun, …") to ask one person. **Hands-free** keeps listening and pauses while agents speak. With Claude in the room, it chairs the meeting, writes minutes at the end and assigns the agreed action items. **Call** on an agent's card starts a 1:1 call. |
@@ -517,6 +518,55 @@ and its commands switch; windows are unix seconds, default the last 24 hours, at
 | `GET /api/reports/<id>` | one report: Markdown and structured data |
 | `GET /api/reports/schedule` | timezone, times, next due, last report of each kind |
 | `POST /api/reports/generate` | a report on demand |
+
+## The two views: Virtual Office and Command Center (`static/views.js`, `desks.js`, `command.js`)
+
+One page, two ways of showing the same office. Both read the same APIs (`/api/overview` above all, then
+`/api/activity/*`, `/api/inbox`, `/api/reports`, `/api/tokens`), and both use the same side panel and
+windows: an agent, task or mission selected in one is still open after switching.
+
+- **Virtual Office** (the default). The walkable floor, and under it a card per desk: name and role, the
+  status word, the current task, its mission with tasks done out of its tasks so far, how long this run
+  has gone and how many actions it recorded, the last thing the agent did, and what needs you. Desks
+  stay in roster order; a status change never moves one. Selecting a desk or a person opens their
+  **Work** tab: what is at the desk now, up next, what needs you, the last 24 hours, the history of the
+  last 7 days (run and queue time per task, how each ended) and their recent outputs.
+- **Command Center.** Seven figures (active agents, running missions and tasks, completed and failed
+  today, blocked agents, pending decisions), the agents table (blocked and failing first), task
+  timelines (each run a bar over the last 6, 12 or 24 hours; select one to open the task), missions
+  with their progress, the Action Inbox, work time per agent (today or 7 days), the daily reports with
+  *Standup now* / *Summary now*, and tokens today with cost (not billed per token).
+
+**The status word** is decided once, by the office (`office/activity.py` `desk_state`), and the desktop,
+the Command Center and the phone all show it:
+
+| Word | When |
+|---|---|
+| **Working** | running a task, replying to a chat, or in a meeting (the label says which) |
+| **Blocked** | waiting for quota, or an open inbox item that stops it: an approval it waits for ("Waiting for your decision"), a blocked task, a limit |
+| **Error** | an unhandled failure in the inbox ("Last task failed"), until it is retried, resolved or dismissed |
+| **Paused** | the office is paused |
+| **Idle** | none of these |
+
+What the agent is doing now wins: an agent at work shows Working even with an old failure open; the
+failure still shows beside it. **Progress** is only what the office really knows: a mission's tasks done
+out of its tasks so far, a run's time and recorded actions. A single task has no known share done, so no
+percentage is ever shown for one.
+
+**Switching.** The switch in the top bar (or Alt+1 / Alt+2) changes only what the page shows. The
+choice is stored in the office's database (`kv` `ui.view`, `POST /api/ui`), so it survives restarts of
+the browser, the office and the laptop; the browser keeps a copy for the first paint. Nothing switches
+by itself: there is no automatic choice (a later enhancement could suggest one from context, never
+switch unasked). Only the owner changes it; the manager's requests are refused.
+
+| | |
+|---|---|
+| `GET /api/overview` | every agent (status word and label, task, mission with its progress, running since, actions, queue, blockers, last 3 actions, active time in 24 h), today's counts in the reports' timezone, open inbox counts, this week's missions |
+| `GET /api/ui` | the view the owner picked: `office` (default) or `command` |
+| `POST /api/ui {"view": "office" or "command"}` | keep a view for next time |
+
+There is no schema change; to forget the choice, `sqlite3 "$DB" "DELETE FROM kv WHERE key='ui.view'"`.
+Older code ignores the row.
 
 ## Checks
 

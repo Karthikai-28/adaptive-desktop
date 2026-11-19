@@ -1468,6 +1468,33 @@ Guide: docs/AGENT_OFFICE.md, "Agent activity and the daily reports". Milestone 2
 
 - 🔬 Live: the first scheduled standup (10:00) and evening summary (19:00) on this laptop and the phone.
 
+## Milestone 27 — Agent Office: Virtual Office and Command Center (2026-11-19)
+
+Guide: docs/AGENT_OFFICE.md, "The two views". Milestone 3 of the Agent Office upgrade.
+
+### Done (software, checked)
+
+- ✅ One overview for every view (`GET /api/overview`) with one status word per agent decided by the office
+  (working, blocked, error, paused, idle); honest progress only (mission tasks done, run time, actions).
+- ✅ Virtual Office (default): desk cards under the floor, name-tag colours for blocked and error, each
+  agent's Work tab (now, up next, needs you, 24 hours, 7-day history, outputs).
+- ✅ Command Center: figures, agents table, task timelines, missions, Action Inbox, work time, daily
+  reports, tokens and cost; the same side panel and windows as the Virtual Office.
+- ✅ View switch (top bar, Alt+1/Alt+2) kept in the office's database through restarts; never automatic;
+  the manager can't change it. The desktop now has the Action Inbox (acknowledge never approves;
+  approving needs the operator key) and the reports.
+- ✅ Phone: today's figures, the same status words, run times, the Work tab's desk and 7-day history.
+- ✅ Checks: `verify-agent-office.sh` (status rule, overview through the office with fake runs, the API,
+  views.js rules) and `verify-agent-office-ui.py` in headless Chrome (desks, workspace, switching with
+  the panel kept, the view after a reload, inbox acknowledge without approval, a report on demand);
+  the app's unit tests (OfficeDeskTest) and APK build. Live office restarted; `/api/overview` and
+  `/api/ui` answer.
+
+### Still to do
+
+- 🔬 Live: both views in the operator's browser while agents work; the phone's Team and Work tabs
+  (install the APK: `scripts/build-link-app.sh --install`).
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the

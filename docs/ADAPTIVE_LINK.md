@@ -402,8 +402,12 @@ notifications are always available to the paired phone.
 **Office** (pinned on Home, and a tile under Laptop tools) is the [Agent Office](AGENT_OFFICE.md)
 from the phone, with everything the desktop page has, laid out for a phone:
 
-- **Team**: Claude and every agent, with what each is doing now. Tap one for their conversation,
-  their work and activity, and a menu to assign a task, call them, stop them or reset their memory.
+- **Team**: today's figures (working, done and failed today, what needs you: the same as the desktop's
+  Command Center), then Claude and every agent with the same status words as the desktop (Working,
+  Blocked, Error, Paused, Idle), the current task and how long it has run. Tap one for their
+  conversation and their **Work**: what is at the desk (task, mission with tasks done out of its tasks,
+  run time and actions, what needs you, the last 24 hours), the last 7 days with each task's run and
+  queue time, and a menu to assign a task, call them, stop them or reset their memory.
 - **Claude**: talk to the manager. **Tasks**: the board, each task's report, brief and activity,
   cancel, run again, and new tasks (with project and "start after"). **Meeting**: call one, talk in
   it, invite people, end it (Claude writes the minutes).
