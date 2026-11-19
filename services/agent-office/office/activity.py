@@ -136,3 +136,36 @@ def fmt_duration(s):
     if m < 60:
         return f"{m}m"
     return f"{m // 60}h {m % 60:02d}m"
+
+
+# ---------------------------------------------------------------------------------------------- desk status
+# One word per agent, the same on the desktop (Virtual Office, Command Center) and on the phone.
+DESK_STATES = ("working", "idle", "blocked", "error", "paused")
+BLOCKING_KINDS = {"approval", "blocked", "limit", "quota"}
+ERROR_KINDS = {"failed", "error", "mission-failed"}
+
+
+def desk_state(status, in_meeting=False, items=()):
+    """(state, label) for an agent from its live status and its open inbox items.
+
+    What it is doing now wins: an agent at work is "working" even with an old failure open; the open items still
+    show beside it. Otherwise an open blocker (an approval it waits for, a blocked task, a limit) makes it
+    "blocked", an unhandled failure "error", and nothing at all "idle"."""
+    open_kinds = {i.get("kind") for i in items if i.get("state") != "RESOLVED"}
+    if status == "paused":
+        return "paused", "Paused"
+    if status == "quota":
+        return "blocked", "Waiting for quota"
+    if status == "working":
+        return "working", "Working"
+    if status == "thinking":
+        return "working", "Replying"
+    if in_meeting:
+        return "working", "In a meeting"
+    if "approval" in open_kinds:
+        return "blocked", "Waiting for your decision"
+    if open_kinds & BLOCKING_KINDS:
+        return "blocked", "Blocked"
+    if open_kinds & ERROR_KINDS:
+        return "error", "Last task failed"
+    return "idle", "Idle"

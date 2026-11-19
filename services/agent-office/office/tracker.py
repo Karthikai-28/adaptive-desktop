@@ -4,8 +4,10 @@ The timelines come from the event journal (office/activity.py has the rules); ta
 from the store; tokens from the ledger. Nothing here writes. server.py serves it as /api/activity/...,
 and office/reports.py builds the standup and the evening summary from `period`.
 """
+import datetime as dt
 import os
 import time
+from zoneinfo import ZoneInfo
 
 from . import activity as A
 from .config import COMPANY
@@ -80,20 +82,83 @@ class Tracker:
                 run_start = tl[task["id"]]["runs"][-1][0]
             elif task:
                 run_start = task.get("started_at")
-            mission = self.store.mission(task["mission_id"]) if task and task.get("mission_id") else None
+            mission = self._mission_brief(task["mission_id"]) if task and task.get("mission_id") else None
             queued = self.store.next_queued(aid)
             open_items = self.o.journal.inbox(state="NEEDS_ATTENTION,IN_PROGRESS", agent=aid, limit=20)["items"]
+            state, label = A.desk_state(st["status"], st.get("in_meeting"), open_items)
+            recent = self.db.execute(
+                "SELECT kind, text, ts, task_id FROM events WHERE agent=? AND kind NOT IN ('think','start') "
+                "ORDER BY id DESC LIMIT 3", (aid,)).fetchall()
             out.append({
                 "id": aid, "name": cfg["name"], "role": cfg["role"], "status": st["status"],
+                "state": state, "state_label": label, "in_meeting": bool(st.get("in_meeting")),
                 "activity": st.get("activity", ""), "activity_ts": st.get("activity_ts"),
                 "task": _task_brief(task) if task else None,
-                "mission": {k: mission[k] for k in ("id", "title", "status")} if mission else None,
+                # what the run has done so far: tool steps recorded for it (a count, not a share of the work)
+                "actions": self._actions(task["id"], run_start) if task else 0,
+                "mission": mission,
                 "running_since": run_start, "running_s": round(now - run_start, 1) if run_start else 0,
                 "queued": [_task_brief(t) for t in queued[:10]], "queued_count": len(queued),
                 "blockers": [{k: i[k] for k in ("id", "kind", "title", "priority", "state")} for i in open_items],
+                "recent": [dict(r) for r in recent],
                 "active_24h_s": summary.get(aid, {}).get("active_s", 0),
+                "runs_24h": summary.get(aid, {}).get("runs", 0),
+                "estimated": summary.get(aid, {}).get("estimated", False),
             })
         return out
+
+    def _actions(self, tid, since):
+        return self.db.execute(
+            "SELECT COUNT(*) FROM events WHERE task_id=? AND kind NOT IN ('think','start','done','assign','info') "
+            "AND ts>=?", (tid, since or 0)).fetchone()[0]
+
+    def _mission_brief(self, mid):
+        """A mission and how far it is: its tasks done out of all its tasks so far (the plan can still grow)."""
+        m = self.store.mission(mid)
+        if not m:
+            return None
+        counts = dict(self.db.execute("SELECT status, COUNT(*) FROM tasks WHERE mission_id=? GROUP BY status", (mid,)))
+        verdicts = m.get("verdicts") or []
+        return {"id": m["id"], "title": m["title"], "status": m["status"], "total_tasks": sum(counts.values()),
+                "done_tasks": counts.get("done", 0), "failed_tasks": counts.get("failed", 0),
+                "running_tasks": counts.get("running", 0), "criteria": len(m.get("criteria") or []),
+                "passed": sum(1 for v in verdicts if v.get("verdict") == "PASS"),
+                "created_at": m["created_at"], "started_at": m["started_at"], "finished_at": m["finished_at"]}
+
+    def overview(self, now=None):
+        """One picture of the office for every view: the desks (Virtual Office), the dashboard (Command Center)
+        and the phone all read this, so they always agree."""
+        now = now or time.time()
+        tz = self.o.reports.s["timezone"]          # "today" is the reports' day (Asia/Kolkata by default)
+        day = dt.datetime.fromtimestamp(now, ZoneInfo(tz)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        agents = self.assignments(now)
+        today = dict(self.db.execute(
+            "SELECT status, COUNT(*) FROM tasks WHERE finished_at>=? AND finished_at<=? GROUP BY status", (day, now)))
+        tasks = dict(self.db.execute("SELECT status, COUNT(*) FROM tasks WHERE status IN ('queued','running') "
+                                     "GROUP BY status"))
+        missions = dict(self.db.execute("SELECT status, COUNT(*) FROM missions GROUP BY status"))
+        shown = [r[0] for r in self.db.execute(
+            "SELECT id FROM missions WHERE status IN ('queued','running','unverified') OR finished_at>=? "
+            "ORDER BY id DESC LIMIT 12", (now - 7 * 86400,))]
+        by_state = {k: 0 for k in A.DESK_STATES}
+        for a in agents:
+            by_state[a["state"]] += 1
+        return {
+            "now": now, "day_start": day, "timezone": tz,
+            "agents": agents,
+            "counts": {
+                "agents": len(agents), "active": by_state["working"], "idle": by_state["idle"],
+                "blocked": by_state["blocked"], "error": by_state["error"], "paused": by_state["paused"],
+                "running_tasks": tasks.get("running", 0), "queued_tasks": tasks.get("queued", 0),
+                "done_today": today.get("done", 0), "failed_today": today.get("failed", 0),
+                "cancelled_today": today.get("cancelled", 0),
+                "running_missions": missions.get("running", 0), "queued_missions": missions.get("queued", 0),
+            },
+            "inbox": self.o.journal.counts(),
+            "missions": [m for m in (self._mission_brief(mid) for mid in shown) if m],
+            "active_24h_s": round(sum(a["active_24h_s"] for a in agents), 1),
+            "estimated": any(a["estimated"] for a in agents),
+        }
 
     # ------------------------------------------------------------------ a period
     def history(self, a, b, agent=None, limit=200, now=None):

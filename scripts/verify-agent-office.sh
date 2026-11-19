@@ -372,6 +372,17 @@ assert "## Still in progress (not finished)" in md and "#3 Job 3" in md.split("#
 assert "#3 Job 3" not in md.split("## Completed")[1].split("##")[0]                  # in progress is never "completed"
 assert "| Maya | 1h 00m |" in md and "not billed per token" in md and "projects/x/report.md" in md
 assert "2/2 criteria passed" in md and data["priorities"][0]["level"] == "Critical"
+# Milestone 3: the one status word every view shows
+D = A.desk_state
+assert D("working") == ("working", "Working") and D("thinking") == ("working", "Replying")
+assert D("idle", True) == ("working", "In a meeting") and D("paused") == ("paused", "Paused")
+assert D("quota") == ("blocked", "Waiting for quota") and D("idle") == ("idle", "Idle")
+assert D("idle", items=[{"kind": "approval", "state": "NEEDS_ATTENTION"}]) == ("blocked", "Waiting for your decision")
+assert D("idle", items=[{"kind": "blocked", "state": "IN_PROGRESS"}])[0] == "blocked"
+assert D("idle", items=[{"kind": "failed", "state": "NEEDS_ATTENTION"}]) == ("error", "Last task failed")
+assert D("idle", items=[{"kind": "failed", "state": "RESOLVED"}])[0] == "idle"
+assert D("working", items=[{"kind": "failed", "state": "NEEDS_ATTENTION"}])[0] == "working"   # what it does now wins
+assert set(A.DESK_STATES) == {"working", "idle", "blocked", "error", "paused"}
 PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
@@ -644,6 +655,8 @@ class FakeRun:
         self.result.cancelled = True; self.done.set()
     def finish(self, text):
         self.result.status, self.result.text = "SUCCESS", text; self.done.set()
+    def fail(self, err):
+        self.result.error = err; self.done.set()
 
 def office(store):
     o = Office(config.load(), store)
@@ -674,15 +687,38 @@ async def main():
     assert set(now_agents) == set(o.agents)
     me = now_agents[agent]
     assert me["status"] == "working" and me["task"]["id"] == t["id"] and me["running_since"], me
+    # Milestone 3: one overview for every view; the status word, honest progress (counts, never a percentage)
+    store.add_event(agent, "write", "Wrote notes.md", t["id"])
+    ov = o.tracker.overview()
+    me3 = next(a for a in ov["agents"] if a["id"] == agent)
+    assert me3["state"] == "working" and me3["state_label"] == "Working" and me3["actions"] == 1, me3
+    assert me3["recent"][0]["text"] == "Wrote notes.md" and "percent" not in str(me3).lower()
+    assert ov["counts"]["active"] == 1 and ov["counts"]["running_tasks"] == 1 and ov["counts"]["agents"] == len(o.agents)
+    assert ov["timezone"] == "Asia/Kolkata" and ov["day_start"] <= time.time() and set(ov["inbox"]) >= {"NEEDS_ATTENTION"}
     await asyncio.sleep(0.4)
     runs[0].finish("Done.")
     await settle(lambda: store.task(t["id"])["status"] == "done")
+    ov = o.tracker.overview()
+    assert ov["counts"]["done_today"] >= 1 and ov["counts"]["active"] == 0
+    assert next(a for a in ov["agents"] if a["id"] == agent)["state"] == "idle"
+    # a failure leaves the desk at "error" until it is dealt with; the inbox item is the same one everywhere
+    f = await o.add_task(agent, "Doomed job", "do it")
+    await settle(lambda: len(runs) == 2); runs[1].fail("agy exited 2")
+    await settle(lambda: len(runs) == 3); runs[2].fail("agy exited 2 again")
+    await settle(lambda: store.task(f["id"])["status"] == "failed")
+    ov = o.tracker.overview()
+    desk = next(a for a in ov["agents"] if a["id"] == agent)
+    assert desk["state"] == "error" and desk["blockers"][0]["kind"] == "failed", desk
+    assert ov["counts"]["error"] == 1 and ov["counts"]["failed_today"] == 1 and ov["inbox"]["NEEDS_ATTENTION"] >= 1
+    o.journal.act(desk["blockers"][0]["id"], "dismiss", "operator", "seen", True)
+    assert next(a for a in o.tracker.overview()["agents"] if a["id"] == agent)["state"] == "idle"
     timing = o.tracker.task_timing(t["id"])
     assert 0.35 < timing["run_s"] < 2 and timing["runs"][0][2] == "done" and not timing["estimated"], timing
     summ = {r["agent"]: r for r in o.tracker.summary(time.time() - 60, time.time())["agents"]}
-    assert 0.35 < summ[agent]["active_s"] < 2 and summ[agent]["tasks"] == {t["id"]: timing["run_s"]}, summ[agent]
+    assert 0.35 < summ[agent]["active_s"] < 2 and summ[agent]["tasks"][t["id"]] == timing["run_s"], summ[agent]
     hist = o.tracker.history(time.time() - 60, time.time())
-    assert [h["task"]["id"] for h in hist] == [t["id"]] and hist[0]["outcome"] == "done"
+    assert [h["task"]["id"] for h in hist] == [f["id"], t["id"]] and hist[1]["outcome"] == "done", hist
+    assert hist[0]["outcome"] == "failed"
 
     # the schedule, with the clock moved: installed on 18 Nov 2026 at 09:00 IST
     S = o.reports.s
@@ -871,6 +907,16 @@ curl -fsS "$B/api/activity/agents" | python3 -c 'import json,sys; d=json.load(sy
 curl -fsS "$B/api/activity/summary" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["until"] - d["since"] == 86400 and all("active_s" in a and "idle_s" in a for a in d["agents"])' || fail "activity: summary"
 curl -fsS "$B/api/activity/history?since=0&until=86400" | python3 -c 'import json,sys; assert json.load(sys.stdin) == []' || fail "activity: history range"
 [ "$(code "$B/api/activity/summary?since=10&until=5")" = 400 ] || fail "activity: a backwards window was accepted"
+# Milestone 3: the overview every view reads, and the chosen view kept in the office's database
+curl -fsS "$B/api/overview" | python3 -c 'import json,sys; d=json.load(sys.stdin); c=d["counts"]; assert c["agents"] == len(d["agents"]) >= 2 and {"active","blocked","error","running_tasks","done_today","failed_today","running_missions"} <= set(c) and all(a["state"] in ("working","idle","blocked","error","paused") and a["state_label"] for a in d["agents"]) and "NEEDS_ATTENTION" in d["inbox"] and isinstance(d["missions"], list)' || fail "overview"
+curl -fsS "$B/api/ui" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["view"] == "office" and d["views"] == ["office", "command"], d' || fail "Virtual Office is not the default view"
+post -d '{"view":"command"}' "$B/api/ui" >/dev/null || fail "pick the Command Center"
+[ "$(code -X POST "${J[@]}" -d '{"view":"cockpit"}' "$B/api/ui")" = 400 ] || fail "an unknown view was accepted"
+[ "$(code -X POST "${J[@]}" -H 'X-Office-Actor: manager' -d '{"view":"office"}' "$B/api/ui")" = 403 ] || fail "the manager changed the operator's view"
+[ "$(code -X POST -H 'Content-Type: application/json' -d '{"view":"office"}' "$B/api/ui")" = 403 ] || fail "view change without X-Office header"
+curl -fsS "$B/api/ui" | python3 -c 'import json,sys; assert json.load(sys.stdin)["view"] == "command"' || fail "view not kept"
+OFFICE_STATE="$TMP/state" PYTHONPATH="$APP" python3 -c 'from office.config import DATA; from office.store import Store; assert Store(DATA / "office.db").get("ui.view") == "command"' || fail "view not saved in the database"
+post -d '{"view":"office"}' "$B/api/ui" >/dev/null || fail "back to the Virtual Office"
 curl -fsS "$B/api/tasks/$HTID/timing" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["task"]["id"] and "queue_s" in d and "approval_s" in d' || fail "task timing"
 [ "$(code "$B/api/tasks/999999/timing")" = 404 ] || fail "timing of a missing task"
 curl -fsS "$B/api/missions/$HMID/progress" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["mission"]["id"] and d["total_tasks"] >= 1 and "contributions" in d' || fail "mission progress"

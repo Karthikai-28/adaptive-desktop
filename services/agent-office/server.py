@@ -582,6 +582,39 @@ async def activity_agents():
     return office.tracker.assignments()
 
 
+@app.get("/api/overview")
+async def overview():
+    """The whole office at a glance, one source for the Virtual Office desks, the Command Center and the phone:
+    every agent's status word, task, mission and run time; today's counts; open inbox; mission progress."""
+    return office.tracker.overview()
+
+
+# How the desktop page shows the office. Kept in the office's database so it survives restarts of the browser
+# and the office; it only changes when the operator picks a view (never by itself).
+UI_VIEWS = ("office", "command")
+
+
+@app.get("/api/ui")
+async def ui_get():
+    view = store.get("ui.view", "office")
+    return {"view": view if view in UI_VIEWS else "office", "views": list(UI_VIEWS)}
+
+
+class UiIn(BaseModel):
+    view: str
+
+
+@app.post("/api/ui")
+async def ui_set(u: UiIn, request: Request):
+    if u.view not in UI_VIEWS:
+        bad(f"view must be one of {', '.join(UI_VIEWS)}")
+    by, _ = await caller(request)
+    if by == "manager":
+        raise HTTPException(403, "only the owner picks how the office is shown")
+    store.set("ui.view", u.view)
+    return {"view": u.view, "views": list(UI_VIEWS)}
+
+
 @app.get("/api/activity/summary")
 async def activity_summary(since: float | None = None, until: float | None = None):
     """Per agent in a window (default the last 24 h): active time (overlaps counted once), idle, queue wait."""
