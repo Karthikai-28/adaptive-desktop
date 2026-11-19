@@ -42,6 +42,7 @@ from .retention import Retention
 from . import verdicts
 from . import operator
 from .journal import Journal
+from . import channels
 from .workflows import RISKS
 
 NAME_RE_CACHE = {}
@@ -101,6 +102,7 @@ class Office:
         self.journal = Journal(store, names, secrets=lambda: (operator.key(),))
         self.journal.publish = self._publish
         self.journal.live_check["quota"] = self._quota_live
+        self.dispatcher = channels.Dispatcher(self.journal, channels.from_config(cfg))   # none enabled by default
         self._bg = set()
         self._sched_lock = asyncio.Lock()
 
@@ -139,6 +141,8 @@ class Office:
         self.ledger.start()
         self._spawn(self._provider_loop())
         self._spawn(self._journal_loop())
+        if self.dispatcher.channels:
+            self._spawn(self.dispatcher.run())
         self.kick()
 
     def _publish(self, msg):

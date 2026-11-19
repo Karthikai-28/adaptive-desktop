@@ -419,6 +419,15 @@ The office listens on the computer's 127.0.0.1 only. The daemon carries it to pa
 at home and away and nothing new is opened. Directing the office means having agents run commands,
 so it takes the commands switch: `link-cli.py phone NAME deny exec` keeps a device out of it.
 
+**Alerts without the page open.** The office's alerts (a failed or blocked task, an approval waiting,
+a quota stop; finished work quietly grouped) come as notifications even when the app is closed: the
+daemon long-polls the office's numbered notifications and nudges the phone's listener (kind `office`),
+and the phone fetches from the office what it has not shown yet, in order, after every reconnect.
+**Acknowledge** on a notification marks the inbox item in progress; it never approves anything (that
+needs the operator key on the computer). The **Inbox** button on the Office page lists what needs you.
+Settings → the computer's alerts → *Agent Office* turns them off. See
+[AGENT_OFFICE.md](AGENT_OFFICE.md#notifications-and-the-action-inbox-officeeventspy-officejournalpy).
+
 ### The laptop as a mobile desktop
 
 The phone is an accessory of the laptop: apps run on the laptop and are used

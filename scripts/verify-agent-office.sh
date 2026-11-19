@@ -267,6 +267,44 @@ so = Store(old)
 jo = Journal(so)
 assert so.version() == 1 and jo.reconcile() == 0 and jo.inbox()["total"] == 0 and jo.notifications() == []
 PY
+# push channels (office/channels.py): WhatsApp is off and can't send; a failing channel keeps what it missed
+# and gets it again, in order, after a backoff; a channel only ever carries a short line
+PYTHONPATH="$APP" python3 - "$TMP/channels.db" "$APP/config.json" <<'PY' || fail "notification channels"
+import asyncio, json, sys
+from office import channels as C
+from office.journal import Journal
+from office.store import Store
+
+cfg = json.load(open(sys.argv[2]))
+wa = C.from_config(cfg)
+assert [c.name for c in wa] == ["whatsapp"] and not wa[0].enabled, "WhatsApp must be off by default"
+assert C.Dispatcher(None, wa).channels == []
+assert C.concise({"title": "T", "text": "x " * 400}).endswith("…") and len(C.concise({"title": "T", "text": "x " * 400})) <= 280
+
+s = Store(sys.argv[1]); j = Journal(s)
+for i in range(3):
+    j.raise_issue("office.error", f"error:{i}", f"problem {i}")
+class Flaky(C.Channel):
+    name = "flaky"
+    def __init__(self):
+        super().__init__({"enabled": True, "min_priority": "high"}); self.sent, self.down = [], True
+    async def send(self, note):
+        if self.down:
+            raise ConnectionError("unreachable")
+        assert set(note["message"]) and "\n" not in note["message"]
+        self.sent.append(note["id"])
+ch = Flaky(); d = C.Dispatcher(j, [ch])
+async def main():
+    await d.once()
+    assert ch.sent == [] and j.delivery("push:flaky")["pending"] == 3 and j.delivery("push:flaky")["failures"] == 1
+    ch.down = False
+    await d.once()
+    assert ch.sent == [], "retried before its backoff"
+    d.retry_at["flaky"] = 0
+    await d.once()
+    assert ch.sent == [1, 2, 3] and j.delivery("push:flaky")["pending"] == 0, ch.sent
+asyncio.run(main())
+PY
 [ "$QUICK" = 1 ] && { echo "quick checks passed"; exit 0; }
 
 # 2. A throwaway server: API, guards, path traversal

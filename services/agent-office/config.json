@@ -32,6 +32,7 @@
   "task_timeout_min": 45,
   "chat_timeout_min": 15,
   "meeting_timeout_min": 4,
+  "notifications": {"whatsapp": {"enabled": false, "min_priority": "high"}},
   "manager": {
     "id": "claude",
     "name": "Claude",

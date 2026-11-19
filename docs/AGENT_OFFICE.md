@@ -57,6 +57,7 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **ROS investigations** | Capture the live ROS setup, baseline and candidate recording metadata, missing/type-changed topics and message-count regressions, plus an exact simulation or replay command in the evidence capsule. |
 | **Mission Control on the phone** | Adaptive Link's native Office has a Missions tab for launching scoped work, reading criteria and reports, searching evidence and cancelling work. It uses the paired phone's mutually authenticated Office gateway and requires that device's Commands switch. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
+| **Action Inbox and alerts** | Failed or blocked work, approvals waiting and quota stops land in one inbox that stays until the problem is really fixed, and reach the phone through Adaptive Link at once; finished work arrives quietly grouped ([Notifications and the Action Inbox](#notifications-and-the-action-inbox-officeeventspy-officejournalpy)). |
 | **Tokens** | Live token usage: who spends what, on which work, and how. The **Tokens** button shows the team (per person by kind of work, over time, by step, by project, by how tasks ended, the most expensive tasks); click a person for their own breakdown (context per call, tasks, every run). Each person's card also has a **Tokens** tab. Windows: last hour to all time. It updates by itself as agents work. |
 
 ## Study programs
@@ -352,6 +353,106 @@ The Tokens window has the same switch (All · Gemini · Local · Claude) next to
 Three numbers per call: **fresh input** (new to the model), **re-read context** (served from cache:
 the conversation sent again with every step, about 95% of all tokens), **output** (thinking
 included). The task board's own count is fresh input + output of a task's last attempt only.
+
+## Notifications and the Action Inbox (`office/events.py`, `office/journal.py`)
+
+The office keeps a record of everything that happens to work, decides from it what needs you, and tells
+you, on the phone too, without you watching the page.
+
+**Events.** Every task and mission status change becomes an event in `event_log`, written in the same
+SQLite transaction as the change itself (`Store` calls the journal from `update_task`/`update_mission`).
+Each event has a UUID, a sequence number `seq` (only rises, without gaps), a UTC timestamp, the agent,
+task and mission, a type and severity, the text, evidence references (`task:12`, `mission:3`) and a
+dedup key: the same fact recorded twice is one event. The log is append-only: SQLite triggers refuse
+any UPDATE or DELETE. Types: `task.created|started|resumed|retry|interrupted|completed|failed|blocked|
+cancelled|requeued`, `mission.created|started|completed|failed|unverified|cancelled|reopened`,
+`approval.requested|granted|declined`, `quota.exceeded|restored`, `limit.reached|cleared`,
+`office.error`, and `inbox.acknowledged|resolved|dismissed|reopened` for what people do. The rules are
+pure functions in `office/events.py`. Text is redacted of anything credential-shaped and of the
+operator key before it is stored.
+
+**The Action Inbox.** One item per problem (`inbox`), the only mutable state: `NEEDS_ATTENTION` →
+`IN_PROGRESS` → `RESOLVED`, and a resolved item can be reopened.
+
+| Event | Inbox | Notification |
+|---|---|---|
+| task failed / blocked (a dependency failed) | opens `task:<id>` | high, at once |
+| approval requested | opens an approval item holding the request | critical, at once |
+| quota used up (Gemini, Haiku, Claude manager) / an hourly limit hit | opens `quota:<provider>` / `limit:<name>` | high, at once |
+| office error running a task | opens `error:task-run` | high, at once |
+| mission failed on its verdicts / unverified | opens `mission:<id>` | high / normal |
+| task run again, or resumed | the task's item → in progress | none (the existing item is updated) |
+| task finished / cancelled | the task's item resolved (`recovered` / `cancelled`) | finished work: normal, grouped |
+| mission succeeded | its item resolved | normal, grouped |
+| quota back, limit reset | resolved by the 30-second sweep | none |
+
+A mission that fails *because* its task failed is recorded, but quietly: the task already has the one
+item and the one alert. The same problem raised again while it is open adds nothing; a new failure of
+the same task (after a retry) updates the same item and sends a new alert.
+
+- **ack** marks an item in progress. **resolve** is refused while the problem is still there (the task
+  is still failed): run the work again or cancel it and the item closes by itself. **dismiss** closes it
+  anyway and needs the operator key while the problem is live. The manager can't resolve, dismiss or
+  decline.
+- **Approvals.** A hardware/external workflow run, or adding or re-running work in a hardware/external
+  mission, asked without the operator key, is still refused exactly as before, and the request is kept
+  in an approval item. **Approve** (`POST /api/inbox/<id>/approve`) needs the operator key and replays the
+  stored request through the same checks as a fresh one, marked approved by the operator; it runs once.
+  Acknowledging, resolving or anything from the phone never approves: the phone has no key and can only
+  acknowledge or **decline**.
+
+**Notifications** (`notifications`) are numbered in order and kept. Each channel confirms how far it has
+got (`deliveries`, per paired phone as `link:<device>`), so what was not delivered is known and sent
+again. Normal ones (finished work) carry a group so the phone bundles them quietly.
+
+**On the phone.** Adaptive Link long-polls the office's notifications and hands each new one to the
+phone's background listener as kind `office` (`services/adaptive-link/office_gateway.py`, the commands
+switch). The phone treats that as a nudge only: it always fetches from the office's list after the
+last one it showed, in order, then confirms them, so after being away or out of reach it gets
+everything it missed, once. Problems and approvals arrive on their own channel with an
+**Acknowledge** button; tapping opens the Office page at the inbox item, task or mission. The Office
+page has an **Inbox** button with the open count. The last 100 alerts are kept on the phone for when
+the computer can't be reached. Switch: Settings → the computer's alerts → *Agent Office*.
+
+**Other channels** (`office/channels.py`). Channels the office pushes to are outbound only (they tell,
+never ask: nothing they receive can approve or start work), carry one concise line, and keep their own
+position, so a failing channel is retried in order with a backoff. **WhatsApp** is listed in
+`config.json` → `notifications` with `"enabled": false` and has no sender yet; nothing needs it.
+
+**API** (GETs are open on 127.0.0.1; POSTs need the office's usual `X-Office` header):
+
+| | |
+|---|---|
+| `GET /api/journal?after=<seq>&limit=&type=task.*&agent=&task_id=&mission_id=&since=&until=` | events after a seq, oldest first, with `head` |
+| `GET /api/inbox?state=NEEDS_ATTENTION,IN_PROGRESS&kind=&agent=&task_id=&mission_id=&priority=&limit=&offset=` | items (open first, critical first), `total`, `counts` |
+| `GET /api/inbox/<id>` | one item with its history and whether the problem is still `live` |
+| `POST /api/inbox/<id>/ack\|resolve\|dismiss\|reopen\|decline` `{"note": ""}` | a person's action |
+| `POST /api/inbox/<id>/approve` | carry out an approval request (operator key) |
+| `GET /api/notifications?after=<id>&limit=&wait=<s>&channel=link` | notifications after an id; `wait` long-polls up to 30 s |
+| `POST /api/notifications/delivered` `{"channel": "link", "through": <id>}` | a channel confirms delivery |
+| `POST /api/notifications/read` `{"ids": [..]}` or `{"through": <id>}` | read status |
+| `GET /api/notifications/deliveries` | each channel's position, pending count and last error |
+
+The live socket also sends `journal`, `inbox` (with counts) and `notification` messages, and the
+`state` snapshot carries `journal_head`, `inbox` counts and the notification head, so a page that
+reconnects asks `/api/journal?after=<the last seq it saw>`.
+
+**Database.** These tables are migration 1 in `office/store.py` (`MIGRATIONS`, recorded in
+`PRAGMA user_version`), applied once at start inside one transaction. The moment it ran is
+`journal_since` in kv: on start the journal re-records only work that finished after it (whatever a
+crash lost between a status write and its event), so an upgraded office does not turn its history
+into alerts. To roll back, stop the office, put back the earlier code, and optionally drop the tables
+(older code ignores them):
+
+```sh
+systemctl --user stop adaptive-agent-office
+sqlite3 ~/.local/share/adaptive-desktop/agent-office/data/office.db \
+  "DROP TABLE IF EXISTS deliveries; DROP TABLE IF EXISTS notifications; DROP TABLE IF EXISTS inbox;
+   DROP TABLE IF EXISTS event_log; DELETE FROM kv WHERE key='journal_since'; PRAGMA user_version=0;"
+```
+
+Every journal action is also one JSON line on the service's output (`journalctl --user -u
+adaptive-agent-office | grep '"log": "journal"'`).
 
 ## Checks
 

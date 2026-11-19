@@ -1413,6 +1413,36 @@ darkness is a release gate, and nothing below marked 🔬 has been tried with pe
 - 🔬 The hand cursor and Kinect Pad with a real person; the space report against where people
   really fit (2026-11-18: 13 of 17 activities fit at 0.80 m and 2 m of floor; tilt up 9° for all).
 
+## Milestone 25 — Agent Office: events, Action Inbox, phone alerts (2026-11-19)
+
+Guide: docs/AGENT_OFFICE.md, "Notifications and the Action Inbox". Milestone 1 of the Agent Office
+upgrade (reports and the new views are the next two).
+
+### Done (software, checked)
+
+- ✅ Append-only event journal (`event_log`, SQLite triggers refuse UPDATE/DELETE), written in the same
+  transaction as each task/mission status change; gap-free `seq`, UTC times, dedup keys, credential and
+  operator-key redaction; crash catch-up limited to work finished after the migration.
+- ✅ Action Inbox: one item per problem, NEEDS_ATTENTION → IN_PROGRESS → RESOLVED and reopen; resolve
+  refused while the problem is live, dismiss of a live problem needs the operator key; recovered and
+  cancelled work closes its item; quota/limit items close by themselves.
+- ✅ Approval requests kept from refused hardware/external runs; approve only with the operator key,
+  through the same checks, once; acknowledging approves nothing.
+- ✅ Numbered notifications with per-device delivery positions and read status; long-poll feed; push
+  channel interface with retry/backoff; WhatsApp present and off, without a sender.
+- ✅ Adaptive Link nudges the phone (kind `office`, commands switch); the phone catches up from the
+  office's list in order and confirms; Acknowledge on the notification; Inbox screens on the Office page.
+- ✅ Checks: `verify-agent-office.sh` (rules, journal on SQLite across a restart, the real scheduler with
+  fake runs, the HTTP inbox/approval/journal/notification API, the existing suite and the page),
+  `verify-link.py` (live push, catch-up, attribution, switch), the app's unit tests and APK build.
+
+### Still to do
+
+- 🔬 Live on the paired phone: install the new APK, fail a task, and see the alert, the Acknowledge
+  button, the catch-up after being out of reach, and the Inbox screen. Not yet done.
+- The desktop page shows the inbox only through the API and toasts; its own Inbox view comes with the
+  Command Center (milestone 3 of the upgrade).
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the
