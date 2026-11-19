@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -73,6 +74,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -143,14 +145,36 @@ private fun routeFrom(link: String): Route? {
     }
 }
 
-private fun statusOf(a: JSONObject?): Pair<String, Color> {
-    if (a == null) return "away" to Dim
-    if (a.optBoolean("in_meeting")) return "in a meeting" to Sky
-    return when (a.str("status")) {
-        "working" -> "working" to Amber
-        "thinking" -> "replying" to Violet
-        "quota" -> "out of quota" to Red
-        else -> "free" to Green
+/** The status word and its colour, the same as the desktop's: the office overview's for an agent, the live status
+ *  mapped onto the same words for the manager (OfficeDesk). Working green, blocked amber, error red, idle grey. */
+private fun deskStatus(office: Office, id: String): Pair<String, Color> {
+    office.desks[id]?.let { d -> return d.str("state_label").ifBlank { OfficeDesk.word(d.str("state")) } to stateTint(d.str("state")) }
+    val a = office.agents[id] ?: return "Away" to Dim
+    val (state, label) = OfficeDesk.fromStatus(a.str("status"), a.optBoolean("in_meeting"))
+    return label to stateTint(state)
+}
+
+private fun stateTint(state: String) = when (state) {
+    "working" -> Green
+    "blocked" -> Amber
+    "error" -> Red
+    else -> Dim
+}
+
+/** Seconds since the epoch, moving every second while it is shown (run times count on). */
+@Composable
+private fun nowTick(): Double {
+    val now by produceState(System.currentTimeMillis() / 1000.0) {
+        while (true) { delay(1000); value = System.currentTimeMillis() / 1000.0 }
+    }
+    return now
+}
+
+/** A mission's tasks done out of its tasks so far: the only progress the office really knows. */
+@Composable
+private fun Progress(fraction: Float, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(Raised)) {
+        Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(Accent))
     }
 }
 
@@ -382,16 +406,31 @@ private fun Field(value: String, onChange: (String) -> Unit, hint: String, modif
 @Composable
 private fun TeamTab(ctx: Ctx) {
     val office = ctx.office
-    val states = office.team.map { office.agents[it.str("id")] }
-    val working = states.count { it?.str("status") == "working" }
-    val free = states.count { statusOf(it).first == "free" }
+    val o = office.overview
+    val c = o?.optJSONObject("counts")
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        // the same figures as the desktop's Command Center
+        if (o != null) item {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(vertical = 12.dp)) {
+                OfficeDesk.today(o).forEachIndexed { i, (value, label) ->
+                    val alert = value != "0" && (i == 2 || i == 3)
+                    Column(Modifier.weight(1f).then(if (i == 3) Modifier.clickable { ctx.push(Route.Inbox) } else Modifier),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(value, color = if (alert) (if (i == 2) Red else Amber) else Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text(label, color = Dim, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
         item {
-            Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("$working working", color = Amber, fontSize = 13.sp)
-                Text("  ·  $free free", color = Green, fontSize = 13.sp)
+            Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                val words = if (c != null) listOf("active" to "working", "blocked" to "blocked", "error" to "with a failure", "paused" to "paused", "idle" to "idle")
+                    .filter { c.optInt(it.first) > 0 }.map { (k, w) -> Triple("${c.optInt(k)} $w", k, w) }
+                    else emptyList()
+                words.forEachIndexed { i, (text, k, _) ->
+                    Text((if (i > 0) "  ·  " else "") + text, color = stateTint(if (k == "active") "working" else k), fontSize = 13.sp)
+                }
                 office.meeting?.let { Text("  ·  meeting on", color = Sky, fontSize = 13.sp) }
-                if (office.settings.optBoolean("paused")) Text("  ·  paused", color = Red, fontSize = 13.sp)
             }
         }
         item { Section("Manager") }
@@ -413,15 +452,25 @@ private fun PersonLine(ctx: Ctx, p: JSONObject?) {
     p ?: return
     val id = p.str("id")
     val a = ctx.office.agents[id]
-    val (label, color) = statusOf(a)
+    val d = ctx.office.desks[id]
+    val (label, color) = deskStatus(ctx.office, id)
     val activity = a?.str("activity").orEmpty()
     val queued = a?.optInt("queued") ?: 0
-    Line(p.str("name"), detail = if (activity.isNotBlank() && label != "free") activity else p.str("role"),
+    val task = d?.optJSONObject("task")
+    val detail = when {
+        task != null -> "#${task.optInt("id")} ${task.str("title")}"
+        activity.isNotBlank() && a?.str("status") != "idle" -> activity
+        d != null && d.optJSONArray("blockers").objects().isNotEmpty() -> d.optJSONArray("blockers").objects().first().str("title")
+        else -> p.str("role")
+    }
+    val running = if (d != null) OfficeDesk.runningFor(d, nowTick() - ctx.office.overviewAt) else 0.0
+    Line(p.str("name"), detail = detail,
         leading = { Box { Avatar(p); Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(Color.Black).padding(2.dp)) { Dot(color, 8) } } },
         trailing = {
             Column(horizontalAlignment = Alignment.End) {
                 Text(label, color = color, fontSize = 12.sp)
-                if (queued > 0) Text("+$queued queued", color = Dim, fontSize = 11.sp)
+                if (running > 0) Text(OfficeDesk.duration(running), color = Dim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                else if (queued > 0) Text("+$queued queued", color = Dim, fontSize = 11.sp)
             }
         },
         onClick = { ctx.push(Route.Person(id)) })
@@ -461,10 +510,10 @@ private fun PersonScreen(ctx: Ctx, route: Route.Person) {
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(p?.str("role").orEmpty(), color = Ink, fontSize = 15.sp)
-            val (label, color) = statusOf(a)
+            val (label, color) = deskStatus(office, route.id)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Dot(color); Spacer(Modifier.width(6.dp))
-                Text(listOf(label, a?.str("activity").orEmpty().takeIf { label != "free" }.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "),
+                Text(listOf(label, a?.str("activity").orEmpty().takeIf { a?.str("status") != "idle" }.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "),
                     color = Dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -625,9 +674,44 @@ private fun WorkView(ctx: Ctx, id: String) {
     val mine = office.tasks.values.filter { it.str("agent") == id }.sortedByDescending { it.optInt("id") }
     val active = mine.filter { it.str("status") in listOf("running", "queued") }
     val past = mine.filter { it.str("status") !in listOf("running", "queued") }.take(25)
+    val d = office.desks[id]
+    val now = nowTick()
+    // the last week's runs with their times (GET /api/activity/history), read again when the agent's work changes
+    var history by remember(id) { mutableStateOf<List<JSONObject>?>(null) }
+    val changed = active.joinToString { "${it.optInt("id")}:${it.str("status")}" }
+    LaunchedEffect(id, office.connected, changed) {
+        if (!office.connected) return@LaunchedEffect
+        val until = System.currentTimeMillis() / 1000.0
+        history = office.array("activity/history?agent=${Office.enc(id)}&since=${until - 7 * 86_400}&until=$until&limit=40")
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) { Button("Assign a task") { ctx.push(Route.NewTask(id)) } }
+        }
+        if (d != null) {
+            item { Section("At the desk") }
+            item {
+                Group {
+                    val (label, color) = deskStatus(office, id)
+                    Line(label, OfficeDesk.runLine(d, now - office.overviewAt), leading = { Dot(color, 10) })
+                    d.optJSONObject("task")?.let { t ->
+                        Line("#${t.optInt("id")}  ${t.str("title")}", "current task", onClick = { ctx.push(Route.Task(t.optInt("id"))) })
+                    }
+                    d.optJSONObject("mission")?.let { m ->
+                        Column(Modifier.fillMaxWidth().clickable { ctx.push(Route.Mission(m.optInt("id"))) }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Text(m.str("title"), color = Ink, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            OfficeDesk.missionFraction(m)?.let { Progress(it, Modifier.padding(vertical = 6.dp)) }
+                            Text("Mission · ${OfficeDesk.missionLine(m)}", color = Dim, fontSize = 13.sp)
+                        }
+                    }
+                    d.optJSONArray("blockers").objects().forEach { b ->
+                        Line(b.str("title"), if (b.str("state") == "IN_PROGRESS") "in progress" else "needs you",
+                            leading = { Dot(priorityColor(b.str("priority")), 10) }, onClick = { ctx.push(Route.InboxItem(b.optInt("id"))) })
+                    }
+                    Line("Last 24 hours", "${OfficeDesk.duration(d.optDouble("active_24h_s", 0.0))} active · ${d.optInt("runs_24h")} runs" +
+                        if (d.optBoolean("estimated")) " · partly estimated" else "")
+                }
+            }
         }
         if (active.isNotEmpty()) { item { Section("Now") }; item { Group { active.forEach { TaskLine(ctx, it, showAgent = false) } } } }
         val events = office.events[id].orEmpty().takeLast(25).reversed()
@@ -640,6 +724,21 @@ private fun WorkView(ctx: Ctx, id: String) {
                             Text(clock(e.optDouble("ts")), color = Dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(48.dp))
                             Text(e.str("text"), color = Ink, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         }
+                    }
+                }
+            }
+        }
+        history?.takeIf { it.isNotEmpty() }?.let { rows ->
+            item { Section("Last 7 days") }
+            item {
+                Group {
+                    rows.forEach { r ->
+                        val t = r.optJSONObject("task") ?: JSONObject()
+                        val outcome = r.str("outcome")
+                        val bits = listOfNotNull("ran ${OfficeDesk.duration(r.optDouble("run_s", 0.0))}" + if (r.optBoolean("estimated")) " (estimated)" else "",
+                            r.optDouble("queue_s", 0.0).takeIf { it >= 1 }?.let { "waited ${OfficeDesk.duration(it)}" }, outcome)
+                        Line("#${t.optInt("id")}  ${t.str("title")}", bits.joinToString(" · "), leading = { Dot(taskColor(if (outcome == "running") "running" else outcome), 10) },
+                            onClick = { ctx.push(Route.Task(t.optInt("id"))) })
                     }
                 }
             }

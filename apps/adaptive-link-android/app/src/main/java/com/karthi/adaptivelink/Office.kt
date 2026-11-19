@@ -68,6 +68,17 @@ class Office(private val client: LinkClient) {
     /** Action Inbox counts by state (NEEDS_ATTENTION, IN_PROGRESS, RESOLVED, critical), kept live. */
     var inbox by mutableStateOf(JSONObject())
         private set
+    /** The office at a glance (GET /api/overview, office/tracker.py): every agent's status word, task, mission
+     *  and run time, today's counts and mission progress. The same data the desktop's Virtual Office and
+     *  Command Center show, so the phone and the computer always say the same thing. */
+    var overview by mutableStateOf<JSONObject?>(null)
+        private set
+    /** When the overview was read, by this phone's clock: run times count on from it. */
+    var overviewAt by mutableDoubleStateOf(0.0)
+        private set
+    /** Each agent's row of the overview, by id. */
+    val desks = mutableStateMapOf<String, JSONObject>()
+    private var overviewJob: Job? = null
     /** Conversations that a screen has opened, kept current as messages arrive. */
     val threads = mutableStateMapOf<String, List<JSONObject>>()
     /** Recent activity per agent, for the agents whose page is open. */
@@ -101,6 +112,12 @@ class Office(private val client: LinkClient) {
             while (isActive) {
                 delay(25_000)
                 socket?.send("ping")
+            }
+        }
+        scope.launch {                  // run times and work time move on even when nothing is announced
+            while (isActive) {
+                delay(20_000)
+                if (connected) loadOverview()
             }
         }
     }
@@ -178,8 +195,9 @@ class Office(private val client: LinkClient) {
                 inbox = m.optJSONObject("inbox") ?: JSONObject()
                 // Whatever is open is read again: messages may have arrived while away.
                 threads.keys.toList().forEach { scope.launch { loadThread(it) } }
+                overviewSoon()
             }
-            "agent" -> m.optJSONObject("agent")?.let { agents[it.str("id")] = it }
+            "agent" -> m.optJSONObject("agent")?.let { agents[it.str("id")] = it; overviewSoon() }
             "event" -> m.optJSONObject("event")?.let { e ->
                 val who = e.str("agent")
                 events[who]?.let { events[who] = (it + e).takeLast(60) }
@@ -191,8 +209,8 @@ class Office(private val client: LinkClient) {
                 }
                 incoming.tryEmit(msg)
             }
-            "task" -> m.optJSONObject("task")?.let { tasks[it.optInt("id")] = it }
-            "mission" -> m.optJSONObject("mission")?.let { missions[it.optInt("id")] = it }
+            "task" -> m.optJSONObject("task")?.let { tasks[it.optInt("id")] = it; overviewSoon() }
+            "mission" -> m.optJSONObject("mission")?.let { missions[it.optInt("id")] = it; overviewSoon() }
             "meeting" -> {
                 meeting = m.optJSONObject("meeting")
                 m.optJSONObject("ended")?.str("minutes_path")?.takeIf { it.isNotBlank() }?.let {
@@ -206,8 +224,22 @@ class Office(private val client: LinkClient) {
             }
             "usage" -> usage = m.optJSONArray("rows").objects()
             "study" -> studies = m.optJSONArray("studies").objects()
-            "inbox" -> m.optJSONObject("counts")?.let { inbox = it }
+            "inbox" -> m.optJSONObject("counts")?.let { inbox = it; overviewSoon() }
         }
+    }
+
+    /** Read the overview again soon: changes come in bursts (a task and its agent and mission together). */
+    fun overviewSoon() {
+        if (overviewJob?.isActive == true) return
+        overviewJob = scope.launch { delay(1200); loadOverview() }
+    }
+
+    suspend fun loadOverview() {
+        val o = obj("overview")?.takeIf { it.has("agents") } ?: return
+        overview = o
+        overviewAt = System.currentTimeMillis() / 1000.0
+        o.optJSONArray("agents").objects().forEach { desks[it.str("id")] = it }
+        o.optJSONObject("inbox")?.let { inbox = it }
     }
 
     // ---------------------------------------------------------------- requests
