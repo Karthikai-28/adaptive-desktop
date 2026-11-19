@@ -32,6 +32,7 @@ import org.json.JSONObject
 object OfficeAlerts {
     const val CHANNEL = "office"
     const val CHANNEL_DIGEST = "office-digest"
+    const val CHANNEL_REPORTS = "office-reports"
     const val EXTRA_ROUTE = "com.karthi.adaptivelink.OFFICE_ROUTE"
     const val EXTRA_NOTIFICATION = "com.karthi.adaptivelink.OFFICE_NOTIFICATION"
     const val ACTION_ACK = "com.karthi.adaptivelink.OFFICE_ACK"
@@ -53,6 +54,8 @@ object OfficeAlerts {
             NotificationManager.IMPORTANCE_HIGH))
         manager.createNotificationChannel(NotificationChannel(CHANNEL_DIGEST, "Agent Office: finished work",
             NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_REPORTS, "Agent Office: standup and evening summary",
+            NotificationManager.IMPORTANCE_DEFAULT))
     }
 
     /** The link says there is something new: fetch it from the office, in order. */
@@ -97,6 +100,7 @@ object OfficeAlerts {
         val id = n.optLong("id")
         val priority = n.str("priority", "normal")
         val urgent = priority != "normal"
+        val report = n.optLong("report_id") > 0
         val title = n.str("title").ifBlank { "Agent Office" }
         val text = n.str("text")
         val route = routeOf(n)
@@ -106,7 +110,7 @@ object OfficeAlerts {
                 .putExtra(EXTRA_ROUTE, route)
                 .putExtra(EXTRA_NOTIFICATION, id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val builder = NotificationCompat.Builder(context, if (urgent) CHANNEL else CHANNEL_DIGEST)
+        val builder = NotificationCompat.Builder(context, if (urgent) CHANNEL else if (report) CHANNEL_REPORTS else CHANNEL_DIGEST)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle(title)
             .setContentText(text)
@@ -126,10 +130,10 @@ object OfficeAlerts {
             // "I'm on it" - marks the inbox item in progress. Approving needs the operator key on the computer.
             builder.addAction(0, "Acknowledge", receiver(context, ACTION_ACK, id, inbox))
         }
-        if (!urgent) builder.setGroup(GROUP_DONE).setSilent(true)
+        if (!urgent && !report) builder.setGroup(GROUP_DONE).setSilent(true)
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.notify(notificationId(id), builder.build())
-        if (!urgent) {
+        if (!urgent && !report) {
             manager.notify(SUMMARY_ID, NotificationCompat.Builder(context, CHANNEL_DIGEST)
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle("Agent Office")
@@ -148,6 +152,7 @@ object OfficeAlerts {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     fun routeOf(n: JSONObject): String = when {
+        n.optLong("report_id") > 0 -> "report:${n.optLong("report_id")}"
         n.optLong("inbox_id") > 0 && n.str("priority") != "normal" -> "inbox:${n.optLong("inbox_id")}"
         n.optLong("task_id") > 0 -> "task:${n.optLong("task_id")}"
         n.optLong("mission_id") > 0 -> "mission:${n.optLong("mission_id")}"

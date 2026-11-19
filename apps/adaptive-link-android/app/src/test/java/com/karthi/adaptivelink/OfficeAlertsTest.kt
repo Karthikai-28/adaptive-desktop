@@ -23,4 +23,15 @@ class OfficeAlertsTest {
         assertEquals("inbox", OfficeAlerts.routeOf(note("normal")))
         assertEquals("inbox", OfficeAlerts.routeOf(JSONObject().put("priority", "high").put("task_id", JSONObject.NULL)))
     }
+
+    @Test fun reportsOpenTheReport() {
+        assertEquals("report:4", OfficeAlerts.routeOf(note("normal").put("report_id", 4)))
+    }
+
+    @Test fun reportMarkdownBecomesBlocks() {
+        val blocks = reportBlocks("# Morning standup — 10:00\n\n*window*\n\n## Blockers\n\n- **Maya**: none\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")
+        assertEquals(listOf("h1", "note", "h2", "line", "table"), blocks.map { it.first })
+        assertEquals("• Maya: none", blocks[3].second)
+        assertEquals("A  B\n1  2", blocks[4].second)
+    }
 }

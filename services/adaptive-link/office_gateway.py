@@ -170,4 +170,4 @@ class OfficeGateway:
 def _brief(n):
     """What the phone needs to show a notification and open what it is about."""
     return {k: n.get(k) for k in ("id", "priority", "group", "title", "text", "agent", "task_id", "mission_id",
-                                  "inbox_id", "created_at")}
+                                  "inbox_id", "report_id", "created_at")}

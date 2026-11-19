@@ -125,6 +125,8 @@ private sealed class Route {
     data class Files(val path: String) : Route()
     object Inbox : Route()
     data class InboxItem(val id: Int) : Route()
+    object Reports : Route()
+    data class Report(val id: Int) : Route()
 }
 
 /** Where a tapped office notification leads (OfficeAlerts.routeOf). */
@@ -135,6 +137,8 @@ private fun routeFrom(link: String): Route? {
         kind == "inbox" -> Route.Inbox
         kind == "task" && id != null -> Route.Task(id)
         kind == "mission" && id != null -> Route.Mission(id)
+        kind == "report" && id != null -> Route.Report(id)
+        kind == "reports" -> Route.Reports
         else -> null
     }
 }
@@ -252,6 +256,8 @@ fun OfficePage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
                 Route.NewMission -> NewMissionScreen(ctx)
                 is Route.Files -> FilesScreen(ctx, top.path)
                 Route.Inbox -> InboxScreen(ctx)
+                Route.Reports -> ReportsScreen(ctx)
+                is Route.Report -> ReportScreen(ctx, top.id)
                 is Route.InboxItem -> InboxItemScreen(ctx, top.id)
             }
         }
@@ -1103,6 +1109,13 @@ private fun MoreTab(ctx: Ctx) {
                 }
             }
         }
+        item { Section("Reports") }
+        item {
+            Group {
+                Line("Standup and evening summary", "Every day at 10:00 and 19:00 (India time), kept and sent to this phone",
+                    trailing = { Text("Open", color = Accent, fontSize = 14.sp) }, onClick = { ctx.push(Route.Reports) })
+            }
+        }
         item { Section("Office") }
         item {
             Group {
@@ -1309,4 +1322,93 @@ private fun InboxItemScreen(ctx: Ctx, id: Int) {
             }
         }
     }
+}
+
+// ------------------------------------------------------------------ reports
+
+@Composable
+private fun ReportsScreen(ctx: Ctx) {
+    val office = ctx.office
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<JSONObject>?>(null) }
+    var schedule by remember { mutableStateOf<JSONObject?>(null) }
+    var round by remember { mutableStateOf(0) }
+    LaunchedEffect(round) {
+        items = office.array("reports?limit=60")
+        schedule = office.obj("reports/schedule")
+    }
+    TopBar("Reports", ctx.pop)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        schedule?.optJSONObject("kinds")?.let { k ->
+            Muted("Next standup ${k.optJSONObject("standup")?.str("next_local").orEmpty()}, next evening summary " +
+                "${k.optJSONObject("evening")?.str("next_local").orEmpty()} (${schedule!!.str("timezone")}).",
+                Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        }
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Standup now") { scope.launch { office.act("reports/generate", JSONObject().put("kind", "standup")); round++ } }
+            Chip("Summary now") { scope.launch { office.act("reports/generate", JSONObject().put("kind", "evening")); round++ } }
+        }
+        when {
+            items == null -> Muted("Loading…", Modifier.padding(20.dp))
+            items!!.isEmpty() -> Muted("No reports yet. The first comes at the next scheduled time.", Modifier.padding(20.dp))
+            else -> Group {
+                items!!.forEach { r ->
+                    val status = r.str("status")
+                    val missed = status == "missed" || status == "failed"
+                    Line(r.str("title"), r.str("summary").ifBlank { status },
+                        leading = { Dot(when (status) { "delivered" -> Green; "generated" -> Accent; "failed" -> Red; else -> Dim }) },
+                        trailing = { Text(r.str("scheduled_at_local").ifBlank { r.str("generated_at_local") }.takeLast(11), color = Dim, fontSize = 12.sp) },
+                        onClick = if (missed) null else ({ ctx.push(Route.Report(r.optInt("id"))) }))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReportScreen(ctx: Ctx, id: Int) {
+    var report by remember { mutableStateOf<JSONObject?>(null) }
+    LaunchedEffect(id) { report = ctx.office.obj("reports/$id") }
+    TopBar("Report", ctx.pop)
+    val r = report ?: run { Muted("Loading…", Modifier.padding(20.dp)); return }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        reportBlocks(r.str("markdown")).forEach { (kind, text) ->
+            when (kind) {
+                "h1" -> Text(text, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+                "h2" -> Section(text)
+                "h3" -> Text(text, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+                "table" -> TextBlock(text, mono = true)
+                else -> Text(text, color = if (kind == "note") Dim else Ink, fontSize = 14.sp, lineHeight = 20.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
+            }
+        }
+    }
+}
+
+/** The report's Markdown as (kind, text) blocks: headings, tables kept monospaced, the rest as lines. */
+internal fun reportBlocks(md: String): List<Pair<String, String>> {
+    val out = mutableListOf<Pair<String, String>>()
+    val table = StringBuilder()
+    fun flush() { if (table.isNotEmpty()) { out += "table" to table.toString().trimEnd(); table.clear() } }
+    md.lines().forEach { raw ->
+        val line = raw.trimEnd()
+        if (line.startsWith("|")) {
+            if (!line.startsWith("|---")) table.append(line.trim('|').split("|").joinToString("  ") { it.trim() }).append('\n')
+            return@forEach
+        }
+        flush()
+        val plain = line.replace("**", "").replace("`", "")
+        when {
+            line.isBlank() -> {}
+            line.startsWith("### ") -> out += "h3" to plain.removePrefix("### ")
+            line.startsWith("## ") -> out += "h2" to plain.removePrefix("## ")
+            line.startsWith("# ") -> out += "h1" to plain.removePrefix("# ")
+            line.startsWith("> ") -> out += "note" to plain.removePrefix("> ")
+            line.startsWith("*") && line.endsWith("*") && !line.startsWith("**") -> out += "note" to plain.trim('*')
+            line.startsWith("- ") -> out += "line" to "• " + plain.removePrefix("- ")
+            else -> out += "line" to plain
+        }
+    }
+    flush()
+    return out
 }
