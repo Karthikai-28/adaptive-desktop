@@ -46,6 +46,15 @@ events, the boards) scrolls inside that tile. Below is a four-column block: Proj
 Space side by side with Spotify and This week under them, Photos down the third column and News
 down the last, both through two rows. The side column is Weather, Today, AI assistants and Phone.
 
+**Agents** (the tab after Today, Ctrl+2) is the [Agent Office](AGENT_OFFICE.md)'s work as a board, so
+you can see what every agent is doing without opening the office: a card per agent (its status word,
+the same as the office's: Working, Blocked, Error, Paused, Idle; its task and how long it has run),
+then four columns: **To do** in the order it will run, **In progress** with the run's time, actions and
+last step, **Needs you** (open Action Inbox items), and **Finished today**. Selecting an agent shows
+only its work; selecting a card opens that task in the Agent Office window (`office-window task N`).
+Each column scrolls in itself; running cards carry light along their edge and their clocks tick. The
+data is the office's `GET /api/board`, read by the hub's `agent_office` collector every 10 seconds.
+
 | Card | Shows | Opens / does |
 | --- | --- | --- |
 | Tasks | Open tasks from every Quick Note inbox (Super+Alt+N, the palette's `todo`), newest first, coloured by project; scroll through all tasks, tick to finish, or add a task. Draft text and selection survive live refreshes | `/api/task`, `/api/task/done` |

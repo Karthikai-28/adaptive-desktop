@@ -568,6 +568,19 @@ switch unasked). Only the owner changes it; the manager's requests are refused.
 There is no schema change; to forget the choice, `sqlite3 "$DB" "DELETE FROM kv WHERE key='ui.view'"`.
 Older code ignores the row.
 
+## Opening it, and the board
+
+**Agent Office** is in the app grid and pinned to the dock (`scripts/install-agent-office.sh` installs
+`com.karthi.AgentOffice.desktop`). It runs `bin/office-window`: the office service is started when it
+is not running, then the page opens in a Chrome app window of its own (window class `AgentOffice`, its
+own profile, so the dock keeps it under its icon and speech input works). Right-click the icon for
+**Command Center** or **Action Inbox**; `office-window task 12` opens a task. The page also takes
+`?view=office|command`, `?open=inbox` and `?task=ID`.
+
+`GET /api/board` is the work as a Jira-style board: to do (in the order it will run), in progress (run
+time, actions, last step), needs you (open inbox items) and finished today, with every agent's status
+word. Mario Home's **Agents** tab shows it ([MARIO.md](MARIO.md)).
+
 ## Checks
 
 ```sh
