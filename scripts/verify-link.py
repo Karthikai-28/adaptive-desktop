@@ -34,6 +34,49 @@ import sandbox_display  # noqa: E402
 PORT, PAIRING_PORT, CLOUD_PORT, OFFICE_PORT = 47923, 47924, 47950, 47951
 
 
+async def office_follow_checks(check):
+    """The office's alerts after an outage: the follower keeps its place, so what the office made while it could
+    not be reached (or restarted) still nudges a phone that stayed connected."""
+    import aiohttp
+    import office_gateway as OG
+    handed, calls = [], {"n": 0}
+
+    class Events:
+        def add(self, kind, title, text, **kw):
+            handed.append(kw["data"]["office"]["id"])
+
+    class Link:
+        events = Events()
+        def _allowed(self, _switch):
+            return True
+
+    gw = OG.OfficeGateway(Link())
+    replies = [{"notifications": [], "head": 3},                              # start: the newest is 3
+               aiohttp.ClientConnectionError("office restarting"),          # the office goes away ...
+               {"notifications": [{"id": 4, "title": "Approval needed", "text": "x"}], "head": 4}]   # ... 4 made meanwhile
+
+    async def notes(after, wait, limit=100):
+        calls["n"] += 1
+        calls.setdefault("after", []).append(after)
+        r = replies.pop(0) if replies else None
+        if r is None:
+            raise asyncio.CancelledError()
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    real_sleep, OG.asyncio.sleep = OG.asyncio.sleep, (lambda _s: real_sleep(0))
+    gw._notifications = notes
+    try:
+        await gw.follow()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        OG.asyncio.sleep = real_sleep
+    check(handed == [4] and calls["after"][:3] == [0, 3, 3],
+          "office: an alert made while the office was out of reach still reaches the phone " + str((handed, calls)))
+
+
 def pure_checks(check):
     import identity as I
     import ai_usage
@@ -2032,6 +2075,7 @@ async def daemon_checks(sandbox, check):
 
 def inner(sandbox, check):
     pure_checks(check)
+    asyncio.run(office_follow_checks(check))
     import verify_link_workspace
     verify_link_workspace.checks(check)
     import verify_link_mobile

@@ -402,6 +402,12 @@ assert D("idle", items=[{"kind": "failed", "state": "NEEDS_ATTENTION"}]) == ("er
 assert D("idle", items=[{"kind": "failed", "state": "RESOLVED"}])[0] == "idle"
 assert D("working", items=[{"kind": "failed", "state": "NEEDS_ATTENTION"}])[0] == "working"   # what it does now wins
 assert set(A.DESK_STATES) == {"working", "idle", "blocked", "error", "paused"}
+# approval waits: one per request; the time between a decline and the same request asked again is not waiting
+ev = lambda seq, ts, t, i="approval:x": {"seq": seq, "ts": ts, "type": t, "issue": i}
+w = A.approval_waits([ev(3, 500, "approval.requested"), ev(1, 100, "approval.requested"), ev(2, 160, "approval.declined"),
+                      ev(4, 530, "approval.granted"), ev(5, 900, "approval.requested", "approval:y")], 1000)
+assert w == [[100, 160, "approval:x"], [500, 530, "approval:x"], [900, 1000, "approval:y"]], w
+assert A.seconds(w) == 60 + 30 + 100
 from office import events as EV
 tree = EV.redact_tree({"a": ["token=supersecretvalue1", {"b": "ghp_" + "x" * 30}], "n": 3, "ok": "plain"})
 assert tree == {"a": ["[redacted]", {"b": "[redacted]"}], "n": 3, "ok": "plain"}, tree

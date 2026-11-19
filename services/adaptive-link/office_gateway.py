@@ -156,7 +156,8 @@ class OfficeGateway:
             except asyncio.CancelledError:
                 raise
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError, KeyError):
-                self.followed = None
+                # keep the place: what the office made while it was away or restarting is handed on once it
+                # answers again (a replaced database is noticed by its head going back, above)
                 await asyncio.sleep(FOLLOW_RETRY_S)
 
     async def _notifications(self, after, wait, limit=100):

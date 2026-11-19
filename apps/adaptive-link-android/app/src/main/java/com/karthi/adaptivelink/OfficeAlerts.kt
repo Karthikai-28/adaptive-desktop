@@ -67,17 +67,19 @@ object OfficeAlerts {
     suspend fun catchUp(context: Context, client: LinkClient) = lock.withLock {
         val store = Store(context)
         if (!store.officeAlerts) return@withLock
+        // Without the permission to post notifications nothing is shown, so nothing is taken or confirmed: the
+        // office keeps them as undelivered and they come once it is allowed.
+        if (!EventsService.mayNotify(context)) return@withLock
         var after = store.lastOfficeNotification
-        var shown = false
         for (page in 0 until 5) {
             val got = client.get("/v1/office/api/notifications?after=$after&limit=$PAGE&channel=link") ?: return@withLock
             if (got.has("error") || got.has("detail") || !got.has("head")) return@withLock
             val head = got.optLong("head")
             if (after == 0L || head < after) {
                 // First time, or the office's records were started again: begin from now. Older alerts are in
-                // the Office page's inbox; a flood of them on a new phone would help no one.
+                // the Office page's inbox; a flood of them on a new phone would help no one. They were not shown
+                // here, so they are not confirmed as delivered either.
                 store.lastOfficeNotification = head
-                client.post("/v1/office/api/notifications/delivered", JSONObject().put("channel", "link").put("through", head))
                 return@withLock
             }
             val items = got.optJSONArray("notifications") ?: JSONArray()
@@ -87,15 +89,15 @@ object OfficeAlerts {
                 remember(context, n)
                 after = n.optLong("id")
                 store.lastOfficeNotification = after
-                shown = true
             }
             if (items.length() < PAGE) break
         }
-        if (shown) client.post("/v1/office/api/notifications/delivered", JSONObject().put("channel", "link").put("through", after))
+        // Everything shown here so far, confirmed every time (the office keeps the highest): a confirmation lost
+        // with the connection is made good by the next catch-up.
+        if (after > 0) client.post("/v1/office/api/notifications/delivered", JSONObject().put("channel", "link").put("through", after))
     }
 
     private fun show(context: Context, n: JSONObject) {
-        if (!EventsService.mayNotify(context)) return
         channels(context)
         val id = n.optLong("id")
         val priority = n.str("priority", "normal")

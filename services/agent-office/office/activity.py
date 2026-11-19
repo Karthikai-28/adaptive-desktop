@@ -95,10 +95,19 @@ def seconds(intervals):
     return sum(iv[1] - iv[0] for iv in intervals)
 
 
-def approval_waits(items, now):
-    """[start, end, item id] per approval item from its created_at to resolved_at (or now)."""
-    return [[i["created_at"], i.get("resolved_at") or now, i["id"]] for i in items
-            if i.get("kind") == "approval" and i.get("created_at")]
+def approval_waits(events, now):
+    """[start, end, issue] for each time an approval waited: from approval.requested to the approval.granted or
+    approval.declined that answered it (or now, still waiting). A request asked again after it was answered is a
+    new wait, so the time between the two is never counted. events: journal rows, any order."""
+    out, open_at = [], {}
+    for e in sorted(events, key=lambda e: e["seq"]):
+        issue = e.get("issue") or ""
+        if e["type"] == "approval.requested":
+            open_at.setdefault(issue, e["ts"])
+        elif e["type"] in ("approval.granted", "approval.declined") and issue in open_at:
+            out.append([open_at.pop(issue), e["ts"], issue])
+    out += [[ts, now, issue] for issue, ts in open_at.items()]
+    return sorted(out)
 
 
 def agent_summary(timelines, a, b, agents=()):

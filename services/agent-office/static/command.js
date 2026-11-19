@@ -11,7 +11,8 @@ const OUTCOME = { done: 'Done', failed: 'Failed', running: 'Running', cancelled:
 
 export function createCommand(ctx) {
   const { h, api, face, S, nameOf, openTask, openMission, openMissions, openBoard, openAgent, inbox, reports, tokens } = ctx;
-  const C = { ov: null, win: '24h', period: 'today', shown: false, busy: {} };
+  // busy: a card is loading; again: something changed meanwhile (a period picked), so it loads once more after
+  const C = { ov: null, win: '24h', period: 'today', shown: false, busy: {}, again: {} };
   try { C.win = localStorage.getItem('office.cc.win') || C.win; C.period = localStorage.getItem('office.cc.period') || C.period; } catch { /* private mode */ }
   const keep = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
@@ -84,7 +85,7 @@ export function createCommand(ctx) {
   }
 
   async function renderLanes() {
-    if (C.busy.lanes) return; C.busy.lanes = true;
+    if (C.busy.lanes) { C.again.lanes = true; return; } C.busy.lanes = true;
     V.winSeg.replaceChildren(seg(WINDOWS.map(w => [w[0], w[1]]), C.win, (k) => { C.win = k; keep('office.cc.win', k); renderLanes(); }));
     try {
       const b = Date.now() / 1000, a = b - WINDOWS.find(w => w[0] === C.win)[2];
@@ -107,11 +108,11 @@ export function createCommand(ctx) {
         hist.length ? null : h('div', { class: 'cc-quiet' }, `No task ran in the last ${label}.`),
         h('div', { class: 'tk-legend', style: 'margin-top:8px' }, ...['done', 'running', 'failed', 'cancelled'].map(o => h('span', null, h('i', { class: `cc-key ${o}` }), OUTCOME[o]))));
     } catch (e) { V.lanes.replaceChildren(h('div', { class: 'empty' }, `Couldn't read the timelines: ${e.message}`)); }
-    finally { C.busy.lanes = false; }
+    finally { C.busy.lanes = false; if (C.again.lanes) { C.again.lanes = false; renderLanes(); } }
   }
 
   async function renderWorktime() {
-    if (C.busy.work) return; C.busy.work = true;
+    if (C.busy.work) { C.again.work = true; return; } C.busy.work = true;
     V.periodSeg.replaceChildren(seg(PERIODS, C.period, (k) => { C.period = k; keep('office.cc.period', k); renderWorktime(); }));
     try {
       const b = Date.now() / 1000, a = C.period === 'today' ? (C.ov?.day_start || b - 86400) : b - 7 * 86400;
@@ -125,11 +126,11 @@ export function createCommand(ctx) {
         d.approvals ? h('p', { class: 'tk-note', style: 'margin:6px 0 0' }, `Waiting for your approval: ${fmtDur(d.approval_wait_s)} over ${d.approvals} request(s).`) : null,
         d.estimated ? h('p', { class: 'tk-note', style: 'margin:6px 0 0' }, 'Includes estimated time for work from before the event journal.') : null);
     } catch (e) { V.worktime.replaceChildren(h('div', { class: 'empty' }, `Couldn't read work time: ${e.message}`)); }
-    finally { C.busy.work = false; }
+    finally { C.busy.work = false; if (C.again.work) { C.again.work = false; renderWorktime(); } }
   }
 
   async function renderTokens() {
-    if (C.busy.tok) return; C.busy.tok = true;
+    if (C.busy.tok) { C.again.tok = true; return; } C.busy.tok = true;
     try {
       const a = C.ov?.day_start || Date.now() / 1000 - 86400;
       const d = await api('GET', `/api/tokens?since=${a}`);
@@ -146,7 +147,7 @@ export function createCommand(ctx) {
           h('span', { class: 'val' }, fmtTokens(p.total))))),
         people.length ? null : h('div', { class: 'empty' }, 'No model calls today.'));
     } catch (e) { V.tokens.replaceChildren(h('div', { class: 'empty' }, `Couldn't read the ledger: ${e.message}`)); }
-    finally { C.busy.tok = false; }
+    finally { C.busy.tok = false; if (C.again.tok) { C.again.tok = false; renderTokens(); } }
   }
 
   // ---------------------------------------------------------------- live

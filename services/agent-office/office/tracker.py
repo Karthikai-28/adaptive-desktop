@@ -61,7 +61,7 @@ class Tracker:
         tl = A.task_timelines(rows, now).get(tid) or A.estimated_timeline(t, now) or \
             {"agent": t["agent"], "mission_id": t["mission_id"], "runs": [], "queued": [], "running": False,
              "estimated": False}
-        approvals = A.approval_waits(self.o.journal.inbox(kind="approval", task_id=tid, limit=200)["items"], now)
+        approvals = A.approval_waits(self._approval_events(task_id=tid), now)
         return {"task": _task_brief(t), "runs": tl["runs"], "queued": tl["queued"], "estimated": tl["estimated"],
                 "run_s": round(A.seconds(tl["runs"]), 1), "queue_s": round(A.seconds(tl["queued"]), 1),
                 "approval_s": round(A.seconds(approvals), 1), "attempts": t["attempts"]}
@@ -232,11 +232,20 @@ class Tracker:
         out.sort(key=lambda r: -(r["runs"][-1][1] if r["runs"] else 0))
         return out[:max(1, min(int(limit), 1000))]
 
+    def _approval_events(self, task_id=None, until=None):
+        q, args = "SELECT seq, ts, type, issue FROM event_log WHERE type IN ('approval.requested','approval.granted'," \
+                  "'approval.declined')", []
+        if task_id:
+            q += " AND task_id=?"; args.append(task_id)
+        if until:
+            q += " AND ts<?"; args.append(until)
+        return [dict(r) for r in self.db.execute(q + " ORDER BY seq", args)]
+
     def summary(self, a, b, now=None):
         now = now or time.time()
         tl = self.timelines(a, b, now)
         per = A.agent_summary(tl, a, b, list(self.o.agents))
-        approvals = A.clip(A.approval_waits(self.o.journal.inbox(kind="approval", limit=200)["items"], now), a, b)
+        approvals = A.clip(A.approval_waits(self._approval_events(until=b), now), a, b)
         for aid, row in per.items():
             row["name"] = self.o.agents.get(aid, {}).get("name", aid)
         return {"since": a, "until": b, "agents": list(per.values()),
