@@ -1,6 +1,8 @@
 package com.karthi.adaptivelink
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
@@ -103,7 +105,8 @@ fun TopBar(title: String, onBack: (() -> Unit)? = null, trailing: @Composable ()
         } else {
             Spacer(Modifier.width(8.dp))
         }
-        Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF5F5F7), modifier = Modifier.weight(1f))
+        Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF5F5F7), modifier = Modifier.weight(1f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         trailing()
     }
 }
@@ -453,6 +456,9 @@ fun HomeScreen(
         }
     }
 
+    // One column: Laptop tools is also shown inside the mobile desktop, in a Box where loose siblings would be
+    // drawn on top of each other (the status card used to cover this bar and its Computers button).
+    Column(Modifier.fillMaxSize()) {
     TopBar(client.computer.name) {
         // Which computer: the others this phone is paired with, and pairing another.
         Box {
@@ -579,14 +585,15 @@ fun HomeScreen(
             items(TILES) { tile ->
                 val enabled = state.connected || tile.page == Page.More
                 val (g1, g2) = tileGradient(tile.page)
+                // As tall as what it says, not a fixed shape: more tools fit on a screen and nothing is cut.
                 Column(
-                    Modifier.aspectRatio(0.92f)
+                    Modifier.fillMaxWidth().heightIn(min = 104.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(Color(0xFF1C1C1E))
                         .border(0.5.dp, Color(0x1FFFFFFF), RoundedCornerShape(20.dp))
                         .clickable(enabled = enabled) { onOpen(tile.page) }
                         .padding(12.dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Box(
                         Modifier.size(38.dp).clip(RoundedCornerShape(10.dp))
@@ -598,10 +605,12 @@ fun HomeScreen(
                     Column {
                         Text(tile.label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
                             color = if (enabled) Color(0xFFF5F5F7) else Color(0xFF8E8E93))
-                        Text(tile.detail, color = Color(0xFF8E8E93), fontSize = 10.5.sp, lineHeight = 12.sp, maxLines = 2)
+                        Text(tile.detail, color = Color(0xFF8E8E93), fontSize = 10.5.sp, lineHeight = 12.sp, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
         }
+    }
     }
 }

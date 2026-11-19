@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -318,7 +319,8 @@ private fun QuotaPill(office: Office) {
         else -> return
     }
     Text(text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Panel).padding(horizontal = 10.dp, vertical = 5.dp))
+        modifier = Modifier.heightIn(min = 40.dp).wrapContentHeight().clip(RoundedCornerShape(12.dp)).background(Panel)
+            .padding(horizontal = 12.dp, vertical = 10.dp), maxLines = 1)
 }
 
 @Composable
@@ -1321,8 +1323,9 @@ private fun InboxPill(office: Office, onClick: () -> Unit) {
     val critical = office.inbox.optInt("critical")
     Text(if (open > 0) "Inbox $open" else "Inbox", color = if (critical > 0) Red else if (open > 0) Amber else Dim,
         fontSize = 12.sp, fontWeight = FontWeight.Medium,
-        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Panel).clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp))
+        maxLines = 1,
+        modifier = Modifier.heightIn(min = 40.dp).wrapContentHeight().clip(RoundedCornerShape(12.dp)).background(Panel)
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp))
 }
 
 @Composable

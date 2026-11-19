@@ -924,7 +924,8 @@ internal fun MobileDesktop(activity: MainActivity, client: LinkClient, store: St
         }
         // The Office has its own tabs and connection line: it fills the screen without the shell's.
         val ownChrome = (location == "native" && nativePage == Page.Office) || location == "continue"
-        if (!ownChrome && (location != "app" || !online || note.startsWith("Step"))) Text(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
+        if (!ownChrome && (location != "app" || !online || note.startsWith("Step"))) Text(note, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (location == "home" && !editLayouts) HomeDock(
             layout.optJSONArray("dock").strings().map { aid -> DockEntry(aid, all.firstOrNull { it.optString("id") == aid }?.optString("name") ?: aid, aid in running) },
             onOpen = { activate(it) },
