@@ -166,6 +166,7 @@ class EventsService : Service() {
         "approve".takeIf { store.approvals }, "approve-done".takeIf { store.approvals },
         "sms-send".takeIf { store.phoneMessages },
         "cast".takeIf { store.castFromComputer }, "phone-input".takeIf { store.castFromComputer },
+        "office".takeIf { store.officeAlerts },
     )
 
     private suspend fun listen() {
@@ -186,6 +187,8 @@ class EventsService : Service() {
                             scope.launch {
                                 client.post("/v1/phone/state", PhoneState.read(this@EventsService))
                                 Outbox.deliver(this@EventsService, client)
+                                // whatever the office said while this phone was away, in order
+                                OfficeAlerts.catchUp(this@EventsService, client)
                                 if (store.copyPhotos && !client.tunnelled) Photos.copy(this@EventsService, client)
                             }
                         }
@@ -227,6 +230,8 @@ class EventsService : Service() {
             "phone-input" -> if (Cast.showing) event.optJSONObject("input")?.let { PhoneControl.running?.perform(it) }
             "approve" -> Approval.ask(this, event)
             "approve-done" -> Approval.done(this, event.optString("ask"))
+            // a nudge: what is shown comes from the office's own numbered list (OfficeAlerts)
+            "office" -> OfficeAlerts.nudged(this, client)
             "sms-send" -> scope.launch {
                 val sent = Texts.send(this@EventsService, event.optString("to"), event.optString("body"))
                 client.post("/v1/phone/sent", JSONObject().put("id", event.optString("send")).put("ok", sent))

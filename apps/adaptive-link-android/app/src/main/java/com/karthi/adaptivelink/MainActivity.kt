@@ -180,7 +180,7 @@ class MainActivity : FragmentActivity() {
         intent?.removeExtra(LaptopApps.EXTRA_APP)
     }
 
-    private fun requestedPage(intent: Intent?): Page = intent?.getStringExtra(EXTRA_PAGE)?.let {
+    private fun requestedPage(intent: Intent?): Page = intent.also { OfficeAlerts.opened(this, it) }?.getStringExtra(EXTRA_PAGE)?.let {
         runCatching { Page.valueOf(it) }.getOrNull()
     } ?: Page.Home
 

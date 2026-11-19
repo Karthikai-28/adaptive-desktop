@@ -123,6 +123,20 @@ private sealed class Route {
     data class Mission(val id: Int) : Route()
     object NewMission : Route()
     data class Files(val path: String) : Route()
+    object Inbox : Route()
+    data class InboxItem(val id: Int) : Route()
+}
+
+/** Where a tapped office notification leads (OfficeAlerts.routeOf). */
+private fun routeFrom(link: String): Route? {
+    val (kind, id) = link.split(":", limit = 2).let { it[0] to it.getOrNull(1)?.toIntOrNull() }
+    return when {
+        kind == "inbox" && id != null -> Route.InboxItem(id)
+        kind == "inbox" -> Route.Inbox
+        kind == "task" && id != null -> Route.Task(id)
+        kind == "mission" && id != null -> Route.Mission(id)
+        else -> null
+    }
 }
 
 private fun statusOf(a: JSONObject?): Pair<String, Color> {
@@ -189,6 +203,10 @@ fun OfficePage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
         onDispose { office.stop(); voice.close(); ears.close() }
     }
     LaunchedEffect(office) { office.notices.collect { snack.showSnackbar(it) } }
+    // opened from an office notification: go straight to what it is about
+    LaunchedEffect(Unit) {
+        OfficeAlerts.pendingRoute?.let { link -> OfficeAlerts.pendingRoute = null; routeFrom(link)?.let { stack.add(it) } }
+    }
     BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
 
     // The microphone is asked for the first time it is needed.
@@ -209,6 +227,8 @@ fun OfficePage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
             when (val top = stack.lastOrNull()) {
                 null -> {
                     TopBar(if (tab == OfficeTab.Claude) office.name(office.managerId) else office.company, onBack) {
+                        InboxPill(office) { stack.add(Route.Inbox) }
+                        Spacer(Modifier.width(6.dp))
                         QuotaPill(office)
                         Spacer(Modifier.width(8.dp))
                     }
@@ -231,6 +251,8 @@ fun OfficePage(activity: MainActivity, client: LinkClient, onBack: () -> Unit) {
                 is Route.Mission -> MissionScreen(ctx, top.id)
                 Route.NewMission -> NewMissionScreen(ctx)
                 is Route.Files -> FilesScreen(ctx, top.path)
+                Route.Inbox -> InboxScreen(ctx)
+                is Route.InboxItem -> InboxItemScreen(ctx, top.id)
             }
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp)) {
@@ -1170,4 +1192,121 @@ private fun size(n: Long): String = when {
     n < 1024 -> "$n B"
     n < 1024 * 1024 -> "${n / 1024} KB"
     else -> "%.1f MB".format(n / 1048576.0)
+}
+
+// ------------------------------------------------------------------ Action Inbox
+
+private val InboxStates = listOf("NEEDS_ATTENTION" to "Needs attention", "IN_PROGRESS" to "In progress", "RESOLVED" to "Resolved")
+
+private fun priorityColor(p: String) = when (p) { "critical" -> Red; "high" -> Amber; else -> Dim }
+private fun stateColor(s: String) = when (s) { "NEEDS_ATTENTION" -> Red; "IN_PROGRESS" -> Amber; else -> Green }
+private fun stateLabel(s: String) = InboxStates.firstOrNull { it.first == s }?.second ?: s
+
+/** What needs the owner, in the top bar: tap for the Action Inbox. */
+@Composable
+private fun InboxPill(office: Office, onClick: () -> Unit) {
+    val open = office.inbox.optInt("NEEDS_ATTENTION")
+    val critical = office.inbox.optInt("critical")
+    Text(if (open > 0) "Inbox $open" else "Inbox", color = if (critical > 0) Red else if (open > 0) Amber else Dim,
+        fontSize = 12.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Panel).clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp))
+}
+
+@Composable
+private fun InboxScreen(ctx: Ctx) {
+    val office = ctx.office
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var state by rememberSaveable { mutableStateOf("NEEDS_ATTENTION") }
+    var items by remember { mutableStateOf<List<JSONObject>?>(null) }
+    var reachable by remember { mutableStateOf(true) }
+    LaunchedEffect(state, office.inbox.toString()) {
+        val got = office.obj("inbox?state=$state&limit=100")
+        reachable = got != null
+        items = got?.optJSONArray("items").objects()
+    }
+    TopBar("Action Inbox", ctx.pop)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            InboxStates.forEach { (key, label) ->
+                val n = office.inbox.optInt(key)
+                Chip(if (key != "RESOLVED" && n > 0) "$label $n" else label, state == key, stateColor(key)) { state = key }
+            }
+        }
+        when {
+            !reachable -> {
+                Muted("The computer can't be reached. The last alerts this phone showed:", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                Group {
+                    OfficeAlerts.recent(context).take(30).forEach { n ->
+                        Line(n.str("title"), n.str("text"), leading = { Dot(priorityColor(n.str("priority"))) })
+                    }
+                }
+            }
+            items == null -> Muted("Loading…", Modifier.padding(20.dp))
+            items!!.isEmpty() -> Muted(if (state == "NEEDS_ATTENTION") "Nothing needs you." else "Nothing here.", Modifier.padding(20.dp))
+            else -> Group {
+                items!!.forEach { item ->
+                    Line(item.str("title"), item.str("text"), leading = { Dot(priorityColor(item.str("priority")), 10) },
+                        trailing = { Text(ago(item.optDouble("updated_at")), color = Dim, fontSize = 12.sp) }) {
+                        ctx.push(Route.InboxItem(item.optInt("id")))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InboxItemScreen(ctx: Ctx, id: Int) {
+    val office = ctx.office
+    val scope = rememberCoroutineScope()
+    var item by remember { mutableStateOf<JSONObject?>(null) }
+    var round by remember { mutableStateOf(0) }
+    LaunchedEffect(id, round, office.inbox.toString()) { office.obj("inbox/$id")?.let { item = it } }
+    TopBar("Inbox #$id", ctx.pop)
+    val it = item ?: run { Muted("Loading…", Modifier.padding(20.dp)); return }
+    val state = it.str("state")
+    val approval = it.str("kind") == "approval"
+    fun act(action: String) = scope.launch {
+        if (office.act("inbox/$id/$action", JSONObject().put("note", "from the phone")) == null) round++
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Text(it.str("title"), color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 20.dp))
+        FlowRow(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip(stateLabel(state), true, stateColor(state))
+            Chip(it.str("priority"), false, priorityColor(it.str("priority")))
+            it.str("agent").takeIf { a -> a.isNotBlank() }?.let { a -> Chip(office.name(a)) }
+            if (it.optInt("task_id") > 0) Chip("Task #${it.optInt("task_id")}") { ctx.push(Route.Task(it.optInt("task_id"))) }
+            if (it.optInt("mission_id") > 0) Chip("Mission #${it.optInt("mission_id")}") { ctx.push(Route.Mission(it.optInt("mission_id"))) }
+        }
+        TextBlock(it.str("text"))
+        if (approval && state != "RESOLVED")
+            Muted("Approving runs work with the operator's authority, so it is done on the computer with the operator key " +
+                "(the office app's Action Inbox, or the office command). From here you can acknowledge it or decline it.",
+                Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+        if (state == "RESOLVED")
+            Muted("Resolved" + it.str("resolution").takeIf { r -> r.isNotBlank() }?.let { r -> ": $r" }.orEmpty() +
+                it.str("resolved_by").takeIf { r -> r.isNotBlank() }?.let { r -> " by $r" }.orEmpty(),
+                Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+        FlowRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (state == "NEEDS_ATTENTION") Button("Acknowledge") { act("ack") }
+            if (approval && state != "RESOLVED") Button("Decline", Red, filled = false) { act("decline") }
+            if (!approval && state != "RESOLVED") Button("Resolved", Green, filled = !it.optBoolean("live"), enabled = !it.optBoolean("live")) { act("resolve") }
+            if (state == "RESOLVED") Button("Reopen", filled = false) { act("reopen") }
+        }
+        if (!approval && state != "RESOLVED" && it.optBoolean("live"))
+            Muted("Still happening: run the work again or cancel it, and this closes by itself.", Modifier.padding(horizontal = 20.dp))
+        val history = it.optJSONArray("history").objects().takeLast(40).reversed()
+        if (history.isNotEmpty()) {
+            Section("History")
+            Group {
+                history.forEach { e ->
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 7.dp)) {
+                        Text(clock(e.optDouble("ts")), color = Dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(48.dp))
+                        Text(e.str("text"), color = Ink, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
 }

@@ -460,6 +460,7 @@ fun MorePage(
     }
     var alerts by remember { mutableStateOf(store.computerAlerts) }
     var computerNotes by remember { mutableStateOf(store.computerNotifications) }
+    var officeAlerts by remember { mutableStateOf(store.officeAlerts) }
     // Android 13 and later ask before an app may show notifications at all.
     val askToNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) note = "Without that permission the phone cannot show them."
@@ -548,6 +549,10 @@ fun MorePage(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Muted("The computer's own notifications as well", Modifier.weight(1f))
                 Switch(checked = computerNotes, onCheckedChange = { computerNotes = it; store.computerNotifications = it; listen() })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Muted("Agent Office: failed or blocked work and approvals at once, finished work quietly grouped", Modifier.weight(1f))
+                Switch(checked = officeAlerts, onCheckedChange = { officeAlerts = it; store.officeAlerts = it; listen() })
             }
         }
 
@@ -653,6 +658,8 @@ fun MorePage(
                     store.relayNotifications = false
                     store.computerAlerts = false
                     store.computerNotifications = false
+                    store.officeAlerts = false
+                    store.lastOfficeNotification = 0L
                     store.syncClipboard = false; store.findPhone = false; store.approvals = false
                     store.presence = false; store.phoneMessages = false; store.copyPhotos = false
                     store.remoteNotification = false

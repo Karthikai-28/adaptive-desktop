@@ -65,6 +65,9 @@ class Office(private val client: LinkClient) {
         private set
     var studies by mutableStateOf<List<JSONObject>>(emptyList())
         private set
+    /** Action Inbox counts by state (NEEDS_ATTENTION, IN_PROGRESS, RESOLVED, critical), kept live. */
+    var inbox by mutableStateOf(JSONObject())
+        private set
     /** Conversations that a screen has opened, kept current as messages arrive. */
     val threads = mutableStateMapOf<String, List<JSONObject>>()
     /** Recent activity per agent, for the agents whose page is open. */
@@ -172,6 +175,7 @@ class Office(private val client: LinkClient) {
                 settings = m.optJSONObject("settings") ?: JSONObject()
                 quotaUntil = m.optDouble("quota_until", 0.0).let { if (it.isNaN()) 0.0 else it }
                 studies = m.optJSONArray("studies").objects()
+                inbox = m.optJSONObject("inbox") ?: JSONObject()
                 // Whatever is open is read again: messages may have arrived while away.
                 threads.keys.toList().forEach { scope.launch { loadThread(it) } }
             }
@@ -202,6 +206,7 @@ class Office(private val client: LinkClient) {
             }
             "usage" -> usage = m.optJSONArray("rows").objects()
             "study" -> studies = m.optJSONArray("studies").objects()
+            "inbox" -> m.optJSONObject("counts")?.let { inbox = it }
         }
     }
 

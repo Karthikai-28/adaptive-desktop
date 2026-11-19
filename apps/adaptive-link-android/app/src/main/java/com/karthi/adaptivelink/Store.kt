@@ -61,6 +61,16 @@ class Store(context: Context) {
         get() = prefs.getBoolean("computer_alerts", false)
         set(value) { prefs.edit().putBoolean("computer_alerts", value).commit() }
 
+    /** The Agent Office's alerts: failed or blocked work, approvals waiting, finished work (OfficeAlerts). */
+    var officeAlerts: Boolean
+        get() = prefs.getBoolean("office_alerts", true)
+        set(value) { prefs.edit().putBoolean("office_alerts", value).commit() }
+
+    /** The last Agent Office notification shown here (the office's own numbering). */
+    var lastOfficeNotification: Long
+        get() = prefs.getLong("last_office_notification", 0L)
+        set(value) = prefs.edit().putLong("last_office_notification", value).apply()
+
     /** ...and the computer's own notifications. */
     var computerNotifications: Boolean
         get() = prefs.getBoolean("computer_notifications", false)
@@ -139,7 +149,7 @@ class Store(context: Context) {
     /** Whether anything needs the phone to stay connected to the computer. */
     val listens: Boolean
         get() = computerAlerts || computerNotifications || syncClipboard || findPhone || approvals || presence ||
-            phoneMessages || copyPhotos || remoteNotification || castFromComputer
+            phoneMessages || copyPhotos || remoteNotification || castFromComputer || officeAlerts
 
     /** The last thing the computer said that this phone has shown. */
     var lastEvent: Long

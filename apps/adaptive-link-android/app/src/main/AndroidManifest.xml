@@ -130,6 +130,7 @@
         <!-- One-tap actions without opening the app: a home-screen widget
              and quick-settings tiles (QuickActions.kt). -->
         <receiver android:name=".QuickReceiver" android:exported="false" />
+        <receiver android:name=".OfficeAlertReceiver" android:exported="false" />
         <receiver android:name=".StatusWidget" android:exported="true" android:label="Computer status">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
