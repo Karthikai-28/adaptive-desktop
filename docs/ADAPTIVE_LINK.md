@@ -425,7 +425,8 @@ daemon long-polls the office's numbered notifications and nudges the phone's lis
 and the phone fetches from the office what it has not shown yet, in order, after every reconnect.
 **Acknowledge** on a notification marks the inbox item in progress; it never approves anything (that
 needs the operator key on the computer). The **Inbox** button on the Office page lists what needs you.
-Settings → the computer's alerts → *Agent Office* turns them off. See
+The morning standup (10:00) and evening summary (19:00) arrive the same way and open in
+**Office → More → Reports**. Settings → the computer's alerts → *Agent Office* turns them off. See
 [AGENT_OFFICE.md](AGENT_OFFICE.md#notifications-and-the-action-inbox-officeeventspy-officejournalpy).
 
 ### The laptop as a mobile desktop

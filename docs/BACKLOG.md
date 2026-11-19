@@ -1443,6 +1443,31 @@ upgrade (reports and the new views are the next two).
 - The desktop page shows the inbox only through the API and toasts; its own Inbox view comes with the
   Command Center (milestone 3 of the upgrade).
 
+## Milestone 26 — Agent Office: activity tracking and daily reports (2026-11-19)
+
+Guide: docs/AGENT_OFFICE.md, "Agent activity and the daily reports". Milestone 2 of the Agent Office upgrade.
+
+### Done (software, checked)
+
+- ✅ Work time from the event journal: run, queue and approval intervals per task; active time as the
+  union of an agent's runs (overlaps once), idle as the rest; per-agent contributions to missions;
+  older work estimated from its own start/finish and marked so.
+- ✅ Morning standup (10:00) and evening summary (19:00), Asia/Kolkata, every day: team and per-agent
+  sections, priorities from the records, completed kept apart from in progress, tokens, no invented
+  deadlines or costs. Markdown in `data/reports/`, notification that opens it on the phone.
+- ✅ Persistent schedule (`reports`, one row per kind and date): no duplicates across restarts, windows
+  without gaps, labelled catch-up for the latest missed time, earlier ones recorded as missed, failures
+  retried 3 times then raised in the inbox, delivered once the phone confirms.
+- ✅ APIs: assignments, summary, history, task timing, mission progress, reports, schedule, on demand.
+- ✅ Phone: report notifications on their own channel, Office → More → Reports, the report view.
+- ✅ Checks: `verify-agent-office.sh` (timelines, IST schedule, both builders, the real scheduler with fake
+  runs and a moved clock: once per time, restart, two-day catch-up, missed records, delivery, failures;
+  the HTTP API), the app's unit tests and APK build.
+
+### Still to do
+
+- 🔬 Live: the first scheduled standup (10:00) and evening summary (19:00) on this laptop and the phone.
+
 ## Immediate next work
 
 0. ROS 2 panel: `./scripts/sync-shell.sh`, restart the shell, open the

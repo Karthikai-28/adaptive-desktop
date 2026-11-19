@@ -58,6 +58,7 @@ Then run `scripts/install-agent-office.sh --status`. `./install.sh` also runs it
 | **Mission Control on the phone** | Adaptive Link's native Office has a Missions tab for launching scoped work, reading criteria and reports, searching evidence and cancelling work. It uses the paired phone's mutually authenticated Office gateway and requires that device's Commands switch. |
 | **Files** | Browse everything the team produces. HTML pages preview in a sandbox. |
 | **Action Inbox and alerts** | Failed or blocked work, approvals waiting and quota stops land in one inbox that stays until the problem is really fixed, and reach the phone through Adaptive Link at once; finished work arrives quietly grouped ([Notifications and the Action Inbox](#notifications-and-the-action-inbox-officeeventspy-officejournalpy)). |
+| **Activity and daily reports** | Who is working on what, for how long (active, idle, queue and approval time), and a morning standup at 10:00 and an evening summary at 19:00 India time every day, saved and sent to the phone; a missed one is caught up and labelled ([Agent activity and the daily reports](#agent-activity-and-the-daily-reports-officeactivitypy-officetrackerpy-officereportspy)). |
 | **Tokens** | Live token usage: who spends what, on which work, and how. The **Tokens** button shows the team (per person by kind of work, over time, by step, by project, by how tasks ended, the most expensive tasks); click a person for their own breakdown (context per call, tasks, every run). Each person's card also has a **Tokens** tab. Windows: last hour to all time. It updates by itself as agents work. |
 
 ## Study programs
@@ -437,22 +438,85 @@ The live socket also sends `journal`, `inbox` (with counts) and `notification` m
 `state` snapshot carries `journal_head`, `inbox` counts and the notification head, so a page that
 reconnects asks `/api/journal?after=<the last seq it saw>`.
 
-**Database.** These tables are migration 1 in `office/store.py` (`MIGRATIONS`, recorded in
-`PRAGMA user_version`), applied once at start inside one transaction. The moment it ran is
-`journal_since` in kv: on start the journal re-records only work that finished after it (whatever a
-crash lost between a status write and its event), so an upgraded office does not turn its history
-into alerts. To roll back, stop the office, put back the earlier code, and optionally drop the tables
-(older code ignores them):
+**Database.** Numbered migrations in `office/store.py` (`MIGRATIONS`, recorded in
+`PRAGMA user_version`), each applied once at start inside one transaction: **1** the journal, inbox,
+notifications and deliveries; **2** `reports` and `notifications.ref` (what a notification opens). The
+moment 1 ran is `journal_since` in kv: on start the journal re-records only work that finished after
+it (whatever a crash lost between a status write and its event), so an upgraded office does not turn
+its history into alerts; `reports_since` does the same for reports. To roll back, stop the office, put
+back the earlier code, and optionally undo the migrations (older code ignores the extra tables):
 
 ```sh
 systemctl --user stop adaptive-agent-office
-sqlite3 ~/.local/share/adaptive-desktop/agent-office/data/office.db \
-  "DROP TABLE IF EXISTS deliveries; DROP TABLE IF EXISTS notifications; DROP TABLE IF EXISTS inbox;
-   DROP TABLE IF EXISTS event_log; DELETE FROM kv WHERE key='journal_since'; PRAGMA user_version=0;"
+DB=~/.local/share/adaptive-desktop/agent-office/data/office.db
+# back to 1 (before the reports):
+sqlite3 "$DB" "DROP TABLE IF EXISTS reports; ALTER TABLE notifications DROP COLUMN ref;
+  DELETE FROM kv WHERE key='reports_since'; PRAGMA user_version=1;"
+# back to 0 (before the journal):
+sqlite3 "$DB" "DROP TABLE IF EXISTS deliveries; DROP TABLE IF EXISTS notifications; DROP TABLE IF EXISTS inbox;
+  DROP TABLE IF EXISTS event_log; DELETE FROM kv WHERE key='journal_since'; PRAGMA user_version=0;"
 ```
 
 Every journal action is also one JSON line on the service's output (`journalctl --user -u
 adaptive-agent-office | grep '"log": "journal"'`).
+
+## Agent activity and the daily reports (`office/activity.py`, `office/tracker.py`, `office/reports.py`)
+
+**Work time.** Every task's time comes from the event journal, split into what it was doing:
+
+- **run**: an agent working on it, from `task.started`/`task.resumed` to the next completed, failed,
+  blocked, cancelled, retry or interrupted event (a pause, a quota stop or a restart ends a run);
+- **queue**: waiting for its turn, from created, run again, retried or interrupted to the next start;
+- **approval**: an approval request waiting in the inbox, from requested to approved or declined.
+
+An agent's **active** time is the union of its run intervals, so overlapping intervals are never counted
+twice; **idle** is the rest of the window. A mission keeps each agent's own contribution. Work that
+finished before the journal existed has no events: its single started/finished pair is used and
+marked *estimated*.
+
+**The reports.** Every calendar day, weekends and holidays included, in `Asia/Kolkata`
+(`config.json` → `reports`):
+
+| | When | What |
+|---|---|---|
+| **Morning standup** | 10:00 | team summary; completed work by agent; in progress now; today's work in priority order; blockers; failed tasks needing attention; decisions waiting (approvals, missions to check); dependencies (the office records no deadlines, and says so); per agent: yesterday, today, current task, blockers, priority |
+| **Evening summary** | 19:00 | every agent active; completed, still in progress (kept apart from completed), failed, blocked and cancelled work; active/idle/queue time per agent and run/queue time per task; missions and their verified criteria; outputs (each finished task's report line, workspace files written); retries and recoveries; tokens per person; remaining work; unresolved blockers; recommended priorities for tomorrow |
+
+The priority order is taken from the records only: approvals first (Critical), then failed or blocked
+work, quota and limits (High), then missions to check, then queued work in the order it will run, with
+what it waits for. An agent's priority is High with an open high/critical inbox item, Normal with work,
+Idle without. Cost is reported as not billed per token: the providers are subscriptions and local models.
+
+- **Windows.** A report covers from the end of the previous report of its kind to its own time, so
+  there are no gaps and nothing is counted twice. The first one covers the 24 hours before it.
+- **Catch-up.** The office looks every 30 seconds. If the laptop was asleep or off at the time, the
+  report is made when the office is running again, titled *catch-up* with the time it was due and the
+  time it was made, and covers the whole time since the previous one. Only the latest due time of each
+  kind is made; earlier ones are recorded as **missed**. Times before the reports were installed are
+  never made up.
+- **Records.** One row per kind and local date in `reports`, so a restart can't make a report twice.
+  Status: `generated`, then `delivered` once a phone has confirmed its notification; `missed`; or
+  `failed` (retried up to 3 times, then an `office.error` inbox item). Each report is saved as Markdown
+  in `data/reports/<date>-<kind>.md`, and announced as a notification (`report.ready`) that opens it on
+  the phone. **Reports** on the phone (Office → More) lists them, with *Standup now* / *Summary now*.
+- **On demand.** `POST /api/reports/generate {"kind": "standup"|"evening"}` makes one from the end of
+  the last scheduled one to now. It is kept and marked on demand, sends nothing and leaves the schedule
+  alone.
+
+**API** (same protections as the rest: local only, and the phone through Adaptive Link's mutual TLS
+and its commands switch; windows are unix seconds, default the last 24 hours, at most 92 days):
+
+| | |
+|---|---|
+| `GET /api/activity/agents` | every agent now: status, task, mission, running since, queue, blockers, active time in 24 h |
+| `GET /api/activity/summary?since=&until=` | per agent: active, idle, queue time, runs, time per task; approval waiting |
+| `GET /api/activity/history?since=&until=&agent=&limit=` | each task that ran or waited: run intervals, run/queue time, outcome |
+| `GET /api/tasks/<id>/timing` | one task: run intervals, run, queue and approval time |
+| `GET /api/missions/<id>/progress` | tasks by status, criteria passed/failed, each agent's contribution |
+| `GET /api/reports?kind=&status=&since=&until=&limit=` | reports, newest first, without their bodies |
+| `GET /api/reports/<id>` | one report: Markdown and structured data |
+| `GET /api/reports/schedule` | timezone, times, next due, last report of each kind |
+| `POST /api/reports/generate` | a report on demand |
 
 ## Checks
 
